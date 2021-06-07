@@ -151,7 +151,7 @@ function Get-AAA {
 .EXAMPLE
     PS C:\> Get-MyIP
     100.100.100.100
-    Returns external IP observed from OpenDNS server
+    Returns external IP observed from Google nameserver(ns1.google.com)
 .INPUTS
     none
 .OUTPUTS
