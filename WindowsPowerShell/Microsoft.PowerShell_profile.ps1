@@ -163,5 +163,5 @@ function Get-AAA {
     Tested with Windows Powershell. Should work with pwsh.
 #>
 function Get-MyIP {
-    return (Resolve-DnsName -Name myip.opendns.com -Server resolver1.opendns.com | Select-Object -ExpandProperty IPAddress);
+    return (Resolve-DnsName -Name o-o.myaddr.l.google.com -Server ns1.google.com -Type TXT | Select-Object -ExpandProperty Strings);
 }
