@@ -144,3 +144,24 @@ function Get-AAA {
     }
     Write-Output ( -join ($Global:getAAA.gadj.Get((Get-Random) % $Global:getAAA.gadj.Count), "-", $Global:getAAA.gadj.Get((Get-Random) % $Global:getAAA.gadj.Count), "-", $Global:getAAA.ganm.Get((Get-Random) % $Global:getAAA.ganm.Count)));
 }
+
+<#
+.SYNOPSIS
+    Uses OpenDNS to return external IP
+.EXAMPLE
+    PS C:\> Get-MyIP
+    100.100.100.100
+    Returns external IP observed from OpenDNS server
+.INPUTS
+    none
+.OUTPUTS
+    Output (if any)
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2021-06
+
+    Tested with Windows Powershell. Should work with pwsh.
+#>
+function Get-MyIP {
+    return (Resolve-DnsName -Name myip.opendns.com -Server resolver1.opendns.com | Select-Object -ExpandProperty IPAddress);
+}
