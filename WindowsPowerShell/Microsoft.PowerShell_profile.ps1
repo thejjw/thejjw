@@ -1,3 +1,5 @@
+
+function Clear-WorkingSet {
 <#
 .SYNOPSIS
     function that executes EmptyWorkingSet() Win32 API call  (port from c# program)
@@ -18,7 +20,6 @@
     In case of error running its host script, try: 
     Set-ExecutionPolicy Bypass -Scope Process -Force; . .\Clear-WorkingSetFunc.ps1
 #>
-function Clear-WorkingSet {
     param (
         # list of TargetProcess
         [Parameter(Mandatory=$true)]
@@ -107,6 +108,8 @@ namespace ewsConsole
     [ewsConsole.Program]::Main($TargetProcesses);
 }
 
+
+function Get-AAA {
 <#
 .SYNOPSIS
     function that outputs string of adjective-adjective-animal format
@@ -132,9 +135,7 @@ namespace ewsConsole
 
     Tip: you can add the function declaration to $PROFILE then call it on future shell sessions with ease
 #>
-
-function Get-AAA {
-    param (
+param (
     )
     if($null -eq $Global:getAAA) {
         $Global:getAAA = @{
@@ -145,6 +146,7 @@ function Get-AAA {
     Write-Output ( -join ($Global:getAAA.gadj.Get((Get-Random) % $Global:getAAA.gadj.Count), "-", $Global:getAAA.gadj.Get((Get-Random) % $Global:getAAA.gadj.Count), "-", $Global:getAAA.ganm.Get((Get-Random) % $Global:getAAA.ganm.Count)));
 }
 
+function Get-MyIP {
 <#
 .SYNOPSIS
     Uses OpenDNS to return external IP
@@ -162,6 +164,5 @@ function Get-AAA {
 
     Tested with Windows Powershell. Should work with pwsh.
 #>
-function Get-MyIP {
-    return (Resolve-DnsName -Name o-o.myaddr.l.google.com -Server ns1.google.com -Type TXT | Select-Object -ExpandProperty Strings);
+return (Resolve-DnsName -Name o-o.myaddr.l.google.com -Server ns1.google.com -Type TXT | Select-Object -ExpandProperty Strings);
 }
