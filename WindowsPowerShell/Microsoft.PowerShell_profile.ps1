@@ -202,10 +202,10 @@ function Get-WhoisInfo {
     )
 
     if($null -eq $WhoisKisaApiKey) {
-        Write-Host 'Whois API key from KISA(후이즈검색.한국) not set via neither -WhoisKisaApiKey parameter nor $Global:WhoisKisaApiKey. Exiting...';
+        Write-Host 'Whois API key from KISA(후이즈검색.한국) not set. Please configure either -WhoisKisaApiKey parameter or $Global:WhoisKisaApiKey. Exiting...';
         break;
     }
-    Set-Variable -Name queryurl -Value "https://whois.kisa.or.kr/openapi/whois.jsp?query=$DomainOrIp&key=$WhoisKisaApiKey&answer=json" -Option Constant;
     $DomainOrIp = $DomainOrIp.Trim();
+    Set-Variable -Name queryurl -Value "https://whois.kisa.or.kr/openapi/whois.jsp?query=$DomainOrIp&key=$WhoisKisaApiKey&answer=json" -Option Constant;
     return (Invoke-WebRequest -Uri $queryurl -UseBasicParsing | Select-Object -ExpandProperty Content | ConvertFrom-Json | Select-Object -ExpandProperty whois);
 }
