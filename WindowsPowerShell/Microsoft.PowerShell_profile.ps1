@@ -166,3 +166,46 @@ function Get-MyIP {
 #>
 return (Resolve-DnsName -Name o-o.myaddr.l.google.com -Server ns1.google.com -Type TXT | Select-Object -ExpandProperty Strings);
 }
+
+function Get-WhoisInfo {
+<#
+.SYNOPSIS
+    Returns WHOIS information for given domain or ip
+.EXAMPLE
+    PS C:\> Get-WhoisInfo 39.116.73.30
+    query       : 39.116.73.30
+    queryType   : IPv4
+    countryCode : KR
+    korean      : @{ISP=; user=}
+    english     : @{ISP=; user=}
+    
+    More information can be accessed via properties like .korean.ISP .korean.user
+.INPUTS
+    Domain or ip address
+.OUTPUTS
+    WHOIS information queried from whois.kisa.or.kr
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2021-06
+
+    Tested with Windows Powershell. Should work with pwsh.
+#>
+    param (
+        # ip or domain to query for
+        [Parameter(Mandatory=$true)]
+        [string]
+        $DomainOrIp,
+        # key if not already set
+        [Parameter(Mandatory=$false)]
+        [string]
+        $WhoisKisaApiKey = $Global:WhoisKisaApiKey
+    )
+
+    if($null -eq $WhoisKisaApiKey) {
+        Write-Host 'Whois API key from KISA(후이즈검색.한국) not set via neither -WhoisKisaApiKey parameter nor $Global:WhoisKisaApiKey. Exiting...';
+        break;
+    }
+    Set-Variable -Name queryurl -Value "https://whois.kisa.or.kr/openapi/whois.jsp?query=$DomainOrIp&key=$WhoisKisaApiKey&answer=json" -Option Constant;
+    $DomainOrIp = $DomainOrIp.Trim();
+    return (Invoke-WebRequest -Uri $queryurl -UseBasicParsing | Select-Object -ExpandProperty Content | ConvertFrom-Json | Select-Object -ExpandProperty whois);
+}
