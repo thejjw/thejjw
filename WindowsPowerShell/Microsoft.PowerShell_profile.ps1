@@ -135,7 +135,7 @@ function Get-AAA {
 
     Tip: you can add the function declaration to $PROFILE then call it on future shell sessions with ease
 #>
-param (
+    param (
     )
     if($null -eq $Global:getAAA) {
         $Global:getAAA = @{
@@ -164,7 +164,7 @@ function Get-MyIP {
 
     Tested with Windows Powershell. Should work with pwsh.
 #>
-return (Resolve-DnsName -Name o-o.myaddr.l.google.com -Server ns1.google.com -Type TXT | Select-Object -ExpandProperty Strings);
+    return (Resolve-DnsName -Name o-o.myaddr.l.google.com -Server ns1.google.com -Type TXT | Select-Object -ExpandProperty Strings);
 }
 
 function Get-WhoisInfo {
