@@ -209,3 +209,128 @@ function Get-WhoisInfo {
     Set-Variable -Name queryurl -Value "http://whois.kisa.or.kr/openapi/whois.jsp?query=$DomainOrIp&key=$WhoisKisaApiKey&answer=json" -Option Constant;
     return (Invoke-WebRequest -Uri $queryurl -UseBasicParsing | Select-Object -ExpandProperty Content | ConvertFrom-Json | Select-Object -ExpandProperty whois);
 }
+
+
+function Clear-JBEvalProductRegistry {
+    param (
+        # product name (ex: 'pycharm', 'clion', ...)
+        [Parameter(Mandatory)]
+        [string]
+        $Product
+    )
+    
+    $reg = 'HKCU:\SOFTWARE\JavaSoft\Prefs\jetbrains\';
+
+    $sub1 = Get-ChildItem $reg;
+    if($null -eq $sub1) {
+        Write-Output "INFO: no subregistry under $reg, exiting..";
+        return;
+    } else {
+        $productsub = $sub1 | Select-String $product;
+        if($null -eq $productsub) {
+            Write-Output "INFO: no subregistry for $product, exiting..";
+            return;
+        } elseif ($productsub.Length -ne 1) {
+            Write-Output "INFO: ambiguous subregistries found for $product (type 1), exiting..";
+            return;
+        } else {
+            $sub2 = Get-ChildItem Registry::$productsub;
+            if($sub2.Length -ne 1) {
+                Write-Output "INFO: ambiguous subregistries found for $product (type 2), exiting..";
+                return;
+            } else {
+                $sub3 = Get-ChildItem Registry::$sub2;
+                if($null -eq $sub3) {
+                    Write-Output "INFO: no subregistry found for $product (depth 2), exiting..";
+                    return;
+                } else {
+                    $evals = $sub3 | Select-Object -ExpandProperty Name | Select-String evlsprt;
+                    if($null -eq $evals) {
+                        Write-Output "INFO: no evaluation related registry found for $product, exiting..";
+                        return;
+                    } elseif ($evals.Length -eq 1) {
+                        Remove-Item Registry::$evals -Recurse;
+                        Write-Output "INFO: 1 evaluation registry deleted for $product, exiting..";
+                        return;
+                    } else {
+                        foreach ($e in $evals) {
+                            $l = $e.Line;
+                            Write-Output "INFO: deleting evaluation registry..: $l"
+                            Remove-Item Registry::$l -Recurse;
+                        }
+                        Write-Output "INFO: evaluation registries deleted for $product, exiting..";
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    Write-Output "INFO: EvalProductRegistry for $Product has finished processing";
+}
+
+function Clear-JBEvalProductFiles {
+    param (
+        # product name (ex: 'pycharm', 'clion', ...)
+        [Parameter(Mandatory)]
+        [string]
+        $Product
+    )
+
+    $jbpath = $env:APPDATA + '\JetBrains';
+    $alldir = Get-ChildItem $jbpath -Directory;
+    $productdir = $alldir | Where-Object -Property Name -Like "$Product*";
+    if($null -eq $productdir) {
+        Write-Output "INFO: no dir found for $Product, exiting...";
+        return;
+    } elseif ($productdir.Length -ne 1) {
+        Write-Output "INFO: several dir found for $Product at $jbpath. Clean up old dir and run again. exiting...";
+        return;
+    } else {
+        Push-Location $productdir.FullName;
+
+        # remove eval dir
+        $eval = Get-Item "eval" -ErrorAction SilentlyContinue;
+        if($null -eq $eval) {
+            Write-Output "INFO: No 'eval' dir found for $productdir.";
+        } else {
+            Write-Output "INFO: Removing $eval.";
+            Remove-Item $eval -Recurse;
+        }
+
+        # access other.xml and delete evlsprt line
+        $optionsother = Get-Item "options\other.xml";
+        if($null -eq $optionsother) {
+            Write-Output "INFO: No other.xml found for $productdir.";
+        } else {
+            Write-Output "INFO: searching for evlsprt lines in other.xml and removing.."
+            (Get-Content $optionsother) | 
+            ForEach-Object {
+                $_ -ireplace ".+evlsprt.+","";
+            } | Set-Content $optionsother;
+        }
+
+        Pop-Location;
+        Write-Output "INFO: EvalProductFiles for $Product has finished processng";
+    }
+}
+
+function Clear-JBTrial {
+    param (
+        # product name (ex: 'pycharm', 'clion', ...)
+        [Parameter(Mandatory)]
+        [string]
+        $Product
+    )
+
+    Clear-JBEvalProductFiles -Product $Product;
+    Clear-JBEvalProductRegistry -Product $Product;
+}
+
+function Clear-AllJBTrial {
+    $allproducts = @('IntelliJ', 'WebStorm', 'DataGrip', 'PhpStorm', 'CLion', 'PyCharm', 'GoLand', 'RubyMine', 'Rider', 'Resharper');
+    foreach ($product in $allproducts) {
+        Clear-JBTrial -Product $product;
+    }
+}
+
