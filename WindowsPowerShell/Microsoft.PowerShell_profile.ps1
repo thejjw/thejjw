@@ -212,6 +212,20 @@ function Get-WhoisInfo {
 
 
 function Clear-JBEvalProductRegistry {
+<#
+.SYNOPSIS
+    Cleans up registry related to evaluation license for a given JetBrains product 
+.EXAMPLE
+    Clear-JBEvalProductRegistry -Product 'PyCharm'
+.INPUTS
+    JetBrains product name (that has set evaluation license on the pc for the current user)
+.OUTPUTS
+    Nothing (will print some processing information though)
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2021-07
+    Tested with Windows Powershell. Should work with pwsh.
+#>
     param (
         # product name (ex: 'pycharm', 'clion', ...)
         [Parameter(Mandatory)]
@@ -270,6 +284,20 @@ function Clear-JBEvalProductRegistry {
 }
 
 function Clear-JBEvalProductFiles {
+<#
+.SYNOPSIS
+    Cleans up flies related to evaluation license for a given JetBrains product 
+.EXAMPLE
+    Clear-JBEvalProductFiles -Product 'PyCharm'
+.INPUTS
+    JetBrains product name (that has set evaluation license on the pc for the current user)
+.OUTPUTS
+    Nothing (will print some processing information though)
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2021-07
+    Tested with Windows Powershell. Should work with pwsh.
+#>
     param (
         # product name (ex: 'pycharm', 'clion', ...)
         [Parameter(Mandatory)]
@@ -316,6 +344,21 @@ function Clear-JBEvalProductFiles {
 }
 
 function Clear-JBTrial {
+<#
+.SYNOPSIS
+    Cleans up all information related to evaluation license for a given JetBrains product 
+.EXAMPLE
+    Clear-JBTrial -Product 'PyCharm'
+.INPUTS
+    JetBrains product name (that has set evaluation license on the pc for the current user)
+.OUTPUTS
+    Nothing (will print some processing information though)
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2021-07
+    Tested with Windows Powershell. Should work with pwsh.
+    Dependent on Clear-JBEvalProductRegistry and Clear-JBEvalProductFiles
+#>
     param (
         # product name (ex: 'pycharm', 'clion', ...)
         [Parameter(Mandatory)]
@@ -323,14 +366,44 @@ function Clear-JBTrial {
         $Product
     )
 
+    if(((Get-ChildItem Function: | Select-Object -ExpandProperty Name) -notcontains 'Clear-JBEvalProductFiles') -or `
+    ((Get-ChildItem Function: | Select-Object -ExpandProperty Name) -notcontains 'Clear-JBEvalProductRegistry')) {
+        Write-Host 'Clear-JBEvalProductFiles and/or Clear-JBEvalProductRegistry not available. exiting...';
+        break;
+    }
+
     Clear-JBEvalProductFiles -Product $Product;
     Clear-JBEvalProductRegistry -Product $Product;
 }
 
 function Clear-AllJBTrial {
+<#
+.SYNOPSIS
+    Cleans up all information related to evaluation license for all known JetBrains product 
+.EXAMPLE
+    Clear-JBAllTrial 
+.INPUTS
+    Nothing
+.OUTPUTS
+    Nothing (will print some processing information though)
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2021-07
+    Tested with Windows Powershell. Should work with pwsh.
+    Dependent on Clear-JBTrial, Clear-JBEvalProductRegistry and Clear-JBEvalProductFiles
+    Edit allproducts list in script to update list of JetBrains products
+#>
+    if(((Get-ChildItem Function: | Select-Object -ExpandProperty Name) -notcontains 'Clear-JBEvalProductFiles') -or `
+    ((Get-ChildItem Function: | Select-Object -ExpandProperty Name) -notcontains 'Clear-JBEvalProductRegistry') -or `
+    ((Get-ChildItem Function: | Select-Object -ExpandProperty Name) -notcontains 'Clear-JBTrial')) {
+        Write-Host 'Clear-JBTrial, Clear-JBEvalProductFiles and/or Clear-JBEvalProductRegistry not available. exiting...';
+        break;
+    }
+
     $allproducts = @('IntelliJ', 'WebStorm', 'DataGrip', 'PhpStorm', 'CLion', 'PyCharm', 'GoLand', 'RubyMine', 'Rider', 'Resharper');
     foreach ($product in $allproducts) {
         Clear-JBTrial -Product $product;
     }
 }
+
 
