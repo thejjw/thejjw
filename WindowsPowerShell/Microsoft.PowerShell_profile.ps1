@@ -108,7 +108,6 @@ namespace ewsConsole
     [ewsConsole.Program]::Main($TargetProcesses);
 }
 
-
 function Get-AAA {
 <#
 .SYNOPSIS
@@ -119,31 +118,55 @@ function Get-AAA {
         https://assets.gfycat.com/animals
         https://assets.gfycat.com/adjectives
     Tested under Windows Powershell
-    Caution: Does not check for duplicate adjectives as of now. NOT FOR PRODUCTION USE.
+    Caution: NOT FOR PRODUCTION USE.
     In case of error running its host script, try: 
     Set-ExecutionPolicy Bypass -Scope Process -Force; . .\Get-AAAFunc.ps1
 .EXAMPLE
     PS C:\> Get-AAA
     snoopy-spiffy-squeaker
+.EXAMPLE
+    PS C:\> Get-AAA 2
+    or
+    PS C:\> Get-AAA -Repeat 2
+    powderblue-flat-alpinegoat
+    academic-relieved-rainbowtrout
 .INPUTS
-    none
+    -Repeat <number> dictates how many AAA format Get-AAA will output (default 1)
 .OUTPUTS
     string of adjective-adjective-animal format
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2021-05
+    Last Edit: 2021-07
 
     Tip: you can add the function declaration to $PROFILE then call it on future shell sessions with ease
+    (note that script execution policy should allow local script execution at least, i.e. RemoteSigned)
 #>
     param (
+        $Repeat = 1
     )
-    if($null -eq $Global:getAAA) {
-        $Global:getAAA = @{
-            ganm = (Invoke-WebRequest https://assets.gfycat.com/animals -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";
-            gadj = (Invoke-WebRequest https://assets.gfycat.com/adjectives -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";        
+
+    [string[]]$result = @();
+    for ($i = 0; $i -lt $Repeat; $i++) {
+        if($null -eq $Global:getAAA) {
+            $Global:getAAA = @{
+                ganm = (Invoke-WebRequest https://assets.gfycat.com/animals -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";
+                gadj = (Invoke-WebRequest https://assets.gfycat.com/adjectives -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";        
+            }
         }
+    
+        $adjs = New-Object System.Collections.Generic.HashSet[string];
+        while ($adjs.Count -ne 2) {
+            $adjs.Add($Global:getAAA.gadj.Get((Get-Random) % $Global:getAAA.gadj.Count)) | Out-Null;
+        }
+        
+        [string[]]$adjsarr = @();
+        foreach ($adj in $adjs) {
+            $adjsarr += ([string]$adj).Trim();
+        }
+        $adjsarr += $Global:getAAA.ganm.Get((Get-Random) % $Global:getAAA.ganm.Count);
+        $result += ($adjsarr -join "-");
     }
-    Write-Output ( -join ($Global:getAAA.gadj.Get((Get-Random) % $Global:getAAA.gadj.Count), "-", $Global:getAAA.gadj.Get((Get-Random) % $Global:getAAA.gadj.Count), "-", $Global:getAAA.ganm.Get((Get-Random) % $Global:getAAA.ganm.Count)));
+    return $result;
 }
 
 function Get-MyIP {
