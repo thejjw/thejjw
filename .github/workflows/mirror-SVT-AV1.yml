@@ -1,4 +1,6 @@
-# .github/workflows/mirror.yml in 'git-mirror-sync'
+# 2025.6 @thejjw
+name: update svt-av1 mirror
+
 on:
   schedule:
     - cron: '0 23 * * *'
