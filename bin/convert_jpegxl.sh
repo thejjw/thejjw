@@ -1,6 +1,7 @@
 #!/bin/bash
-
 # 2025.6 @thejjw
+
+set -e
 
 # Set the distance parameter to 0 for lossless
 DISTANCE=0
