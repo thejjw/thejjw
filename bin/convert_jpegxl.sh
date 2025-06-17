@@ -6,12 +6,15 @@ set -e
 # Set the distance parameter to 0 for lossless
 DISTANCE=0
 
-# Parse options
 DELETE_ORIGINAL=0
-while getopts "d" opt; do
+INCLUDE_WEBP=0
+while getopts "dw" opt; do
   case $opt in
     d)
       DELETE_ORIGINAL=1
+      ;;
+    w)
+      INCLUDE_WEBP=1
       ;;
   esac
 done
@@ -40,8 +43,12 @@ echo_elapsed() {
     printf "[+%ds] %s\n" "$elapsed" "$1" | tee -a "$LOG_FILE"
 }
 
-# Find all specified file formats and count them
-mapfile -t files < <(find . -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.gif" \))
+# Find files
+if [ "$INCLUDE_WEBP" -eq 1 ]; then
+    mapfile -t files < <(find . -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.gif" -o -iname "*.webp" \))
+else
+    mapfile -t files < <(find . -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.gif" \))
+fi
 total=${#files[@]}
 echo_elapsed "Total files to process: $total"
 
@@ -51,16 +58,30 @@ for file in "${files[@]}"; do
     output="${file%.*}.jxl"
     echo_elapsed "[$count/$total] Converting: $file -> $output"
 
-    # Convert to JPEG XL using FFmpeg
+    orig_size=$(stat -c%s "$file")
     ffmpeg -y -i "$file" -c:v libjxl -distance $DISTANCE -effort 9 "$output"
+    status=$?
 
     # Check if conversion was successful
-    if [ $? -eq 0 ]; then
+    if [ $status -eq 0 ]; then
+        new_size=$(stat -c%s "$output")
+        size_diff=$((orig_size - new_size))
+        percent=0
+        if [ "$orig_size" -gt 0 ]; then
+            percent=$((100 * size_diff / orig_size))
+        fi
+        logmsg="Success! $file: $orig_size bytes -> $new_size bytes (${percent}% change)."
+        echo_elapsed "$logmsg"
+
         if [ "$DELETE_ORIGINAL" -eq 1 ]; then
-          echo_elapsed "Success! Deleting original: $file"
-          rm "$file"
+            if [ "$new_size" -lt "$orig_size" ]; then
+                echo_elapsed "Deleting original: $file"
+                rm "$file"
+            else
+                echo_elapsed "Not deleting original, .jxl is not smaller."
+            fi
         else
-          echo_elapsed "Success! (Original not deleted. Use -d to enable deletion.)"
+            echo_elapsed "Original not deleted. Use -d to enable deletion."
         fi
     else
         echo_elapsed "Conversion failed for: $file"
