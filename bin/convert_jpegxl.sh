@@ -78,7 +78,8 @@ for file in "${files[@]}"; do
                 echo_elapsed "Deleting original: $file"
                 rm "$file"
             else
-                echo_elapsed "Not deleting original, .jxl is not smaller."
+                echo_elapsed "Not deleting original, .jxl is not smaller. Deleting .jxl file."
+                rm "$output"
             fi
         else
             echo_elapsed "Original not deleted. Use -d to enable deletion."
