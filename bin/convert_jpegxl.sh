@@ -40,8 +40,8 @@ echo_elapsed() {
     printf "[+%ds] %s\n" "$elapsed" "$1" | tee -a "$LOG_FILE"
 }
 
-# Find all .jpg and .jpeg files and count them
-mapfile -t files < <(find . -type f \( -iname "*.jpg" -o -iname "*.jpeg" \))
+# Find all specified file formats and count them
+mapfile -t files < <(find . -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.gif" \))
 total=${#files[@]}
 echo_elapsed "Total files to process: $total"
 
@@ -52,7 +52,7 @@ for file in "${files[@]}"; do
     echo_elapsed "[$count/$total] Converting: $file -> $output"
 
     # Convert to JPEG XL using FFmpeg
-    ffmpeg -y -i "$file" -c:v libjxl -distance $DISTANCE "$output"
+    ffmpeg -y -i "$file" -c:v libjxl -distance $DISTANCE -effort 9 "$output"
 
     # Check if conversion was successful
     if [ $? -eq 0 ]; then
