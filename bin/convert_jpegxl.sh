@@ -16,6 +16,10 @@ while getopts "dw" opt; do
 done
 shift $((OPTIND -1))
 
+for tool in ffmpeg ffprobe; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "Error: '$tool' is not installed or not in PATH. Aborting."; exit 1; }
+done
+
 # Check for JPEG XL support
 if ! ffmpeg -buildconf 2>/dev/null | grep -qE 'libjxl'; then
   echo "Error: ffmpeg is not compiled with libjxl support. Aborting."
