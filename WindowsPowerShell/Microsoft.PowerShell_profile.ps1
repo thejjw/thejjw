@@ -256,7 +256,8 @@ function Get-NewPassword {
     Firefox Password Generator logic is taken and modified from:
         https://github.com/mozilla/gecko-dev/blob/4ca7c3542cc16420efd6f7e7931241ab102484f6/toolkit/components/passwordmgr/PasswordGenerator.jsm
     upstream version is at:
-        https://github.com/mozilla/gecko-dev/blob/master/toolkit/components/passwordmgr/PasswordGenerator.jsm
+        (as of 2025.6) https://github.com/mozilla/gecko-dev/blob/master/toolkit/components/passwordmgr/shared/PasswordGenerator.sys.mjs
+        (previously) https://github.com/mozilla/gecko-dev/blob/master/toolkit/components/passwordmgr/PasswordGenerator.jsm
     nonexistent window.crypto workaround for node.js is borrowed from:
         https://gist.github.com/Chrischuck/aa6447c4f9b540113f85108e0681f773
     Author: jjw(@thejjw)
