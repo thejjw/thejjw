@@ -17,7 +17,9 @@ done
 shift $((OPTIND -1))
 
 # Check for requirements
-command -v parallel >/dev/null || { echo "Error: GNU parallel is not installed."; exit 1; }
+for tool in ffmpeg ffprobe parallel; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "Error: '$tool' is not installed or not in PATH. Aborting."; exit 1; }
+done
 ffmpeg -buildconf 2>/dev/null | grep -q 'libjxl' || { echo "Error: ffmpeg missing libjxl support."; exit 1; }
 
 LOG_FILE="./convert_jpegxl_parallel_$(date "+%Y%m%d_%H%M%S").log"
