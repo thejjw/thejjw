@@ -44,10 +44,23 @@ log_elapsed "Found ${#files[@]} files. Launching parallel conversion..."
 # Define the processing function
 convert_jxl() {
   input="$1"
+  ext="${input##*.}"
+  ext_lc="${ext,,}"
+
+  # Skip animated WebP files
+  if [[ "$ext_lc" == "webp" ]]; then
+    frames=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames \
+      -of default=noprint_wrappers=1:nokey=1 "$input" 2>/dev/null)
+    if [[ "$frames" == "N/A" || "$frames" -gt 1 ]]; then
+      echo "[SKIP] Skipping animated WebP: $input"
+      return 0
+    fi
+  fi
+
   output="${input%.*}.jxl"
   orig_size=$(stat -c%s "$input" 2>/dev/null || echo 0)
-  ffmpeg -y -i "$input" -c:v libjxl -distance $DISTANCE -effort $EFFORT "$output" 2>>"$LOG_FILE"
 
+  ffmpeg -y -i "$input" -c:v libjxl -distance $DISTANCE -effort $EFFORT "$output" 2>>"$LOG_FILE"
   if [ $? -eq 0 ]; then
     new_size=$(stat -c%s "$output")
     if [ "$DELETE_ORIGINAL" -eq 1 ] && [ "$new_size" -lt "$orig_size" ]; then
