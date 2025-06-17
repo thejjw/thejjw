@@ -574,22 +574,22 @@ function Send-SshKey {
 .PARAMETER User
     The username to authenticate with on the remote server.
 
-.PARAMETER Host
+.PARAMETER Hostname
     The remote server (IP address or hostname).
 
 .PARAMETER Port
     The SSH port number. Default is 22.
 
 .EXAMPLE
-    PS C:\> Send-SshKey -User root -Host 192.168.1.100
+    PS C:\> Send-SshKey -User root -Hostname 192.168.1.100
     Uploads the current user's public key to root@192.168.1.100 on port 22.
 
 .EXAMPLE
-    PS C:\> Send-SshKey -User jjw -Host example.com -Port 2222
+    PS C:\> Send-SshKey -User jjw -Hostname example.com -Port 2222
     Uploads the public key to jjw@example.com using SSH over port 2222.
 
 .INPUTS
-    String parameters -User, -Host, and optionally -Port
+    String parameters -User, -Hostname, and optionally -Port
 
 .OUTPUTS
     None. Writes operation status to console.
@@ -606,7 +606,7 @@ function Send-SshKey {
         [string]$User,
 
         [Parameter(Mandatory=$true)]
-        [string]$Host,
+        [string]$Hostname,
 
         [int]$Port = 22
     )
@@ -618,9 +618,9 @@ function Send-SshKey {
     }
 
     if (Test-Path $pubkeyPath) {
-        Write-Host "Sending public key to ${User}@${Host}:${Port} ..." -ForegroundColor Cyan
-        Get-Content $pubkeyPath | ssh "$User@$Host" -p $Port 'mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
-        Write-Host "✔ Public key installed on $Host" -ForegroundColor Green
+        Write-Host "Sending public key to ${User}@${Hostname}:${Port} ..." -ForegroundColor Cyan
+        Get-Content $pubkeyPath | ssh "$User@$Hostname" -p $Port 'mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
+        Write-Host "✔ Public key installed on $Hostname" -ForegroundColor Green
     } else {
         Write-Warning "❌ Could not locate or generate SSH public key."
     }
