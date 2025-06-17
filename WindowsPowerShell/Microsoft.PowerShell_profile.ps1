@@ -618,7 +618,7 @@ function Send-SshKey {
     }
 
     if (Test-Path $pubkeyPath) {
-        Write-Host "Sending public key to $User@$Host:$Port ..." -ForegroundColor Cyan
+        Write-Host "Sending public key to ${User}@${Host}:${Port} ..." -ForegroundColor Cyan
         Get-Content $pubkeyPath | ssh "$User@$Host" -p $Port 'mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
         Write-Host "✔ Public key installed on $Host" -ForegroundColor Green
     } else {
