@@ -1,8 +1,6 @@
 #!/bin/bash
 # 2025.6 @thejjw — Parallel edition with GNU parallel power
 
-set -e
-
 DISTANCE=0
 EFFORT=9
 DELETE_ORIGINAL=0
