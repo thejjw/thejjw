@@ -5,17 +5,21 @@
 # Set the distance parameter to 0 for lossless
 DISTANCE=0
 
+# Create a timestamped log file (YYYYMMDD_HHMMSS)
+LOG_TIMESTAMP=$(date "+%Y%m%d_%H%M%S")
+LOG_FILE="./convert_jpegxl_${LOG_TIMESTAMP}.log"
+
 # Capture initial time in seconds since epoch
 START_TIME=$(date +%s)
 START_HUMAN=$(date "+%Y-%m-%d %H:%M:%S")
-echo "Script started at: $START_HUMAN"
+echo "Script started at: $START_HUMAN" | tee -a "$LOG_FILE"
 
-# Function to echo with elapsed time
+# Function to echo with elapsed time (to both console and log file)
 echo_elapsed() {
     local now elapsed
     now=$(date +%s)
     elapsed=$((now - START_TIME))
-    printf "[+%ds] %s\n" "$elapsed" "$1"
+    printf "[+%ds] %s\n" "$elapsed" "$1" | tee -a "$LOG_FILE"
 }
 
 # Find all .jpg and .jpeg files and count them
@@ -40,3 +44,5 @@ for file in "${files[@]}"; do
         echo_elapsed "Conversion failed for: $file"
     fi
 done
+
+echo_elapsed "Script completed."
