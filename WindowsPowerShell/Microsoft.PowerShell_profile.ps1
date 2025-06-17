@@ -114,9 +114,7 @@ function Get-AAA {
     function that outputs string of adjective-adjective-animal format
 .DESCRIPTION
     function that outputs string of adjective-adjective-animal format.
-    Depends on availability of following resources:
-        https://assets.gfycat.com/animals
-        https://assets.gfycat.com/adjectives
+    Depends on availability of https://raw.githubusercontent.com resources.
     Tested under Windows Powershell
     Caution: NOT FOR PRODUCTION USE.
     In case of error running its host script, try: 
@@ -149,8 +147,8 @@ function Get-AAA {
     for ($i = 0; $i -lt $Repeat; $i++) {
         if($null -eq $Global:getAAA) {
             $Global:getAAA = @{
-                ganm = (Invoke-WebRequest https://assets.gfycat.com/animals -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";
-                gadj = (Invoke-WebRequest https://assets.gfycat.com/adjectives -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";        
+                ganm = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/animals -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";
+                gadj = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/adjectives -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";        
             }
         }
     
