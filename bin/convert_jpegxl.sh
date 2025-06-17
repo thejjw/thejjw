@@ -5,12 +5,16 @@
 # Set the distance parameter to 0 for lossless
 DISTANCE=0
 
-# Find and process all .jpg and .jpeg files
-find . -type f \( -iname "*.jpg" -o -iname "*.jpeg" \) | while read -r file; do
-    # Generate output filename by replacing .jpg or .jpeg with .jxl
+# Find all .jpg and .jpeg files and count them
+mapfile -t files < <(find . -type f \( -iname "*.jpg" -o -iname "*.jpeg" \))
+total=${#files[@]}
+echo "Total files to process: $total"
+
+count=0
+for file in "${files[@]}"; do
+    ((count++))
     output="${file%.*}.jxl"
-    
-    echo "Converting: $file -> $output"
+    echo "[$count/$total] Converting: $file -> $output"
 
     # Convert to JPEG XL using FFmpeg
     ffmpeg -y -i "$file" -c:v libjxl -distance $DISTANCE "$output"
