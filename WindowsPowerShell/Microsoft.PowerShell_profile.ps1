@@ -233,202 +233,6 @@ function Get-WhoisInfo {
     return (Invoke-WebRequest -Uri $queryurl -UseBasicParsing | Select-Object -ExpandProperty Content | ConvertFrom-Json | Select-Object -ExpandProperty whois);
 }
 
-
-function Clear-JBEvalProductRegistry {
-<#
-.SYNOPSIS
-    Cleans up registry related to evaluation license for a given JetBrains product 
-.EXAMPLE
-    Clear-JBEvalProductRegistry -Product 'PyCharm'
-.INPUTS
-    JetBrains product name (that has set evaluation license on the pc for the current user)
-.OUTPUTS
-    Nothing (will print some processing information though)
-.NOTES
-    Author: jjw(@thejjw)
-    Last Edit: 2021-07
-    Tested with Windows Powershell. Should work with pwsh.
-#>
-    param (
-        # product name (ex: 'pycharm', 'clion', ...)
-        [Parameter(Mandatory)]
-        [string]
-        $Product
-    )
-    
-    $reg = 'HKCU:\SOFTWARE\JavaSoft\Prefs\jetbrains\';
-
-    $sub1 = Get-ChildItem $reg;
-    if($null -eq $sub1) {
-        Write-Output "INFO: no subregistry under $reg, exiting..";
-        return;
-    } else {
-        $productsub = $sub1 | Select-String $product;
-        if($null -eq $productsub) {
-            Write-Output "INFO: no subregistry for $product, exiting..";
-            return;
-        } elseif ($productsub.Length -ne 1) {
-            Write-Output "INFO: ambiguous subregistries found for $product (type 1), exiting..";
-            return;
-        } else {
-            $sub2 = Get-ChildItem Registry::$productsub;
-            if($sub2.Length -ne 1) {
-                Write-Output "INFO: ambiguous subregistries found for $product (type 2), exiting..";
-                return;
-            } else {
-                $sub3 = Get-ChildItem Registry::$sub2;
-                if($null -eq $sub3) {
-                    Write-Output "INFO: no subregistry found for $product (depth 2), exiting..";
-                    return;
-                } else {
-                    $evals = $sub3 | Select-Object -ExpandProperty Name | Select-String evlsprt;
-                    if($null -eq $evals) {
-                        Write-Output "INFO: no evaluation related registry found for $product, exiting..";
-                        return;
-                    } elseif ($evals.Length -eq 1) {
-                        Remove-Item Registry::$evals -Recurse;
-                        Write-Output "INFO: 1 evaluation registry deleted for $product, exiting..";
-                        return;
-                    } else {
-                        foreach ($e in $evals) {
-                            $l = $e.Line;
-                            Write-Output "INFO: deleting evaluation registry..: $l"
-                            Remove-Item Registry::$l -Recurse;
-                        }
-                        Write-Output "INFO: evaluation registries deleted for $product, exiting..";
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    Write-Output "INFO: EvalProductRegistry for $Product has finished processing";
-}
-
-function Clear-JBEvalProductFiles {
-<#
-.SYNOPSIS
-    Cleans up flies related to evaluation license for a given JetBrains product 
-.EXAMPLE
-    Clear-JBEvalProductFiles -Product 'PyCharm'
-.INPUTS
-    JetBrains product name (that has set evaluation license on the pc for the current user)
-.OUTPUTS
-    Nothing (will print some processing information though)
-.NOTES
-    Author: jjw(@thejjw)
-    Last Edit: 2021-07
-    Tested with Windows Powershell. Should work with pwsh.
-#>
-    param (
-        # product name (ex: 'pycharm', 'clion', ...)
-        [Parameter(Mandatory)]
-        [string]
-        $Product
-    )
-
-    $jbpath = $env:APPDATA + '\JetBrains';
-    $alldir = Get-ChildItem $jbpath -Directory;
-    $productdir = $alldir | Where-Object -Property Name -Like "$Product*";
-    if($null -eq $productdir) {
-        Write-Output "INFO: no dir found for $Product, exiting...";
-        return;
-    } elseif ($productdir.Length -ne 1) {
-        Write-Output "INFO: several dir found for $Product at $jbpath. Clean up old dir and run again. exiting...";
-        return;
-    } else {
-        Push-Location $productdir.FullName;
-
-        # remove eval dir
-        $eval = Get-Item "eval" -ErrorAction SilentlyContinue;
-        if($null -eq $eval) {
-            Write-Output "INFO: No 'eval' dir found for $productdir.";
-        } else {
-            Write-Output "INFO: Removing $eval.";
-            Remove-Item $eval -Recurse;
-        }
-
-        # access other.xml and delete evlsprt line
-        $optionsother = Get-Item "options\other.xml";
-        if($null -eq $optionsother) {
-            Write-Output "INFO: No other.xml found for $productdir.";
-        } else {
-            Write-Output "INFO: searching for evlsprt lines in other.xml and removing.."
-            (Get-Content $optionsother) | 
-            ForEach-Object {
-                $_ -ireplace ".+evlsprt.+","";
-            } | Set-Content $optionsother;
-        }
-
-        Pop-Location;
-        Write-Output "INFO: EvalProductFiles for $Product has finished processng";
-    }
-}
-
-function Clear-JBTrial {
-<#
-.SYNOPSIS
-    Cleans up all information related to evaluation license for a given JetBrains product 
-.EXAMPLE
-    Clear-JBTrial -Product 'PyCharm'
-.INPUTS
-    JetBrains product name (that has set evaluation license on the pc for the current user)
-.OUTPUTS
-    Nothing (will print some processing information though)
-.NOTES
-    Author: jjw(@thejjw)
-    Last Edit: 2021-07
-    Tested with Windows Powershell. Should work with pwsh.
-    Dependent on Clear-JBEvalProductRegistry and Clear-JBEvalProductFiles
-#>
-    param (
-        # product name (ex: 'pycharm', 'clion', ...)
-        [Parameter(Mandatory)]
-        [string]
-        $Product
-    )
-
-    if(((Get-ChildItem Function: | Select-Object -ExpandProperty Name) -notcontains 'Clear-JBEvalProductFiles') -or `
-    ((Get-ChildItem Function: | Select-Object -ExpandProperty Name) -notcontains 'Clear-JBEvalProductRegistry')) {
-        Write-Host 'Clear-JBEvalProductFiles and/or Clear-JBEvalProductRegistry not available. exiting...';
-        break;
-    }
-
-    Clear-JBEvalProductFiles -Product $Product;
-    Clear-JBEvalProductRegistry -Product $Product;
-}
-
-function Clear-AllJBTrial {
-<#
-.SYNOPSIS
-    Cleans up all information related to evaluation license for all known JetBrains product 
-.EXAMPLE
-    Clear-JBAllTrial 
-.INPUTS
-    Nothing
-.OUTPUTS
-    Nothing (will print some processing information though)
-.NOTES
-    Author: jjw(@thejjw)
-    Last Edit: 2021-07
-    Tested with Windows Powershell. Should work with pwsh.
-    Dependent on Clear-JBTrial, Clear-JBEvalProductRegistry and Clear-JBEvalProductFiles
-    Edit allproducts list in script to update list of JetBrains products
-#>
-    if(((Get-ChildItem Function: | Select-Object -ExpandProperty Name) -notcontains 'Clear-JBEvalProductFiles') -or `
-    ((Get-ChildItem Function: | Select-Object -ExpandProperty Name) -notcontains 'Clear-JBEvalProductRegistry') -or `
-    ((Get-ChildItem Function: | Select-Object -ExpandProperty Name) -notcontains 'Clear-JBTrial')) {
-        Write-Host 'Clear-JBTrial, Clear-JBEvalProductFiles and/or Clear-JBEvalProductRegistry not available. exiting...';
-        break;
-    }
-
-    $allproducts = @('IntelliJ', 'WebStorm', 'DataGrip', 'PhpStorm', 'CLion', 'PyCharm', 'GoLand', 'RubyMine', 'Rider', 'Resharper');
-    foreach ($product in $allproducts) {
-        Clear-JBTrial -Product $product;
-    }
-}
-
 function Get-NewPassword {
 <#
 .SYNOPSIS
@@ -758,4 +562,67 @@ function Save-Download {
     $file = [System.IO.FileStream]::new($fullPath, [System.IO.FileMode]::Create)
     $file.Write($WebResponse.Content, 0, $WebResponse.RawContentLength)
     $file.Close()
+}
+
+function Send-SshKey {
+<#
+.SYNOPSIS
+    Sends public SSH key to remote Linux server (ssh-copy-id equivalent for Windows PowerShell)
+.DESCRIPTION
+    Sends user's SSH public key to a specified remote server's ~/.ssh/authorized_keys over SSH.
+    Requires OpenSSH client tools (`ssh`, `ssh-keygen`) available in the system PATH.
+
+.PARAMETER User
+    The username to authenticate with on the remote server.
+
+.PARAMETER Host
+    The remote server (IP address or hostname).
+
+.PARAMETER Port
+    The SSH port number. Default is 22.
+
+.EXAMPLE
+    PS C:\> Send-SshKey -User root -Host 192.168.1.100
+    Uploads the current user's public key to root@192.168.1.100 on port 22.
+
+.EXAMPLE
+    PS C:\> Send-SshKey -User jjw -Host example.com -Port 2222
+    Uploads the public key to jjw@example.com using SSH over port 2222.
+
+.INPUTS
+    String parameters -User, -Host, and optionally -Port
+
+.OUTPUTS
+    None. Writes operation status to console.
+
+.NOTES
+    Author: jjw (@thejjw)
+    Last Edit: 2025-06-17
+
+    To make this function persist, add it to your $PROFILE:
+        notepad $PROFILE
+#>
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$User,
+
+        [Parameter(Mandatory=$true)]
+        [string]$Host,
+
+        [int]$Port = 22
+    )
+
+    $pubkeyPath = "$env:USERPROFILE\.ssh\id_rsa.pub"
+    if (-not (Test-Path $pubkeyPath)) {
+        Write-Host "SSH key not found. Generating one now..." -ForegroundColor Yellow
+        ssh-keygen
+    }
+
+    if (Test-Path $pubkeyPath) {
+        Write-Host "Sending public key to $User@$Host:$Port ..." -ForegroundColor Cyan
+        Get-Content $pubkeyPath | ssh "$User@$Host" -p $Port 'mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
+        Write-Host "✔ Public key installed on $Host" -ForegroundColor Green
+    } else {
+        Write-Warning "❌ Could not locate or generate SSH public key."
+    }
 }
