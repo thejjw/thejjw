@@ -1,5 +1,5 @@
 #!/bin/bash
-# (linux/deb/ubuntu)(bash) Download and extract latest ffmpeg and ab-av1 release from GitHub, overwriting extraction
+# (linux/deb/ubuntu)(bash) Download and extract latest ffmpeg release from GitHub, overwriting extraction
 # 2025.6 @thejjw
 
 set -e
