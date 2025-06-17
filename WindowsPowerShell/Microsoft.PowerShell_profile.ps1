@@ -585,8 +585,8 @@ function Send-SshKey {
     Uploads the current user's public key to root@192.168.1.100 on port 22.
 
 .EXAMPLE
-    PS C:\> Send-SshKey -User jjw -Hostname example.com -Port 2222
-    Uploads the public key to jjw@example.com using SSH over port 2222.
+    PS C:\> Send-SshKey -User user -Hostname example.com -Port 2222
+    Uploads the public key to user@example.com using SSH over port 2222.
 
 .INPUTS
     String parameters -User, -Hostname, and optionally -Port
