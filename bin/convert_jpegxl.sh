@@ -49,6 +49,19 @@ echo_elapsed "Total files to process: $total"
 count=0
 for file in "${files[@]}"; do
   ((count++))
+  ext="${file##*.}"
+  ext_lc="${ext,,}"
+  
+  # Skip animated WebP
+  if [[ "$ext_lc" == "webp" ]]; then
+    frames=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames \
+      -of default=noprint_wrappers=1:nokey=1 "$file" 2>/dev/null)
+    if [[ "$frames" == "N/A" || "$frames" -gt 1 ]]; then
+      echo_elapsed "[$count/$total] Skipping animated WebP: $file"
+      continue
+    fi
+  fi
+
   output="${file%.*}.jxl"
   echo_elapsed "[$count/$total] Converting: $file -> $output"
 
