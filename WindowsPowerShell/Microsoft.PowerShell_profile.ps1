@@ -690,3 +690,56 @@ function Add-WingetPackagePaths {
     Write-Host "`n📌 Updated user PATH:"
     $currentPath.Split(';') | ForEach-Object { Write-Host "  $_" }
 }
+
+function Remove-WingetPackagePaths {
+<#
+.SYNOPSIS
+    Removes all user PATH entries under the winget package directory.
+
+.DESCRIPTION
+    Scans the current user PATH for any entries that start with
+    $env:LOCALAPPDATA\Microsoft\WinGet\Packages and removes them.
+
+.EXAMPLE
+    PS C:\> Remove-WingetPackagePaths
+    ✔ Removed the following winget directories from your user PATH:
+      - C:\Users\User\AppData\Local\Microsoft\WinGet\Packages\SomeTool\bin
+
+.INPUTS
+    None
+
+.OUTPUTS
+    Writes status messages to the host; modifies the user PATH environment variable.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+
+    Compatible with Windows PowerShell.
+#>
+    $wingetRoot = [IO.Path]::Combine($env:LOCALAPPDATA, "Microsoft\WinGet\Packages")
+    $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    $currentPathArr = $currentPath -split ';' | Where-Object { $_ -ne '' }
+
+    $filtered = @()
+    $removed = @()
+
+    foreach ($p in $currentPathArr) {
+        if ($p -like "$wingetRoot*") {
+            $removed += $p
+        } else {
+            $filtered += $p
+        }
+    }
+
+    if ($removed.Count -eq 0) {
+        Write-Host "No winget paths found in user PATH. Nothing to remove."
+    } else {
+        [Environment]::SetEnvironmentVariable("PATH", ($filtered -join ';'), "User")
+        Write-Host "✔ Removed the following winget directories from your user PATH:"
+        $removed | ForEach-Object { Write-Host "  - $_" }
+    }
+
+    Write-Host "`n📌 Updated user PATH:"
+    $filtered | ForEach-Object { Write-Host "  $_" }
+}
