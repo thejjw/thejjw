@@ -656,6 +656,7 @@ function Add-WingetPackagePaths {
     Last Edit: 2025-06
 
     Compatible with Windows PowerShell.
+    See Remove-WingetPackagePaths
 #>
     $wingetPath = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
 
@@ -716,6 +717,7 @@ function Remove-WingetPackagePaths {
     Last Edit: 2025-06
 
     Compatible with Windows PowerShell.
+    See Add-WingetPackagePaths
 #>
     $wingetRoot = [IO.Path]::Combine($env:LOCALAPPDATA, "Microsoft\WinGet\Packages")
     $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
