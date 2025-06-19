@@ -625,3 +625,68 @@ function Send-SshKey {
         Write-Warning "❌ Could not locate or generate SSH public key."
     }
 }
+
+
+function Add-WingetPackagePaths {
+<#
+.SYNOPSIS
+    Adds directories containing executables from winget package installs to the user PATH.
+
+.DESCRIPTION
+    Scans subdirectories in %LOCALAPPDATA%\Microsoft\WinGet\Packages that contain .exe files,
+    and appends them to the user's PATH environment variable if they are not already present.
+
+.EXAMPLE
+    PS C:\> Add-WingetPackagePaths
+    ✔ Added the following paths to your user PATH:
+      - C:\Users\User\AppData\Local\Microsoft\WinGet\Packages\ExampleTool\bin
+    📌 Updated user PATH:
+      C:\Tools\Bin
+      C:\Users\User\AppData\Local\Microsoft\WinGet\Packages\ExampleTool\bin
+    Adds new executable directories and shows final PATH.
+
+.INPUTS
+    None
+
+.OUTPUTS
+    Writes status messages to the host; modifies the user PATH environment variable.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+
+    Compatible with Windows PowerShell.
+#>
+    $wingetPath = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+
+    if (!(Test-Path $wingetPath)) {
+        Write-Host "Winget package directory not found at $wingetPath"
+        return
+    }
+
+    $binPaths = Get-ChildItem -Path $wingetPath -Directory -Recurse |
+        Where-Object { (Get-ChildItem -Path $_.FullName -Filter *.exe -File -ErrorAction SilentlyContinue).Count -gt 0 } |
+        Select-Object -ExpandProperty FullName
+
+    $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    $currentPathArr = $currentPath -split ';'
+
+    $added = @()
+    foreach ($path in $binPaths) {
+        if ($currentPathArr -notcontains $path) {
+            $currentPath += ";$path"
+            $added += $path
+        }
+    }
+
+    if ($added.Count -eq 0) {
+        Write-Host "No new paths were added. All executable directories are already in PATH."
+    } else {
+        [Environment]::SetEnvironmentVariable("PATH", $currentPath, "User")
+        Write-Host "✔ Added the following paths to your user PATH:"
+        $added | ForEach-Object { Write-Host "  - $_" }
+    }
+
+    Write-Host "`n📌 Updated user PATH:"
+    $currentPath.Split(';') | ForEach-Object { Write-Host "  $_" }
+}
