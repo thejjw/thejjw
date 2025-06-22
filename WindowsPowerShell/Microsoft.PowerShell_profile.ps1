@@ -745,3 +745,178 @@ function Remove-WingetPackagePaths {
     Write-Host "`n📌 Updated user PATH:"
     $filtered | ForEach-Object { Write-Host "  $_" }
 }
+
+function New-RandomMacAddress {
+<#
+.SYNOPSIS
+    Generates a random MAC address, with optional locally administered format.
+
+.DESCRIPTION
+    Creates a MAC address for virtual machines, containers, or testing scenarios.
+    By default, the MAC address is locally administered (bit 1 of first octet set) and unicast (bit 0 cleared).
+    Use the -FullyRandom switch to generate a completely random MAC that may not conform to local/unicast standards.
+
+.PARAMETER FullyRandom
+    If specified, generates a fully random MAC address without enforcing local or unicast bits.
+
+.EXAMPLE
+    PS C:\> New-RandomMacAddress
+    06:3c:74:1a:cc:2e
+
+.EXAMPLE
+    PS C:\> New-RandomMacAddress -FullyRandom
+    9f:83:ad:75:b2:01
+
+.INPUTS
+    None
+
+.OUTPUTS
+    System.String. Returns a MAC address as a string (e.g. '02:ab:cd:ef:12:34').
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+
+    Compatible with Windows PowerShell and PowerShell Core.
+#>
+    [CmdletBinding()]
+    param (
+        [switch]$FullyRandom
+    )
+
+    if ($FullyRandom) {
+        # All octets are fully random
+        $octets = @(for ($i = 0; $i -lt 6; $i++) { (Get-Random -Minimum 0 -Maximum 256).ToString("x2") })
+    } else {
+        # First octet: locally administered (bit 1 set), unicast (bit 0 cleared)
+        $first = ((Get-Random -Minimum 0 -Maximum 256) -bor 0x02) -band 0xFE
+        $octets = @($first.ToString("x2"))
+        for ($i = 1; $i -lt 6; $i++) {
+            $octets += (Get-Random -Minimum 0 -Maximum 256).ToString("x2")
+        }
+    }
+
+    return ($octets -join ":")
+}
+
+function Get-MacAdapters {
+<#
+.SYNOPSIS
+    Lists all network adapters and their MAC addresses.
+
+.DESCRIPTION
+    Queries all network adapters and displays their name, description, MAC address, and status.
+    Useful for identifying the correct adapter to modify.
+
+.EXAMPLE
+    PS C:\> Get-MacAdapters
+
+.OUTPUTS
+    Table of adapter details.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+#>
+    Get-NetAdapter | Format-Table Name, InterfaceDescription, MacAddress, Status
+}
+
+function Set-RandomMacAddress {
+<#
+.SYNOPSIS
+    Sets a network adapter's MAC address to a random value.
+
+.DESCRIPTION
+    Generates a random MAC address and applies it to the specified adapter.
+    By default, the MAC is locally administered and unicast.
+    Use the -FullyRandom switch to generate a completely random MAC address.
+
+.PARAMETER AdapterName
+    The name of the network adapter to modify. Use Get-MacAdapters to list available adapters.
+
+.PARAMETER FullyRandom
+    If specified, generates a fully random MAC address
+    (may not be locally administered or unicast).
+
+.EXAMPLE
+    PS C:\> Set-RandomMacAddress -AdapterName "Wi-Fi"
+    Sets "Wi-Fi" adapter to a locally administered, unicast random MAC.
+
+.EXAMPLE
+    PS C:\> Set-RandomMacAddress -AdapterName "Ethernet" -FullyRandom
+    Sets "Ethernet" adapter to a fully random MAC.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+#>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$AdapterName,
+        [switch]$FullyRandom
+    )
+
+    # Generate MAC address
+    if ($FullyRandom) {
+        $octets = @(for ($i = 0; $i -lt 6; $i++) { (Get-Random -Minimum 0 -Maximum 256).ToString("x2") })
+    } else {
+        $first = ((Get-Random -Minimum 0 -Maximum 256) -bor 0x02) -band 0xFE
+        $octets = @($first.ToString("x2"))
+        for ($i = 1; $i -lt 6; $i++) {
+            $octets += (Get-Random -Minimum 0 -Maximum 256).ToString("x2")
+        }
+    }
+    $newMac = $octets -join ""
+    Write-Host "Attempting to set MAC address for adapter '$AdapterName' to $newMac..."
+
+    try {
+        Set-NetAdapter -Name $AdapterName -MacAddress $newMac -Confirm:$false
+        Write-Host "✔ Successfully changed MAC address."
+        Write-Host "Restarting adapter '$AdapterName'..."
+        Restart-NetAdapter -Name $AdapterName -Confirm:$false
+        Write-Host "Adapter restarted."
+        Get-NetAdapter -Name $AdapterName | Select-Object Name, MacAddress
+    }
+    catch {
+        Write-Error "Failed to set MAC address: $_"
+        Write-Error "Ensure you are running PowerShell as Administrator and the adapter name is correct."
+    }
+}
+
+function Reset-MacAddress {
+<#
+.SYNOPSIS
+    Resets a network adapter's MAC address to its default (hardware) value.
+
+.DESCRIPTION
+    Clears the custom MAC address and restores the adapter's original hardware MAC.
+
+.PARAMETER AdapterName
+    The name of the network adapter to modify.
+
+.EXAMPLE
+    PS C:\> Reset-MacAddress -AdapterName "Wi-Fi"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+#>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$AdapterName
+    )
+
+    Write-Host "Resetting MAC address for adapter '$AdapterName' to its default..."
+    try {
+        Set-NetAdapter -Name $AdapterName -MacAddress $null -Confirm:$false
+        Restart-NetAdapter -Name $AdapterName -Confirm:$false
+        Write-Host "✔ MAC address reset to default."
+        Get-NetAdapter -Name $AdapterName | Select-Object Name, MacAddress
+    }
+    catch {
+        Write-Error "Failed to reset MAC address: $_"
+        Write-Error "Ensure you are running PowerShell as Administrator and the adapter name is correct."
+    }
+}
