@@ -116,6 +116,7 @@ fi
 # https://www.engadget.com/2010-05-06-use-networksetup-to-change-airport-networks-from-the-command-lin.html#:~:text=Over%20at%20Macworld%2C%20Rob%20Griffiths,when%20Snow%20Leopard%20was%20released.)
 
 # more on macchanger:
+# https://packages.debian.org/macchanger
 # https://manpages.ubuntu.com/manpages/man1/macchanger.1.html
 # www.gnu.org/software/macchanger
 # https://github.com/alobbs/macchanger
