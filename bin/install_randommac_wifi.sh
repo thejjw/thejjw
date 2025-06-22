@@ -1,5 +1,6 @@
 #!/bin/bash
 # (mac/linux/deb/ubuntu)(bash) This script installs the 'randommac_wifi' alias specific to your OS.
+# more notes in the end
 # 2025.6 @thejjw
 
 OS_TYPE=$(uname)
@@ -95,3 +96,37 @@ else
     echo "Error: Unsupported operating system ($OS_TYPE). This installer script currently supports macOS and Linux only."
     exit 1
 fi
+
+# more on networksetup:
+# The networksetup command in macOS is used to manage network settings, including Wi-Fi connections,
+# from the command line. You can use it to enable or disable Wi-Fi, join and leave networks, 
+# and configure various network parameters. The airport command, though related to Wi-Fi management, 
+# has been deprecated and is not recommended for use in newer macOS versions. 
+# https://www.engadget.com/2010-05-06-use-networksetup-to-change-airport-networks-from-the-command-lin.html#:~:text=Over%20at%20Macworld%2C%20Rob%20Griffiths,when%20Snow%20Leopard%20was%20released.)
+
+# more on macchanger:
+# https://manpages.ubuntu.com/manpages/man1/macchanger.1.html
+# www.gnu.org/software/macchanger
+# https://github.com/alobbs/macchanger
+#        macchanger is a GNU/Linux utility for viewing/manipulating the MAC address for network interfaces.
+#        -r, --random
+#               Set fully random MAC.
+#        -a, --another
+#               Set random vendor MAC of the same kind.
+#         EXAMPLE
+#               macchanger -A eth1
+# To reset your Wi-Fi MAC address on Ubuntu using macchanger, you first need to identify your network interface, then bring it down, change the MAC address, bring it back up, and finally verify the change. Here's a step-by-step guide:
+# 1. Identify the Network Interface:
+# Open a terminal.
+# Use the command ip link to list all network interfaces. Look for your Wi-Fi interface, which is typically named wlan0 or similar. 
+# Note the interface name (e.g., wlan0). 
+# 2. Disable the Interface:
+# Use the command sudo ip link set <interface_name> down (replace <interface_name> with your interface name, e.g., sudo ip link set wlan0 down) to disable the interface. 
+# 3. Change the MAC Address:
+# Use the command sudo macchanger -r <interface_name> to generate a random MAC address (e.g., sudo macchanger -r wlan0). 
+# Alternatively, use sudo macchanger -m <new_mac_address> <interface_name> to set a specific MAC address (e.g., sudo macchanger -m 00:11:22:33:44:55 wlan0). 
+# 4. Enable the Interface:
+# Use the command sudo ip link set <interface_name> up to enable the interface (e.g., sudo ip link set wlan0 up). 
+# 5. Verify the Change:
+# Use the command ip link again and check the MAC address associated with your Wi-Fi interface. 
+# You can also use macchanger -s <interface_name> to view the current and permanent MAC addresses. 
