@@ -3,6 +3,8 @@
 # more notes in the end
 # 2025.6 @thejjw
 
+set -e
+
 OS_TYPE=$(uname)
 
 if [ "$OS_TYPE" = "Darwin" ]; then
@@ -38,11 +40,20 @@ MAC_ALIAS_EOF
     echo "Installation complete. Please run 'source $TARGET_SHELL_RC' or restart your terminal to use the 'randommac_wifi' alias."
 
 elif [ "$OS_TYPE" = "Linux" ]; then
-    # On Linux, install to .bashrc
     TARGET_SHELL_RC="$HOME/.bashrc"
     ALIAS_NAME="randommac_wifi"
 
     echo "Detected Linux. Installing '$ALIAS_NAME' alias to $TARGET_SHELL_RC..."
+
+    # --- macchanger installation block ---
+    if command -v apt >/dev/null 2>&1; then
+        echo "apt found, attempting to install macchanger (requires sudo)..."
+        sudo apt update
+        sudo apt install -y macchanger
+    else
+        echo "apt not found. Skipping automatic macchanger installation."
+    fi
+    # -------------------------------------
 
     # Use a here-document to append the Linux alias definition
     cat << 'LINUX_ALIAS_EOF' >> "$TARGET_SHELL_RC"
