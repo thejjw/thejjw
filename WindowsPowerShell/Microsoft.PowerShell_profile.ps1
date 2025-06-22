@@ -920,3 +920,142 @@ function Reset-MacAddress {
         Write-Error "Ensure you are running PowerShell as Administrator and the adapter name is correct."
     }
 }
+
+function Convert-JpgToJxl {
+<#
+.SYNOPSIS
+    Converts all .jpg images in a directory (recursively) to .jxl using ImageMagick, in parallel.
+.DESCRIPTION
+    Finds all .jpg files recursively from a target directory (default: current), starts a background job for each conversion,
+    and deletes the original .jpg only on successful conversion. Reports progress and elapsed time.
+    Uses Windows PowerShell Start-Job for parallelism (suitable for PowerShell 5.1+).
+.PARAMETER Path
+    The directory to search for .jpg images. Default is current directory.
+.PARAMETER ThrottleLimit
+    Maximum number of parallel jobs allowed. Default is 4.
+.EXAMPLE
+    PS C:\> Convert-JpgToJxl
+.EXAMPLE
+    PS C:\> Convert-JpgToJxl -Path "D:\Photos" -ThrottleLimit 8
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+    - Compatible with Windows PowerShell and PowerShell Core.
+    - Requires ImageMagick (magick.exe) in PATH.
+    - Deletes .jpg only on successful conversion.
+#>
+    [CmdletBinding()]
+    param(
+        [string]$Path = ".",
+        [int]$ThrottleLimit = 4
+    )
+
+    $images = Get-ChildItem -Path $Path -Filter *.jpg -Recurse -File
+    $total = $images.Count
+    if ($total -eq 0) {
+        Write-Host "No .jpg files found in $Path"
+        return
+    }
+    $startTime = Get-Date
+    $jobs = @()
+    $i = 0
+
+    foreach ($image in $images) {
+        # Limit the number of concurrent jobs
+        while (@(Get-Job -State "Running").Count -ge $ThrottleLimit) {
+            Start-Sleep -Milliseconds 200
+        }
+        $jobs += Start-Job -ArgumentList $image.FullName -ScriptBlock {
+            param($imgPath)
+            $jxlPath = $imgPath -replace '\.jpg$', '.jxl'
+            try {
+                & magick.exe $imgPath $jxlPath
+                if (Test-Path $jxlPath) {
+                    Remove-Item $imgPath -Verbose
+                    [PSCustomObject]@{Status="Success"; Path=$imgPath}
+                } else {
+                    [PSCustomObject]@{Status="Fail"; Path=$imgPath}
+                }
+            } catch {
+                [PSCustomObject]@{Status="Error"; Path=$imgPath; Message=$_}
+            }
+        }
+    }
+
+    $completed = 0
+    while ($completed -lt $total) {
+        $results = Receive-Job -Job $jobs -Wait -AutoRemoveJob
+        foreach ($result in $results) {
+            $completed++
+            $pct = [math]::Round($completed * 100 / $total, 2)
+            $elapsed = (Get-Date) - $startTime
+            if ($result.Status -eq "Success") {
+                Write-Host ("[{0}] Converted [{1}] ({2}/{3}, {4}%) ({5} sec elapsed)" -f (Get-Date), $result.Path, $completed, $total, $pct, [math]::Round($elapsed.TotalSeconds,2))
+            } elseif ($result.Status -eq "Fail") {
+                Write-Warning "Conversion failed for $($result.Path)"
+            } elseif ($result.Status -eq "Error") {
+                Write-Warning "Error converting $($result.Path): $($result.Message)"
+            }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+
+    $endTime = Get-Date
+    $elapsedTime = $endTime - $startTime
+    Write-Host "The script took $($elapsedTime.TotalSeconds) seconds to convert $total images."
+}
+
+function Convert-JpgToJxl-Sequential {
+<#
+.SYNOPSIS
+    Converts all .jpg images in a directory (recursively) to .jxl using ImageMagick.
+.DESCRIPTION
+    Finds all .jpg files recursively from a target directory (default: current), converts each to .jxl using magick.exe,
+    and deletes the original .jpg only on successful conversion.
+    Reports progress and elapsed time. Designed for Windows PowerShell compatibility (v5.1+).
+.PARAMETER Path
+    The directory to search for .jpg images. Default is current directory.
+.EXAMPLE
+    PS C:\> Convert-JpgToJxl-Sequential
+.EXAMPLE
+    PS C:\> Convert-JpgToJxl-Sequential -Path "D:\Photos"
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+    - Compatible with Windows PowerShell and PowerShell Core.
+    - Requires ImageMagick (magick.exe) in PATH.
+    - Deletes .jpg only on successful conversion.
+#>
+    [CmdletBinding()]
+    param(
+        [string]$Path = "."
+    )
+    $images = Get-ChildItem -Path $Path -Filter *.jpg -Recurse -File
+    $total = $images.Count
+    if ($total -eq 0) {
+        Write-Host "No .jpg files found in $Path"
+        return
+    }
+    $startTime = Get-Date
+    $i = 0
+    foreach ($image in $images) {
+        $jxlPath = $image.FullName -replace '\.jpg$', '.jxl'
+        try {
+            & magick.exe $image.FullName $jxlPath
+            if (Test-Path $jxlPath) {
+                Remove-Item $image.FullName -Verbose
+            } else {
+                Write-Warning "Conversion failed for $($image.FullName)"
+            }
+        } catch {
+            Write-Warning "Error converting $($image.FullName): $_"
+        }
+        $i++
+        $pct = [math]::Round($i * 100 / $total, 2)
+        $elapsed = (Get-Date) - $startTime
+        Write-Host ("[{0}] Converted {1} of {2} images ({3}%) ({4} sec elapsed)" -f (Get-Date), $i, $total, $pct, [math]::Round($elapsed.TotalSeconds,2))
+    }
+    $endTime = Get-Date
+    $elapsedTime = $endTime - $startTime
+    Write-Host "The script took $($elapsedTime.TotalSeconds) seconds to convert $total images."
+}
