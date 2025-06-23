@@ -1,4 +1,3 @@
-
 function Clear-WorkingSet {
 <#
 .SYNOPSIS
@@ -595,7 +594,7 @@ function Send-SshKey {
     None. Writes operation status to console.
 
 .NOTES
-    Author: jjw (@thejjw)
+    Author: jjw(@thejjw)
     Last Edit: 2025-06-17
 
     To make this function persist, add it to your $PROFILE:
@@ -620,12 +619,11 @@ function Send-SshKey {
     if (Test-Path $pubkeyPath) {
         Write-Host "Sending public key to ${User}@${Hostname}:${Port} ..." -ForegroundColor Cyan
         Get-Content $pubkeyPath | ssh "$User@$Hostname" -p $Port 'mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
-        Write-Host "✔ Public key installed on $Hostname" -ForegroundColor Green
+        Write-Host " Public key installed on $Hostname" -ForegroundColor Green
     } else {
-        Write-Warning "❌ Could not locate or generate SSH public key."
+        Write-Warning " Could not locate or generate SSH public key."
     }
 }
-
 
 function Add-WingetPackagePaths {
 <#
@@ -684,11 +682,11 @@ function Add-WingetPackagePaths {
         Write-Host "No new paths were added. All executable directories are already in PATH."
     } else {
         [Environment]::SetEnvironmentVariable("PATH", $currentPath, "User")
-        Write-Host "✔ Added the following paths to your user PATH:"
+        Write-Host " Added the following paths to your user PATH:"
         $added | ForEach-Object { Write-Host "  - $_" }
     }
 
-    Write-Host "`n📌 Updated user PATH:"
+    Write-Host "`n Updated user PATH:"
     $currentPath.Split(';') | ForEach-Object { Write-Host "  $_" }
 }
 
@@ -738,11 +736,11 @@ function Remove-WingetPackagePaths {
         Write-Host "No winget paths found in user PATH. Nothing to remove."
     } else {
         [Environment]::SetEnvironmentVariable("PATH", ($filtered -join ';'), "User")
-        Write-Host "✔ Removed the following winget directories from your user PATH:"
+        Write-Host " Removed the following winget directories from your user PATH:"
         $removed | ForEach-Object { Write-Host "  - $_" }
     }
 
-    Write-Host "`n📌 Updated user PATH:"
+    Write-Host "`n Updated user PATH:"
     $filtered | ForEach-Object { Write-Host "  $_" }
 }
 
@@ -872,7 +870,7 @@ function Set-RandomMacAddress {
 
     try {
         Set-NetAdapter -Name $AdapterName -MacAddress $newMac -Confirm:$false
-        Write-Host "✔ Successfully changed MAC address."
+        Write-Host " Successfully changed MAC address."
         Write-Host "Restarting adapter '$AdapterName'..."
         Restart-NetAdapter -Name $AdapterName -Confirm:$false
         Write-Host "Adapter restarted."
@@ -912,7 +910,7 @@ function Reset-MacAddress {
     try {
         Set-NetAdapter -Name $AdapterName -MacAddress $null -Confirm:$false
         Restart-NetAdapter -Name $AdapterName -Confirm:$false
-        Write-Host "✔ MAC address reset to default."
+        Write-Host " MAC address reset to default."
         Get-NetAdapter -Name $AdapterName | Select-Object Name, MacAddress
     }
     catch {
