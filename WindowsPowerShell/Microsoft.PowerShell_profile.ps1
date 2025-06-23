@@ -638,9 +638,9 @@ function Add-WingetPackagePaths {
 
 .EXAMPLE
     PS C:\> Add-WingetPackagePaths
-    ✔ Added the following paths to your user PATH:
-      - C:\Users\User\AppData\Local\Microsoft\WinGet\Packages\ExampleTool\bin
-    📌 Updated user PATH:
+     Added the following paths to your user PATH:
+      C:\Users\User\AppData\Local\Microsoft\WinGet\Packages\ExampleTool\bin
+     Updated user PATH:
       C:\Tools\Bin
       C:\Users\User\AppData\Local\Microsoft\WinGet\Packages\ExampleTool\bin
     Adds new executable directories and shows final PATH.
