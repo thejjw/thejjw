@@ -8,3 +8,11 @@ cd thejjw
 git sparse-checkout init --cone
 git sparse-checkout set bin
 git checkout main
+mkdir -pv ~/bin
+cp -rv bin/* ~/bin/
+chmod +x ~/bin/*
+
+if ! grep -q 'export PATH="$HOME/bin:$PATH"' "$HOME/.bashrc"; then
+  echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
+  echo "Added ~/bin to PATH in .bashrc"
+fi
