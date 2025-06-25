@@ -1061,28 +1061,25 @@ function Convert-JpgToJxl-Sequential {
 function Get-IpInfo {
 <#
 .SYNOPSIS
-    Returns IP information from ipregistry.co API for a given IP address.
+    Prints the command to query ipregistry.co for a given IP address using curl-like User-Agent.
 .DESCRIPTION
-    Queries https://api.ipregistry.co for geolocation and other info about the specified IP address.
-    Requires internet access. Uses free "tryout" API key by default.
+    Outputs the exact Invoke-RestMethod command for the user to copy and run manually.
 .EXAMPLE
-    PS C:\> Get-IpInfo 8.8.8.8
-    Returns JSON info for 8.8.8.8 from ipregistry.co.
+    PS C:\> Get-IpInfo 1.1.1.1
+    Prints the command to query ipregistry.co for 1.1.1.1
 .INPUTS
     IP address as string.
 .OUTPUTS
-    JSON string with IP info.
+    String: PowerShell command to run manually.
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2025-06
-
-    You can get your own API key at https://ipregistry.co/
 #>
-    param (
+    param(
         [Parameter(Mandatory=$true)]
-        [string]$IpAddress,
-        [string]$ApiKey = "tryout"
+        [string]$Ip
     )
-    $url = "https://api.ipregistry.co/$IpAddress?key=$ApiKey"
-    return (Invoke-WebRequest -Uri $url | Select-Object -ExpandProperty Content)
+    $cmd = "Invoke-RestMethod -Uri 'https://api.ipregistry.co/${Ip}?key=tryout' -Headers @{ 'User-Agent' = 'curl/7.68.0' }"
+    Write-Host "Run this command manually in your shell:" -ForegroundColor Yellow
+    Write-Host $cmd -ForegroundColor Cyan
 }
