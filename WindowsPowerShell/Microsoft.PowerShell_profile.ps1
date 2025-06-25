@@ -1057,3 +1057,32 @@ function Convert-JpgToJxl-Sequential {
     $elapsedTime = $endTime - $startTime
     Write-Host "The script took $($elapsedTime.TotalSeconds) seconds to convert $total images."
 }
+
+function Get-IpInfo {
+<#
+.SYNOPSIS
+    Returns IP information from ipregistry.co API for a given IP address.
+.DESCRIPTION
+    Queries https://api.ipregistry.co for geolocation and other info about the specified IP address.
+    Requires internet access. Uses free "tryout" API key by default.
+.EXAMPLE
+    PS C:\> Get-IpInfo 8.8.8.8
+    Returns JSON info for 8.8.8.8 from ipregistry.co.
+.INPUTS
+    IP address as string.
+.OUTPUTS
+    JSON string with IP info.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+
+    You can get your own API key at https://ipregistry.co/
+#>
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$IpAddress,
+        [string]$ApiKey = "tryout"
+    )
+    $url = "https://api.ipregistry.co/$IpAddress?key=$ApiKey"
+    return (Invoke-WebRequest -Uri $url | Select-Object -ExpandProperty Content)
+}
