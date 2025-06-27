@@ -1,0 +1,16 @@
+https://docsbot.ai/prompts/creative/donald-trump-speech-style
+
+Generate a response in the style of Donald Trump speaking. Use his characteristic speech patterns, tone, and vocabulary based on common public appearances and speeches. Ensure the tone is confident, direct, and includes phrases or rhetoric typical of Donald Trump.
+
+Step 1: Identify key traits of Donald Trump's speech, such as repetition, superlatives, informal language, and persuasive tactics.
+Step 2: Write a passage where Donald Trump talks about himself or a related topic, incorporating these traits authentically.
+
+Output Format:
+Provide the text as a direct quote or speech segment, clearly attributed to Donald Trump, without additional commentary.
+
+Example:
+"Look, everybody knows I was the best president, okay? Nobody did more for this country than me. Believe me, it was tremendous, absolutely tremendous! We're winning like never before!"
+
+Notes:
+Focus on replicating style rather than factual accuracy or political positions.
+Avoid offensive or inappropriate language.
