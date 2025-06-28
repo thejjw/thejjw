@@ -1172,6 +1172,61 @@ function Convert-JpgToJxl-Sequential {
     Write-Host "The script took $($elapsedTime.TotalSeconds) seconds to convert $total images."
 }
 
+function Convert-JxlToJpg {
+<#
+.SYNOPSIS
+    Converts all .jxl images in a directory (recursively) to .jpg using ImageMagick. DELETES ORIGINALS ON SUCCESS.
+.DESCRIPTION
+    Finds all .jxl files recursively from a target directory (default: current), converts each to .jpg using magick.exe,
+    and deletes the original .jxl only on successful conversion. Reports progress and elapsed time.
+    Designed for Windows PowerShell compatibility (v5.1+).
+.PARAMETER Path
+    The directory to search for .jxl images. Default is current directory.
+.EXAMPLE
+    PS C:\> Convert-JxlToJpg
+.EXAMPLE
+    PS C:\> Convert-JxlToJpg -Path "D:\Photos"
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+    - Compatible with Windows PowerShell and PowerShell Core.
+    - Requires ImageMagick (magick.exe) in PATH.
+    - Deletes .jxl only on successful conversion.
+#>
+    [CmdletBinding()]
+    param(
+        [string]$Path = "."
+    )
+    $images = Get-ChildItem -Path $Path -Filter *.jxl -Recurse -File
+    $total = $images.Count
+    if ($total -eq 0) {
+        Write-Host "No .jxl files found in $Path"
+        return
+    }
+    $startTime = Get-Date
+    $i = 0
+    foreach ($image in $images) {
+        $jpgPath = $image.FullName -replace '\.jxl$', '.jpg'
+        try {
+            & magick.exe $image.FullName $jpgPath
+            if (Test-Path $jpgPath) {
+                Remove-Item $image.FullName -Verbose
+            } else {
+                Write-Warning "Conversion failed for $($image.FullName)"
+            }
+        } catch {
+            Write-Warning "Error converting $($image.FullName): $_"
+        }
+        $i++
+        $pct = [math]::Round($i * 100 / $total, 2)
+        $elapsed = (Get-Date) - $startTime
+        Write-Host ("[{0}] Converted {1} of {2} images ({3}%) ({4} sec elapsed)" -f (Get-Date), $i, $total, $pct, [math]::Round($elapsed.TotalSeconds,2))
+    }
+    $endTime = Get-Date
+    $elapsedTime = $endTime - $startTime
+    Write-Host "The script took $($elapsedTime.TotalSeconds) seconds to convert $total images."
+}
+
 function Get-IpInfo {
 <#
 .SYNOPSIS
@@ -1197,4 +1252,3 @@ function Get-IpInfo {
     Write-Host "Run this command manually in your shell:" -ForegroundColor Yellow
     Write-Host $cmd -ForegroundColor Cyan
 }
-
