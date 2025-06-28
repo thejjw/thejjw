@@ -48,10 +48,19 @@ for filepath in "${FILELIST[@]}"; do
     # Compute base for expected output
     dir=$(dirname "$filepath")
     base=$(basename "$filepath")
+    ext="${base##*.}"
     fname="${base%.*}"   # filename without extension
 
-    # Look for any AV1 output with pattern filename.av1.*
-    av1_path=$(find "$dir" -maxdepth 1 -type f -name "$fname.av1.*" | head -n 1)
+    # Try the most likely output filename first
+    av1_path="$dir/$fname.av1.$ext"
+    if [ ! -f "$av1_path" ]; then
+        # Wait up to 3 seconds for the file to appear
+        for i in {1..10}; do
+            av1_path=$(find "$dir" -maxdepth 1 -type f -name "$fname.av1.*" | head -n 1)
+            [ -n "$av1_path" ] && break
+            sleep 0.3
+        done
+    fi
 
     orig_hr=$(du -h "$filepath" | cut -f1)
     av1_hr="N/A"
