@@ -231,20 +231,134 @@ function Get-WhoisInfo {
 }
 
 function Get-NewPassword {
+<#!
+.SYNOPSIS
+    Generates a random password with customizable options.
+.DESCRIPTION
+    Generates a password of specified length and character classes (upper, lower, digit, special).
+    Ensures no more than a specified number of consecutive identical characters.
+    Optionally enforces at least one character from each enabled class and uses Fisher-Yates shuffle.
+.EXAMPLE
+    PS C:\> Get-NewPassword -Length 20 -IncludeSpecial $true -MaxConsecutive 2
+    Generates a 20-character password with special characters and at most 2 consecutive identical characters.
+.EXAMPLE
+    PS C:\> Get-NewPassword -Length 16 -MoreSecure
+    Generates a 16-character password with all enabled classes present and Fisher-Yates shuffle.
+.PARAMETER Length
+    Length of the password to generate (default: 16).
+.PARAMETER MaxConsecutive
+    Maximum allowed consecutive identical characters (default: 2).
+.PARAMETER IncludeUpper
+    Include uppercase letters (default: $true).
+.PARAMETER IncludeLower
+    Include lowercase letters (default: $true).
+.PARAMETER IncludeDigit
+    Include digits (default: $true).
+.PARAMETER IncludeSpecial
+    Include special characters (default: $true).
+.PARAMETER MoreSecure
+    If set, ensures at least one character from each enabled class and uses Fisher-Yates shuffle.
+.OUTPUTS
+    System.String. The generated password.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-06
+    Pure PowerShell implementation, no external dependencies.
+#>
+    param(
+        [int]$Length = 16,
+        [int]$MaxConsecutive = 2,
+        [bool]$IncludeUpper = $true,
+        [bool]$IncludeLower = $true,
+        [bool]$IncludeDigit = $true,
+        [bool]$IncludeSpecial = $true,
+        [switch]$MoreSecure
+    )
+    $upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    $lower = "abcdefghijklmnopqrstuvwxyz"
+    $digits = "0123456789"
+    $special = "!@#$%^&*()-_=+[]{};:,.<>/?"
+
+    $charPool = ""
+    $required = @()
+    if ($IncludeUpper)  { $charPool += $upper;  $required += $upper  }
+    if ($IncludeLower)  { $charPool += $lower;  $required += $lower  }
+    if ($IncludeDigit)  { $charPool += $digits; $required += $digits }
+    if ($IncludeSpecial){ $charPool += $special; $required += $special}
+
+    if ($charPool.Length -eq 0) {
+        throw "No character classes selected for password generation."
+    }
+    if ($MoreSecure -and ($required.Count -gt $Length)) {
+        throw "Password length too short for all required classes."
+    }
+
+    function Get-RandomChar {
+        param($set)
+        if ($null -eq $set) { $set = $charPool }
+        return $set[(Get-Random -Minimum 0 -Maximum $set.Length)]
+    }
+
+    function IsValidPassword($password) {
+        $lastChar = ''
+        $count = 1
+        foreach ($char in $password.ToCharArray()) {
+            if ($char -eq $lastChar) {
+                $count++
+                if ($count -gt $MaxConsecutive) {
+                    return $false
+                }
+            } else {
+                $count = 1
+                $lastChar = $char
+            }
+        }
+        return $true
+    }
+
+    do {
+        $passwordChars = @()
+        if ($MoreSecure) {
+            foreach ($class in $required) {
+                $passwordChars += Get-RandomChar $class
+            }
+            for ($i = $passwordChars.Count; $i -lt $Length; $i++) {
+                $passwordChars += Get-RandomChar $charPool
+            }
+            # Fisher-Yates shuffle
+            for ($i = $passwordChars.Count - 1; $i -gt 0; $i--) {
+                $j = Get-Random -Minimum 0 -Maximum ($i + 1)
+                $tmp = $passwordChars[$i]
+                $passwordChars[$i] = $passwordChars[$j]
+                $passwordChars[$j] = $tmp
+            }
+        } else {
+            $passwordChars = for ($i = 0; $i -lt $Length; $i++) {
+                Get-RandomChar $charPool
+            }
+            $passwordChars = $passwordChars | Sort-Object { Get-Random }
+        }
+        $password = -join $passwordChars
+    } while (-not (IsValidPassword $password))
+
+    return $password
+}
+
+function Get-NewPasswordNode {
 <#
 .SYNOPSIS
-    Generates random password
+    Generates random password using Node.js (Firefox logic)
 .DESCRIPTION
     Utilizes node.js CLI to invoke password generator logic used by Firefox.
     Will NOT run without node.js runtime installed
 .EXAMPLE
-    PS C:\> Get-NewPassword
+    PS C:\> Get-NewPasswordNode
     uafF7MdSYftgh4N
     Generates password of default length(15)
 .EXAMPLE    
-    PS C:\> Get-NewPassword 8
+    PS C:\> Get-NewPasswordNode 8
     or
-    PS C:\> Get-NewPassword -Length 8
+    PS C:\> Get-NewPasswordNode -Length 8
     3rBBHBcw
     Generates password of length 8
 .INPUTS
@@ -1083,3 +1197,4 @@ function Get-IpInfo {
     Write-Host "Run this command manually in your shell:" -ForegroundColor Yellow
     Write-Host $cmd -ForegroundColor Cyan
 }
+
