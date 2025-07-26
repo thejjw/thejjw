@@ -14,5 +14,5 @@ jobs:
         run: |
           git clone --mirror https://opendev.org/openstack/sunbeam-charms.git repo.git
           cd repo.git
-          git remote set-url --push origin "https://x-access-token:${{ secrets.mirror_SVT_AV1_token }}@github.com/thejjw/sunbeam-charms.git"
+          git remote set-url --push origin "https://x-access-token:${{ secrets.mirror_sunbeam_charms_token }}@github.com/thejjw/sunbeam-charms.git"
           git push --mirror
