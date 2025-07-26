@@ -1,0 +1,18 @@
+# 2025.7 @thejjw
+name: update sunbeam-charms mirror
+
+on:
+  schedule:
+    - cron: '0 23 * * 0,2,5'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror from OpenDev
+        run: |
+          git clone --mirror https://opendev.org/openstack/sunbeam-charms.git repo.git
+          cd repo.git
+          git remote set-url --push origin "https://x-access-token:${{ secrets.mirror_SVT_AV1_token }}@github.com/thejjw/sunbeam-charms.git"
+          git push --mirror
