@@ -3,7 +3,7 @@ name: update sunbeam-charms mirror
 
 on:
   schedule:
-    - cron: '0 23 * * 0,2,5'
+    - cron: '0 23 * * 2,5'
   workflow_dispatch:
 
 jobs:
