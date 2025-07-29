@@ -2,7 +2,7 @@
 
 # This script recursively encodes all(most?) video files in the current directory tree to AV1 format using ab-av1,
 # logging progress with timestamps, and optionally deletes the original files with -d/--delete only if the AV1 output is smaller.
-# 2025.6 @thejjw
+# 2025.6-2025.7 @thejjw
 
 LOGFILE="convert_av1_ab-av1_$(date +%Y%m%d_%H%M%S).log"
 SCRIPT_START_TIME=$(date +%s)
