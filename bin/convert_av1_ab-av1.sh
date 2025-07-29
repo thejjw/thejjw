@@ -26,7 +26,7 @@ log() {
 }
 
 # Find all files and save to an array
-mapfile -t FILELIST < <(find . \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.mov" -o -iname "*.avi" -o -iname "*.wmv" \))
+mapfile -t FILELIST < <(find . \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.mov" -o -iname "*.avi" -o -iname "*.wmv" -o -iname "*.webm" \))
 TOTAL_FILES="${#FILELIST[@]}"
 COUNT=0
 
