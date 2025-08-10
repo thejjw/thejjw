@@ -1,4 +1,5 @@
 https://github.com/lgboim/gpt-5-system-prompt/blob/main/system_prompt.md
+
 This repository contains the full system prompt an AI model, identifying itself as "GPT-5", disclosed when directly asked. This is not a third-party leak but rather a self-disclosure by the model itself, obtained via prompt injection.
 
 ---
