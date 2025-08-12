@@ -1813,3 +1813,258 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
         return $plan
     }
 }
+
+function Export-TlsCertificates {
+<#
+.SYNOPSIS
+Retrieves and exports TLS certificates from a remote server without installing them.
+
+.DESCRIPTION
+Connects to a remote server via TLS, retrieves the certificate chain, and exports
+selected certificates to files in PEM and/or DER format. Does not modify the 
+Windows certificate store. Useful for certificate analysis, backup, or 
+importing into other systems.
+
+.PARAMETER TargetHost
+The hostname or IP address of the target server to retrieve certificates from.
+
+.PARAMETER TargetPort
+The TCP port to connect to. Defaults to 443 (HTTPS).
+
+.PARAMETER SNIHost
+The Server Name Indication (SNI) hostname to use during TLS handshake.
+Defaults to the same value as TargetHost. Useful for servers hosting 
+multiple certificates.
+
+.PARAMETER WhatToExport
+Specifies which certificates from the chain to export:
+- 'Root': Only the root CA certificate
+- 'Intermediate': Only intermediate CA certificates  
+- 'Leaf': Only the server certificate
+- 'All': All certificates in the chain (default)
+
+.PARAMETER OutDir
+Directory path where exported certificate files will be saved.
+Defaults to ".\certificates". Directory will be created if it doesn't exist.
+
+.PARAMETER Format
+Certificate export format:
+- 'PEM': Base64 encoded with BEGIN/END markers
+- 'DER': Binary format
+- 'Both': Export in both formats (default)
+
+.PARAMETER NoExport
+Switch to only display certificate information without exporting files.
+Useful for certificate analysis and troubleshooting.
+
+.OUTPUTS
+PSCustomObject with properties:
+- LeafCertificate: The server certificate
+- CertificateChain: Array of all certificates in chain
+- ExportedCertificates: Array of certificates that were exported
+- OutputDirectory: Path where files were saved (null if -NoExport)
+
+.EXAMPLE
+Export-TlsCertificates -TargetHost "google.com"
+
+Exports all certificates from google.com:443 in both PEM and DER formats
+to the .\certificates directory.
+
+.EXAMPLE
+Export-TlsCertificates -TargetHost "github.com" -WhatToExport "Intermediate" -Format "PEM"
+
+Exports only intermediate CA certificates from github.com in PEM format.
+
+.EXAMPLE
+Export-TlsCertificates -TargetHost "example.com" -NoExport
+
+Retrieves and displays certificate information from example.com without
+saving any files.
+
+.EXAMPLE
+Export-TlsCertificates -TargetHost "internal.company.com" -TargetPort 8443 -SNIHost "api.company.com"
+
+Connects to internal.company.com:8443 using SNI hostname api.company.com
+and exports all certificates.
+
+.EXAMPLE
+$result = Export-TlsCertificates -TargetHost "microsoft.com" -OutDir "C:\temp\certs"
+$result.LeafCertificate.Subject
+
+Exports certificates to custom directory and examines the leaf certificate.
+
+.NOTES
+Requires .NET Framework with System.Net.Security.SslStream support.
+Certificate validation is bypassed during retrieval to allow analysis of
+invalid or self-signed certificates.
+
+Author: jjw(@thejjw)
+Last Edit: Aug 2025
+
+.LINK
+https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TargetHost,
+        
+        [Parameter(Mandatory = $false)]
+        [int]$TargetPort = 443,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$SNIHost = $TargetHost,
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Root', 'Intermediate', 'Leaf', 'All')]
+        [string]$WhatToExport = 'All',
+        
+        [Parameter(Mandatory = $false)]
+        [string]$OutDir = ".\certificates",
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('PEM', 'DER', 'Both')]
+        [string]$Format = 'Both',
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$NoExport
+    )
+    
+    Write-Host "Connecting to ${TargetHost}:${TargetPort} (SNI: ${SNIHost})"
+    
+    # --- TLS connection and cert retrieval ---
+    $tcp = $null; $ssl = $null; $leaf = $null
+    try {
+        $tcp = [System.Net.Sockets.TcpClient]::new()
+        $tcp.Connect($TargetHost, $TargetPort)
+        $ssl = [System.Net.Security.SslStream]::new(
+            $tcp.GetStream(), $false,
+            { param($sender, $cert, $chain, $errors) $true }
+        )
+        $ssl.AuthenticateAsClient($SNIHost)
+        $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
+    }
+    catch {
+        throw "Failed to retrieve certificate from ${TargetHost}:${TargetPort}. $_"
+    }
+    finally {
+        if ($ssl) { $ssl.Dispose() }
+        if ($tcp) { $tcp.Dispose() }
+    }
+
+    # --- Chain building ---
+    $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+    $chain.ChainPolicy.RevocationMode = 'NoCheck'
+    $chain.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
+    $null = $chain.Build($leaf)
+
+    # --- Unique certificates and fallback ---
+    function Get-UniqueByThumbprint {
+        param([System.Collections.IEnumerable] $certs)
+        $certList = @($certs)
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($c in $certList) {
+            if ($null -ne $c -and $seen.Add($c.Thumbprint)) { $c }
+        }
+    }
+    
+    # --- Chain element processing ---
+    $chainCertsRaw = @($chain.ChainElements | ForEach-Object { $_.Certificate })
+    $elements = @(Get-UniqueByThumbprint $chainCertsRaw)
+
+    if (-not $elements -or $elements.Count -eq 0) {
+        $elements = @($leaf)
+        Write-Warning "Server did not provide a certificate chain. Using only leaf certificate."
+    }
+
+    # --- Helper functions ---
+    function Get-RootCert { param($e) if ($e.Count -gt 0) { $e[-1] } }
+    function Get-Intermediates { param($e) if ($e.Count -gt 2) { $e[1..($e.Count-2)] } else { @() } }
+    function Is-SelfSigned($c) { return ($c.Subject -eq $c.Issuer) }
+    function Get-CertType($c) {
+        if (Is-SelfSigned $c) { return 'Root' }
+        $bc = $c.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.19' } | Select-Object -First 1
+        if ($bc -is [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]) {
+            if ($bc.CertificateAuthority) { return 'Intermediate' }
+        }
+        return 'Leaf'
+    }
+
+    # --- Certificate selection and filtering ---
+    $toExport = switch ($WhatToExport) {
+        'Root'         { @(Get-RootCert $elements) | Where-Object { $_ } }
+        'Intermediate' { @(Get-Intermediates $elements) | Where-Object { $_ } }
+        'Leaf'         { @($leaf) | Where-Object { $_ } }
+        'All'          { $elements | Where-Object { $_ } }
+    }
+
+    if (-not $toExport -or $toExport.Count -eq 0) {
+        throw "No certificates selected for export with '${WhatToExport}'."
+    }
+
+    # --- File export operations ---
+    if (-not $NoExport) {
+        if (-not (Test-Path $OutDir)) { 
+            $null = New-Item -ItemType Directory -Path $OutDir -Force
+            Write-Host "Created output directory: $OutDir"
+        }
+        
+        foreach ($cert in $toExport) {
+            # --- Safe filename generation ---
+            $subject = $cert.Subject -replace 'CN=', '' -replace ',.*', ''
+            $safeName = ($subject -replace '[^\w\.-]+', '_').Trim('_')
+            if ([string]::IsNullOrWhiteSpace($safeName)) {
+                $safeName = "cert"
+            }
+            
+            $certType = Get-CertType $cert
+            $thumbprint = $cert.Thumbprint.Substring(0, 8)  # First 8 chars of thumbprint
+            $baseFileName = "${safeName}_${certType}_${thumbprint}"
+            
+            # --- Format-specific export ---
+            if ($Format -eq 'DER' -or $Format -eq 'Both') {
+                $derPath = Join-Path $OutDir "${baseFileName}.cer"
+                [IO.File]::WriteAllBytes($derPath, $cert.Export('Cert'))
+                Write-Host "Exported DER: $derPath"
+            }
+            
+            if ($Format -eq 'PEM' -or $Format -eq 'Both') {
+                $pemPath = Join-Path $OutDir "${baseFileName}.pem"
+                $pemContent = @(
+                    "-----BEGIN CERTIFICATE-----"
+                    [Convert]::ToBase64String($cert.Export('Cert'), 'InsertLineBreaks')
+                    "-----END CERTIFICATE-----"
+                ) -join "`r`n"
+                [IO.File]::WriteAllText($pemPath, $pemContent)
+                Write-Host "Exported PEM: $pemPath"
+            }
+        }
+        
+        Write-Host "`nExported $($toExport.Count) certificate(s) to: $OutDir"
+    }
+
+    # --- Display certificate chain summary ---
+    Write-Host "`n--- Certificate Chain Summary ---"
+    Write-Host "Leaf Certificate:"
+    Write-Host "  Subject: $($leaf.Subject)"
+    Write-Host "  Issuer:  $($leaf.Issuer)"
+    Write-Host "  Thumbprint: $($leaf.Thumbprint)"
+    Write-Host "  Valid From: $($leaf.NotBefore)"
+    Write-Host "  Valid To:   $($leaf.NotAfter)"
+    
+    Write-Host "`nComplete Chain:"
+    for ($i = 0; $i -lt $elements.Count; $i++) {
+        $cert = $elements[$i]
+        $type = Get-CertType $cert
+        $tag = if ($i -eq 0) {'[Leaf]'} elseif ($i -eq $elements.Count-1) {'[Root]'} else {'[Intermediate]'}
+        Write-Host "  $tag [$type] $($cert.Subject) [$($cert.Thumbprint)]"
+    }
+    
+    # --- Return certificate objects for further processing ---
+    return [PSCustomObject]@{
+        LeafCertificate = $leaf
+        CertificateChain = $elements
+        ExportedCertificates = $toExport
+        OutputDirectory = if (-not $NoExport) { $OutDir } else { $null }
+    }
+}x
