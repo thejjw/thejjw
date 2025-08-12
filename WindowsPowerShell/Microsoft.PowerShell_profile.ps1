@@ -1931,10 +1931,12 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
     )
     
     Write-Host "Connecting to ${TargetHost}:${TargetPort} (SNI: ${SNIHost})"
+    Write-Verbose "Target: ${TargetHost}:${TargetPort}"
     
     # --- TLS connection and cert retrieval ---
     $tcp = $null; $ssl = $null; $leaf = $null
     try {
+        Write-Verbose "Connecting to ${TargetHost}:${TargetPort}..."
         $tcp = [System.Net.Sockets.TcpClient]::new()
         $tcp.Connect($TargetHost, $TargetPort)
         $ssl = [System.Net.Security.SslStream]::new(
@@ -1943,6 +1945,7 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         )
         $ssl.AuthenticateAsClient($SNIHost)
         $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
+        Write-Verbose "Successfully retrieved server certificate from ${TargetHost}:${TargetPort}"
     }
     catch {
         throw "Failed to retrieve certificate from ${TargetHost}:${TargetPort}. $_"
@@ -1999,14 +2002,14 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
     }
 
     if (-not $toExport -or $toExport.Count -eq 0) {
-        throw "No certificates selected for export with '${WhatToExport}'."
+        throw "No certificates were obtained from ${TargetHost}:${TargetPort} for export type '${WhatToExport}'."
     }
 
     # --- File export operations ---
     if (-not $NoExport) {
         if (-not (Test-Path $OutDir)) { 
             $null = New-Item -ItemType Directory -Path $OutDir -Force
-            Write-Host "Created output directory: $OutDir"
+            Write-Host "Created output directory: ${OutDir}"
         }
         
         foreach ($cert in $toExport) {
@@ -2025,7 +2028,7 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
             if ($Format -eq 'DER' -or $Format -eq 'Both') {
                 $derPath = Join-Path $OutDir "${baseFileName}.cer"
                 [IO.File]::WriteAllBytes($derPath, $cert.Export('Cert'))
-                Write-Host "Exported DER: $derPath"
+                Write-Host "Exported DER: ${derPath}"
             }
             
             if ($Format -eq 'PEM' -or $Format -eq 'Both') {
@@ -2036,15 +2039,16 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
                     "-----END CERTIFICATE-----"
                 ) -join "`r`n"
                 [IO.File]::WriteAllText($pemPath, $pemContent)
-                Write-Host "Exported PEM: $pemPath"
+                Write-Host "Exported PEM: ${pemPath}"
             }
         }
         
-        Write-Host "`nExported $($toExport.Count) certificate(s) to: $OutDir"
+        Write-Host "`nExported $($toExport.Count) certificate(s) to: ${OutDir}"
     }
 
     # --- Certificate chain summary display ---
     Write-Host "`n--- Certificate Chain Summary ---"
+    Write-Host "Target: ${TargetHost}:${TargetPort}"
     Write-Host "Leaf Certificate:"
     Write-Host "  Subject: $($leaf.Subject)"
     Write-Host "  Issuer:  $($leaf.Issuer)"
@@ -2057,7 +2061,7 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         $cert = $elements[$i]
         $type = Get-CertType $cert
         $tag = if ($i -eq 0) {'[Leaf]'} elseif ($i -eq $elements.Count-1) {'[Root]'} else {'[Intermediate]'}
-        Write-Host "  $tag [$type] $($cert.Subject) [$($cert.Thumbprint)]"
+        Write-Host "  ${tag} [${type}] $($cert.Subject) [$($cert.Thumbprint)]"
     }
     
     # --- Return certificate objects for further processing ---
@@ -2066,5 +2070,9 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         CertificateChain = $elements
         ExportedCertificates = $toExport
         OutputDirectory = if (-not $NoExport) { $OutDir } else { $null }
+        TargetHost = $TargetHost
+        TargetPort = $TargetPort
+        SNIHost = $SNIHost
     }
 }
+ 
