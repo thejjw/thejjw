@@ -1413,11 +1413,11 @@ Connects via IP, sends a custom SNI, and saves all certificates to disk.
 
     # --- Choose what to install ---
     $toInstall = switch ($WhatToInstall) {
-        'Root'         { @(Get-RootCert $elements) }
-        'Intermediate' { @(Get-Intermediates $elements) }
-        'Leaf'         { @($leaf) }
-        'All'          { $elements }
-    } | Where-Object { $_ -ne $null }
+        'Root'         { @(Get-RootCert $elements) | Where-Object { $_ } }
+        'Intermediate' { @(Get-Intermediates $elements) | Where-Object { $_ } }
+        'Leaf'         { @($leaf) | Where-Object { $_ } }
+        'All'          { $elements | Where-Object { $_ } }
+    }
 
     if (-not $toInstall -or $toInstall.Count -eq 0) {
         throw "No certificates selected to install for '$WhatToInstall'. The server may not have provided a full chain."
