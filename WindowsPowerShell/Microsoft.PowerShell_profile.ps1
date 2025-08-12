@@ -1261,7 +1261,7 @@ Connects to a given HTTPS URL, retrieves the server certificate chain, and insta
 .DESCRIPTION
 Use this function to install certificates from a development or internal server so that clients and browsers stop showing warnings. By default, certificates are added to the CurrentUser store without requiring admin privileges. You can optionally install to the LocalMachine store if running with elevation and providing -MachineStore.
 
-Installs roots to "Root", intermediates to "CA", and leaf certificates to "My" only if self-signed.
+Installs roots to "Root", intermediates to "CA", and leaf certificates to "My" only if self-signed (self-signed leafs go to Root).
 
 .PARAMETER Url
 HTTPS URL of the server (e.g. 'https://localhost:8443'). If scheme is omitted, 'https://' is assumed.
@@ -1298,7 +1298,7 @@ Connects via IP, sends a custom SNI, and saves all certificates to disk.
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2025-08
+    Last Edit: 2025-08 (variable hardening, chain ordering, error handling)
 #>
     [CmdletBinding()]
     param(
@@ -1327,44 +1327,79 @@ Connects via IP, sends a custom SNI, and saves all certificates to disk.
 
     # --- Parse URL ---
     if ($Url -notmatch '^\w+://') { $Url = "https://$Url" }
-    $uri  = [Uri]$Url
-    $host = $uri.Host
-    $port = if ($uri.IsDefaultPort) { 443 } else { $uri.Port }
-    if ([string]::IsNullOrWhiteSpace($SNIHost)) { $SNIHost = $host }
-
-    Write-Verbose "Connecting to ${host}:${port} with SNI '${SNIHost}'"
-
-    # --- TLS connection and chain building ---
-    $tcp = [System.Net.Sockets.TcpClient]::new()
     try {
-        $tcp.Connect($host, $port)
+        $uri = [Uri]$Url
+    } catch {
+        throw "Invalid URL: '$Url'. Example: https://localhost:8443"
+    }
+
+    $serverName = $uri.Host
+    $serverPort = if ($uri.IsDefaultPort) { 443 } else { $uri.Port }
+    if ([string]::IsNullOrWhiteSpace($SNIHost)) { $SNIHost = $serverName }
+
+    if ([string]::IsNullOrWhiteSpace($serverName)) {
+        throw "No hostname found in URL: '$Url'"
+    }
+
+    Write-Verbose "Connecting to ${serverName}:${serverPort} with SNI '${SNIHost}'"
+
+    # --- TLS connection and certificate retrieval ---
+    $tcp = $null
+    $ssl = $null
+    $leaf = $null
+
+    try {
+        $tcp = [System.Net.Sockets.TcpClient]::new()
+        $tcp.NoDelay = $true
+        $tcp.Connect($serverName, $serverPort)
+
+        # Accept any certificate during handshake; we'll inspect/install manually.
         $ssl = [System.Net.Security.SslStream]::new(
             $tcp.GetStream(), $false,
             { param($sender, $cert, $chain, $errors) $true }
         )
         $ssl.AuthenticateAsClient($SNIHost)
+
+        if (-not $ssl.RemoteCertificate) {
+            throw "TLS handshake completed but no remote certificate was provided by the server."
+        }
+
         $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
+    }
+    catch {
+        throw "Failed to retrieve server certificate from ${serverName}:${serverPort}. $_"
     }
     finally {
         if ($ssl) { $ssl.Dispose() }
-        $tcp.Dispose()
+        if ($tcp) { $tcp.Dispose() }
     }
 
+    # --- Build chain (allow unknown CA, skip revocation to avoid offline failures) ---
     $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
-    $chain.ChainPolicy.RevocationMode = 'NoCheck'
-    $chain.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
+    $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+    $chain.ChainPolicy.VerificationFlags = [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::AllowUnknownCertificateAuthority
     $null = $chain.Build($leaf)
 
-    $elements = @($chain.ChainElements | ForEach-Object { $_.Certificate }) | Sort-Object Thumbprint -Unique
+    # Preserve order as provided by the chain (leaf -> root), remove duplicates by thumbprint
+    function Get-UniqueByThumbprint {
+        param([System.Collections.IEnumerable] $certs)
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($c in $certs) {
+            if ($null -eq $c) { continue }
+            if ($seen.Add($c.Thumbprint)) { $c }
+        }
+    }
+    $elements = @(Get-UniqueByThumbprint ($chain.ChainElements | ForEach-Object { $_.Certificate }))
 
     # --- Certificate selection helpers ---
-    function Get-RootCert { param($els) return $els[-1] }
+    function Get-RootCert { param($els) if ($els -and $els.Count -gt 0) { return $els[-1] } else { return $null } }
     function Get-Intermediates {
         param($els)
+        if (-not $els) { return @() }
         if ($els.Count -le 2) { return @() }
         return $els[1..($els.Count-2)]
     }
-    function Is-SelfSigned($c) { return ($c.Subject -eq $c.Issuer) }
+    function Is-SelfSigned { param($c) return ($c.Subject -eq $c.Issuer) }
     function Get-StoreNameForCert {
         param($c)
         if (Is-SelfSigned $c) { return 'Root' }
@@ -1376,15 +1411,23 @@ Connects via IP, sends a custom SNI, and saves all certificates to disk.
         return 'My'
     }
 
+    # --- Choose what to install ---
     $toInstall = switch ($WhatToInstall) {
         'Root'         { @(Get-RootCert $elements) }
         'Intermediate' { @(Get-Intermediates $elements) }
         'Leaf'         { @($leaf) }
         'All'          { $elements }
+    } | Where-Object { $_ -ne $null }
+
+    if (-not $toInstall -or $toInstall.Count -eq 0) {
+        throw "No certificates selected to install for '$WhatToInstall'. The server may not have provided a full chain."
     }
 
+    # --- Optionally export to files ---
     if ($SaveToFiles) {
-        if (-not (Test-Path $OutDir)) { $null = New-Item -ItemType Directory -Path $OutDir }
+        if (-not (Test-Path -LiteralPath $OutDir)) {
+            $null = New-Item -ItemType Directory -Path $OutDir -Force
+        }
         foreach ($c in $toInstall) {
             $safeSubject = ($c.Subject -replace '[^\w\.-]+','_')
             $path = Join-Path $OutDir ("{0}-{1}.cer" -f $safeSubject, $c.Thumbprint)
@@ -1393,22 +1436,23 @@ Connects via IP, sends a custom SNI, and saves all certificates to disk.
         }
     }
 
+    # --- Install selected certificates ---
     foreach ($c in $toInstall) {
         if ($WhatToInstall -eq 'Leaf' -and -not (Is-SelfSigned $c)) {
             Write-Warning "Skipping non-self-signed leaf. Install its issuer instead to establish trust."
             continue
         }
 
-        $targetStore = Get-StoreNameForCert $c
-        $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($targetStore, $storeLocation)
+        $targetStoreName = Get-StoreNameForCert $c
+        $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($targetStoreName, $storeLocation)
         $store.Open('ReadWrite')
         try {
             $existing = $store.Certificates.Find('FindByThumbprint', $c.Thumbprint, $false)
             if ($existing.Count -eq 0) {
                 $store.Add($c)
-                Write-Host ("Installed: {0} => {1}\{2}" -f $c.Subject, $storeLocation, $targetStore)
+                Write-Host ("Installed: {0} => {1}\{2}" -f $c.Subject, $storeLocation, $targetStoreName)
             } else {
-                Write-Host ("Already present: {0} in {1}\{2}" -f $c.Subject, $storeLocation, $targetStore)
+                Write-Host ("Already present: {0} in {1}\{2}" -f $c.Subject, $storeLocation, $targetStoreName)
             }
         }
         finally {
@@ -1416,6 +1460,7 @@ Connects via IP, sends a custom SNI, and saves all certificates to disk.
         }
     }
 
+    # --- Summary ---
     Write-Host ""
     Write-Host "Leaf:   $($leaf.Subject)  [$($leaf.Thumbprint)]"
     Write-Host "Chain:"
