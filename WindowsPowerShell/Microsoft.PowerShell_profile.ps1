@@ -1252,3 +1252,175 @@ function Get-IpInfo {
     Write-Host "Run this command manually in your shell:" -ForegroundColor Yellow
     Write-Host $cmd -ForegroundColor Cyan
 }
+
+function Install-ServerCertificateTrust {
+<#
+.SYNOPSIS
+Connects to a given HTTPS URL, retrieves the server certificate chain, and installs selected certificates into the Windows trust store.
+
+.DESCRIPTION
+Use this function to install certificates from a development or internal server so that clients and browsers stop showing warnings. By default, certificates are added to the CurrentUser store without requiring admin privileges. You can optionally install to the LocalMachine store if running with elevation and providing -MachineStore.
+
+Installs roots to "Root", intermediates to "CA", and leaf certificates to "My" only if self-signed.
+
+.PARAMETER Url
+HTTPS URL of the server (e.g. 'https://localhost:8443'). If scheme is omitted, 'https://' is assumed.
+
+.PARAMETER WhatToInstall
+Which certificate(s) to install: 'Root', 'Intermediate', 'Leaf', or 'All'. Default is 'Root'.
+
+.PARAMETER MachineStore
+If specified, installs certificates to the LocalMachine store. Requires elevation.
+
+.PARAMETER SaveToFiles
+If specified, exports selected certificates as .cer files for inspection.
+
+.PARAMETER OutDir
+Directory to save certificate files if SaveToFiles is used. Defaults to '.\certs'.
+
+.PARAMETER SNIHost
+Optional override for the SNI hostname sent during TLS handshake.
+
+.EXAMPLE
+Install-ServerCertificateTrust -Url https://localhost
+
+Installs the root CA from the HTTPS server at localhost to the CurrentUser store.
+
+.EXAMPLE
+Install-ServerCertificateTrust -Url https://internal.dev.local -WhatToInstall All -MachineStore
+
+Installs the full certificate chain to LocalMachine stores. Requires elevation.
+
+.EXAMPLE
+Install-ServerCertificateTrust -Url https://127.0.0.1:5001 -SNIHost dev.local.app -SaveToFiles
+
+Connects via IP, sends a custom SNI, and saves all certificates to disk.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2025-08
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Url,
+
+        [ValidateSet('Root','Intermediate','Leaf','All')]
+        [string] $WhatToInstall = 'Root',
+
+        [switch] $MachineStore,
+        [switch] $SaveToFiles,
+        [string] $OutDir = (Join-Path $PWD 'certs'),
+        [string] $SNIHost
+    )
+
+    # --- Select store location ---
+    $storeLocation = if ($MachineStore) {
+        $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+        if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw "To use -MachineStore, run this function in an elevated PowerShell session."
+        }
+        'LocalMachine'
+    } else {
+        'CurrentUser'
+    }
+
+    # --- Parse URL ---
+    if ($Url -notmatch '^\w+://') { $Url = "https://$Url" }
+    $uri  = [Uri]$Url
+    $host = $uri.Host
+    $port = if ($uri.IsDefaultPort) { 443 } else { $uri.Port }
+    if ([string]::IsNullOrWhiteSpace($SNIHost)) { $SNIHost = $host }
+
+    Write-Verbose "Connecting to $host:$port with SNI '$SNIHost'"
+
+    # --- TLS connection and chain building ---
+    $tcp = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $tcp.Connect($host, $port)
+        $ssl = [System.Net.Security.SslStream]::new(
+            $tcp.GetStream(), $false,
+            { param($sender, $cert, $chain, $errors) $true }
+        )
+        $ssl.AuthenticateAsClient($SNIHost)
+        $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
+    }
+    finally {
+        if ($ssl) { $ssl.Dispose() }
+        $tcp.Dispose()
+    }
+
+    $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+    $chain.ChainPolicy.RevocationMode = 'NoCheck'
+    $chain.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
+    $null = $chain.Build($leaf)
+
+    $elements = @($chain.ChainElements | ForEach-Object { $_.Certificate }) | Sort-Object Thumbprint -Unique
+
+    # --- Certificate selection helpers ---
+    function Get-RootCert { param($els) return $els[-1] }
+    function Get-Intermediates {
+        param($els)
+        if ($els.Count -le 2) { return @() }
+        return $els[1..($els.Count-2)]
+    }
+    function Is-SelfSigned($c) { return ($c.Subject -eq $c.Issuer) }
+    function Get-StoreNameForCert {
+        param($c)
+        if (Is-SelfSigned $c) { return 'Root' }
+        $bc = $c.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.19' } | Select-Object -First 1
+        if ($bc) {
+            $bcx = [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]$bc
+            if ($bcx.CertificateAuthority) { return 'CA' }
+        }
+        return 'My'
+    }
+
+    $toInstall = switch ($WhatToInstall) {
+        'Root'         { @(Get-RootCert $elements) }
+        'Intermediate' { @(Get-Intermediates $elements) }
+        'Leaf'         { @($leaf) }
+        'All'          { $elements }
+    }
+
+    if ($SaveToFiles) {
+        if (-not (Test-Path $OutDir)) { $null = New-Item -ItemType Directory -Path $OutDir }
+        foreach ($c in $toInstall) {
+            $safeSubject = ($c.Subject -replace '[^\w\.-]+','_')
+            $path = Join-Path $OutDir ("{0}-{1}.cer" -f $safeSubject, $c.Thumbprint)
+            [IO.File]::WriteAllBytes($path, $c.Export('Cert'))
+            Write-Verbose "Saved: $path"
+        }
+    }
+
+    foreach ($c in $toInstall) {
+        if ($WhatToInstall -eq 'Leaf' -and -not (Is-SelfSigned $c)) {
+            Write-Warning "Skipping non-self-signed leaf. Install its issuer instead to establish trust."
+            continue
+        }
+
+        $targetStore = Get-StoreNameForCert $c
+        $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($targetStore, $storeLocation)
+        $store.Open('ReadWrite')
+        try {
+            $existing = $store.Certificates.Find('FindByThumbprint', $c.Thumbprint, $false)
+            if ($existing.Count -eq 0) {
+                $store.Add($c)
+                Write-Host ("Installed: {0} => {1}\{2}" -f $c.Subject, $storeLocation, $targetStore)
+            } else {
+                Write-Host ("Already present: {0} in {1}\{2}" -f $c.Subject, $storeLocation, $targetStore)
+            }
+        }
+        finally {
+            $store.Close()
+        }
+    }
+
+    Write-Host ""
+    Write-Host "Leaf:   $($leaf.Subject)  [$($leaf.Thumbprint)]"
+    Write-Host "Chain:"
+    for ($i=0; $i -lt $elements.Count; $i++) {
+        $marker = if ($i -eq 0) {'[Leaf]'} elseif ($i -eq $elements.Count-1) {'[Root]'} else {'[Interm]'}
+        Write-Host ("  {0} {1}  [{2}]" -f $marker, $elements[$i].Subject, $elements[$i].Thumbprint)
+    }
+}
