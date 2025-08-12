@@ -1332,7 +1332,7 @@ Connects via IP, sends a custom SNI, and saves all certificates to disk.
     $port = if ($uri.IsDefaultPort) { 443 } else { $uri.Port }
     if ([string]::IsNullOrWhiteSpace($SNIHost)) { $SNIHost = $host }
 
-    Write-Verbose "Connecting to $host:$port with SNI '$SNIHost'"
+    Write-Verbose "Connecting to ${host}:${port} with SNI '${SNIHost}'"
 
     # --- TLS connection and chain building ---
     $tcp = [System.Net.Sockets.TcpClient]::new()
