@@ -1474,6 +1474,9 @@ Overwrites existing .cer files in OutputDir.
 .PARAMETER WhatIfOnly
 Fetch and export certificates, but skip installation steps.
 
+.PARAMETER SkipCertValidation
+Skip certificate validation during TLS connection (allows self-signed/invalid certs).
+
 .EXAMPLE
 Install-SiteCertificatesViaCertutil -Host "example.com" -Verbose
 
@@ -1496,7 +1499,7 @@ Simulates operation: exports but skips installation.
 - certutil will silently deduplicate duplicate certificates during install.
 
 Author: jjw(@thejjw)
-Last Edit: Aug 2025
+Last Edit: Aug 2025 (Fixed version)
 
 .LINK
 https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/certutil
@@ -1517,7 +1520,8 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
         [switch] $MachineStore,          # Use LocalMachine store (requires admin)
         [switch] $InstallEndEntity,      # Also install the server (end-entity) cert into 'My'
         [switch] $Force,                 # Overwrite existing exported files
-        [switch] $WhatIfOnly             # Do not install; just fetch/export and show plan
+        [switch] $WhatIfOnly,            # Do not install; just fetch/export and show plan
+        [switch] $SkipCertValidation     # Skip certificate validation during TLS connection
     )
 
     begin {
@@ -1536,6 +1540,19 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
             throw "certutil.exe not found."
         }
 
+        function Escape-CertutilArgument {
+            param([string]$Argument)
+            if ($Argument -match '\s') {
+                return "`"$Argument`""
+            }
+            return $Argument
+        }
+
+        function Test-IsAdministrator {
+            $currentPrincipal = [Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
+            return $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        }
+
         function Invoke-CertutilAddStore {
             [CmdletBinding()]
             param(
@@ -1550,24 +1567,33 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
             $args += $StoreName
             $args += $CerPath
 
-            Write-Verbose ("certutil {0}" -f ($args -join ' '))
+            # Properly escape arguments that contain spaces
+            $escapedArgs = $args | ForEach-Object { Escape-CertutilArgument $_ }
+            $argumentString = $escapedArgs -join ' '
+
+            Write-Verbose ("certutil {0}" -f $argumentString)
             $psi = New-Object System.Diagnostics.ProcessStartInfo
             $psi.FileName = $certutil
-            $psi.Arguments = ($args -join ' ')
+            $psi.Arguments = $argumentString
             $psi.UseShellExecute = $false
             $psi.RedirectStandardOutput = $true
             $psi.RedirectStandardError = $true
             $p = New-Object System.Diagnostics.Process
             $p.StartInfo = $psi
-            [void]$p.Start()
-            $stdout = $p.StandardOutput.ReadToEnd()
-            $stderr = $p.StandardError.ReadToEnd()
-            $p.WaitForExit()
+            
+            try {
+                [void]$p.Start()
+                $stdout = $p.StandardOutput.ReadToEnd()
+                $stderr = $p.StandardError.ReadToEnd()
+                $p.WaitForExit()
 
-            if ($p.ExitCode -ne 0) {
-                throw "certutil failed (exit $($p.ExitCode)) for $CerPath to $StoreName. Error: $stderr`nOutput: $stdout"
-            } else {
-                Write-Verbose $stdout.Trim()
+                if ($p.ExitCode -ne 0) {
+                    throw "certutil failed (exit $($p.ExitCode)) for $CerPath to $StoreName. Error: $stderr`nOutput: $stdout"
+                } else {
+                    Write-Verbose $stdout.Trim()
+                }
+            } finally {
+                if ($p) { $p.Dispose() }
             }
         }
 
@@ -1582,8 +1608,15 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
 
                 [switch] $Overwrite
             )
-            $cn = ($Certificate.Subject -split ',\s*' | Where-Object { $_ -like 'CN=*' } | Select-Object -First 1).Replace('CN=','')
-            if ([string]::IsNullOrWhiteSpace($cn)) { $cn = $Certificate.GetNameInfo('SimpleName',$false) }
+            
+            # Improved CN extraction with better handling of escaped characters
+            $subjectParts = $Certificate.Subject -split '(?<!\\),' | ForEach-Object { $_.Trim() }
+            $cnPart = $subjectParts | Where-Object { $_ -like 'CN=*' } | Select-Object -First 1
+            $cn = if ($cnPart) { $cnPart -replace '^CN=', '' -replace '\\(.)', '$1' } else { $null }
+            
+            if ([string]::IsNullOrWhiteSpace($cn)) { 
+                $cn = $Certificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) 
+            }
             if ([string]::IsNullOrWhiteSpace($cn)) { $cn = 'Unknown' }
 
             $thumb = $Certificate.Thumbprint -replace '\s',''
@@ -1611,6 +1644,8 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
                 }
             }
 
+            # Note: This classification assumes standard PKI structures.
+            # Self-signed certificates in private PKI may need manual review.
             if ($isCA -and $isSelfSigned) { return 'Root' }
             if ($isCA -and -not $isSelfSigned) { return 'CA' }
             return 'EndEntity'
@@ -1618,6 +1653,11 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
     }
 
     process {
+        # Check admin privileges if MachineStore is requested
+        if ($MachineStore -and -not (Test-IsAdministrator)) {
+            throw "MachineStore requires administrative privileges. Please run as administrator."
+        }
+
         if ($PSCmdlet.ParameterSetName -eq 'Url') {
             if (-not $Url) { throw "Url is required." }
             if ($Url.Scheme -ne 'https') { throw "Only https URLs are supported for TLS certificate retrieval." }
@@ -1630,25 +1670,66 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
             [void](New-Item -ItemType Directory -Path $OutputDir -Force)
         }
 
-        # 1) Open TLS and capture server certificate
+        # 1) Open TLS and capture server certificate with better error handling
         $tcp = $null
         $ssl = $null
+        $serverCert = $null
+        
         try {
+            Write-Verbose "Connecting to $Host:$Port..."
             $tcp = New-Object System.Net.Sockets.TcpClient
             $tcp.ReceiveTimeout = 10000
             $tcp.SendTimeout = 10000
-            $tcp.Connect($Host, $Port)
+            
+            try {
+                $tcp.Connect($Host, $Port)
+            } catch [System.Net.Sockets.SocketException] {
+                throw "Failed to connect to ${Host}:${Port}. Check hostname and port availability. Error: $($_.Exception.Message)"
+            } catch {
+                throw "Network connection failed to ${Host}:${Port}. Error: $($_.Exception.Message)"
+            }
 
-            $ssl = New-Object System.Net.Security.SslStream($tcp.GetStream(), $false, { param($s,$c,$chain,$errors) return $true })
-            $ssl.AuthenticateAsClient($Host)
+            # Configure certificate validation callback
+            $certCallback = if ($SkipCertValidation) {
+                { param($s,$c,$chain,$errors) return $true }
+            } else {
+                { param($s,$c,$chain,$errors) 
+                    if ($errors -ne [System.Net.Security.SslPolicyErrors]::None) {
+                        Write-Warning "TLS certificate validation errors: $errors"
+                    }
+                    return $true  # Still proceed but warn about issues
+                }
+            }
+
+            $ssl = New-Object System.Net.Security.SslStream($tcp.GetStream(), $false, $certCallback)
+            
+            try {
+                $ssl.AuthenticateAsClient($Host)
+            } catch [System.Security.Authentication.AuthenticationException] {
+                throw "TLS authentication failed for ${Host}:${Port}. Error: $($_.Exception.Message)"
+            } catch {
+                throw "TLS handshake failed for ${Host}:${Port}. Error: $($_.Exception.Message)"
+            }
 
             $serverCert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($ssl.RemoteCertificate)
+            Write-Verbose "Successfully retrieved server certificate: $($serverCert.Subject)"
+            
         } finally {
-            if ($ssl) { $ssl.Dispose() }
-            if ($tcp) { $tcp.Dispose() }
+            if ($ssl) { 
+                try { $ssl.Close() } catch { }
+                $ssl.Dispose() 
+            }
+            if ($tcp) { 
+                try { $tcp.Close() } catch { }
+                $tcp.Dispose() 
+            }
         }
 
-        # 2) Build chain (allow AIA/HTTP retrieval, skip revocation)
+        if (-not $serverCert) {
+            throw "Failed to retrieve server certificate from $Host:$Port"
+        }
+
+        # 2) Build chain (allow AIA/HTTP retrieval, skip revocation) with validation warning
         $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
         $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
         $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EndCertificateOnly
@@ -1659,7 +1740,10 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
             -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreEndRevocationUnknown `
             -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreRootRevocationUnknown
 
-        [void]$chain.Build($serverCert)
+        $buildResult = $chain.Build($serverCert)
+        if (-not $buildResult) {
+            Write-Warning "Certificate chain building incomplete. Some intermediate certificates may be missing. Chain status: $($chain.ChainStatus | ForEach-Object { $_.Status })"
+        }
 
         # Aggregate unique certs (end-entity + intermediates + maybe root)
         $certs = @()
@@ -1669,6 +1753,10 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
             $id = $c.Thumbprint -replace '\s',''
             if ($seen.Add($id)) { $certs += $c }
         }
+
+        try {
+            $chain.Dispose()
+        } catch { }
 
         if (-not $certs -or $certs.Count -eq 0) {
             throw "No certificates were obtained from $Host:$Port."
