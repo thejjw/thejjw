@@ -1284,7 +1284,7 @@ Install-ServerCertificateTrust -Url https://dev.local -WhatToInstall All -Machin
 
 .NOTES
 Author: jjw(@thejjw)
-Last Edit: Aug 2025 (variable cleanup, chain resilience, parser fix)
+Last Edit: Aug 2025
 #>
     [CmdletBinding()]
     param(
@@ -1312,13 +1312,13 @@ Last Edit: Aug 2025 (variable cleanup, chain resilience, parser fix)
     }
 
     # --- Parse URL ---
-    if ($Url -notmatch '^\w+://') { $Url = "https://$Url" }
+    if ($Url -notmatch '^\w+://') { $Url = "https://${Url}" }
     $uri = [Uri]$Url
     $targetHost = $uri.Host
     $targetPort = if ($uri.IsDefaultPort) { 443 } else { $uri.Port }
     if (-not $SNIHost) { $SNIHost = $targetHost }
 
-    Write-Verbose "Connecting to $targetHost:$targetPort with SNI '$SNIHost'"
+    Write-Verbose "Connecting to ${targetHost}:${targetPort} with SNI '${SNIHost}'"
 
     # --- TLS connection and cert retrieval ---
     $tcp = $null; $ssl = $null; $leaf = $null
@@ -1333,7 +1333,7 @@ Last Edit: Aug 2025 (variable cleanup, chain resilience, parser fix)
         $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
     }
     catch {
-        throw "Failed to retrieve certificate from $targetHost:$targetPort. $_"
+        throw "Failed to retrieve certificate from ${targetHost}:${targetPort}. $_"
     }
     finally {
         if ($ssl) { $ssl.Dispose() }
@@ -1346,7 +1346,7 @@ Last Edit: Aug 2025 (variable cleanup, chain resilience, parser fix)
     $chain.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
     $null = $chain.Build($leaf)
 
-    # --- Safe de-duplication and fallback ---
+    # --- Unique and fallback ---
     function Get-UniqueByThumbprint {
         param([System.Collections.IEnumerable] $certs)
         $certList = @($certs)
@@ -1376,7 +1376,7 @@ Last Edit: Aug 2025 (variable cleanup, chain resilience, parser fix)
         return 'My'
     }
 
-    # --- Select what to install ---
+    # --- Selection ---
     $toInstall = switch ($WhatToInstall) {
         'Root'         { @(Get-RootCert $elements) | Where-Object { $_ } }
         'Intermediate' { @(Get-Intermediates $elements) | Where-Object { $_ } }
@@ -1385,7 +1385,7 @@ Last Edit: Aug 2025 (variable cleanup, chain resilience, parser fix)
     }
 
     if (-not $toInstall -or $toInstall.Count -eq 0) {
-        throw "No certificates selected for '$WhatToInstall'."
+        throw "No certificates selected for '${WhatToInstall}'."
     }
 
     # --- Optional export ---
@@ -1393,9 +1393,9 @@ Last Edit: Aug 2025 (variable cleanup, chain resilience, parser fix)
         if (-not (Test-Path $OutDir)) { $null = New-Item -ItemType Directory -Path $OutDir }
         foreach ($cert in $toInstall) {
             $safeName = ($cert.Subject -replace '[^\w\.-]+','_')
-            $filePath = Join-Path $OutDir ("{0}-{1}.cer" -f $safeName, $cert.Thumbprint)
+            $filePath = Join-Path $OutDir ("${safeName}-${cert.Thumbprint}.cer")
             [IO.File]::WriteAllBytes($filePath, $cert.Export('Cert'))
-            Write-Verbose "Exported: $filePath"
+            Write-Verbose "Exported: ${filePath}"
         }
     }
 
@@ -1413,9 +1413,9 @@ Last Edit: Aug 2025 (variable cleanup, chain resilience, parser fix)
             $existing = $store.Certificates.Find('FindByThumbprint', $cert.Thumbprint, $false)
             if ($existing.Count -eq 0) {
                 $store.Add($cert)
-                Write-Host ("Installed: {0} => {1}\{2}" -f $cert.Subject, $storeLocation, $storeName)
+                Write-Host ("Installed: ${cert.Subject} => ${storeLocation}\${storeName}")
             } else {
-                Write-Host ("Already present: {0} in {1}\{2}" -f $cert.Subject, $storeLocation, $storeName)
+                Write-Host ("Already present: ${cert.Subject} in ${storeLocation}\${storeName}")
             }
         }
         finally {
@@ -1424,10 +1424,11 @@ Last Edit: Aug 2025 (variable cleanup, chain resilience, parser fix)
     }
 
     # --- Summary ---
-    Write-Host "`nLeaf:   $($leaf.Subject) [$($leaf.Thumbprint)]"
+    Write-Host ""
+    Write-Host "Leaf:   ${leaf.Subject} [${leaf.Thumbprint}]"
     Write-Host "Chain:"
     for ($i = 0; $i -lt $elements.Count; $i++) {
         $tag = if ($i -eq 0) {'[Leaf]'} elseif ($i -eq $elements.Count-1) {'[Root]'} else {'[Interm]'}
-        Write-Host ("  {0} {1} [{2}]" -f $tag, $elements[$i].Subject, $elements[$i].Thumbprint)
+        Write-Host ("  ${tag} ${elements[$i].Subject} [${elements[$i].Thumbprint}]")
     }
 }
