@@ -1432,3 +1432,296 @@ Last Edit: Aug 2025
         Write-Host ("  ${tag} ${elements[$i].Subject} [${elements[$i].Thumbprint}]")
     }
 }
+
+function Install-SiteCertificatesViaCertutil {
+<#
+.SYNOPSIS
+Fetches, exports, classifies, and optionally installs certificates from a TLS server using certutil.
+
+.DESCRIPTION
+This function connects to a remote HTTPS server (given by host/port or URL),
+retrieves its TLS certificate chain, exports each certificate to a .cer file, and
+installs them silently into Windows certificate stores using `certutil`.
+
+Supports:
+- Root certificates → Root store
+- Intermediate CAs → CA store
+- End-Entity server cert → Personal (My) store (optional)
+
+Can run interactively or non-interactively with full control via parameters.
+
+.PARAMETER Host
+The target hostname (e.g. www.example.com) to connect via TLS. Required if using host:port mode.
+
+.PARAMETER Port
+The TLS port on the host. Defaults to 443.
+
+.PARAMETER Url
+An HTTPS URL. If provided, host and port are extracted from this.
+
+.PARAMETER OutputDir
+Directory to save exported .cer files. Defaults to TEMP\SiteCerts.
+
+.PARAMETER MachineStore
+Use LocalMachine store instead of CurrentUser. Requires admin rights.
+
+.PARAMETER InstallEndEntity
+Also installs the server certificate (end-entity) into the Personal (My) store.
+
+.PARAMETER Force
+Overwrites existing .cer files in OutputDir.
+
+.PARAMETER WhatIfOnly
+Fetch and export certificates, but skip installation steps.
+
+.EXAMPLE
+Install-SiteCertificatesViaCertutil -Host "example.com" -Verbose
+
+Fetches and installs certificates from example.com into CurrentUser stores.
+
+.EXAMPLE
+Install-SiteCertificatesViaCertutil -Url "https://api.example.com" -OutputDir "C:\apiCerts" -MachineStore -InstallEndEntity
+
+Fetches via HTTPS, saves to C:\apiCerts, and installs all certificates to LocalMachine stores.
+
+.EXAMPLE
+Install-SiteCertificatesViaCertutil -Host "example.com" -WhatIfOnly
+
+Simulates operation: exports but skips installation.
+
+.NOTES
+- Requires certutil.exe to be available.
+- Installation into LocalMachine stores needs admin privileges.
+- Skips revocation checks to improve reliability in offline or private network scenarios.
+- certutil will silently deduplicate duplicate certificates during install.
+
+Author: jjw(@thejjw)
+Last Edit: Aug 2025
+
+.LINK
+https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/certutil
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true, ParameterSetName='HostPort')]
+        [string] $Host,
+
+        [Parameter(ParameterSetName='HostPort')]
+        [int] $Port = 443,
+
+        [Parameter(Mandatory=$true, ParameterSetName='Url')]
+        [Uri] $Url,
+
+        [string] $OutputDir = (Join-Path $env:TEMP "SiteCerts"),
+
+        [switch] $MachineStore,          # Use LocalMachine store (requires admin)
+        [switch] $InstallEndEntity,      # Also install the server (end-entity) cert into 'My'
+        [switch] $Force,                 # Overwrite existing exported files
+        [switch] $WhatIfOnly             # Do not install; just fetch/export and show plan
+    )
+
+    begin {
+        function New-SafeFileName {
+            param([string]$s)
+            $invalid = [IO.Path]::GetInvalidFileNameChars() -join ''
+            $regex = "[{0}]" -f [Regex]::Escape($invalid)
+            return ([Regex]::Replace($s, $regex, '_'))
+        }
+
+        function Get-CertutilPath {
+            $p = Join-Path $env:SystemRoot 'System32\certutil.exe'
+            if (Test-Path $p) { return $p }
+            $p2 = Join-Path $env:windir 'Sysnative\certutil.exe'
+            if (Test-Path $p2) { return $p2 }
+            throw "certutil.exe not found."
+        }
+
+        function Invoke-CertutilAddStore {
+            [CmdletBinding()]
+            param(
+                [Parameter(Mandatory=$true)][string]$StoreName,
+                [Parameter(Mandatory=$true)][string]$CerPath,
+                [switch]$Machine
+            )
+            $certutil = Get-CertutilPath
+            $args = @()
+            if (-not $Machine) { $args += '-user' }
+            $args += '-addstore'
+            $args += $StoreName
+            $args += $CerPath
+
+            Write-Verbose ("certutil {0}" -f ($args -join ' '))
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $certutil
+            $psi.Arguments = ($args -join ' ')
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $p = New-Object System.Diagnostics.Process
+            $p.StartInfo = $psi
+            [void]$p.Start()
+            $stdout = $p.StandardOutput.ReadToEnd()
+            $stderr = $p.StandardError.ReadToEnd()
+            $p.WaitForExit()
+
+            if ($p.ExitCode -ne 0) {
+                throw "certutil failed (exit $($p.ExitCode)) for $CerPath to $StoreName. Error: $stderr`nOutput: $stdout"
+            } else {
+                Write-Verbose $stdout.Trim()
+            }
+        }
+
+        function Save-CertAsCer {
+            [CmdletBinding()]
+            param(
+                [Parameter(Mandatory=$true)]
+                [System.Security.Cryptography.X509Certificates.X509Certificate2] $Certificate,
+
+                [Parameter(Mandatory=$true)]
+                [string] $Directory,
+
+                [switch] $Overwrite
+            )
+            $cn = ($Certificate.Subject -split ',\s*' | Where-Object { $_ -like 'CN=*' } | Select-Object -First 1).Replace('CN=','')
+            if ([string]::IsNullOrWhiteSpace($cn)) { $cn = $Certificate.GetNameInfo('SimpleName',$false) }
+            if ([string]::IsNullOrWhiteSpace($cn)) { $cn = 'Unknown' }
+
+            $thumb = $Certificate.Thumbprint -replace '\s',''
+            $fileBase = "{0}__{1}" -f (New-SafeFileName $cn), $thumb
+            $path = Join-Path $Directory ($fileBase + '.cer')
+
+            if ((-not $Overwrite) -and (Test-Path -LiteralPath $path)) {
+                return $path
+            }
+
+            $bytes = $Certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+            [IO.File]::WriteAllBytes($path, $bytes)
+            return $path
+        }
+
+        function Classify-Cert {
+            [CmdletBinding()]
+            param([System.Security.Cryptography.X509Certificates.X509Certificate2] $Certificate)
+
+            $isSelfSigned = $Certificate.Subject -eq $Certificate.Issuer
+            $isCA = $false
+            foreach ($ext in $Certificate.Extensions) {
+                if ($ext -is [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]) {
+                    $isCA = $ext.CertificateAuthority
+                }
+            }
+
+            if ($isCA -and $isSelfSigned) { return 'Root' }
+            if ($isCA -and -not $isSelfSigned) { return 'CA' }
+            return 'EndEntity'
+        }
+    }
+
+    process {
+        if ($PSCmdlet.ParameterSetName -eq 'Url') {
+            if (-not $Url) { throw "Url is required." }
+            if ($Url.Scheme -ne 'https') { throw "Only https URLs are supported for TLS certificate retrieval." }
+            $Host = $Url.Host
+            $Port = if ($Url.Port -gt 0) { $Url.Port } else { 443 }
+        }
+
+        Write-Verbose "Target: $Host:$Port"
+        if (-not (Test-Path -LiteralPath $OutputDir)) {
+            [void](New-Item -ItemType Directory -Path $OutputDir -Force)
+        }
+
+        # 1) Open TLS and capture server certificate
+        $tcp = $null
+        $ssl = $null
+        try {
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            $tcp.ReceiveTimeout = 10000
+            $tcp.SendTimeout = 10000
+            $tcp.Connect($Host, $Port)
+
+            $ssl = New-Object System.Net.Security.SslStream($tcp.GetStream(), $false, { param($s,$c,$chain,$errors) return $true })
+            $ssl.AuthenticateAsClient($Host)
+
+            $serverCert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($ssl.RemoteCertificate)
+        } finally {
+            if ($ssl) { $ssl.Dispose() }
+            if ($tcp) { $tcp.Dispose() }
+        }
+
+        # 2) Build chain (allow AIA/HTTP retrieval, skip revocation)
+        $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+        $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+        $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EndCertificateOnly
+        $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(20)
+        $chain.ChainPolicy.VerificationFlags = `
+            [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreCertificateAuthorityRevocationUnknown `
+            -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreCtlSignerRevocationUnknown `
+            -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreEndRevocationUnknown `
+            -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreRootRevocationUnknown
+
+        [void]$chain.Build($serverCert)
+
+        # Aggregate unique certs (end-entity + intermediates + maybe root)
+        $certs = @()
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($elem in $chain.ChainElements) {
+            $c = $elem.Certificate
+            $id = $c.Thumbprint -replace '\s',''
+            if ($seen.Add($id)) { $certs += $c }
+        }
+
+        if (-not $certs -or $certs.Count -eq 0) {
+            throw "No certificates were obtained from $Host:$Port."
+        }
+
+        Write-Verbose ("Discovered {0} certificate(s) in chain." -f $certs.Count)
+
+        # 3) Export and decide store per cert
+        $plan = @()  # objects: @{ Path=; Store=; Type=; Subject= }
+        foreach ($c in $certs) {
+            $type = Classify-Cert -Certificate $c
+            $path = Save-CertAsCer -Certificate $c -Directory $OutputDir -Overwrite:$Force
+            $subject = $c.Subject
+
+            $store = switch ($type) {
+                'Root' { 'Root' }
+                'CA' { 'CA' }
+                'EndEntity' {
+                    if ($InstallEndEntity) { 'My' } else { $null }
+                }
+                default { $null }
+            }
+
+            $plan += [pscustomobject]@{
+                Subject = $subject
+                Thumbprint = $c.Thumbprint -replace '\s',''
+                Type = $type
+                Path = $path
+                Store = $store
+            }
+        }
+
+        # 4) Present plan and optionally install
+        Write-Host "Exported certificates to: $OutputDir"
+        foreach ($item in $plan) {
+            $storeLabel = if ($item.Store) { $item.Store } else { '(skip install)' }
+            Write-Host (" - {0} [{1}] -> {2}" -f $item.Subject, $item.Type, $storeLabel)
+        }
+
+        if ($WhatIfOnly) {
+            Write-Host "WhatIfOnly specified: no installation attempted."
+            return $plan
+        }
+
+        foreach ($item in $plan | Where-Object { $_.Store }) {
+            try {
+                Invoke-CertutilAddStore -StoreName $item.Store -CerPath $item.Path -Machine:$MachineStore
+                Write-Host ("Installed: {0} -> {1}" -f (Split-Path -Leaf $item.Path), $item.Store)
+            } catch {
+                throw "Failed to install $($item.Path) into store $($item.Store): $($_.Exception.Message)"
+            }
+        }
+
+        return $plan
+    }
+}
