@@ -2043,7 +2043,7 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         Write-Host "`nExported $($toExport.Count) certificate(s) to: $OutDir"
     }
 
-    # --- Display certificate chain summary ---
+    # --- Certificate chain summary display ---
     Write-Host "`n--- Certificate Chain Summary ---"
     Write-Host "Leaf Certificate:"
     Write-Host "  Subject: $($leaf.Subject)"
@@ -2067,4 +2067,4 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         ExportedCertificates = $toExport
         OutputDirectory = if (-not $NoExport) { $OutDir } else { $null }
     }
-}x
+}
