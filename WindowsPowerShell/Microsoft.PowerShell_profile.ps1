@@ -1931,12 +1931,12 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
     )
     
     Write-Host "Connecting to ${TargetHost}:${TargetPort} (SNI: ${SNIHost})"
-    Write-Verbose "Target: ${TargetHost}:${TargetPort}"
+    Write-Verbose "Target server: ${TargetHost}:${TargetPort}"
     
     # --- TLS connection and cert retrieval ---
     $tcp = $null; $ssl = $null; $leaf = $null
     try {
-        Write-Verbose "Connecting to ${TargetHost}:${TargetPort}..."
+        Write-Verbose "Establishing TCP connection to ${TargetHost}:${TargetPort}..."
         $tcp = [System.Net.Sockets.TcpClient]::new()
         $tcp.Connect($TargetHost, $TargetPort)
         $ssl = [System.Net.Security.SslStream]::new(
@@ -2048,7 +2048,7 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
 
     # --- Certificate chain summary display ---
     Write-Host "`n--- Certificate Chain Summary ---"
-    Write-Host "Target: ${TargetHost}:${TargetPort}"
+    Write-Host "Target server: ${TargetHost}:${TargetPort}"
     Write-Host "Leaf Certificate:"
     Write-Host "  Subject: $($leaf.Subject)"
     Write-Host "  Issuer:  $($leaf.Issuer)"
