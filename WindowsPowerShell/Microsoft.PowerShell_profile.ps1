@@ -1450,10 +1450,10 @@ Supports:
 
 Can run interactively or non-interactively with full control via parameters.
 
-.PARAMETER Host
+.PARAMETER TargetHost
 The target hostname (e.g. www.example.com) to connect via TLS. Required if using host:port mode.
 
-.PARAMETER Port
+.PARAMETER TargetPort
 The TLS port on the host. Defaults to 443.
 
 .PARAMETER Url
@@ -1478,7 +1478,7 @@ Fetch and export certificates, but skip installation steps.
 Skip certificate validation during TLS connection (allows self-signed/invalid certs).
 
 .EXAMPLE
-Install-SiteCertificatesViaCertutil -Host "example.com" -Verbose
+Install-SiteCertificatesViaCertutil -TargetHost "example.com" -Verbose
 
 Fetches and installs certificates from example.com into CurrentUser stores.
 
@@ -1488,7 +1488,7 @@ Install-SiteCertificatesViaCertutil -Url "https://api.example.com" -OutputDir "C
 Fetches via HTTPS, saves to C:\apiCerts, and installs all certificates to LocalMachine stores.
 
 .EXAMPLE
-Install-SiteCertificatesViaCertutil -Host "example.com" -WhatIfOnly
+Install-SiteCertificatesViaCertutil -TargetHost "example.com" -WhatIfOnly
 
 Simulates operation: exports but skips installation.
 
@@ -1507,10 +1507,10 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true, ParameterSetName='HostPort')]
-        [string] $Host,
+        [string] $TargetHost,
 
         [Parameter(ParameterSetName='HostPort')]
-        [int] $Port = 443,
+        [int] $TargetPort = 443,
 
         [Parameter(Mandatory=$true, ParameterSetName='Url')]
         [Uri] $Url,
@@ -1525,6 +1525,7 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
     )
 
     begin {
+        # --- Helper functions ---
         function New-SafeFileName {
             param([string]$s)
             $invalid = [IO.Path]::GetInvalidFileNameChars() -join ''
@@ -1567,7 +1568,7 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
             $args += $StoreName
             $args += $CerPath
 
-            # Properly escape arguments that contain spaces
+            # --- Properly escape arguments that contain spaces ---
             $escapedArgs = $args | ForEach-Object { Escape-CertutilArgument $_ }
             $argumentString = $escapedArgs -join ' '
 
@@ -1609,7 +1610,7 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
                 [switch] $Overwrite
             )
             
-            # Improved CN extraction with better handling of escaped characters
+            # --- Improved CN extraction with better handling of escaped characters ---
             $subjectParts = $Certificate.Subject -split '(?<!\\),' | ForEach-Object { $_.Trim() }
             $cnPart = $subjectParts | Where-Object { $_ -like 'CN=*' } | Select-Object -First 1
             $cn = if ($cnPart) { $cnPart -replace '^CN=', '' -replace '\\(.)', '$1' } else { $null }
@@ -1644,6 +1645,7 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
                 }
             }
 
+            # --- Certificate classification logic ---
             # Note: This classification assumes standard PKI structures.
             # Self-signed certificates in private PKI may need manual review.
             if ($isCA -and $isSelfSigned) { return 'Root' }
@@ -1653,43 +1655,44 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
     }
 
     process {
-        # Check admin privileges if MachineStore is requested
+        # --- Administrative privilege validation ---
         if ($MachineStore -and -not (Test-IsAdministrator)) {
             throw "MachineStore requires administrative privileges. Please run as administrator."
         }
 
+        # --- Parameter processing and validation ---
         if ($PSCmdlet.ParameterSetName -eq 'Url') {
             if (-not $Url) { throw "Url is required." }
             if ($Url.Scheme -ne 'https') { throw "Only https URLs are supported for TLS certificate retrieval." }
-            $Host = $Url.Host
-            $Port = if ($Url.Port -gt 0) { $Url.Port } else { 443 }
+            $TargetHost = $Url.Host
+            $TargetPort = if ($Url.Port -gt 0) { $Url.Port } else { 443 }
         }
 
-        Write-Verbose "Target: $Host:$Port"
+        Write-Verbose "Target server: ${TargetHost}:${TargetPort}"
         if (-not (Test-Path -LiteralPath $OutputDir)) {
             [void](New-Item -ItemType Directory -Path $OutputDir -Force)
         }
 
-        # 1) Open TLS and capture server certificate with better error handling
+        # --- TLS connection and certificate retrieval ---
         $tcp = $null
         $ssl = $null
         $serverCert = $null
         
         try {
-            Write-Verbose "Connecting to $Host:$Port..."
+            Write-Verbose "Establishing connection to ${TargetHost}:${TargetPort}..."
             $tcp = New-Object System.Net.Sockets.TcpClient
             $tcp.ReceiveTimeout = 10000
             $tcp.SendTimeout = 10000
             
             try {
-                $tcp.Connect($Host, $Port)
+                $tcp.Connect($TargetHost, $TargetPort)
             } catch [System.Net.Sockets.SocketException] {
-                throw "Failed to connect to ${Host}:${Port}. Check hostname and port availability. Error: $($_.Exception.Message)"
+                throw "Failed to connect to ${TargetHost}:${TargetPort}. Check hostname and port availability. Error: $($_.Exception.Message)"
             } catch {
-                throw "Network connection failed to ${Host}:${Port}. Error: $($_.Exception.Message)"
+                throw "Network connection failed to ${TargetHost}:${TargetPort}. Error: $($_.Exception.Message)"
             }
 
-            # Configure certificate validation callback
+            # --- Certificate validation callback configuration ---
             $certCallback = if ($SkipCertValidation) {
                 { param($s,$c,$chain,$errors) return $true }
             } else {
@@ -1704,11 +1707,11 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
             $ssl = New-Object System.Net.Security.SslStream($tcp.GetStream(), $false, $certCallback)
             
             try {
-                $ssl.AuthenticateAsClient($Host)
+                $ssl.AuthenticateAsClient($TargetHost)
             } catch [System.Security.Authentication.AuthenticationException] {
-                throw "TLS authentication failed for ${Host}:${Port}. Error: $($_.Exception.Message)"
+                throw "TLS authentication failed for ${TargetHost}:${TargetPort}. Error: $($_.Exception.Message)"
             } catch {
-                throw "TLS handshake failed for ${Host}:${Port}. Error: $($_.Exception.Message)"
+                throw "TLS handshake failed for ${TargetHost}:${TargetPort}. Error: $($_.Exception.Message)"
             }
 
             $serverCert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($ssl.RemoteCertificate)
@@ -1726,10 +1729,10 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
         }
 
         if (-not $serverCert) {
-            throw "Failed to retrieve server certificate from $Host:$Port"
+            throw "Failed to retrieve server certificate from ${TargetHost}:${TargetPort}"
         }
 
-        # 2) Build chain (allow AIA/HTTP retrieval, skip revocation) with validation warning
+        # --- Certificate chain building and validation ---
         $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
         $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
         $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EndCertificateOnly
@@ -1745,7 +1748,7 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
             Write-Warning "Certificate chain building incomplete. Some intermediate certificates may be missing. Chain status: $($chain.ChainStatus | ForEach-Object { $_.Status })"
         }
 
-        # Aggregate unique certs (end-entity + intermediates + maybe root)
+        # --- Certificate aggregation and deduplication ---
         $certs = @()
         $seen = New-Object 'System.Collections.Generic.HashSet[string]'
         foreach ($elem in $chain.ChainElements) {
@@ -1759,12 +1762,12 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
         } catch { }
 
         if (-not $certs -or $certs.Count -eq 0) {
-            throw "No certificates were obtained from $Host:$Port."
+            throw "No certificates were obtained from ${TargetHost}:${TargetPort}."
         }
 
         Write-Verbose ("Discovered {0} certificate(s) in chain." -f $certs.Count)
 
-        # 3) Export and decide store per cert
+        # --- Certificate export and installation planning ---
         $plan = @()  # objects: @{ Path=; Store=; Type=; Subject= }
         foreach ($c in $certs) {
             $type = Classify-Cert -Certificate $c
@@ -1789,8 +1792,8 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
             }
         }
 
-        # 4) Present plan and optionally install
-        Write-Host "Exported certificates to: $OutputDir"
+        # --- Installation plan presentation and execution ---
+        Write-Host "Exported certificates to: ${OutputDir}"
         foreach ($item in $plan) {
             $storeLabel = if ($item.Store) { $item.Store } else { '(skip install)' }
             Write-Host (" - {0} [{1}] -> {2}" -f $item.Subject, $item.Type, $storeLabel)
@@ -1801,6 +1804,7 @@ https://learn.microsoft.com/en-us/windows-server/administration/windows-commands
             return $plan
         }
 
+        # --- Certificate installation execution ---
         foreach ($item in $plan | Where-Object { $_.Store }) {
             try {
                 Invoke-CertutilAddStore -StoreName $item.Store -CerPath $item.Path -Machine:$MachineStore
