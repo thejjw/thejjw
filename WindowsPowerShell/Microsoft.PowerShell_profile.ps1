@@ -723,19 +723,34 @@ function Send-SshKey {
 
         [int]$Port = 22
     )
+    # Prefer common public key filenames. This avoids false negatives when
+    # ssh-keygen creates id_ed25519.pub (the modern default) instead of id_rsa.pub.
+    $sshDir = Join-Path $env:USERPROFILE '.ssh'
+    if (-not (Test-Path $sshDir)) { New-Item -ItemType Directory -Path $sshDir | Out-Null }
 
-    $pubkeyPath = "$env:USERPROFILE\.ssh\id_rsa.pub"
-    if (-not (Test-Path $pubkeyPath)) {
-        Write-Host "SSH key not found. Generating one now..." -ForegroundColor Yellow
-        ssh-keygen
+    $candidates = @('id_ed25519.pub','id_rsa.pub','id_ecdsa.pub','id_dsa.pub')
+    $pubkeyPath = $null
+    foreach ($name in $candidates) {
+        $p = Join-Path $sshDir $name
+        if (Test-Path $p) { $pubkeyPath = $p; break }
+    }
+
+    if (-not $pubkeyPath) {
+        Write-Host "SSH public key not found. Generating ed25519 key now..." -ForegroundColor Yellow
+        # Generate an ed25519 key non-interactively with empty passphrase so the function
+        # can be used in scripts. If you prefer to be prompted for a passphrase, modify
+        # or remove the -N "" flag.
+        ssh-keygen -t ed25519 -f (Join-Path $sshDir 'id_ed25519') -N "" | Out-Null
+        $pubkeyPath = Join-Path $sshDir 'id_ed25519.pub'
     }
 
     if (Test-Path $pubkeyPath) {
-        Write-Host "Sending public key to ${User}@${Hostname}:${Port} ..." -ForegroundColor Cyan
-        Get-Content $pubkeyPath | ssh "$User@$Hostname" -p $Port 'mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
+        Write-Host "Sending public key $pubkeyPath to ${User}@${Hostname}:${Port} ..." -ForegroundColor Cyan
+        # Ensure remote .ssh exists and append the public key; set umask to keep permissions strict.
+        Get-Content $pubkeyPath | ssh "$User@$Hostname" -p $Port 'mkdir -p ~/.ssh; umask 077; cat >> ~/.ssh/authorized_keys'
         Write-Host " Public key installed on $Hostname" -ForegroundColor Green
     } else {
-        Write-Warning " Could not locate or generate SSH public key."
+        Write-Warning " Could not locate or generate SSH public key. Searched: $($candidates -join ', ')"
     }
 }
 
