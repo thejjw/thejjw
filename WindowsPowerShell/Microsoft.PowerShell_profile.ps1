@@ -744,9 +744,9 @@ function Send-SshKey {
         $privateKey = Join-Path $sshDir 'id_ed25519'
         $pubkeyPath = "${privateKey}.pub"
 
-        # Prefer explicit path to ssh-keygen if available
-        $sshCmd = (Get-Command ssh-keygen -ErrorAction SilentlyContinue)?.Source
-        if (-not $sshCmd) { $sshCmd = 'ssh-keygen' }
+    # Prefer explicit path to ssh-keygen if available (compatible with Windows PowerShell v5.1)
+    $cmd = Get-Command ssh-keygen -ErrorAction SilentlyContinue
+    if ($cmd -ne $null) { $sshCmd = $cmd.Source } else { $sshCmd = 'ssh-keygen' }
 
         $sshArgs = @('-t','ed25519','-f',$privateKey,'-N','')
         try {
