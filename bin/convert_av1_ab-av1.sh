@@ -2,7 +2,7 @@
 
 # This script recursively encodes all(most?) video files in the current directory tree to AV1 format using ab-av1,
 # logging progress with timestamps, and optionally deletes the original files with -d/--delete only if the AV1 output is smaller.
-# 2025.6-2025.7 @thejjw
+# 2025.6-2025.8 @thejjw
 
 LOGFILE="convert_av1_ab-av1_$(date +%Y%m%d_%H%M%S).log"
 SCRIPT_START_TIME=$(date +%s)
@@ -25,12 +25,29 @@ log() {
     echo "$now $elapsed_fmt $*" | tee -a "$LOGFILE"
 }
 
-# Find all files and save to an array
-mapfile -t FILELIST < <(find . \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.mov" -o -iname "*.avi" -o -iname "*.wmv" -o -iname "*.webm" \))
+# Find all files and save to an array, filtering out those already encoded
+mapfile -t ALL_FILES < <(find . \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.mov" -o -iname "*.avi" -o -iname "*.wmv" -o -iname "*.webm" \))
+
+# Filter out files that are already AV1 encoded (end with .av1.{extension})
+FILELIST=()
+for filepath in "${ALL_FILES[@]}"; do
+    base=$(basename "$filepath")
+    
+    # Skip files that end with .av1.{extension} pattern (like movie.av1.mp4)
+    if [[ ! "$base" =~ \.av1\.[^.]+$ ]]; then
+        FILELIST+=("$filepath")
+    fi
+done
+
 TOTAL_FILES="${#FILELIST[@]}"
+SKIPPED_FILES=$((${#ALL_FILES[@]} - TOTAL_FILES))
 COUNT=0
 
-log "[INFO] Found $TOTAL_FILES video files to process."
+log "[INFO] Found ${#ALL_FILES[@]} video files total."
+if [ $SKIPPED_FILES -gt 0 ]; then
+    log "[INFO] Skipping $SKIPPED_FILES files that are already AV1 encoded."
+fi
+log "[INFO] Processing $TOTAL_FILES video files."
 
 for filepath in "${FILELIST[@]}"; do
     COUNT=$((COUNT + 1))
