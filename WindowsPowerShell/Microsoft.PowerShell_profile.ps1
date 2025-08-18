@@ -738,10 +738,25 @@ function Send-SshKey {
     if (-not $pubkeyPath) {
         Write-Host "SSH public key not found. Generating ed25519 key now..." -ForegroundColor Yellow
         # Generate an ed25519 key non-interactively with empty passphrase so the function
-        # can be used in scripts. If you prefer to be prompted for a passphrase, modify
-        # or remove the -N "" flag.
-        ssh-keygen -t ed25519 -f (Join-Path $sshDir 'id_ed25519') -N "" | Out-Null
-        $pubkeyPath = Join-Path $sshDir 'id_ed25519.pub'
+        # can be used in scripts. Some shells / platforms may drop an empty "" argument
+        # which causes ssh-keygen to see -N with no value. Build an explicit argument
+        # array and invoke the program so the empty passphrase is passed reliably.
+        $privateKey = Join-Path $sshDir 'id_ed25519'
+        $pubkeyPath = "${privateKey}.pub"
+
+        # Prefer explicit path to ssh-keygen if available
+        $sshCmd = (Get-Command ssh-keygen -ErrorAction SilentlyContinue)?.Source
+        if (-not $sshCmd) { $sshCmd = 'ssh-keygen' }
+
+        $sshArgs = @('-t','ed25519','-f',$privateKey,'-N','')
+        try {
+            $output = & $sshCmd @sshArgs 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "ssh-keygen failed (exit=$LASTEXITCODE): $([string]::Join("`n", $output))"
+            }
+        } catch {
+            Write-Warning "Exception while running ssh-keygen: $_"
+        }
     }
 
     if (Test-Path $pubkeyPath) {
