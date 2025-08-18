@@ -714,6 +714,7 @@ function Send-SshKey {
     To make this function persist, add it to your $PROFILE:
         notepad $PROFILE
 #>
+    [CmdletBinding()]
     param (
         [Parameter(Mandatory=$true)]
         [string]$User,
@@ -749,10 +750,26 @@ function Send-SshKey {
     if ($cmd -ne $null) { $sshCmd = $cmd.Source } else { $sshCmd = 'ssh-keygen' }
 
         $sshArgs = @('-t','ed25519','-f',$privateKey,'-N','')
+
+        # Diagnostic output to help debug argument passing and environment
+        Write-Verbose "PowerShell version: $($PSVersionTable.PSVersion)"
+        Write-Verbose "Resolved sshCmd: $sshCmd"
+        Write-Verbose "Resolved privateKey: $privateKey"
+        Write-Verbose "sshArgs count: $($sshArgs.Count)"
+        for ($i = 0; $i -lt $sshArgs.Count; $i++) {
+            $arg = $sshArgs[$i]
+            if ($null -eq $arg) { $len = '<null>' } else { $len = $arg.ToString().Length }
+            Write-Verbose "  [$i] -> '$arg' (length=$len)"
+        }
+        Write-Verbose "Joined args (for logging only): $([string]::Join(' ', $sshArgs))"
+
         try {
+            Write-Verbose "Invoking: $sshCmd with arg array (see above)"
             $output = & $sshCmd @sshArgs 2>&1
+            Write-Verbose "ssh-keygen exit code: $LASTEXITCODE"
+            if ($output) { Write-Verbose "ssh-keygen output:`n$([string]::Join("`n", $output))" }
             if ($LASTEXITCODE -ne 0) {
-                Write-Warning "ssh-keygen failed (exit=$LASTEXITCODE): $([string]::Join("`n", $output))"
+                Write-Warning "ssh-keygen failed (exit=$LASTEXITCODE). See verbose output above for args and output."
             }
         } catch {
             Write-Warning "Exception while running ssh-keygen: $_"
