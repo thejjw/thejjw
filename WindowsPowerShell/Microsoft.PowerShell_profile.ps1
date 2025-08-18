@@ -764,12 +764,30 @@ function Send-SshKey {
         Write-Verbose "Joined args (for logging only): $([string]::Join(' ', $sshArgs))"
 
         try {
-            Write-Verbose "Invoking: $sshCmd with arg array (see above)"
-            $output = & $sshCmd @sshArgs 2>&1
-            Write-Verbose "ssh-keygen exit code: $LASTEXITCODE"
-            if ($output) { Write-Verbose "ssh-keygen output:`n$([string]::Join("`n", $output))" }
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "ssh-keygen failed (exit=$LASTEXITCODE). See verbose output above for args and output."
+            if ($sshArgs -contains '') {
+                # Some Windows native binaries (including OpenSSH's ssh-keygen) can drop
+                # an empty argument when invoked via PowerShell argument arrays. To ensure
+                # the empty quoted string for -N is preserved, build a single quoted
+                # command line and run it through cmd.exe /c which preserves "" as an
+                # explicit empty-argument token.
+                $cmdLine = '"' + $sshCmd + '" -t ed25519 -f "' + $privateKey + '" -N ""'
+                Write-Verbose "Invoking via cmd.exe /c: $cmdLine"
+                $output = & cmd.exe /c $cmdLine 2>&1
+                $exit = $LASTEXITCODE
+                Write-Verbose "ssh-keygen (via cmd) exit code: $exit"
+                if ($output) { Write-Verbose "ssh-keygen output (via cmd):`n$([string]::Join("`n", $output))" }
+                if ($exit -ne 0) {
+                    Write-Warning "ssh-keygen failed (exit=$exit). See verbose output above for args and output."
+                }
+            } else {
+                Write-Verbose "Invoking: $sshCmd with arg array (see above)"
+                $output = & $sshCmd @sshArgs 2>&1
+                $exit = $LASTEXITCODE
+                Write-Verbose "ssh-keygen exit code: $exit"
+                if ($output) { Write-Verbose "ssh-keygen output:`n$([string]::Join("`n", $output))" }
+                if ($exit -ne 0) {
+                    Write-Warning "ssh-keygen failed (exit=$exit). See verbose output above for args and output."
+                }
             }
         } catch {
             Write-Warning "Exception while running ssh-keygen: $_"
