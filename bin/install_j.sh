@@ -7,5 +7,5 @@ if ! which apt >/dev/null; then
   exit 1
 fi
 
-PACKAGES="libjxl-tools tmux build-essential nodejs cmatrix fonts-noto-cjk neofetch curl parallel zstd xz-utils"
+PACKAGES="libjxl-tools tmux build-essential nodejs cmatrix fonts-noto-cjk neofetch curl parallel zstd xz-utils webp"
 sudo apt-get update && sudo apt-get install -y $PACKAGES
