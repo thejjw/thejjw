@@ -1,4 +1,4 @@
-#!/bin/bash
+  #!/bin/bash
 # 2025.9 @thejjw
 
 # Set the distance parameter to 0 for lossless
@@ -68,7 +68,7 @@ for file in "${files[@]}"; do
   # Use conditional transcoding based on file type
   if [[ "$ext_lc" == "jpg" || "$ext_lc" == "jpeg" ]]; then
     # Use lossless JPEG-to-JXL transcoding. This is extremely fast and reversible.
-    cjxl --effort 9 "$file" "$output" --jpeg_transcode
+    cjxl --effort 9 "$file" "$output"
   else
     # Use standard lossless encoding for other formats like PNG or WebP.
     cjxl --effort 9 "$file" "$output" --lossless
