@@ -40,11 +40,13 @@ echo_elapsed() {
   printf "[+%ds] %s\n" "$elapsed" "$1" | tee -a "$LOG_FILE"
 }
 
-# Build find expression
-EXTENSIONS="-iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png'"
-[ "$INCLUDE_WEBP" -eq 1 ] && EXTENSIONS="$EXTENSIONS -o -iname '*.webp'"
+# Build find expression using an array
+find_args=('-iname' '*.jpg' '-o' '-iname' '*.jpeg' '-o' '-iname' '*.png')
+if [ "$INCLUDE_WEBP" -eq 1 ]; then
+  find_args+=('-o' '-iname' '*.webp')
+fi
 
-mapfile -t files < <(find . -type f \( $EXTENSIONS \))
+mapfile -t files < <(find . -type f \( "${find_args[@]}" \))
 total=${#files[@]}
 echo_elapsed "Total files to process: $total"
 
