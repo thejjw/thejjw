@@ -68,7 +68,7 @@ for file in "${files[@]}"; do
   # Use conditional transcoding based on file type
   if [[ "$ext_lc" == "jpg" || "$ext_lc" == "jpeg" ]]; then
     # Use lossless JPEG-to-JXL transcoding. This is extremely fast and reversible.
-    cjxl --effort 9 "$file" "$output"
+    cjxl --effort 9 "$file" "$output" --lossless_jpeg=1
   else
     # Use standard lossless encoding for other formats like PNG or WebP.
     cjxl --effort 9 "$file" "$output" --lossless
