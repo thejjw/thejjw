@@ -1,8 +1,7 @@
 #!/bin/bash
-# 2025.6 @thejjw
+# 2025.9 @thejjw
 
 # Set the distance parameter to 0 for lossless
-DISTANCE=0
 DELETE_ORIGINAL=0
 INCLUDE_WEBP=0
 
@@ -14,15 +13,10 @@ while getopts "dw" opt; do
 done
 shift $((OPTIND -1))
 
-for tool in ffmpeg ffprobe; do
+# Check for required tools
+for tool in ffprobe cjxl; do
   command -v "$tool" >/dev/null 2>&1 || { echo "Error: '$tool' is not installed or not in PATH. Aborting."; exit 1; }
 done
-
-# Check for JPEG XL support
-if ! ffmpeg -buildconf 2>/dev/null | grep -qE 'libjxl'; then
-  echo "Error: ffmpeg is not compiled with libjxl support. Aborting."
-  exit 1
-fi
 
 # Create a timestamped log file (YYYYMMDD_HHMMSS)
 # Capture initial time in seconds since epoch
@@ -70,9 +64,17 @@ for file in "${files[@]}"; do
   echo_elapsed "[$count/$total] Converting: $file -> $output"
 
   orig_size=$(stat -c%s "$file")
-  ffmpeg -y -i "$file" -c:v libjxl -distance $DISTANCE -effort 9 "$output"
-  status=$?
 
+  # Use conditional transcoding based on file type
+  if [[ "$ext_lc" == "jpg" || "$ext_lc" == "jpeg" ]]; then
+    # Use lossless JPEG-to-JXL transcoding. This is extremely fast and reversible.
+    cjxl --effort 9 "$file" "$output" --jpeg_transcode
+  else
+    # Use standard lossless encoding for other formats like PNG or WebP.
+    cjxl --effort 9 "$file" "$output" --lossless
+  fi
+  status=$?
+  
   if [ $status -eq 0 ]; then
     new_size=$(stat -c%s "$output")
     size_diff=$((orig_size - new_size))
