@@ -2,7 +2,7 @@
 
 # This script recursively encodes all(most?) video files in the current directory tree to AV1 format using ab-av1,
 # logging progress with timestamps, and optionally deletes the original files with -d/--delete only if the AV1 output is smaller.
-# 2025.6-2025.8 @thejjw
+# 2025.6-2025.9 @thejjw
 
 LOGFILE="convert_av1_ab-av1_$(date +%Y%m%d_%H%M%S).log"
 SCRIPT_START_TIME=$(date +%s)
@@ -68,12 +68,18 @@ for filepath in "${FILELIST[@]}"; do
     ext="${base##*.}"
     fname="${base%.*}"   # filename without extension
 
+    # Escape brackets in fname for safe globbing
+    safe_fname="${fname//\[ /\[ }"
+    safe_fname="${safe_fname//\] /\\] }"
+    safe_fname="${safe_fname//\*/\\*}"
+    safe_fname="${safe_fname//\?/\\?}"
+
     # Try the most likely output filename first
     av1_path="$dir/$fname.av1.$ext"
     if [ ! -f "$av1_path" ]; then
         # Wait up to 3 seconds for the file to appear
         for i in {1..10}; do
-            av1_path=$(find "$dir" -maxdepth 1 -type f -name "$fname.av1.*" | head -n 1)
+            av1_path=$(find "$dir" -maxdepth 1 -type f -name "$safe_fname.av1.*" | head -n 1)
             [ -n "$av1_path" ] && break
             sleep 0.3
         done
