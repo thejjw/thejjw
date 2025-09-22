@@ -69,8 +69,8 @@ for filepath in "${FILELIST[@]}"; do
     fname="${base%.*}"   # filename without extension
 
     # Escape brackets in fname for safe globbing
-    safe_fname="${fname//\[ /\[ }"
-    safe_fname="${safe_fname//\] /\\] }"
+    safe_fname="${fname//\[/\\[}"
+    safe_fname="${safe_fname//\]/\\]}"
     safe_fname="${safe_fname//\*/\\*}"
     safe_fname="${safe_fname//\?/\\?}"
 
