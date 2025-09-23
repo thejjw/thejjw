@@ -2174,3 +2174,71 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         SNIHost = $SNIHost
     }
 }
+
+function Lock-File {
+<#
+.SYNOPSIS
+Completely locks down a file by removing all explicit and inherited access rules.
+
+.DESCRIPTION
+The Lock-File function disables inheritance on the specified file and removes
+all access control entries (ACEs). This leaves the file with no access rules,
+effectively preventing all users (including Administrators) from accessing it
+until permissions are explicitly restored.
+
+.PARAMETER Path
+The full path to the file you want to lock down.
+
+.EXAMPLE
+Lock-File -Path "C:\Path\To\Secret.txt"
+
+Locks down the file Secret.txt so that no one has access.
+
+.NOTES
+- You may need to run PowerShell as Administrator if the file is in a protected location.
+- To restore access, you must take ownership and reapply permissions manually
+
+Author: jjw(@thejjw)
+Last Edit: Sept 2025
+#>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path $Path)) {
+        Write-Error "The file '$Path' does not exist."
+        return
+    }
+
+    try {
+        # Get current ACL
+        $acl = Get-Acl $Path
+
+        # Disable inheritance and remove inherited rules
+        $acl.SetAccessRuleProtection($true, $false)
+
+        # Remove any explicit rules that might remain
+        $acl.Access | ForEach-Object {
+            $acl.RemoveAccessRule($_) | Out-Null
+        }
+
+        # Apply the stripped ACL back to the file
+        Set-Acl -Path $Path -AclObject $acl
+
+        Write-Output "File '$Path' has been locked down. Current access rules:"
+
+        $rules = (Get-Acl $Path).Access
+        if ($rules.Count -eq 0) {
+            Write-Output "  [Empty: no access rules](expected result)"
+        }
+        else {
+            $rules
+            Write-Error "some access rules are detected(unexpected result)"
+        }
+    }
+    catch {
+        Write-Error "Failed to lock down file '$Path'. Error: $_"
+    }
+}
