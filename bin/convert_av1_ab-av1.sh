@@ -26,7 +26,7 @@ log() {
 }
 
 # Find all files and save to an array, filtering out those already encoded
-mapfile -t ALL_FILES < <(find . \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.mov" -o -iname "*.mpg" -o -iname "*.avi" -o -iname "*.wmv" -o -iname "*.webm" -o -iname "*.ts" -o -iname "*.3gp" \))
+mapfile -t ALL_FILES < <(find . \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.mov" -o -iname "*.mpg" -o -iname "*.avi" -o -iname "*.wmv" -o -iname "*.webm" -o -iname "*.ts" -o -iname "*.3gp" -o -iname "*.flv" \))
 
 # Filter out files that are already AV1 encoded (end with .av1.{extension})
 FILELIST=()
