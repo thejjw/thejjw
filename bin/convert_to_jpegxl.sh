@@ -14,7 +14,7 @@ done
 shift $((OPTIND -1))
 
 # Check for required tools
-for tool in ffprobe cjxl; do
+for tool in ffprobe cjxl bc; do
   command -v "$tool" >/dev/null 2>&1 || { echo "Error: '$tool' is not installed or not in PATH. Aborting."; exit 1; }
 done
 
@@ -26,12 +26,14 @@ START_TIME=$(date +%s)
 START_HUMAN=$(date "+%Y-%m-%d %H:%M:%S")
 echo "Script started at: $START_HUMAN" | tee -a "$LOG_FILE"
 
-# Function to echo with elapsed time (to both console and log file)
+# Function to echo with timestamp and elapsed time (to both console and log file)
 echo_elapsed() {
-  local now elapsed
-  now=$(date +%s)
-  elapsed=$((now - START_TIME))
-  printf "[+%ds] %s\n" "$elapsed" "$1" | tee -a "$LOG_FILE"
+  local now now_s elapsed elapsed_fmt
+  now=$(date '+[%Y-%m-%d %H:%M:%S]')
+  now_s=$(date +%s)
+  elapsed=$((now_s - START_TIME))
+  elapsed_fmt=$(printf '[%02d:%02d:%02d]' $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60)))
+  echo "$now $elapsed_fmt $1" | tee -a "$LOG_FILE"
 }
 
 # Build find expression using an array
@@ -43,6 +45,10 @@ fi
 mapfile -t files < <(find . -type f \( "${find_args[@]}" \))
 total=${#files[@]}
 echo_elapsed "Total files to process: $total"
+
+total_orig_size=0
+total_jxl_size=0
+successful_conversions=0
 
 count=0
 for file in "${files[@]}"; do
@@ -81,6 +87,10 @@ for file in "${files[@]}"; do
     percent=0
     [ "$orig_size" -gt 0 ] && percent=$((100 * size_diff / orig_size))
 
+    total_orig_size=$((total_orig_size + orig_size))
+    total_jxl_size=$((total_jxl_size + new_size))
+    successful_conversions=$((successful_conversions + 1))
+
     echo_elapsed "Success! $file: $orig_size bytes -> $new_size bytes (${percent}% change)."
 
     if [ "$DELETE_ORIGINAL" -eq 1 ]; then
@@ -98,5 +108,15 @@ for file in "${files[@]}"; do
     echo_elapsed "Conversion failed for: $file"
   fi
 done
+
+saved=$((total_orig_size - total_jxl_size))
+reduction_percent=0
+if [ "$total_orig_size" -gt 0 ]; then reduction_percent=$((100 * saved / total_orig_size)); fi
+
+orig_mb=$(echo "scale=1; $total_orig_size / 1048576" | bc)
+jxl_mb=$(echo "scale=1; $total_jxl_size / 1048576" | bc)
+saved_mb=$(echo "scale=1; $saved / 1048576" | bc)
+
+echo_elapsed "Summary: $successful_conversions files converted. Total original: ${orig_mb} MB, Total JXL: ${jxl_mb} MB, Saved: ${saved_mb} MB (${reduction_percent}% reduction)."
 
 echo_elapsed "Script completed."
