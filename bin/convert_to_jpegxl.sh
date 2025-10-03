@@ -15,7 +15,7 @@ shift $((OPTIND -1))
 
 # Check for required tools
 for tool in ffprobe cjxl bc; do
-  command -v "$tool" >/dev/null 2>&1 || { echo "Error: '$tool' is not installed or not in PATH. Aborting."; exit 1; }
+  command -v "$tool" >/dev/null 2>&1 || { echo "Error: '$tool' is not installed or not in PATH. Aborting."; echo "Tip: libjxl-tools provides cjxl (ubuntu)"; exit 1; }
 done
 
 # Create a timestamped log file (YYYYMMDD_HHMMSS)
