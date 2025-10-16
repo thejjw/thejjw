@@ -397,11 +397,19 @@ function Get-NewPasswordNode {
  * https://cs.chromium.org/chromium/src/components/password_manager/core/browser/generation/password_generator.cc?l=93&rcl=a896a3ac4ea731b5ab3d2ab5bd76a139885d5c4f
  * which is Copyright 2018 The Chromium Authors. All rights reserved.
  */
-
-const nodeCrypto = require('crypto');
-global.crypto = {
-    getRandomValues: function(buffer) { return nodeCrypto.randomFillSync(buffer);}
-};
+ 
+// === Patch for Node.js v19+ compatibility ===
+// Use built-in Web Crypto if available; otherwise polyfill it.
+const nodeCrypto = require("crypto");
+if (typeof globalThis.crypto === "undefined") {
+  // Older Node (pre-v19)
+  globalThis.crypto = {
+    getRandomValues: (buffer) => nodeCrypto.randomFillSync(buffer),
+  };
+} else if (!globalThis.crypto.getRandomValues) {
+  // Some environments expose crypto without getRandomValues
+  globalThis.crypto.getRandomValues = (buffer) => nodeCrypto.randomFillSync(buffer);
+}
 
 const EXPORTED_SYMBOLS = ["PasswordGenerator"];
 
