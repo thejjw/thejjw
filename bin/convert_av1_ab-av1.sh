@@ -8,6 +8,10 @@ LOGFILE="convert_av1_ab-av1_$(date +%Y%m%d_%H%M%S).log"
 SCRIPT_START_TIME=$(date +%s)
 DELETE_ORIGINAL=0
 
+# Array of file extensions to search for
+# Add or remove extensions from this list as needed
+EXTENSIONS=( "mp4" "m4v" "mkv" "mov" "mpg" "mpeg" "avi" "wmv" "webm" "ts" "3gp" "flv" )
+
 # Parse optional --delete or -d argument
 if [[ "$1" == "-d" || "$1" == "--delete" ]]; then
     DELETE_ORIGINAL=1
@@ -25,8 +29,17 @@ log() {
     echo "$now $elapsed_fmt $*" | tee -a "$LOGFILE"
 }
 
-# Find all files and save to an array, filtering out those already encoded
-mapfile -t ALL_FILES < <(find . \( -iname "*.mp4" -o -iname "*.m4v" -o -iname "*.mkv" -o -iname "*.mov" -o -iname "*.mpg" -o -iname "*.avi" -o -iname "*.wmv" -o -iname "*.webm" -o -iname "*.ts" -o -iname "*.3gp" -o -iname "*.flv" \))
+# Prepare the arguments for the find command
+FIND_ARGS=()
+for EXT in "${EXTENSIONS[@]}"; do
+    FIND_ARGS+=( -o -iname "*.${EXT}" )
+done
+
+# Remove the initial "-o" from the arguments
+unset FIND_ARGS[0]
+
+# Find all files with the specified extensions and save to an array, filtering out those already encoded
+mapfile -t ALL_FILES < <(find . \( "${FIND_ARGS[@]}" \))
 
 # Filter out files that are already AV1 encoded (end with .av1.{extension})
 FILELIST=()
