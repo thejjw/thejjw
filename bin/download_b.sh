@@ -19,3 +19,5 @@ if ! grep -q 'export PATH="$HOME/bin:$PATH"' "$HOME/.bashrc"; then
   echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
   echo "Added ~/bin to PATH in .bashrc"
 fi
+
+rm -rf thejjw
