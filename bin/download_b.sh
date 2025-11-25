@@ -6,6 +6,7 @@
 # Exit on any error
 set -e
 
+pushd ~
 git clone --filter=blob:none --no-checkout https://github.com/thejjw/thejjw.git
 cd thejjw
 git sparse-checkout init --cone
@@ -18,6 +19,9 @@ cp -arv bin/* ~/bin/
 if ! grep -q 'export PATH="$HOME/bin:$PATH"' "$HOME/.bashrc"; then
   echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
   echo "Added ~/bin to PATH in .bashrc"
+else
+  echo "~/bin already in PATH in .bashrc"
 fi
 
 rm -rf thejjw
+popd
