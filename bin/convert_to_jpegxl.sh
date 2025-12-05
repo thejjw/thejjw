@@ -1,12 +1,35 @@
   #!/bin/bash
 # 2025.9 @thejjw
 
-# Set the distance parameter to 0 for lossless
+# Set the distance parameter to 0 for lossless (JPEG), non-JPEG uses -d 1.0 by default
 DELETE_ORIGINAL=0
 INCLUDE_WEBP=0
 
-while getopts "dw" opt; do
+usage() {
+  cat <<HELP
+Usage: $(basename "$0") [OPTIONS]
+
+Options:
+  -d        Delete original files when output .jxl is smaller
+  -w        Include .webp files in the search (skips animated webp)
+  -h, --help  Show this help and exit
+
+Description:
+  Converts images in the current directory and subdirectories to JPEG XL (.jxl).
+  JPEGs are transcoded losslessly; other formats use cjxl -e 9 -d 1.0 by default.
+HELP
+}
+
+for arg in "$@"; do
+  if [[ "$arg" == "--help" ]]; then
+    usage
+    exit 0
+  fi
+done
+
+while getopts "hdw" opt; do
   case $opt in
+    h) usage; exit 0 ;;
     d) DELETE_ORIGINAL=1 ;;
     w) INCLUDE_WEBP=1 ;;
   esac
@@ -76,8 +99,8 @@ for file in "${files[@]}"; do
     # Use lossless JPEG-to-JXL transcoding. This is extremely fast and reversible.
     cjxl --effort 9 "$file" "$output" --lossless_jpeg=1
   else
-    # Use standard lossless encoding for other formats like PNG or WebP.
-    cjxl --effort 9 "$file" "$output" --lossless
+    # Use standard encoding for other formats like PNG or WebP; set -d 1.0 by default
+    cjxl --effort 9 --distance 1.0 "$file" "$output"
   fi
   status=$?
   
