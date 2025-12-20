@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # AV1 Transcode Script
 # 30%(40% -lq) reduction for h264, 20%(30% -lq) reduction for hevc
