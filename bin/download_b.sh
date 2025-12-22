@@ -23,5 +23,6 @@ else
   echo "~/bin already in PATH in .bashrc"
 fi
 
-rm -rf thejjw
 popd
+rm -rf ~/thejjw
+echo "Installation complete. Please restart your terminal or run 'source ~/.bashrc' to update your PATH."
