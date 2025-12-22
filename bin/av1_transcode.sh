@@ -18,10 +18,12 @@ DIRECTORY
   Root directory to scan (default: .)
 
 OPTIONS
-  -d                    Delete original after successful conversion ONLY if output is smaller.
+  -d, --delete          Delete original after successful conversion ONLY if output is smaller.
                         If output is not smaller, output is deleted and original is kept.
   --dry-run             Do not encode. Only list what would be processed and the target bitrates
                         including estimated size change.
+  -f, --filter          Apply video filter chain during encode:
+                        unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4,gradfun=20:0.5
   --low-quality, --lq, -l
                         Use more aggressive bitrate reduction:
                           * h264  -> 40% less (target = 0.60 * source)
@@ -177,11 +179,14 @@ DELETE_ORIGINAL=false
 DRY_RUN=false
 QUALITY_MODE="normal"
 ROOT="."
+APPLY_FILTER=false
+FILTER_CHAIN='unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4,gradfun=20:0.5'
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -d) DELETE_ORIGINAL=true; shift ;;
+    -d|--delete) DELETE_ORIGINAL=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
+    -f|--filter) APPLY_FILTER=true; shift ;;
     --low-quality|--lq|-l) QUALITY_MODE="low"; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
@@ -232,6 +237,11 @@ log "Quality mode    : $QUALITY_MODE"
 log "Log             : $LOGFILE"
 log "Extensions      : ${EXTENSIONS[*]}"
 log "FFmpeg opts     : ${FFMPEG_OPTS[*]}"
+if $APPLY_FILTER; then
+  log "Video filter    : ENABLED -> $FILTER_CHAIN"
+else
+  log "Video filter    : disabled"
+fi
 
 if [[ "$QUALITY_MODE" == "low" ]]; then
   H264_FACTOR="0.60"
@@ -347,6 +357,9 @@ if $DRY_RUN; then
     log "[$((i+1))/${#PLAN_FILES[@]}] codec=$c src≈${src_kbps} kbps ($(fmt_bytes "$orig_b")) target=${tgt} kbps (~$(fmt_bytes "$est_b"))"
     log "  in : $f"
     log "  out: ${PLAN_OUT[$i]}"
+    if $APPLY_FILTER; then
+      log "  vf : $FILTER_CHAIN"
+    fi
   done
   log_scope_run
   log "Dry-run complete. Total elapsed: $(fmt_seconds $(( $(date +%s) - RUN_START_EPOCH )))"
@@ -388,9 +401,15 @@ for i in "${!PLAN_FILES[@]}"; do
 
   log "FFmpeg pass 1..."
   set +e
+  # Optional filter args for v:0
+  VF_ARGS=()
+  if $APPLY_FILTER; then
+    VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
+  fi
   ffmpeg "${FFMPEG_OPTS[@]}" -y \
     -i "$FILE" \
     -map 0:v:0 \
+    "${VF_ARGS[@]}" \
     -c:v libsvtav1 -b:v "${TARGET_KBPS}k" \
     -pass 1 -passlogfile "$PASS_PREFIX" \
     -an -sn -dn \
@@ -408,10 +427,16 @@ for i in "${!PLAN_FILES[@]}"; do
 
   log "FFmpeg pass 2..."
   set +e
+  # Reuse VF_ARGS for pass 2
+  VF_ARGS=()
+  if $APPLY_FILTER; then
+    VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
+  fi
   ffmpeg "${FFMPEG_OPTS[@]}" -y \
     -i "$FILE" \
     -map 0 -map_metadata 0 -map_chapters 0 \
     -c copy \
+    "${VF_ARGS[@]}" \
     -c:v:0 libsvtav1 -b:v:0 "${TARGET_KBPS}k" \
     -pass 2 -passlogfile "$PASS_PREFIX" \
     "$OUT"
