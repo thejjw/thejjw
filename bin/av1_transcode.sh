@@ -24,10 +24,13 @@ OPTIONS
                         including estimated size change.
   -f, --filter          Apply video filter chain during encode:
                         unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4,gradfun=20:0.5
-  --low-quality, --lq, -l
-                        Use more aggressive bitrate reduction:
-                          * h264  -> 40% less (target = 0.60 * source)
-                          * hevc  -> 30% less (target = 0.70 * source)
+  --quality <low|1gb|2gb>
+                        Quality preset:
+                          * low  → h264 target = 60% (40% less), hevc target = 70% (30% less)
+                          * 1gb  → compute video bitrate to target ~1 GiB total size
+                          * 2gb  → compute video bitrate to target ~2 GiB total size
+                        All presets use 2-pass SVT-AV1.
+                        Default (no --quality): h264 target = 70% (30% less), hevc target = 80% (20% less).
   -h, --help            Show this help.
 
 Output naming
@@ -154,6 +157,28 @@ get_video_bitrate_bps() {
   }'
 }
 
+# Sum audio bitrates across all audio streams. Fallback to 128 kbps if unknown.
+get_audio_bitrate_sum_bps() {
+  local f="$1"
+  local total=0
+  local any=0
+  while IFS= read -r br; do
+    if [[ -n "$br" && "$br" != "N/A" && "$br" != "0" ]]; then
+      any=1
+      total=$(( total + br ))
+    fi
+  done < <(ffprobe -v error -select_streams a \
+            -show_entries stream=bit_rate \
+            -of default=nk=1:nw=1 -- "$f" 2>/dev/null)
+
+  if [[ "$any" -eq 0 ]]; then
+    # Assume 128 kbps for audio when unknown
+    echo 128000
+  else
+    echo "$total"
+  fi
+}
+
 compute_target_kbps() {
   local src_bps="$1"
   local factor="$2"
@@ -181,13 +206,26 @@ QUALITY_MODE="normal"
 ROOT="."
 APPLY_FILTER=false
 FILTER_CHAIN='unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4,gradfun=20:0.5'
+TARGET_SIZE_BYTES=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -d|--delete) DELETE_ORIGINAL=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     -f|--filter) APPLY_FILTER=true; shift ;;
-    --low-quality|--lq|-l) QUALITY_MODE="low"; shift ;;
+    --quality)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --quality requires a value (low|1gb|2gb)" >&2
+        usage
+        exit 1
+      fi
+      case "$2" in
+        low) QUALITY_MODE="low" ;;
+        1gb) QUALITY_MODE="size"; TARGET_SIZE_BYTES=$((1000*1000*1000)) ;;
+        2gb) QUALITY_MODE="size"; TARGET_SIZE_BYTES=$((2*1000*1000*1000)) ;;
+        *) echo "ERROR: unknown --quality value: $2" >&2; usage; exit 1 ;;
+      esac
+      shift 2 ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     -*)
@@ -234,6 +272,9 @@ log "Root            : $ROOT"
 log "Delete original : $DELETE_ORIGINAL"
 log "Dry-run         : $DRY_RUN"
 log "Quality mode    : $QUALITY_MODE"
+if [[ "$QUALITY_MODE" == "size" ]]; then
+  log "Target size     : $(fmt_bytes "$TARGET_SIZE_BYTES")"
+fi
 log "Log             : $LOGFILE"
 log "Extensions      : ${EXTENSIONS[*]}"
 log "FFmpeg opts     : ${FFMPEG_OPTS[*]}"
@@ -246,9 +287,15 @@ fi
 if [[ "$QUALITY_MODE" == "low" ]]; then
   H264_FACTOR="0.60"
   HEVC_FACTOR="0.70"
-  log "Bitrate rule    : LOW-QUALITY (--low-quality/--lq/-l)"
+  log "Bitrate rule    : LOW-QUALITY (--quality low)"
   log "  h264 target   : 60% of detected bitrate (40% less)"
   log "  hevc target   : 70% of detected bitrate (30% less)"
+elif [[ "$QUALITY_MODE" == "size" ]]; then
+  # For size-targeted mode, factors not used; bitrate derived from duration & audio.
+  H264_FACTOR="0.00"
+  HEVC_FACTOR="0.00"
+  log "Bitrate rule    : SIZE-TARGET (~$(fmt_bytes "$TARGET_SIZE_BYTES"))"
+  log "  video target  : computed to fit total size minus audio"
 else
   H264_FACTOR="0.70"
   HEVC_FACTOR="0.80"
@@ -316,9 +363,23 @@ for FILE in "${CANDIDATES[@]}"; do
     continue
   fi
 
-  TARGET_KBPS="$(compute_target_kbps "$SRC_BPS" "$FACTOR")"
   ORIG_BYTES="$(stat -c%s -- "$FILE")"
-  EST_TGT_BYTES="$(estimate_target_bytes_from_ratio "$ORIG_BYTES" "$SRC_BPS" "$TARGET_KBPS")"
+  if [[ "$QUALITY_MODE" == "size" ]]; then
+    # Derive target video kbps from desired total size and duration, subtracting audio bps.
+    DUR="$(get_format_duration "$FILE")"
+    AUDIO_BPS="$(get_audio_bitrate_sum_bps "$FILE")"
+    # total bps to meet size (bytes*8/duration):
+    TOTAL_BPS=$(awk -v bytes="$TARGET_SIZE_BYTES" -v dur="$DUR" 'BEGIN{ if(dur<=0){print 0} else { printf "%.0f", (bytes*8)/dur } }')
+    VIDEO_BPS=$(( TOTAL_BPS - AUDIO_BPS ))
+    if (( VIDEO_BPS <= 0 )); then
+      VIDEO_BPS=250000
+    fi
+    TARGET_KBPS=$(( (VIDEO_BPS + 500) / 1000 ))
+    EST_TGT_BYTES="$TARGET_SIZE_BYTES"
+  else
+    TARGET_KBPS="$(compute_target_kbps "$SRC_BPS" "$FACTOR")"
+    EST_TGT_BYTES="$(estimate_target_bytes_from_ratio "$ORIG_BYTES" "$SRC_BPS" "$TARGET_KBPS")"
+  fi
 
   BASE="${FILE%.*}"
   OUT="${BASE}.av1.r.mkv"
