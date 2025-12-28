@@ -23,7 +23,7 @@ OPTIONS
   --dry-run             Do not encode. Only list what would be processed and the target bitrates
                         including estimated size change.
   -f, --filter          Apply video filter chain during encode:
-                        unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4,gradfun=0.5:20
+                        unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4
   --quality <low|1gb|2gb>
                         Quality preset:
                           * low  → h264 target = 60% (40% less), hevc target = 70% (30% less)
@@ -205,7 +205,7 @@ DRY_RUN=false
 QUALITY_MODE="normal"
 ROOT="."
 APPLY_FILTER=false
-FILTER_CHAIN='unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4,gradfun=0.5:20'
+FILTER_CHAIN='unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4'
 TARGET_SIZE_BYTES=0
 
 while [[ $# -gt 0 ]]; do
