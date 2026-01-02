@@ -7,7 +7,7 @@
 set -u
 set -o pipefail
 
-EXTENSIONS=( "mp4" "m4v" "mkv" "mov" "avi" "webm" "ts" "m2ts" "mts" )
+EXTENSIONS=( "mp4" "m4v" "mkv" "mov" "mpg" "mpeg" "avi" "wmv" "webm" "ts" "3gp" "flv" "m2ts" "mts" "f4v" "rmvb" "rm" "ogv" "divx" "xvid" )
 
 usage() {
   cat <<'EOF'
@@ -22,6 +22,7 @@ OPTIONS
                         If output is not smaller, output is deleted and original is kept.
   --dry-run             Do not encode. Only list what would be processed and the target bitrates
                         including estimated size change.
+  -e, --everything     Encode any supported video codec (default encodes only h264/hevc/h265).
   -f, --filter          Apply video filter chain during encode:
                         unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4
   --quality <low|1gb|2gb>
@@ -46,7 +47,8 @@ FFmpeg verbosity / progress
 Behavior summary
   - Recursively finds files by extension under DIRECTORY.
   - Probes each candidate via ffprobe:
-      * Only processes v:0 codec: h264 or hevc/h265 (skips others)
+      * Default: only processes v:0 codec h264 or hevc/h265 (skips others)
+      * With --everything: processes any detected video codec (h264 rules for bitrate)
       * Derives bitrate from:
           1) v:0 stream bit_rate, else
           2) format bit_rate, else
@@ -207,11 +209,13 @@ ROOT="."
 APPLY_FILTER=false
 FILTER_CHAIN='unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4'
 TARGET_SIZE_BYTES=0
+EVERYTHING=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -d|--delete) DELETE_ORIGINAL=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
+    -e|--everything) EVERYTHING=true; shift ;;
     -f|--filter) APPLY_FILTER=true; shift ;;
     --quality)
       if [[ $# -lt 2 ]]; then
@@ -271,6 +275,7 @@ log "=== AV1 Transcode Run Started ==="
 log "Root            : $ROOT"
 log "Delete original : $DELETE_ORIGINAL"
 log "Dry-run         : $DRY_RUN"
+log "Everything      : $EVERYTHING"
 log "Quality mode    : $QUALITY_MODE"
 if [[ "$QUALITY_MODE" == "size" ]]; then
   log "Target size     : $(fmt_bytes "$TARGET_SIZE_BYTES")"
@@ -302,6 +307,9 @@ else
   log "Bitrate rule    : NORMAL"
   log "  h264 target   : 70% of detected bitrate (30% less)"
   log "  hevc target   : 80% of detected bitrate (20% less)"
+fi
+if $EVERYTHING; then
+  log "Everything mode : non-h264/hevc use h264 bitrate rule"
 fi
 log "Bitrate detect  : v:0 stream bit_rate -> format bit_rate -> avg(size/duration)"
 log "Target floor    : 250 kbps"
@@ -354,7 +362,14 @@ for FILE in "${CANDIDATES[@]}"; do
   case "$CODEC" in
     h264) FACTOR="$H264_FACTOR" ;;
     hevc|h265) FACTOR="$HEVC_FACTOR" ;;
-    *) FILES_SKIPPED=$((FILES_SKIPPED+1)); continue ;;
+    *)
+      if $EVERYTHING; then
+        FACTOR="$H264_FACTOR"
+      else
+        FILES_SKIPPED=$((FILES_SKIPPED+1))
+        continue
+      fi
+      ;;
   esac
 
   SRC_BPS="$(get_video_bitrate_bps "$FILE")"

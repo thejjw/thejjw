@@ -10,7 +10,7 @@ DELETE_ORIGINAL=0
 
 # Array of file extensions to search for
 # Add or remove extensions from this list as needed
-EXTENSIONS=( "mp4" "m4v" "mkv" "mov" "mpg" "mpeg" "avi" "wmv" "webm" "ts" "3gp" "flv" )
+EXTENSIONS=( "mp4" "m4v" "mkv" "mov" "mpg" "mpeg" "avi" "wmv" "webm" "ts" "3gp" "flv" "m2ts" "mts" "f4v" "rmvb" "rm" "ogv" "divx" "xvid" )
 
 # Parse optional --delete or -d argument
 if [[ "$1" == "-d" || "$1" == "--delete" ]]; then
