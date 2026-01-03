@@ -595,13 +595,103 @@ for i in "${!PLAN_FILES[@]}"; do
     "${VF_ARGS[@]}" \
     -c:v:0 libsvtav1 -b:v:0 "${TARGET_KBPS}k" \
     -pass 2 -passlogfile "$PASS_PREFIX" \
-    "$OUT"
+    "$OUT" 2>&1 | tee /tmp/ffmpeg_pass2.log
   RC2=$?
   set -e
 
   rm -rf "$PASSDIR" 2>/dev/null || true
 
-  if [[ "$RC2" -ne 0 || ! -s "$OUT" ]]; then
+  # Check for matroska header write error - indicates corrupted/problematic input container
+  if [[ "$RC2" -ne 0 ]] && grep -q "Could not write header" /tmp/ffmpeg_pass2.log 2>/dev/null; then
+    log "ERROR: Matroska header write error detected. Container may be corrupted."
+    log "Attempting to fix by re-muxing input file to clean MKV..."
+    
+    # Create a clean MKV copy of the input
+    REMUX_FILE="${FILE}.remux.mkv"
+    log "Creating clean MKV: $REMUX_FILE"
+    set +e
+    ffmpeg "${FFMPEG_OPTS[@]}" -y \
+      -i "$FILE" \
+      -map 0 -map_metadata 0 -map_chapters 0 \
+      -c copy \
+      "$REMUX_FILE"
+    REMUX_RC=$?
+    set -e
+    
+    if [[ "$REMUX_RC" -eq 0 && -s "$REMUX_FILE" ]]; then
+      log "Re-mux successful. Replacing original and retrying transcode..."
+      
+      # Replace original with remuxed version
+      rm -f -- "$FILE"
+      mv "$REMUX_FILE" "$FILE"
+      
+      # Retry pass 1
+      PASSDIR="$(mktemp -d -t av1pass_retry_XXXXXXXX)"
+      PASS_PREFIX="${PASSDIR}/ffmpeg2pass"
+      log "Retry: FFmpeg pass 1..."
+      set +e
+      VF_ARGS=()
+      if $APPLY_FILTER; then
+        VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
+      fi
+      ffmpeg "${FFMPEG_OPTS[@]}" -y \
+        -i "$FILE" \
+        -map 0:v:0 \
+        "${VF_ARGS[@]}" \
+        -c:v libsvtav1 -b:v "${TARGET_KBPS}k" \
+        -pass 1 -passlogfile "$PASS_PREFIX" \
+        -an -sn -dn \
+        -f null /dev/null
+      RC1=$?
+      set -e
+      
+      if [[ "$RC1" -ne 0 ]]; then
+        log "ERROR: Retry pass 1 failed (exit=$RC1)."
+        rm -rf "$PASSDIR" 2>/dev/null || true
+        FILES_FAILED=$((FILES_FAILED+1))
+        log_scope_run
+        continue
+      fi
+      
+      # Retry pass 2
+      log "Retry: FFmpeg pass 2..."
+      set +e
+      VF_ARGS=()
+      if $APPLY_FILTER; then
+        VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
+      fi
+      ffmpeg "${FFMPEG_OPTS[@]}" -y \
+        -i "$FILE" \
+        -map 0 -map_metadata 0 -map_chapters 0 \
+        "${VF_ARGS[@]}" \
+        -c:v:0 libsvtav1 -b:v:0 "${TARGET_KBPS}k" \
+        -c:a copy -c:s copy -c:d copy -c:t copy \
+        -c:v:1 copy -c:v:2 copy -c:v:3 copy -c:v:4 copy -c:v:5 copy \
+        -pass 2 -passlogfile "$PASS_PREFIX" \
+        "$OUT"
+      RC2=$?
+      set -e
+      
+      rm -rf "$PASSDIR" 2>/dev/null || true
+      
+      if [[ "$RC2" -ne 0 || ! -s "$OUT" ]]; then
+        log "ERROR: Retry pass 2 failed or output missing/empty (exit=$RC2)."
+        rm -f -- "$OUT" 2>/dev/null || true
+        FILES_FAILED=$((FILES_FAILED+1))
+        log_scope_run
+        continue
+      fi
+      
+      log "SUCCESS: Transcode completed after re-mux."
+    else
+      log "ERROR: Re-mux failed (exit=$REMUX_RC). Giving up on this file."
+      rm -f -- "$REMUX_FILE" 2>/dev/null || true
+      rm -f -- "$OUT" 2>/dev/null || true
+      FILES_FAILED=$((FILES_FAILED+1))
+      log_scope_run
+      continue
+    fi
+  elif [[ "$RC2" -ne 0 || ! -s "$OUT" ]]; then
     log "ERROR: pass 2 failed or output missing/empty (exit=$RC2)."
     rm -f -- "$OUT" 2>/dev/null || true
     FILES_FAILED=$((FILES_FAILED+1))
