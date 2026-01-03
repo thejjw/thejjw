@@ -74,12 +74,12 @@ need_cmd() {
 
 has_encoder() {
   local enc="$1"
-  ffmpeg -hide_banner -encoders 2>/dev/null | awk '{print $2}' | grep -qx "$enc"
+  ffmpeg -hide_banner -encoders 2>&1 | awk '{print $2}' | grep -qx "$enc"
 }
 
 has_filter() {
   local filter="$1"
-  ffmpeg -hide_banner -filters 2>/dev/null | grep -qw "$filter"
+  ffmpeg -hide_banner -filters 2>&1 | grep -qw "$filter"
 }
 
 fmt_seconds() {
