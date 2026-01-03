@@ -18,7 +18,12 @@ DIRECTORY
   Root directory to scan (default: .)
 
 OPTIONS
-  -d, --delete          Delete original after successful conversion ONLY if output is smaller.
+  -d, --delete          Delete original after successful conversion ONLY if:
+                        1) Output is smaller, AND
+                        2) VMAF score is 90 or above.
+                        If output is not smaller, output is deleted and original is kept.
+  --delete-always       Delete original after successful conversion if output is smaller,
+                        regardless of VMAF score. (Original -d behavior)
                         If output is not smaller, output is deleted and original is kept.
   --dry-run             Do not encode. Only list what would be processed and the target bitrates
                         including estimated size change.
@@ -72,6 +77,11 @@ has_encoder() {
   ffmpeg -hide_banner -encoders 2>/dev/null | awk '{print $2}' | grep -qx "$enc"
 }
 
+has_filter() {
+  local filter="$1"
+  ffmpeg -hide_banner -filters 2>/dev/null | grep -qw "$filter"
+}
+
 fmt_seconds() {
   local s="$1"
   local h=$((s/3600))
@@ -114,6 +124,57 @@ log() {
 # -stats_period is documented as the update period for stats/progress. :contentReference[oaicite:4]{index=4}
 # -stats forces periodic stats even when loglevel is set. :contentReference[oaicite:5]{index=5}
 FFMPEG_OPTS=( -hide_banner -loglevel warning -stats -stats_period 300 )
+
+# Calculate VMAF score between distorted (output) and reference (original) video
+calculate_vmaf() {
+  local distorted="$1"
+  local reference="$2"
+  local json_log="$(mktemp -t vmaf_XXXXXXXX.json)"
+  
+  log "Calculating VMAF score..."
+  
+  # Run ffmpeg with libvmaf filter
+  set +e
+  ffmpeg -hide_banner -loglevel error \
+    -i "$distorted" \
+    -i "$reference" \
+    -lavfi "libvmaf=log_path='${json_log}':log_fmt=json" \
+    -f null - 2>&1
+  local rc=$?
+  set -e
+  
+  if [[ $rc -ne 0 || ! -s "$json_log" ]]; then
+    log "WARNING: VMAF calculation failed (exit=$rc)"
+    rm -f "$json_log" 2>/dev/null || true
+    echo "0"
+    return 1
+  fi
+  
+  # Extract pooled VMAF score from JSON
+  local vmaf_score
+  vmaf_score=$(awk '
+    /"pooled_metrics":/ { in_pooled=1; next }
+    in_pooled && /"vmaf":/ {
+      match($0, /"mean"[[:space:]]*:[[:space:]]*([0-9.]+)/, arr);
+      if (arr[1] != "") {
+        printf "%.0f", arr[1];
+        exit;
+      }
+    }
+    /}/ { in_pooled=0 }
+  ' "$json_log")
+  
+  rm -f "$json_log" 2>/dev/null || true
+  
+  if [[ -z "$vmaf_score" ]]; then
+    log "WARNING: Could not parse VMAF score from JSON"
+    echo "0"
+    return 1
+  fi
+  
+  echo "$vmaf_score"
+  return 0
+}
 
 get_video_codec() {
   local f="$1"
@@ -203,6 +264,7 @@ estimate_target_bytes_from_ratio() {
 
 # ---------------- option parsing ----------------
 DELETE_ORIGINAL=false
+DELETE_ALWAYS=false
 DRY_RUN=false
 QUALITY_MODE="normal"
 ROOT="."
@@ -214,6 +276,7 @@ EVERYTHING=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -d|--delete) DELETE_ORIGINAL=true; shift ;;
+    --delete-always) DELETE_ORIGINAL=true; DELETE_ALWAYS=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     -e|--everything) EVERYTHING=true; shift ;;
     -f|--filter) APPLY_FILTER=true; shift ;;
@@ -266,14 +329,31 @@ if ! has_encoder "libsvtav1"; then
   exit 1
 fi
 
+if ! has_filter "libvmaf"; then
+  echo "ERROR: ffmpeg does not have 'libvmaf' filter support." >&2
+  echo "       VMAF scoring is required. Install FFmpeg with libvmaf enabled." >&2
+  exit 1
+fi
+
 TS="$(date +%Y%m%d_%H%M%S)"
 LOGFILE="transcode_av1_${TS}.log"
 exec > >(tee -a "$LOGFILE") 2>&1
 log_init
 
+# Array to track files with VMAF < 90
+LOW_VMAF_FILES=()
+
 log "=== AV1 Transcode Run Started ==="
 log "Root            : $ROOT"
-log "Delete original : $DELETE_ORIGINAL"
+if $DELETE_ORIGINAL; then
+  if $DELETE_ALWAYS; then
+    log "Delete original : YES (always, if smaller)"
+  else
+    log "Delete original : YES (if smaller AND VMAF >= 90)"
+  fi
+else
+  log "Delete original : NO"
+fi
 log "Dry-run         : $DRY_RUN"
 log "Everything      : $EVERYTHING"
 log "Quality mode    : $QUALITY_MODE"
@@ -535,11 +615,49 @@ for i in "${!PLAN_FILES[@]}"; do
   SAVED_BYTES=$((ORIG_BYTES - NEW_BYTES))
   SAVED_PCT="$(awk -v o="$ORIG_BYTES" -v n="$NEW_BYTES" 'BEGIN{ if(o<=0){print "0.00"} else {printf "%.2f", (o-n)*100.0/o} }')"
   log "Size: original=$(fmt_bytes "$ORIG_BYTES") new=$(fmt_bytes "$NEW_BYTES") saved=$(fmt_bytes "$SAVED_BYTES") (${SAVED_PCT}%)"
+  
+  # Calculate VMAF score and rename output file
+  VMAF_SCORE=$(calculate_vmaf "$OUT" "$FILE")
+  if [[ "$VMAF_SCORE" != "0" ]]; then
+    log "VMAF score: $VMAF_SCORE"
+    
+    # Rename output to include VMAF score: basename.VMAF.av1.r.mkv
+    BASE="${FILE%.*}"
+    OUT_DIR="$(dirname "$OUT")"
+    OUT_NAME="$(basename "$OUT")"
+    
+    # Check if timestamp was added to output name
+    if [[ "$OUT_NAME" =~ \.av1\.r\.[0-9]{8}_[0-9]{6}\.mkv$ ]]; then
+      # Has timestamp: basename.av1.r.YYYYmmdd_HHMMSS.mkv -> basename.VMAF.av1.r.YYYYmmdd_HHMMSS.mkv
+      NEW_OUT="${OUT%.av1.r.*.mkv}.${VMAF_SCORE}.av1.r.${TS}.mkv"
+    else
+      # No timestamp: basename.av1.r.mkv -> basename.VMAF.av1.r.mkv
+      NEW_OUT="${BASE}.${VMAF_SCORE}.av1.r.mkv"
+    fi
+    
+    mv "$OUT" "$NEW_OUT"
+    log "Renamed to: $NEW_OUT"
+    OUT="$NEW_OUT"
+    
+    # Track files with VMAF < 90
+    if (( VMAF_SCORE < 90 )); then
+      LOW_VMAF_FILES+=("$OUT (VMAF: $VMAF_SCORE)")
+    fi
+  fi
 
   if $DELETE_ORIGINAL; then
     if (( NEW_BYTES < ORIG_BYTES )); then
-      rm -f -- "$FILE"
-      log "Deleted original (output is smaller)."
+      # Check VMAF requirement unless --delete-always is used
+      if $DELETE_ALWAYS || (( VMAF_SCORE >= 90 )); then
+        rm -f -- "$FILE"
+        if $DELETE_ALWAYS; then
+          log "Deleted original (output is smaller, --delete-always)."
+        else
+          log "Deleted original (output is smaller and VMAF >= 90)."
+        fi
+      else
+        log "Keeping original (VMAF $VMAF_SCORE < 90). Use --delete-always to override."
+      fi
     else
       rm -f -- "$OUT"
       log "Output was not smaller; deleted output and kept original."
@@ -570,6 +688,14 @@ if (( TOTAL_ORIG_BYTES > 0 && TOTAL_NEW_BYTES > 0 )); then
   log "Bytes original   : $(fmt_bytes "$TOTAL_ORIG_BYTES")"
   log "Bytes new        : $(fmt_bytes "$TOTAL_NEW_BYTES")"
   log "Bytes saved      : $(fmt_bytes "$TOTAL_SAVED") (${TOTAL_SAVED_PCT}%)"
+fi
+
+if (( ${#LOW_VMAF_FILES[@]} > 0 )); then
+  log "================================================================================"
+  log "=== Files with VMAF < 90 (may need quality review) ==="
+  for file in "${LOW_VMAF_FILES[@]}"; do
+    log "  $file"
+  done
 fi
 
 log "=== Finished ==="
