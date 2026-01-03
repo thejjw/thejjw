@@ -2,7 +2,7 @@
 
 # AV1 Transcode Script
 # 30%(40% -lq) reduction for h264, 20%(30% -lq) reduction for hevc
-# 2025.12 @thejjw
+# 2025.12-2026.1 @thejjw
 
 set -u
 set -o pipefail
