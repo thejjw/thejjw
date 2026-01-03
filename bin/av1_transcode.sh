@@ -707,7 +707,12 @@ for i in "${!PLAN_FILES[@]}"; do
   log "Size: original=$(fmt_bytes "$ORIG_BYTES") new=$(fmt_bytes "$NEW_BYTES") saved=$(fmt_bytes "$SAVED_BYTES") (${SAVED_PCT}%)"
   
   # Calculate VMAF score and rename output file
-  VMAF_SCORE=$(calculate_vmaf "$OUT" "$FILE")
+  VMAF_SCORE=0
+  if ! VMAF_SCORE=$(calculate_vmaf "$OUT" "$FILE"); then
+    VMAF_SCORE=0
+    log "WARNING: VMAF calculation failed; continuing without VMAF-driven actions."
+  fi
+
   if [[ "$VMAF_SCORE" != "0" ]]; then
     log "VMAF score: $VMAF_SCORE"
     
