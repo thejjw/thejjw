@@ -46,8 +46,8 @@ Output naming
 
 FFmpeg verbosity / progress
   - This script runs ffmpeg with:
-      -hide_banner -loglevel warning -stats -stats_period 300
-    so you still get progress lines, but only every 300 seconds.
+      -hide_banner -loglevel warning -stats -stats_period 180
+    so you still get progress lines, but only every 180 seconds.
 
 Behavior summary
   - Recursively finds files by extension under DIRECTORY.
