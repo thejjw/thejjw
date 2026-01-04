@@ -131,7 +131,8 @@ calculate_vmaf() {
   local reference="$2"
   local output_log="$(mktemp -t vmaf_output_XXXXXXXX.log)"
   
-  log "Calculating VMAF score..."
+  # Log to stderr to avoid capturing in command substitution
+  log "Calculating VMAF score..." >&2
   
   # Run ffmpeg with libvmaf filter; map only video streams and reset PTS to avoid DTS warnings.
   # Capture all output to parse for "VMAF score: XX.YY"
@@ -146,15 +147,15 @@ calculate_vmaf() {
   local rc=$?
   set -e
   
-  # Parse stderr/stdout for "VMAF score: XX.YY" lines and take the last one
+  # Parse stderr/stdout for "VMAF score: XX.YY" lines and take the last one (preserve 2 decimal places)
   local vmaf_score
-  vmaf_score=$(grep -i "VMAF score:" "$output_log" 2>/dev/null | tail -n 1 | awk -F': ' '{print $2}' | awk '{printf "%.0f", $1}')
+  vmaf_score=$(grep -i "VMAF score:" "$output_log" 2>/dev/null | tail -n 1 | awk -F': ' '{print $2}' | awk '{printf "%.2f", $1}')
   
-  if [[ -z "$vmaf_score" || "$vmaf_score" == "0" ]]; then
-    log "WARNING: Could not parse VMAF score from output (exit=$rc)"
+  if [[ -z "$vmaf_score" || "$vmaf_score" == "0.00" ]]; then
+    log "WARNING: Could not parse VMAF score from output (exit=$rc)" >&2
     if [[ -s "$output_log" ]]; then
-      log "FFmpeg output (last 20 lines):"
-      tail -n 20 "$output_log" | sed 's/^/  /'
+      log "FFmpeg output (last 20 lines):" >&2
+      tail -n 20 "$output_log" | sed 's/^/  /' >&2
     fi
     rm -f "$output_log" 2>/dev/null || true
     echo "0"
@@ -704,7 +705,7 @@ for i in "${!PLAN_FILES[@]}"; do
     log "WARNING: VMAF calculation failed; continuing without VMAF-driven actions."
   fi
 
-  if [[ "$VMAF_SCORE" != "0" ]]; then
+  if [[ "$VMAF_SCORE" != "0" && "$VMAF_SCORE" != "0.00" ]]; then
     log "VMAF score: $VMAF_SCORE"
     
     # Rename output to include VMAF score: basename.VMAF.av1.r.mkv
@@ -725,16 +726,16 @@ for i in "${!PLAN_FILES[@]}"; do
     log "Renamed to: $NEW_OUT"
     OUT="$NEW_OUT"
     
-    # Track files with VMAF < 90
-    if (( VMAF_SCORE < 90 )); then
+    # Track files with VMAF < 90 (use awk for decimal comparison)
+    if awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score < 90) }'; then
       LOW_VMAF_FILES+=("$OUT (VMAF: $VMAF_SCORE)")
     fi
   fi
 
   if $DELETE_ORIGINAL; then
     if (( NEW_BYTES < ORIG_BYTES )); then
-      # Check VMAF requirement unless --delete-always is used
-      if $DELETE_ALWAYS || (( VMAF_SCORE >= 90 )); then
+      # Check VMAF requirement unless --delete-always is used (use awk for decimal comparison)
+      if $DELETE_ALWAYS || awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score >= 90) }'; then
         rm -f -- "$FILE"
         if $DELETE_ALWAYS; then
           log "Deleted original (output is smaller, --delete-always)."
