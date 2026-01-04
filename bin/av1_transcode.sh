@@ -120,60 +120,48 @@ log() {
   printf "[%s] [%s] %s\n" "$now_ts" "$(fmt_seconds "$elapsed")" "$*"
 }
 
-# FFmpeg: quieter logs + progress only every 300s
+# FFmpeg: quieter logs + progress only every 180s
 # -stats_period is documented as the update period for stats/progress. :contentReference[oaicite:4]{index=4}
 # -stats forces periodic stats even when loglevel is set. :contentReference[oaicite:5]{index=5}
-FFMPEG_OPTS=( -hide_banner -loglevel warning -stats -stats_period 300 )
+FFMPEG_OPTS=( -hide_banner -loglevel warning -stats -stats_period 180 )
 
 # Calculate VMAF score between distorted (output) and reference (original) video
 calculate_vmaf() {
   local distorted="$1"
   local reference="$2"
-  local json_log="$(mktemp -t vmaf_XXXXXXXX.json)"
+  local output_log="$(mktemp -t vmaf_output_XXXXXXXX.log)"
   
   log "Calculating VMAF score..."
   
   # Run ffmpeg with libvmaf filter; map only video streams and reset PTS to avoid DTS warnings.
+  # Capture all output to parse for "VMAF score: XX.YY"
   set +e
-  ffmpeg -hide_banner -loglevel warning \
+  ffmpeg -hide_banner -loglevel info \
     -i "$distorted" \
     -i "$reference" \
     -map 0:v:0 -map 1:v:0 \
-    -filter_complex "[0:v:0]setpts=PTS-STARTPTS[dist];[1:v:0]setpts=PTS-STARTPTS[ref];[dist][ref]libvmaf=log_path='${json_log}':log_fmt=json" \
+    -filter_complex "[0:v:0]setpts=PTS-STARTPTS[dist];[1:v:0]setpts=PTS-STARTPTS[ref];[dist][ref]libvmaf" \
     -an -sn -dn \
-    -f null - 2>&1
+    -f null - > "$output_log" 2>&1
   local rc=$?
   set -e
   
-  # If ffmpeg exited non-zero but produced a log, continue parsing; only fail if log is missing/empty.
-  if [[ ! -s "$json_log" ]]; then
-    log "WARNING: VMAF calculation failed (no log; exit=$rc)"
-    rm -f "$json_log" 2>/dev/null || true
-    echo "0"
-    return 1
-  fi
-  
-  # Extract pooled VMAF score from JSON (ignore ffmpeg exit code if log exists)
+  # Parse stderr/stdout for "VMAF score: XX.YY" lines and take the last one
   local vmaf_score
-  vmaf_score=$(awk '
-    /"pooled_metrics":/ { in_pooled=1; next }
-    in_pooled && /"vmaf":/ {
-      match($0, /"mean"[[:space:]]*:[[:space:]]*([0-9.]+)/, arr);
-      if (arr[1] != "") {
-        printf "%.0f", arr[1];
-        exit;
-      }
-    }
-    /}/ { in_pooled=0 }
-  ' "$json_log")
+  vmaf_score=$(grep -i "VMAF score:" "$output_log" 2>/dev/null | tail -n 1 | awk -F': ' '{print $2}' | awk '{printf "%.0f", $1}')
   
-  rm -f "$json_log" 2>/dev/null || true
-  
-  if [[ -z "$vmaf_score" ]]; then
-    log "WARNING: Could not parse VMAF score from JSON"
+  if [[ -z "$vmaf_score" || "$vmaf_score" == "0" ]]; then
+    log "WARNING: Could not parse VMAF score from output (exit=$rc)"
+    if [[ -s "$output_log" ]]; then
+      log "FFmpeg output (last 20 lines):"
+      tail -n 20 "$output_log" | sed 's/^/  /'
+    fi
+    rm -f "$output_log" 2>/dev/null || true
     echo "0"
     return 1
   fi
+  
+  rm -f "$output_log" 2>/dev/null || true
   
   echo "$vmaf_score"
   return 0
