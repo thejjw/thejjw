@@ -133,24 +133,27 @@ calculate_vmaf() {
   
   log "Calculating VMAF score..."
   
-  # Run ffmpeg with libvmaf filter
+  # Run ffmpeg with libvmaf filter; map only video streams and reset PTS to avoid DTS warnings.
   set +e
-  ffmpeg -hide_banner -loglevel error \
+  ffmpeg -hide_banner -loglevel warning \
     -i "$distorted" \
     -i "$reference" \
-    -lavfi "libvmaf=log_path='${json_log}':log_fmt=json" \
+    -map 0:v:0 -map 1:v:0 \
+    -filter_complex "[0:v:0]setpts=PTS-STARTPTS[dist];[1:v:0]setpts=PTS-STARTPTS[ref];[dist][ref]libvmaf=log_path='${json_log}':log_fmt=json" \
+    -an -sn -dn \
     -f null - 2>&1
   local rc=$?
   set -e
   
-  if [[ $rc -ne 0 || ! -s "$json_log" ]]; then
-    log "WARNING: VMAF calculation failed (exit=$rc)"
+  # If ffmpeg exited non-zero but produced a log, continue parsing; only fail if log is missing/empty.
+  if [[ ! -s "$json_log" ]]; then
+    log "WARNING: VMAF calculation failed (no log; exit=$rc)"
     rm -f "$json_log" 2>/dev/null || true
     echo "0"
     return 1
   fi
   
-  # Extract pooled VMAF score from JSON
+  # Extract pooled VMAF score from JSON (ignore ffmpeg exit code if log exists)
   local vmaf_score
   vmaf_score=$(awk '
     /"pooled_metrics":/ { in_pooled=1; next }
