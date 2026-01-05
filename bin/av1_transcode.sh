@@ -431,6 +431,12 @@ for FILE in "${CANDIDATES[@]}"; do
     continue
   fi
 
+  # Skip if video is already AV1 (since we're transcoding to AV1)
+  if [[ "$CODEC" == "av1" ]]; then
+    FILES_SKIPPED=$((FILES_SKIPPED+1))
+    continue
+  fi
+
   case "$CODEC" in
     h264) FACTOR="$H264_FACTOR" ;;
     hevc|h265) FACTOR="$HEVC_FACTOR" ;;
