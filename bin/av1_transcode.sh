@@ -321,6 +321,8 @@ if ! has_encoder "libsvtav1"; then
   exit 1
 fi
 
+sleep 0.5
+
 if ! has_filter "libvmaf"; then
   echo "ERROR: ffmpeg does not have 'libvmaf' filter support." >&2
   echo "       VMAF scoring is required. Install FFmpeg with libvmaf enabled." >&2
