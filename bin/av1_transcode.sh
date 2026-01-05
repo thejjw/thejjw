@@ -77,9 +77,10 @@ has_encoder() {
   ffmpeg -hide_banner -encoders 2>&1 | awk '{print $2}' | grep -qx "$enc"
 }
 
-has_filter() {
-  local filter="$1"
-  ffmpeg -hide_banner -filters 2>&1 | grep -qw "$filter"
+has_libvmaf() {
+  # Check if FFmpeg was built with libvmaf support by examining its configuration.
+  # This is more reliable than using -filters which can be inconsistent.
+  ffmpeg -version 2>&1 | grep -q -- "--enable-libvmaf"
 }
 
 fmt_seconds() {
@@ -321,10 +322,8 @@ if ! has_encoder "libsvtav1"; then
   exit 1
 fi
 
-sleep 0.5
-
-if ! has_filter "libvmaf"; then
-  echo "ERROR: ffmpeg does not have 'libvmaf' filter support." >&2
+if ! has_libvmaf; then
+  echo "ERROR: ffmpeg does not have 'libvmaf' support." >&2
   echo "       VMAF scoring is required. Install FFmpeg with libvmaf enabled." >&2
   exit 1
 fi
