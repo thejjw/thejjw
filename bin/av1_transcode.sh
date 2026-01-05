@@ -738,26 +738,28 @@ for i in "${!PLAN_FILES[@]}"; do
     fi
   fi
 
+  # Always delete output if it's bigger than original (regardless of switch)
+  if (( NEW_BYTES >= ORIG_BYTES )); then
+    rm -f -- "$OUT"
+    log "Output was not smaller; deleted output and kept original."
+    TOTAL_NEW_BYTES=$((TOTAL_NEW_BYTES - NEW_BYTES))
+    TOTAL_ORIG_BYTES=$((TOTAL_ORIG_BYTES - ORIG_BYTES))
+    log_scope_run
+    continue
+  fi
+
+  # If output is smaller and --delete flag is used, consider deleting original
   if $DELETE_ORIGINAL; then
-    if (( NEW_BYTES < ORIG_BYTES )); then
-      # Check VMAF requirement unless --delete-always is used (use awk for decimal comparison)
-      if $DELETE_ALWAYS || awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score >= 90) }'; then
-        rm -f -- "$FILE"
-        if $DELETE_ALWAYS; then
-          log "Deleted original (output is smaller, --delete-always)."
-        else
-          log "Deleted original (output is smaller and VMAF >= 90)."
-        fi
+    # Check VMAF requirement unless --delete-always is used (use awk for decimal comparison)
+    if $DELETE_ALWAYS || awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score >= 90) }'; then
+      rm -f -- "$FILE"
+      if $DELETE_ALWAYS; then
+        log "Deleted original (output is smaller, --delete-always)."
       else
-        log "Keeping original (VMAF $VMAF_SCORE < 90). Use --delete-always to override."
+        log "Deleted original (output is smaller and VMAF >= 90)."
       fi
     else
-      rm -f -- "$OUT"
-      log "Output was not smaller; deleted output and kept original."
-      TOTAL_NEW_BYTES=$((TOTAL_NEW_BYTES - NEW_BYTES))
-      TOTAL_ORIG_BYTES=$((TOTAL_ORIG_BYTES - ORIG_BYTES))
-      log_scope_run
-      continue
+      log "Keeping original (VMAF $VMAF_SCORE < 90). Use --delete-always to override."
     fi
   fi
 
