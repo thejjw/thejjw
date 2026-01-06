@@ -760,7 +760,7 @@ for i in "${!PLAN_FILES[@]}"; do
         log "Deleted original (output is smaller and VMAF >= 90)."
       fi
     else
-      log "Keeping original (VMAF $VMAF_SCORE < 90). Use --delete-always to override."
+      log "Keeping original (VMAF $VMAF_SCORE < 90). Deleted the converted file instead. Use --delete-always to override."
     fi
   fi
 
