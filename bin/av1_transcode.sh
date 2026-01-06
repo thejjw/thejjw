@@ -735,13 +735,13 @@ for i in "${!PLAN_FILES[@]}"; do
     
     # Track files with VMAF < 90 (use awk for decimal comparison)
     if awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score < 90) }'; then
-      LOW_VMAF_FILES+=("$OUT (VMAF: $VMAF_SCORE)")
+      LOW_VMAF_FILES+=("$FILE (VMAF: $VMAF_SCORE)")
     fi
   fi
 
   # Always delete output if it's bigger than original (regardless of switch)
   if (( NEW_BYTES >= ORIG_BYTES )); then
-    rm -f -- "$OUT"
+    rm -fv -- "$OUT"
     log "Output was not smaller; deleted output and kept original."
     TOTAL_NEW_BYTES=$((TOTAL_NEW_BYTES - NEW_BYTES))
     TOTAL_ORIG_BYTES=$((TOTAL_ORIG_BYTES - ORIG_BYTES))
@@ -753,14 +753,16 @@ for i in "${!PLAN_FILES[@]}"; do
   if $DELETE_ORIGINAL; then
     # Check VMAF requirement unless --delete-always is used (use awk for decimal comparison)
     if $DELETE_ALWAYS || awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score >= 90) }'; then
-      rm -f -- "$FILE"
+      rm -fv -- "$FILE"
       if $DELETE_ALWAYS; then
         log "Deleted original (output is smaller, --delete-always)."
       else
         log "Deleted original (output is smaller and VMAF >= 90)."
       fi
     else
-      log "Keeping original (VMAF $VMAF_SCORE < 90). Deleted the converted file instead. Use --delete-always to override."
+      log "Keeping original (VMAF $VMAF_SCORE < 90). Deleting the converted file instead."
+      rm -fv -- "$OUT"
+      log "Use --delete-always to override VMAF requirement."
     fi
   fi
 
@@ -789,6 +791,11 @@ fi
 if (( ${#LOW_VMAF_FILES[@]} > 0 )); then
   log "================================================================================"
   log "=== Files with VMAF < 90 (may need quality review) ==="
+  if $DELETE_ORIGINAL; then
+    log "Note: Transcoded outputs were deleted due to -d flag."
+  else
+    log "Note: Transcoded outputs kept (default behavior without -d flag)."
+  fi
   for file in "${LOW_VMAF_FILES[@]}"; do
     log "  $file"
   done
