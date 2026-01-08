@@ -20,8 +20,9 @@ DIRECTORY
 OPTIONS
   -d, --delete          Delete original after successful conversion ONLY if:
                         1) Output is smaller, AND
-                        2) VMAF score is 90 or above.
+                        2) VMAF score is 93 [1] or above.
                         If output is not smaller, output is deleted and original is kept.
+[1] The "Average > 93" rule for VMAF is widely accepted in the video compression industry as the threshold for "Visually Lossless" (or "Transparent") quality.
   --delete-always       Delete original after successful conversion if output is smaller,
                         regardless of VMAF score. (Original -d behavior)
                         If output is not smaller, output is deleted and original is kept.
@@ -333,7 +334,7 @@ LOGFILE="transcode_av1_${TS}.log"
 exec > >(tee -a "$LOGFILE") 2>&1
 log_init
 
-# Array to track files with VMAF < 90
+# Array to track files with VMAF < 93
 LOW_VMAF_FILES=()
 
 log "=== AV1 Transcode Run Started ==="
@@ -342,7 +343,7 @@ if $DELETE_ORIGINAL; then
   if $DELETE_ALWAYS; then
     log "Delete original : YES (always, if smaller)"
   else
-    log "Delete original : YES (if smaller AND VMAF >= 90)"
+    log "Delete original : YES (if smaller AND VMAF >= 93)"
   fi
 else
   log "Delete original : NO"
@@ -733,8 +734,8 @@ for i in "${!PLAN_FILES[@]}"; do
     log "Renamed to: $NEW_OUT"
     OUT="$NEW_OUT"
     
-    # Track files with VMAF < 90 (use awk for decimal comparison)
-    if awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score < 90) }'; then
+    # Track files with VMAF < 93 (use awk for decimal comparison)
+    if awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score < 93) }'; then
       LOW_VMAF_FILES+=("$FILE (VMAF: $VMAF_SCORE)")
     fi
   fi
@@ -752,15 +753,15 @@ for i in "${!PLAN_FILES[@]}"; do
   # If output is smaller and --delete flag is used, consider deleting original
   if $DELETE_ORIGINAL; then
     # Check VMAF requirement unless --delete-always is used (use awk for decimal comparison)
-    if $DELETE_ALWAYS || awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score >= 90) }'; then
+    if $DELETE_ALWAYS || awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score >= 93) }'; then
       rm -fv -- "$FILE"
       if $DELETE_ALWAYS; then
         log "Deleted original (output is smaller, --delete-always)."
       else
-        log "Deleted original (output is smaller and VMAF >= 90)."
+        log "Deleted original (output is smaller and VMAF >= 93)."
       fi
     else
-      log "Keeping original (VMAF $VMAF_SCORE < 90). Deleting the converted file instead."
+      log "Keeping original (VMAF $VMAF_SCORE < 93). Deleting the converted file instead."
       rm -fv -- "$OUT"
       log "Use --delete-always to override VMAF requirement."
     fi
@@ -790,7 +791,7 @@ fi
 
 if (( ${#LOW_VMAF_FILES[@]} > 0 )); then
   log "================================================================================"
-  log "=== Files with VMAF < 90 (may need quality review) ==="
+  log "=== Files with VMAF < 93 (may need quality review) ==="
   if $DELETE_ORIGINAL; then
     log "Note: Transcoded outputs were deleted due to -d flag."
   else
