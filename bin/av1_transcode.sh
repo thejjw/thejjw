@@ -23,9 +23,15 @@ OPTIONS
                         2) VMAF score is 93 [1] or above.
                         If output is not smaller, output is deleted and original is kept.
 [1] The "Average > 93" rule for VMAF is widely accepted in the video compression industry as the threshold for "Visually Lossless" (or "Transparent") quality.
+  --delete-safe         Delete original after successful conversion ONLY if VMAF >= 93.
+                        Otherwise keep both transcode and original for human comparison.
+                        If output is not smaller, output is deleted and original is kept.
   --delete-always       Delete original after successful conversion if output is smaller,
                         regardless of VMAF score. (Original -d behavior)
                         If output is not smaller, output is deleted and original is kept.
+
+  NOTE: -d, --delete, --delete-safe, and --delete-always are mutually exclusive.
+        Only one deletion mode can be specified.
   --dry-run             Do not encode. Only list what would be processed and the target bitrates
                         including estimated size change.
   -e, --everything     Encode any supported video codec (default encodes only h264/hevc/h265).
@@ -259,6 +265,7 @@ estimate_target_bytes_from_ratio() {
 # ---------------- option parsing ----------------
 DELETE_ORIGINAL=false
 DELETE_ALWAYS=false
+DELETE_SAFE=false
 DRY_RUN=false
 QUALITY_MODE="normal"
 ROOT="."
@@ -269,8 +276,35 @@ EVERYTHING=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -d|--delete) DELETE_ORIGINAL=true; shift ;;
-    --delete-always) DELETE_ORIGINAL=true; DELETE_ALWAYS=true; shift ;;
+    -d|--delete)
+      if $DELETE_SAFE || $DELETE_ALWAYS; then
+        echo "ERROR: -d/--delete cannot be combined with --delete-safe or --delete-always" >&2
+        usage
+        exit 1
+      fi
+      DELETE_ORIGINAL=true
+      shift
+      ;;
+    --delete-safe)
+      if $DELETE_ORIGINAL || $DELETE_ALWAYS; then
+        echo "ERROR: --delete-safe cannot be combined with -d/--delete or --delete-always" >&2
+        usage
+        exit 1
+      fi
+      DELETE_ORIGINAL=true
+      DELETE_SAFE=true
+      shift
+      ;;
+    --delete-always)
+      if $DELETE_ORIGINAL || $DELETE_SAFE; then
+        echo "ERROR: --delete-always cannot be combined with -d/--delete or --delete-safe" >&2
+        usage
+        exit 1
+      fi
+      DELETE_ORIGINAL=true
+      DELETE_ALWAYS=true
+      shift
+      ;;
     --dry-run) DRY_RUN=true; shift ;;
     -e|--everything) EVERYTHING=true; shift ;;
     -f|--filter) APPLY_FILTER=true; shift ;;
@@ -341,7 +375,9 @@ log "=== AV1 Transcode Run Started ==="
 log "Root            : $ROOT"
 if $DELETE_ORIGINAL; then
   if $DELETE_ALWAYS; then
-    log "Delete original : YES (always, if smaller)"
+    log "Delete original : ALWAYS (if smaller)"
+  elif $DELETE_SAFE; then
+    log "Delete original : SAFE (delete only if VMAF > 93, otherwise keep both)"
   else
     log "Delete original : YES (if smaller AND VMAF >= 93)"
   fi
@@ -752,18 +788,28 @@ for i in "${!PLAN_FILES[@]}"; do
 
   # If output is smaller and --delete flag is used, consider deleting original
   if $DELETE_ORIGINAL; then
-    # Check VMAF requirement unless --delete-always is used (use awk for decimal comparison)
-    if $DELETE_ALWAYS || awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score >= 93) }'; then
+    if $DELETE_ALWAYS; then
+      # Delete always: just delete the original
       rm -fv -- "$FILE"
-      if $DELETE_ALWAYS; then
-        log "Deleted original (output is smaller, --delete-always)."
+      log "Deleted original (output is smaller, --delete-always)."
+    elif $DELETE_SAFE; then
+      # Safe delete: only delete if VMAF >= 93
+      if awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score >= 93) }'; then
+        rm -fv -- "$FILE"
+        log "Deleted original (VMAF $VMAF_SCORE >= 93, safe to delete)."
       else
-        log "Deleted original (output is smaller and VMAF >= 93)."
+        log "Keeping both files (VMAF $VMAF_SCORE < 93 requires human comparison)."
       fi
     else
-      log "Keeping original (VMAF $VMAF_SCORE < 93). Deleting the converted file instead."
-      rm -fv -- "$OUT"
-      log "Use --delete-always to override VMAF requirement."
+      # Standard delete: check VMAF >= 93 (use awk for decimal comparison)
+      if awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score >= 93) }'; then
+        rm -fv -- "$FILE"
+        log "Deleted original (output is smaller and VMAF >= 93)."
+      else
+        log "Keeping original (VMAF $VMAF_SCORE < 93). Deleting the converted file instead."
+        rm -fv -- "$OUT"
+        log "Use --delete-always to override VMAF requirement."
+      fi
     fi
   fi
 
