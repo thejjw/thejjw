@@ -643,13 +643,15 @@ for i in "${!PLAN_FILES[@]}"; do
     log "Attempting to fix by re-muxing input file to clean MKV..."
     
     # Create a clean MKV copy of the input
+    # Only map supported Matroska streams (video, audio, subtitles) and skip unsupported types (data, attachments, etc.)
     REMUX_FILE="${FILE}.remux.mkv"
     log "Creating clean MKV: $REMUX_FILE"
     set +e
     ffmpeg "${FFMPEG_OPTS[@]}" -y \
       -i "$FILE" \
-      -map 0 -map_metadata 0 -map_chapters 0 \
-      -c copy \
+      -map 0:v:0 -map 0:a -map 0:s \
+      -map_metadata 0 -map_chapters 0 \
+      -c:v copy -c:a copy -c:s copy \
       "$REMUX_FILE"
     REMUX_RC=$?
     set -e
