@@ -2250,3 +2250,93 @@ Last Edit: Sept 2025
         Write-Error "Failed to lock down file '$Path'. Error: $_"
     }
 }
+
+function Convert-VideoWithTransposeIntelQuickSync {
+<#
+.SYNOPSIS
+Rotates a video 90 degrees using Intel Quick Sync hardware acceleration.
+
+.DESCRIPTION
+Transposes (rotates) video files 90 degrees clockwise or counter-clockwise using Intel Quick Sync
+encoding. Outputs an HEVC-encoded MKV file with AAC audio. Hardware acceleration via Intel QSV
+significantly speeds up transcoding compared to software processing.
+
+.PARAMETER InputFile
+The full path to the input video file to rotate.
+
+.PARAMETER CounterClockwise
+If specified, rotates the video 90 degrees counter-clockwise. By default, rotates clockwise.
+
+.PARAMETER Quality
+HEVC quality level (0-51). Lower values mean higher quality. Defaults to 15.
+
+.EXAMPLE
+Convert-VideoWithTransposeIntelQuickSync -InputFile "C:\Videos\input.mp4"
+
+Rotates input.mp4 90 degrees clockwise and saves as input_v.mkv.
+
+.EXAMPLE
+Convert-VideoWithTransposeIntelQuickSync -InputFile "C:\Videos\video.mov" -CounterClockwise
+
+Rotates video.mov 90 degrees counter-clockwise and saves as video_v.mkv.
+
+.EXAMPLE
+Convert-VideoWithTransposeIntelQuickSync -InputFile "C:\Videos\video.mp4" -Quality 20
+
+Rotates video.mp4 with quality level 20 (lower quality, faster encoding).
+
+.NOTES
+Requires ffmpeg with Intel QSV support and compatible Intel GPU hardware.
+Output file is appended with "_v.mkv" suffix and saved in the same directory as the input.
+
+Quality Presets (HEVC 0-51 scale, lower = better quality):
+- 0-10:   Very high quality (slow encoding, ~0.5x speed)
+- 11-18:  High quality (medium speed, ~1-2x speed) - DEFAULT RANGE (15)
+- 19-28:  Medium/Normal quality (good balance, ~3-5x speed)
+- 29-38:  Lower quality (fast encoding, ~5-10x speed)
+- 39-51:  Very low quality (very fast, ~10x+ speed)
+
+Quality 8 for archival/high-quality use cases
+Quality 20 for balanced quality/speed
+Quality 32 for fast encoding with acceptable quality loss
+
+Author: jjw(@thejjw)
+Last Edit: Jan 2026
+#>
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$InputFile,
+        [switch]$CounterClockwise,
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(0, 51)]
+        [int]$Quality = 15
+    )
+    # Build output filename by appending "_v.mkv"
+    $BaseName   = [System.IO.Path]::GetFileNameWithoutExtension($InputFile)
+    $Directory  = [System.IO.Path]::GetDirectoryName($InputFile)
+    if ([string]::IsNullOrEmpty($Directory)) {
+        $Directory = "."
+    }
+    $OutputFile = Join-Path $Directory ($BaseName + "_v.mkv")
+    # Select transpose mode based on switch
+    if ($CounterClockwise) {
+        $Mode = "vpp_qsv=transpose=cclock"
+    }
+    else {
+        $Mode = "vpp_qsv=transpose=clock"
+    }
+    # Construct the ffmpeg arguments properly
+    $ffmpegArgs = @(
+        "-hwaccel", "qsv",
+        "-hwaccel_output_format", "qsv",
+        "-i", $InputFile,
+        "-vf", $Mode,
+        "-c:v", "hevc_qsv",
+        "-global_quality", $Quality,
+        "-c:a", "aac",
+        "-b:a", "192k",
+        $OutputFile
+    )
+    Write-Host "Running ffmpeg on $InputFile..."
+    & ffmpeg @ffmpegArgs
+}
