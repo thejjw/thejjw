@@ -2270,6 +2270,9 @@ If specified, rotates the video 90 degrees counter-clockwise. By default, rotate
 .PARAMETER Quality
 HEVC quality level (0-51). Lower values mean higher quality. Defaults to 15.
 
+.PARAMETER Enhance
+If specified, applies Intel QSV detail/sharpness enhancement filter (level 30) to the video.
+
 .EXAMPLE
 Convert-VideoWithTransposeIntelQuickSync -InputFile "C:\Videos\input.mp4"
 
@@ -2284,6 +2287,11 @@ Rotates video.mov 90 degrees counter-clockwise and saves as video_v.mkv.
 Convert-VideoWithTransposeIntelQuickSync -InputFile "C:\Videos\video.mp4" -Quality 20
 
 Rotates video.mp4 with quality level 20 (lower quality, faster encoding).
+
+.EXAMPLE
+Convert-VideoWithTransposeIntelQuickSync -InputFile "C:\Videos\video.mp4" -Enhance
+
+Rotates video.mp4 with detail enhancement filter applied (sharpness boost).
 
 .NOTES
 Requires ffmpeg with Intel QSV support and compatible Intel GPU hardware.
@@ -2309,7 +2317,8 @@ Last Edit: Jan 2026
         [switch]$CounterClockwise,
         [Parameter(Mandatory = $false)]
         [ValidateRange(0, 51)]
-        [int]$Quality = 15
+        [int]$Quality = 15,
+        [switch]$Enhance
     )
     # Build output filename by appending "_v.mkv"
     $BaseName   = [System.IO.Path]::GetFileNameWithoutExtension($InputFile)
@@ -2324,6 +2333,10 @@ Last Edit: Jan 2026
     }
     else {
         $Mode = "vpp_qsv=transpose=clock"
+    }
+    # Add detail enhancement if requested
+    if ($Enhance) {
+        $Mode = "${Mode}:detail=30"
     }
     # Construct the ffmpeg arguments properly
     $ffmpegArgs = @(
