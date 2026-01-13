@@ -2274,6 +2274,11 @@ HEVC quality level (0-51). Lower values mean higher quality. Defaults to 15.
 If specified, applies Intel QSV detail/sharpness enhancement filter (level 30) to the video.
 
 .EXAMPLE
+Get-ChildItem *.webm | % { Convert-VideoWithTransposeIntelQuickSync -InputFile $_.FullName }
+
+Processes all .webm files in the current directory, rotating each 90 degrees clockwise.
+
+.EXAMPLE
 Convert-VideoWithTransposeIntelQuickSync -InputFile "C:\Videos\input.mp4"
 
 Rotates input.mp4 90 degrees clockwise and saves as input_v.mkv.
