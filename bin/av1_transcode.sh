@@ -37,11 +37,12 @@ OPTIONS
   -e, --everything     Encode any supported video codec (default encodes only h264/hevc/h265).
   -f, --filter          Apply video filter chain during encode:
                         unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4
-  --quality <low|1gb|2gb>
+  --quality <low|1gb|2gb|4gb>
                         Quality preset:
                           * low  → h264 target = 60% (40% less), hevc target = 70% (30% less)
                           * 1gb  → compute video bitrate to target ~1 GiB total size
                           * 2gb  → compute video bitrate to target ~2 GiB total size
+                          * 4gb  → compute video bitrate to target ~4 GiB total size
                         All presets use 2-pass SVT-AV1.
                         Default (no --quality): h264 target = 70% (30% less), hevc target = 80% (20% less).
   -h, --help            Show this help.
@@ -310,7 +311,7 @@ while [[ $# -gt 0 ]]; do
     -f|--filter) APPLY_FILTER=true; shift ;;
     --quality)
       if [[ $# -lt 2 ]]; then
-        echo "ERROR: --quality requires a value (low|1gb|2gb)" >&2
+        echo "ERROR: --quality requires a value (low|1gb|2gb|4gb)" >&2
         usage
         exit 1
       fi
@@ -318,6 +319,7 @@ while [[ $# -gt 0 ]]; do
         low) QUALITY_MODE="low" ;;
         1gb) QUALITY_MODE="size"; TARGET_SIZE_BYTES=$((1000*1000*1000)) ;;
         2gb) QUALITY_MODE="size"; TARGET_SIZE_BYTES=$((2*1000*1000*1000)) ;;
+        4gb) QUALITY_MODE="size"; TARGET_SIZE_BYTES=$((4*1000*1000*1000)) ;;
         *) echo "ERROR: unknown --quality value: $2" >&2; usage; exit 1 ;;
       esac
       shift 2 ;;
