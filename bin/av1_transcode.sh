@@ -651,7 +651,7 @@ for i in "${!PLAN_FILES[@]}"; do
     set +e
     ffmpeg "${FFMPEG_OPTS[@]}" -y \
       -i "$FILE" \
-      -map 0:v:0 -map 0:a -map 0:s \
+      -map 0:v:0 -map 0:a? -map 0:s? \
       -map_metadata 0 -map_chapters 0 \
       -c:v copy -c:a copy -c:s copy \
       "$REMUX_FILE"
