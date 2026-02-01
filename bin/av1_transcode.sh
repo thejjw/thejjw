@@ -2,7 +2,7 @@
 
 # AV1 Transcode Script
 # 30%(40% -lq) reduction for h264, 20%(30% -lq) reduction for hevc
-# 2025.12-2026.1 @thejjw
+# 2025.12-2026.2 @thejjw
 
 set -u
 set -o pipefail
@@ -29,6 +29,7 @@ OPTIONS
   --delete-always       Delete original after successful conversion if output is smaller,
                         regardless of VMAF score. (Original -d behavior)
                         If output is not smaller, output is deleted and original is kept.
+  NOTE: Outputs with VMAF < 70 are always deleted as "bad quality encodes".
 
   NOTE: -d, --delete, --delete-safe, and --delete-always are mutually exclusive.
         Only one deletion mode can be specified.
@@ -68,6 +69,7 @@ Behavior summary
           3) computed from size/duration (average)
   - Encodes v:0 to AV1 using libsvtav1 in 2-pass mode.
   - Copies all other streams as-is (audio/subs/data/attachments/other video streams).
+  - Always deletes outputs with VMAF < 70 and reports them as bad quality encodes.
   - Logs: "transcode_av1_<YYYYmmdd_HHMMSS>.log" and stdout (tee).
 EOF
 }
@@ -372,6 +374,8 @@ log_init
 
 # Array to track files with VMAF < 93
 LOW_VMAF_FILES=()
+# Array to track files with VMAF < 70 (bad quality encodes)
+BAD_VMAF_FILES=()
 
 log "=== AV1 Transcode Run Started ==="
 log "Root            : $ROOT"
@@ -778,6 +782,16 @@ for i in "${!PLAN_FILES[@]}"; do
     if awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score < 93) }'; then
       LOW_VMAF_FILES+=("$FILE (VMAF: $VMAF_SCORE)")
     fi
+
+    # Always delete outputs with VMAF < 70 (bad quality encodes)
+    if awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score < 70) }'; then
+      BAD_VMAF_FILES+=("$FILE (VMAF: $VMAF_SCORE)")
+      rm -fv -- "$OUT"
+      log "Bad quality encode (VMAF $VMAF_SCORE < 70). Deleted output and kept original."
+      TOTAL_NEW_BYTES=$((TOTAL_NEW_BYTES - NEW_BYTES))
+      log_scope_run
+      continue
+    fi
   fi
 
   # Always delete output if it's bigger than original (regardless of switch)
@@ -848,6 +862,15 @@ if (( ${#LOW_VMAF_FILES[@]} > 0 )); then
     log "Note: Transcoded outputs kept (default behavior without -d flag)."
   fi
   for file in "${LOW_VMAF_FILES[@]}"; do
+    log "  $file"
+  done
+fi
+
+if (( ${#BAD_VMAF_FILES[@]} > 0 )); then
+  log "================================================================================"
+  log "=== Bad quality encodes (VMAF < 70) ==="
+  log "Note: Outputs were deleted and originals kept."
+  for file in "${BAD_VMAF_FILES[@]}"; do
     log "  $file"
   done
 fi
