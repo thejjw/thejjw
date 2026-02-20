@@ -1,9 +1,10 @@
   #!/bin/bash
-# 2025.9 @thejjw
+# 2025.9-2026.2 @thejjw
 
 # Set the distance parameter to 0 for lossless (JPEG), non-JPEG uses -d 1.0 by default
 DELETE_ORIGINAL=0
 INCLUDE_WEBP=0
+VERBOSE_WEBP=0
 
 usage() {
   cat <<HELP
@@ -12,20 +13,25 @@ Usage: $(basename "$0") [OPTIONS]
 Options:
   -d        Delete original files when output .jxl is smaller
   -w        Include .webp files in the search (skips animated webp)
+  --verbose-webp  Print webpinfo details when a WebP is skipped
   -h, --help  Show this help and exit
 
 Description:
   Converts images in the current directory and subdirectories to JPEG XL (.jxl).
   JPEGs are transcoded losslessly; other formats use cjxl -e 9 -d 1.0 by default.
+  WebP animation detection uses webpinfo (animated WebPs are skipped).
 HELP
 }
 
+normalized_args=()
 for arg in "$@"; do
-  if [[ "$arg" == "--help" ]]; then
-    usage
-    exit 0
-  fi
+  case "$arg" in
+    --help) normalized_args+=("-h") ;;
+    --verbose-webp) VERBOSE_WEBP=1 ;;
+    *) normalized_args+=("$arg") ;;
+  esac
 done
+set -- "${normalized_args[@]}"
 
 while getopts "hdw" opt; do
   case $opt in
@@ -37,7 +43,7 @@ done
 shift $((OPTIND -1))
 
 # Check for required tools
-for tool in ffprobe cjxl bc; do
+for tool in webpinfo cjxl bc; do
   command -v "$tool" >/dev/null 2>&1 || { echo "Error: '$tool' is not installed or not in PATH. Aborting."; echo "Tip: libjxl-tools provides cjxl (ubuntu)"; exit 1; }
 done
 
@@ -81,10 +87,26 @@ for file in "${files[@]}"; do
   
   # Skip animated WebP
   if [[ "$ext_lc" == "webp" ]]; then
-    frames=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames \
-      -of default=noprint_wrappers=1:nokey=1 "$file" 2>/dev/null)
-    if [[ "$frames" == "N/A" || "$frames" -gt 1 ]]; then
+    webpinfo_out=$(webpinfo "$file" 2>&1)
+    if [[ $? -ne 0 ]]; then
+      echo_elapsed "[$count/$total] Skipping invalid/unreadable WebP: $file"
+      if [[ "$VERBOSE_WEBP" -eq 1 && -n "$webpinfo_out" ]]; then
+        echo_elapsed "[$count/$total] webpinfo details for skipped file: $file"
+        while IFS= read -r line; do
+          echo_elapsed "[webpinfo] $line"
+        done <<< "$webpinfo_out"
+      fi
+      continue
+    fi
+
+    if grep -qE '^  Animation: 1$' <<< "$webpinfo_out"; then
       echo_elapsed "[$count/$total] Skipping animated WebP: $file"
+      if [[ "$VERBOSE_WEBP" -eq 1 ]]; then
+        echo_elapsed "[$count/$total] webpinfo details for skipped file: $file"
+        while IFS= read -r line; do
+          echo_elapsed "[webpinfo] $line"
+        done <<< "$webpinfo_out"
+      fi
       continue
     fi
   fi
