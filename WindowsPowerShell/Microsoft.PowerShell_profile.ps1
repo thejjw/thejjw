@@ -2270,14 +2270,6 @@ If specified, rotates the video 90 degrees counter-clockwise. By default, rotate
 .PARAMETER Quality
 HEVC quality level (0-51). Lower values mean higher quality. Defaults to 15.
 
-.PARAMETER Enhance
-If specified, applies Intel QSV detail/sharpness enhancement filter (level 30) to the video.
-
-.EXAMPLE
-Get-ChildItem *.webm | % { Convert-VideoWithTransposeIntelQuickSync -InputFile $_.FullName }
-
-Processes all .webm files in the current directory, rotating each 90 degrees clockwise.
-
 .EXAMPLE
 Convert-VideoWithTransposeIntelQuickSync -InputFile "C:\Videos\input.mp4"
 
@@ -2292,11 +2284,6 @@ Rotates video.mov 90 degrees counter-clockwise and saves as video_v.mkv.
 Convert-VideoWithTransposeIntelQuickSync -InputFile "C:\Videos\video.mp4" -Quality 20
 
 Rotates video.mp4 with quality level 20 (lower quality, faster encoding).
-
-.EXAMPLE
-Convert-VideoWithTransposeIntelQuickSync -InputFile "C:\Videos\video.mp4" -Enhance
-
-Rotates video.mp4 with detail enhancement filter applied (sharpness boost).
 
 .NOTES
 Requires ffmpeg with Intel QSV support and compatible Intel GPU hardware.
@@ -2314,7 +2301,7 @@ Quality 20 for balanced quality/speed
 Quality 32 for fast encoding with acceptable quality loss
 
 Author: jjw(@thejjw)
-Last Edit: Jan 2026
+Last Edit: Mar 2026
 #>
     param (
         [Parameter(Mandatory = $true)]
@@ -2325,9 +2312,12 @@ Last Edit: Jan 2026
         [int]$Quality = 15,
         [switch]$Enhance
     )
+    # Strip backtick escapes before [ and ] (PowerShell tab-completion artifact)
+    $InputFile = $InputFile -replace '`(?=[\[\]])', ''
+    $ResolvedInput = (Get-Item -LiteralPath $InputFile).FullName
     # Build output filename by appending "_v.mkv"
-    $BaseName   = [System.IO.Path]::GetFileNameWithoutExtension($InputFile)
-    $Directory  = [System.IO.Path]::GetDirectoryName($InputFile)
+    $BaseName   = [System.IO.Path]::GetFileNameWithoutExtension($ResolvedInput)
+    $Directory  = [System.IO.Path]::GetDirectoryName($ResolvedInput)
     if ([string]::IsNullOrEmpty($Directory)) {
         $Directory = "."
     }
@@ -2347,7 +2337,7 @@ Last Edit: Jan 2026
     $ffmpegArgs = @(
         "-hwaccel", "qsv",
         "-hwaccel_output_format", "qsv",
-        "-i", $InputFile,
+        "-i", $ResolvedInput,
         "-vf", $Mode,
         "-c:v", "hevc_qsv",
         "-global_quality", $Quality,
@@ -2355,6 +2345,6 @@ Last Edit: Jan 2026
         "-b:a", "192k",
         $OutputFile
     )
-    Write-Host "Running ffmpeg on $InputFile..."
+    Write-Host "Running ffmpeg on $ResolvedInput..."
     & ffmpeg @ffmpegArgs
 }
