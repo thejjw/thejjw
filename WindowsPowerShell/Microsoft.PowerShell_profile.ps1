@@ -2348,3 +2348,174 @@ Last Edit: Mar 2026
     Write-Host "Running ffmpeg on $ResolvedInput..."
     & ffmpeg @ffmpegArgs
 }
+
+function New-RandomDir {
+<#
+.SYNOPSIS
+Creates a new directory (random name by default) and changes into it.
+
+.DESCRIPTION
+New-RandomDir creates a directory inside the specified BasePath. If -Name is
+not provided, a random human-readable name is generated. The command then
+changes the current location to the newly created directory.
+
+Optional switches allow initializing a git repository with a synthetic local
+identity and creating basic agent documentation files (CLAUDE.md and AGENTS.md).
+
+.PARAMETER BasePath
+The parent directory where the new directory will be created.
+Defaults to the current location.
+
+.PARAMETER Name
+Explicit name for the directory. If omitted, a random name is generated.
+
+.PARAMETER Git
+Initializes a git repository in the new directory and configures a local
+identity using the format: username@hostname.local.
+
+.PARAMETER Agents
+Creates basic CLAUDE.md and AGENTS.md template files in the directory.
+Requires -Git.
+
+.PARAMETER MaxAttempts
+Maximum number of attempts when generating a random directory name.
+
+.EXAMPLE
+nrd
+Creates a randomly named directory in the current location and changes into it.
+
+.EXAMPLE
+nrd -Git
+Creates a random directory, initializes git, and sets a synthetic local identity.
+
+.EXAMPLE
+nrd -Name scratch-api
+Creates a directory with the specified name and changes into it.
+
+.EXAMPLE
+nrd -Git -Agents -Verbose
+Creates a random directory, initializes git, creates agent templates,
+and prints verbose output.
+
+.NOTES
+Alias: nrd
+Author: jjw(@thejjw)
+Last Edit: 2026-03
+
+#>
+    [CmdletBinding()]
+    param(
+        [string]$BasePath = (Get-Location).Path,
+        [string]$Name,
+        [switch]$Git,
+        [switch]$Agents,
+        [int]$MaxAttempts = 50
+    )
+
+    if ($Agents -and -not $Git) {
+        throw "-Agents requires -Git."
+    }
+
+    $adjectives = @(
+        'amber','ancient','autumn','bold','brisk','calm','clear','cool','crimson','curious',
+        'dawn','deep','eager','ember','fast','frost','gentle','golden','grand','hidden',
+        'icy','jolly','kind','lively','lucky','misty','modern','mossy','nimble','odd',
+        'quiet','rapid','red','shiny','silent','silver','small','solar','steady','stormy',
+        'swift','tiny','urban','velvet','warm','wild','wise','young'
+    )
+
+    $nouns = @(
+        'brook','cabin','cloud','comet','delta','dream','falcon','field','fire','forest',
+        'garden','glade','harbor','hill','lab','lake','leaf','meadow','moon','mountain',
+        'otter','owl','path','peak','pine','planet','pond','rabbit','river','shadow',
+        'sky','star','stone','sun','thicket','trail','tree','valley','wave','wind',
+        'wolf','wood','workshop'
+    )
+
+    if (-not (Test-Path -LiteralPath $BasePath)) {
+        throw "Base path does not exist: $BasePath"
+    }
+
+    $BasePath = (Resolve-Path -LiteralPath $BasePath).Path
+    Write-Verbose "Base path: $BasePath"
+
+    if (-not $Name) {
+        for ($i = 1; $i -le $MaxAttempts; $i++) {
+            $Name = '{0}-{1}-{2}' -f
+                $adjectives[(Get-Random -Minimum 0 -Maximum $adjectives.Count)],
+                $nouns[(Get-Random -Minimum 0 -Maximum $nouns.Count)],
+                (Get-Random -Minimum 100 -Maximum 1000)
+
+            $candidate = Join-Path $BasePath $Name
+            Write-Verbose "Attempt ${i}: $candidate"
+
+            if (-not (Test-Path -LiteralPath $candidate)) { break }
+            $Name = $null
+        }
+
+        if (-not $Name) {
+            throw "Failed to generate a unique directory name after $MaxAttempts attempts."
+        }
+    }
+
+    $Path = Join-Path $BasePath $Name
+
+    if (Test-Path -LiteralPath $Path) {
+        throw "Directory already exists: $Path"
+    }
+    Write-Verbose "Creating directory: $Path"
+    $null = New-Item -ItemType Directory -Path $Path
+
+    if ($Git) {
+        $git = Get-Command git -ErrorAction SilentlyContinue
+        if (-not $git) {
+            Write-Warning "git not found on PATH. Skipping git setup."
+        }
+        else {
+            $user = $env:USERNAME
+            $hostName = $env:COMPUTERNAME
+            $email = '{0}@{1}.local' -f $user.ToLower(), $hostName.ToLower()
+
+            Write-Verbose "Initializing git repository"
+            & git -C $Path init | Out-Null
+
+            & git -C $Path config --local user.name $user
+            & git -C $Path config --local user.email $email
+
+            Write-Host ("Git identity: {0} <{1}>" -f $user, $email)
+        }
+    }
+
+    if ($Agents) {
+        Write-Verbose "Creating CLAUDE.md and AGENTS.md"
+
+@"
+# CLAUDE.md
+
+## Code Style
+- Prefer concise, minimal implementations — avoid boilerplate and unnecessary abstraction.
+- Comment every public function/method and any non-obvious logic inline.
+
+## Git Discipline
+- Commit each logical change separately — never bundle unrelated changes.
+- Use Conventional Commits: ``feat:``, ``fix:``, ``refactor:``, ``docs:``, ``chore:``, ``test:``, etc.
+- Write short, imperative descriptions (e.g. ``feat: add input validation``, ``fix: off-by-one in retry loop``).
+"@ | Set-Content -LiteralPath (Join-Path $Path 'CLAUDE.md') -Encoding UTF8
+
+@"
+# AGENTS.md
+
+## Coding Agent
+- Produce the shortest correct implementation; refactor verbosity on sight.
+- Annotate intent — every function and tricky block gets a comment.
+- Commit each discrete change separately using Conventional Commits so history reads like a changelog.
+"@ | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
+    }
+
+    Write-Verbose "Changing location to: $Path"
+    Set-Location -LiteralPath $Path
+
+    Get-Item -LiteralPath $Path
+}
+
+Set-Alias nrd New-RandomDir
