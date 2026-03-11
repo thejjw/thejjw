@@ -2467,8 +2467,8 @@ Last Edit: 2026-03
     $null = New-Item -ItemType Directory -Path $Path
 
     if ($Git) {
-        $git = Get-Command git -ErrorAction SilentlyContinue
-        if (-not $git) {
+        $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+        if (-not $gitCmd) {
             Write-Warning "git not found on PATH. Skipping git setup."
         }
         else {
