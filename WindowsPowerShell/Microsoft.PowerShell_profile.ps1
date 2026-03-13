@@ -1,3 +1,9 @@
+function prompt {
+    $loc = $executionContext.SessionState.Path.CurrentLocation
+    $out = "PS $loc$('>' * ($nestedPromptLevel + 1)) "
+    "$([char]27)]9;9;`"$loc`"$([char]27)\" + $out
+}
+
 function Clear-WorkingSet {
 <#
 .SYNOPSIS
@@ -2493,11 +2499,11 @@ Last Edit: 2026-03
 # CLAUDE.md
 
 ## Code Style
-- Prefer concise, minimal implementations — avoid boilerplate and unnecessary abstraction.
+- Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
 - Comment every public function/method and any non-obvious logic inline.
 
 ## Git Discipline
-- Commit each logical change separately — never bundle unrelated changes.
+- Commit each logical change separately -- never bundle unrelated changes.
 - Use Conventional Commits: ``feat:``, ``fix:``, ``refactor:``, ``docs:``, ``chore:``, ``test:``, etc.
 - Write short, imperative descriptions (e.g. ``feat: add input validation``, ``fix: off-by-one in retry loop``).
 "@ | Set-Content -LiteralPath (Join-Path $Path 'CLAUDE.md') -Encoding UTF8
