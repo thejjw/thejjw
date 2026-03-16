@@ -2383,6 +2383,10 @@ identity using the format: username@hostname.local.
 Creates basic CLAUDE.md and AGENTS.md template files in the directory.
 Requires -Git.
 
+.PARAMETER Temp
+Uses the user temp directory ($env:TEMP) as the base path instead of
+the current location.
+
 .PARAMETER MaxAttempts
 Maximum number of attempts when generating a random directory name.
 
@@ -2397,6 +2401,10 @@ Creates a random directory, initializes git, and sets a synthetic local identity
 .EXAMPLE
 nrd -Name scratch-api
 Creates a directory with the specified name and changes into it.
+
+.EXAMPLE
+nrd -Temp -Git
+Creates a random directory under $env:TEMP, initializes git.
 
 .EXAMPLE
 nrd -Git -Agents -Verbose
@@ -2415,6 +2423,7 @@ Last Edit: 2026-03
         [string]$Name,
         [switch]$Git,
         [switch]$Agents,
+        [switch]$Temp,
         [int]$MaxAttempts = 50
     )
 
@@ -2422,12 +2431,20 @@ Last Edit: 2026-03
         throw "-Agents requires -Git."
     }
 
+    # Override base path to user temp directory when -Temp is specified
+    if ($Temp) { $BasePath = $env:TEMP }
+
+    $colors = @(
+        'amber','azure','coral','crimson','cyan','golden','green','indigo','ivory','jade',
+        'lime','mint','navy','olive','orange','peach','pink','plum','red','rose',
+        'ruby','rust','sage','scarlet','silver','slate','teal','violet'
+    )
+
     $adjectives = @(
-        'amber','ancient','autumn','bold','brisk','calm','clear','cool','crimson','curious',
-        'dawn','deep','eager','ember','fast','frost','gentle','golden','grand','hidden',
-        'icy','jolly','kind','lively','lucky','misty','modern','mossy','nimble','odd',
-        'quiet','rapid','red','shiny','silent','silver','small','solar','steady','stormy',
-        'swift','tiny','urban','velvet','warm','wild','wise','young'
+        'ancient','bold','brisk','calm','clear','cool','curious','deep','eager','fast',
+        'gentle','grand','hidden','icy','jolly','kind','lively','lucky','misty','modern',
+        'mossy','nimble','odd','quiet','rapid','shiny','silent','small','solar','steady',
+        'stormy','swift','tiny','urban','warm','wild','wise','young'
     )
 
     $nouns = @(
@@ -2448,9 +2465,9 @@ Last Edit: 2026-03
     if (-not $Name) {
         for ($i = 1; $i -le $MaxAttempts; $i++) {
             $Name = '{0}-{1}-{2}' -f
+                $colors[(Get-Random -Minimum 0 -Maximum $colors.Count)],
                 $adjectives[(Get-Random -Minimum 0 -Maximum $adjectives.Count)],
-                $nouns[(Get-Random -Minimum 0 -Maximum $nouns.Count)],
-                (Get-Random -Minimum 100 -Maximum 1000)
+                $nouns[(Get-Random -Minimum 0 -Maximum $nouns.Count)]
 
             $candidate = Join-Path $BasePath $Name
             Write-Verbose "Attempt ${i}: $candidate"
