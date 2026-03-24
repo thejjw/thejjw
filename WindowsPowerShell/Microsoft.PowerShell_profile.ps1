@@ -2515,6 +2515,15 @@ Last Edit: 2026-03
 @"
 # CLAUDE.md
 
+## Environment
+- Platform: Windows 11, shell: PowerShell.
+- Use PowerShell commands and syntax -- not Unix/bash equivalents.
+  - ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
+  - Redirect to ``\$null`` not ``/dev/null``.
+  - Use semicolons or separate statements -- not ``&&`` to chain commands.
+  - Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
+- If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
+
 ## Code Style
 - Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
 - Comment every public function/method and any non-obvious logic inline.
@@ -2528,9 +2537,18 @@ Last Edit: 2026-03
 @"
 # AGENTS.md
 
+## Environment
+- Platform: Windows 11, shell: PowerShell.
+- Use PowerShell commands and syntax -- not Unix/bash equivalents.
+  - ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
+  - Redirect to ``\$null`` not ``/dev/null``.
+  - Use semicolons or separate statements -- not ``&&`` to chain commands.
+  - Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
+- If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
+
 ## Coding Agent
 - Produce the shortest correct implementation; refactor verbosity on sight.
-- Annotate intent — every function and tricky block gets a comment.
+- Annotate intent -- every function and tricky block gets a comment.
 - Commit each discrete change separately using Conventional Commits so history reads like a changelog.
 "@ | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
     }
