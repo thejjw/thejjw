@@ -2435,9 +2435,15 @@ Last Edit: 2026-03
     if ($Temp) { $BasePath = $env:TEMP }
 
     $colors = @(
-        'amber','azure','coral','crimson','cyan','golden','green','indigo','ivory','jade',
-        'lime','mint','navy','olive','orange','peach','pink','plum','red','rose',
-        'ruby','rust','sage','scarlet','silver','slate','teal','violet'
+        'amber','aqua','azure','beige','black','blue','bronze','brown','coral',
+        'crimson','cyan','denim','ebony','emerald','fuchsia','gold','golden',
+        'gray','green','indigo','ivory','jade','lavender','lemon','lilac',
+        'lime','magenta','mahogany','marigold','maroon','mint','mocha','navy',
+        'ochre','olive','onyx','orange','orchid','peach','pearl','periwinkle',
+        'pine','pink','plum','purple','red','rose','ruby','rust','saffron',
+        'sage','salmon','sapphire','scarlet','sepia','silver','slate','tan',
+        'tangerine','taupe','teal','topaz','turquoise','umber','vermilion',
+        'violet','walnut','white','wine','yellow'
     )
 
     $adjectives = @(
