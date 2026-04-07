@@ -2521,9 +2521,12 @@ Last Edit: 2026-03
 @"
 # AGENTS.md
 
+## Rules
+
 - Always commit after completing each logical change with a descriptive commit message.
 
 ## Environment
+
 - Platform: Windows 11, shell: PowerShell.
 - Use PowerShell commands and syntax -- not Unix/bash equivalents.
   - ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
@@ -2533,10 +2536,12 @@ Last Edit: 2026-03
 - If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
 
 ## Code Style
+
 - Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
 - Comment every public function/method and any non-obvious logic inline.
 
 ## Git Discipline
+
 - Commit each logical change separately -- never bundle unrelated changes.
 - Use Conventional Commits: ``feat:``, ``fix:``, ``refactor:``, ``docs:``, ``chore:``, ``test:``, etc.
 - Write short, imperative descriptions (e.g. ``feat: add input validation``, ``fix: off-by-one in retry loop``).
