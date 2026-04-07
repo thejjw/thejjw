@@ -137,13 +137,17 @@ nrd() {
     cat > "$dir/AGENTS.md" << 'AGENT_EOF'
 # AGENTS.md
 
+## Rules
+
 - Always commit after completing each logical change with a descriptive commit message.
 
 ## Code Style
+
 - Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
 - Comment every public function/method and any non-obvious logic inline.
 
 ## Git Discipline
+
 - Commit each logical change separately -- never bundle unrelated changes.
 - Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
 - Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
