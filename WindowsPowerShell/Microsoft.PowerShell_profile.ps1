@@ -2521,6 +2521,8 @@ Last Edit: 2026-03
 @"
 # CLAUDE.md
 
+- Always commit after completing each logical change with a descriptive commit message.
+
 ## Environment
 - Platform: Windows 11, shell: PowerShell.
 - Use PowerShell commands and syntax -- not Unix/bash equivalents.
@@ -2555,7 +2557,7 @@ Last Edit: 2026-03
 ## Coding Agent
 - Produce the shortest correct implementation; refactor verbosity on sight.
 - Annotate intent -- every function and tricky block gets a comment.
-- Commit each discrete change separately using Conventional Commits so history reads like a changelog.
+- Always commit each discrete change separately using Conventional Commits so history reads like a changelog.
 "@ | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
     }
 
