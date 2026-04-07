@@ -2516,10 +2516,10 @@ Last Edit: 2026-03
     }
 
     if ($Agents) {
-        Write-Verbose "Creating CLAUDE.md and AGENTS.md"
+        Write-Verbose "Creating AGENTS.md (canonical) + CLAUDE.md (@import)"
 
 @"
-# CLAUDE.md
+# AGENTS.md
 
 - Always commit after completing each logical change with a descriptive commit message.
 
@@ -2527,7 +2527,7 @@ Last Edit: 2026-03
 - Platform: Windows 11, shell: PowerShell.
 - Use PowerShell commands and syntax -- not Unix/bash equivalents.
   - ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
-  - Redirect to ``\$null`` not ``/dev/null``.
+  - Redirect to ``$null`` not ``/dev/null``.
   - Use semicolons or separate statements -- not ``&&`` to chain commands.
   - Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
 - If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
@@ -2540,27 +2540,11 @@ Last Edit: 2026-03
 - Commit each logical change separately -- never bundle unrelated changes.
 - Use Conventional Commits: ``feat:``, ``fix:``, ``refactor:``, ``docs:``, ``chore:``, ``test:``, etc.
 - Write short, imperative descriptions (e.g. ``feat: add input validation``, ``fix: off-by-one in retry loop``).
-"@ | Set-Content -LiteralPath (Join-Path $Path 'CLAUDE.md') -Encoding UTF8
-
-@"
-# AGENTS.md
-
-## Environment
-- Platform: Windows 11, shell: PowerShell.
-- Use PowerShell commands and syntax -- not Unix/bash equivalents.
-  - ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
-  - Redirect to ``\$null`` not ``/dev/null``.
-  - Use semicolons or separate statements -- not ``&&`` to chain commands.
-  - Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
-- If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
-
-## Coding Agent
-- Produce the shortest correct implementation; refactor verbosity on sight.
-- Annotate intent -- every function and tricky block gets a comment.
-- Always commit each discrete change separately using Conventional Commits so history reads like a changelog.
 "@ | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
-    }
 
+        # CLAUDE.md imports AGENTS.md -- Claude Code reads CLAUDE.md, not AGENTS.md
+        '@AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'CLAUDE.md') -Encoding UTF8
+    }
     Write-Verbose "Changing location to: $Path"
     Set-Location -LiteralPath $Path
 
