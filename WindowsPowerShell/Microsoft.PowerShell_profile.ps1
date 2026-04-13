@@ -2558,7 +2558,6 @@ Last Edit: 2026-04
 
 Set-Alias nrd New-RandomDir
 
-#Requires -RunAsAdministrator
 function Invoke-LoginAudit {
 <#
 .SYNOPSIS
@@ -2594,6 +2593,12 @@ function Invoke-LoginAudit {
   )
 
   $ErrorActionPreference = 'Stop'
+
+  # Fail fast if not elevated - Security event log read requires admin
+  $currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+  if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'Invoke-LoginAudit requires an elevated PowerShell session (reading the Security event log needs Administrator rights).'
+  }
 
   if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
 
