@@ -2557,3 +2557,277 @@ Last Edit: 2026-04
 }
 
 Set-Alias nrd New-RandomDir
+
+#Requires -RunAsAdministrator
+function Invoke-LoginAudit {
+<#
+.SYNOPSIS
+  Audits Windows login activity for the last N hours and writes a Markdown report.
+
+.DESCRIPTION
+  Reads the Security event log for logon-related events, summarizes them, and
+  produces a human-readable Markdown file you can skim yourself and raw event
+  data for further analysis. Raw event data is saved alongside as CSV so
+  you can drill into specific rows.
+
+.EXAMPLE
+    Invoke-LoginAudit
+    Invoke-LoginAudit -Hours 168 -OutDir C:\audits
+
+.PARAMETER Hours
+  How many hours back to look. Default 48.
+
+.PARAMETER OutDir
+  Where to write the report and CSVs. Default: cwd
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-04
+
+    Tip: you can add the function declaration to $PROFILE then call it on future shell sessions with ease
+    (note that script execution policy should allow local script execution at least, i.e. RemoteSigned)
+#>
+  [CmdletBinding()]
+  param(
+    [int]$Hours = 48,
+    [string]$OutDir = (Get-Location).Path
+  )
+
+  $ErrorActionPreference = 'Stop'
+
+  if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
+
+  $since     = (Get-Date).AddHours(-$Hours)
+  $stamp     = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $reportMd  = Join-Path $OutDir "login-audit-$stamp.md"
+  $successCsv= Join-Path $OutDir "4624-success-$stamp.csv"
+  $failCsv   = Join-Path $OutDir "4625-failed-$stamp.csv"
+
+  $logonTypeMap = @{
+    2  = 'Interactive'
+    3  = 'Network'
+    4  = 'Batch'
+    5  = 'Service'
+    7  = 'Unlock'
+    8  = 'NetworkCleartext'
+    9  = 'NewCredentials'
+    10 = 'RemoteInteractive(RDP)'
+    11 = 'CachedInteractive'
+  }
+
+  # 4625 sub-status codes -> plain English (common ones)
+  $subStatusMap = @{
+    '0xC0000064' = 'User does not exist'
+    '0xC000006A' = 'Bad password'
+    '0xC000006D' = 'Bad username or password'
+    '0xC000006F' = 'Outside allowed hours'
+    '0xC0000070' = 'Workstation restriction'
+    '0xC0000071' = 'Password expired'
+    '0xC0000072' = 'Account disabled'
+    '0xC0000193' = 'Account expired'
+    '0xC0000224' = 'Password must change'
+    '0xC0000234' = 'Account locked out'
+    '0xC000015B' = 'Logon type not granted'
+  }
+
+  function Get-Events($id) {
+    try {
+      Get-WinEvent -FilterHashtable @{LogName='Security'; Id=$id; StartTime=$since} -ErrorAction Stop
+    } catch [System.Exception] {
+      if ($_.Exception.Message -match 'No events') { @() } else { throw }
+    }
+  }
+
+  function Md-Table($rows, $columns) {
+    if (-not $rows) { return "_(none)_`n" }
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.AppendLine('| ' + ($columns -join ' | ') + ' |')
+    [void]$sb.AppendLine('|' + (($columns | ForEach-Object { '---' }) -join '|') + '|')
+    foreach ($r in $rows) {
+      $cells = $columns | ForEach-Object {
+        $v = $r.$_
+        if ($null -eq $v -or $v -eq '') { '-' } else { ($v -replace '\|','\|') }
+      }
+      [void]$sb.AppendLine('| ' + ($cells -join ' | ') + ' |')
+    }
+    $sb.ToString()
+  }
+
+  Write-Host "Collecting events since $since ..." -ForegroundColor Cyan
+
+  $raw4624 = Get-Events 4624
+  $raw4625 = Get-Events 4625
+  $raw4634 = Get-Events 4634
+  $raw4647 = Get-Events 4647
+  $raw4740 = try {
+    Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4740; StartTime=(Get-Date).AddDays(-30)} -ErrorAction Stop
+  } catch { @() }
+  $raw4800 = Get-Events 4800
+  $raw4801 = Get-Events 4801
+
+  $ok = $raw4624 | ForEach-Object {
+    $lt = [int]$_.Properties[8].Value
+    [PSCustomObject]@{
+      Time          = $_.TimeCreated
+      User          = $_.Properties[5].Value
+      Domain        = $_.Properties[6].Value
+      LogonType     = $lt
+      LogonTypeName = $logonTypeMap[$lt]
+      Workstation   = $_.Properties[11].Value
+      IP            = $_.Properties[18].Value
+      LogonProcess  = $_.Properties[9].Value
+      AuthPackage   = $_.Properties[10].Value
+      ProcessName   = $_.Properties[17].Value
+    }
+  }
+
+  $fail = $raw4625 | ForEach-Object {
+    $lt = [int]$_.Properties[10].Value
+    $sub = ('0x{0:X}' -f [int64]$_.Properties[9].Value)
+    [PSCustomObject]@{
+      Time          = $_.TimeCreated
+      User          = $_.Properties[5].Value
+      Domain        = $_.Properties[6].Value
+      LogonType     = $lt
+      LogonTypeName = $logonTypeMap[$lt]
+      Status        = ('0x{0:X}' -f [int64]$_.Properties[7].Value)
+      SubStatus     = $sub
+      Reason        = $subStatusMap[$sub]
+      Workstation   = $_.Properties[13].Value
+      IP            = $_.Properties[19].Value
+      ProcessName   = $_.Properties[18].Value
+    }
+  }
+
+  if ($ok)   { $ok   | Export-Csv -NoTypeInformation -Path $successCsv }
+  if ($fail) { $fail | Export-Csv -NoTypeInformation -Path $failCsv }
+
+  $humanTypes = 2,7,10,11
+  $human      = $ok | Where-Object { $_.LogonType -in $humanTypes }
+  $netNonSys  = $ok | Where-Object {
+    $_.LogonType -eq 3 -and
+    $_.User -notin 'SYSTEM','ANONYMOUS LOGON','LOCAL SERVICE','NETWORK SERVICE' -and
+    $_.IP -and $_.IP -ne '-'
+  }
+
+  # Flag non-loopback IPs on interactive/unlock events - unusual for console sign-in
+  $remoteHumanFlags = $human | Where-Object { $_.IP -and $_.IP -ne '-' -and $_.IP -ne '127.0.0.1' -and $_.IP -ne '::1' }
+
+  # Off-hours human logons (before 6am or after 10pm local time)
+  $offHours = $human | Where-Object { $_.Time.Hour -lt 6 -or $_.Time.Hour -ge 22 }
+
+  $userBreakdown = $ok | Group-Object User, LogonTypeName |
+    Sort-Object Count -Descending |
+    ForEach-Object {
+      [PSCustomObject]@{
+        Count = $_.Count
+        Group = $_.Name
+      }
+    }
+
+  $computer = $env:COMPUTERNAME
+  $now      = Get-Date
+  $windowEnd= $now.ToString('yyyy-MM-dd HH:mm:ss')
+  $windowStart = $since.ToString('yyyy-MM-dd HH:mm:ss')
+
+  $md = @()
+  $md += "# Login Activity Report - $computer"
+  $md += ""
+  $md += "- **Window:** $windowStart -> $windowEnd  (last $Hours hours)"
+  $md += "- **Generated:** $now"
+  $md += "- **Generated by:** ``Invoke-LoginAudit``"
+  $csvRefs = @()
+  if (Test-Path $successCsv) { $csvRefs += "``$successCsv``" }
+  if (Test-Path $failCsv)    { $csvRefs += "``$failCsv``" }
+  if ($csvRefs) { $md += "- **Raw CSVs:** " + ($csvRefs -join ', ') }
+  $md += ""
+  $md += "## Totals"
+  $md += ""
+  $md += "| Event | Count | Meaning |"
+  $md += "|---|---:|---|"
+  $md += "| 4624 Successful logon | $($ok.Count) | All successful session creations |"
+  $md += "| 4625 Failed logon | $($fail.Count) | Bad passwords / rejected auth |"
+  $md += "| 4634 Logoff | $(($raw4634 | Measure-Object).Count) | Session teardowns |"
+  $md += "| 4647 User-initiated logoff | $(($raw4647 | Measure-Object).Count) | Explicit sign-outs |"
+  $md += "| 4740 Lockouts (last 30d) | $(($raw4740 | Measure-Object).Count) | Account lockouts |"
+  $md += "| 4800 Lock | $(($raw4800 | Measure-Object).Count) | Workstation locks |"
+  $md += "| 4801 Unlock | $(($raw4801 | Measure-Object).Count) | Workstation unlocks |"
+  $md += ""
+
+  $md += "## Automatic flags"
+  $md += ""
+  $flags = @()
+  if ($fail.Count -gt 0)               { $flags += "- **$($fail.Count) failed logon attempts** - see the failures table below." }
+  if ((($raw4740 | Measure-Object).Count) -gt 0) { $flags += "- **Account lockouts occurred** in the last 30 days." }
+  if ($remoteHumanFlags) { $flags += "- **$($remoteHumanFlags.Count) human-type logons recorded a non-loopback source IP** - unusual for a console sign-in." }
+  if ($offHours)        { $flags += "- **$($offHours.Count) human-type logons outside 06:00-22:00** - double-check these are yours." }
+  if ($netNonSys)       { $flags += "- **$($netNonSys.Count) non-SYSTEM network logons** from remote hosts - confirm each source is expected." }
+  if (-not $flags)      { $flags += "_No automatic flags raised. Still eyeball the tables below._" }
+  $md += $flags
+  $md += ""
+
+  $md += "## Breakdown by user + logon type (4624)"
+  $md += ""
+  $md += (Md-Table $userBreakdown @('Count','Group'))
+
+  $md += "## Human-type logons (Interactive / Unlock / RDP / CachedInteractive)"
+  $md += ""
+  $md += "Logon types 2, 7, 10, 11. These are the events that represent a real person signing in."
+  $md += ""
+  $md += (Md-Table ($human | Sort-Object Time -Descending) @('Time','User','Domain','LogonTypeName','Workstation','IP'))
+
+  $md += "## Network logons from non-SYSTEM accounts (type 3)"
+  $md += ""
+  $md += "Remote access to this machine (SMB shares, WinRM, etc.) that used a real user credential."
+  $md += ""
+  $md += (Md-Table ($netNonSys | Sort-Object Time -Descending) @('Time','User','Domain','IP','Workstation'))
+
+  $md += "## Failed logons (4625)"
+  $md += ""
+  $md += (Md-Table ($fail | Sort-Object Time -Descending) @('Time','User','Domain','LogonTypeName','Reason','SubStatus','IP','Workstation'))
+
+  $md += "## Account lockouts (4740, last 30 days)"
+  $md += ""
+  $lockoutRows = $raw4740 | ForEach-Object {
+    [PSCustomObject]@{
+      Time           = $_.TimeCreated
+      LockedAccount  = $_.Properties[0].Value
+      CallerComputer = $_.Properties[1].Value
+    }
+  }
+  $md += (Md-Table $lockoutRows @('Time','LockedAccount','CallerComputer'))
+
+  $md += "## Logon type reference"
+  $md += ""
+  $md += "| Type | Name | Meaning |"
+  $md += "|---:|---|---|"
+  $md += "| 2 | Interactive | Signed in at the console (keyboard) |"
+  $md += "| 3 | Network | Accessed a share / WinRM / remote API |"
+  $md += "| 4 | Batch | Scheduled task |"
+  $md += "| 5 | Service | Service account starting |"
+  $md += "| 7 | Unlock | Unlocked a locked session |"
+  $md += "| 8 | NetworkCleartext | Network logon with cleartext creds (!) |"
+  $md += "| 9 | NewCredentials | RunAs /netonly |"
+  $md += "| 10 | RemoteInteractive | RDP |"
+  $md += "| 11 | CachedInteractive | Cached domain creds (offline) |"
+  $md += ""
+
+  $md += "## What to do next"
+  $md += ""
+  $md += "1. Skim the **Human-type logons** table - do you recognize every row?"
+  $md += "2. For any flagged non-loopback IP on an interactive/unlock event, check whether an RDP / remote-management tool was running at that time."
+  $md += "3. For **Network logons**, confirm each source hostname/IP is a device you own."
+  $md += "4. If something looks off, run again with a longer window: ``-Hours 168`` for a week."
+  $md += "5. Paste this Markdown file back to other tools for further analysis - include the raw CSVs if you want row-level drilldown."
+  $md += ""
+
+  $md -join "`r`n" | Set-Content -Encoding UTF8 -Path $reportMd
+
+  Write-Host ""
+  Write-Host "Report written: $reportMd" -ForegroundColor Green
+  if (Test-Path $successCsv) { Write-Host "Success CSV:    $successCsv" } else { Write-Host "Success CSV:    (not created - no 4624 events)" -ForegroundColor DarkGray }
+  if (Test-Path $failCsv)    { Write-Host "Failed CSV:     $failCsv" }    else { Write-Host "Failed CSV:     (not created - no 4625 events)" -ForegroundColor DarkGray }
+  Write-Host ""
+  Write-Host "Open the report:" -ForegroundColor Cyan
+  Write-Host "  notepad `"$reportMd`""
+}
