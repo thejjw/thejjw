@@ -41,7 +41,7 @@ else
 #   nrd                  random name in $PWD
 #   nrd -n my-project    explicit name        (or: nrd my-project)
 #   nrd -g               init git + synthetic identity
-#   nrd -a               create AGENTS.md + CLAUDE.md (@import); requires -g
+#   nrd -a               create AGENTS.md + CLAUDE.md + GEMINI.md (@import); requires -g
 #   nrd -t               use $TMPDIR as base
 #   nrd -v               verbose
 
@@ -133,7 +133,7 @@ nrd() {
   fi
 
   if $use_agents; then
-    $verbose && echo "creating AGENTS.md (canonical) + CLAUDE.md (@import)"
+    $verbose && echo "creating AGENTS.md (canonical) + CLAUDE.md/GEMINI.md (@import)"
     cat > "$dir/AGENTS.md" << 'AGENT_EOF'
 # AGENTS.md
 
@@ -152,7 +152,8 @@ nrd() {
 - Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
 - Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
 AGENT_EOF
-    printf '@agents.md\n' > "$dir/CLAUDE.md"
+    printf '@AGENTS.md\n' > "$dir/CLAUDE.md"
+    printf '@./AGENTS.md\n' > "$dir/GEMINI.md"
   fi
 
   cd "$dir" || return 1

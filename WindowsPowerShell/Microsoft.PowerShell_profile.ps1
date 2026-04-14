@@ -2366,7 +2366,8 @@ not provided, a random human-readable name is generated. The command then
 changes the current location to the newly created directory.
 
 Optional switches allow initializing a git repository with a synthetic local
-identity and creating basic agent documentation files (CLAUDE.md and AGENTS.md).
+identity and creating basic agent documentation files (AGENTS.md, CLAUDE.md,
+and GEMINI.md).
 
 .PARAMETER BasePath
 The parent directory where the new directory will be created.
@@ -2380,7 +2381,8 @@ Initializes a git repository in the new directory and configures a local
 identity using the format: username@hostname.local.
 
 .PARAMETER Agents
-Creates basic CLAUDE.md and AGENTS.md template files in the directory.
+Creates basic AGENTS.md, CLAUDE.md, and GEMINI.md template files in the
+directory.
 Requires -Git.
 
 .PARAMETER Temp
@@ -2516,7 +2518,7 @@ Last Edit: 2026-04
     }
 
     if ($Agents) {
-        Write-Verbose "Creating AGENTS.md (canonical) + CLAUDE.md (@import)"
+        Write-Verbose "Creating AGENTS.md (canonical) + CLAUDE.md/GEMINI.md (@import)"
 
 @"
 # AGENTS.md
@@ -2549,6 +2551,9 @@ Last Edit: 2026-04
 
         # CLAUDE.md imports AGENTS.md -- Claude Code reads CLAUDE.md, not AGENTS.md
         '@AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'CLAUDE.md') -Encoding UTF8
+
+        # GEMINI.md imports AGENTS.md -- Gemini CLI reads GEMINI.md, not AGENTS.md
+        '@./AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'GEMINI.md') -Encoding UTF8
     }
     Write-Verbose "Changing location to: $Path"
     Set-Location -LiteralPath $Path
