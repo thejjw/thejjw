@@ -2,7 +2,7 @@
 
 # AV1 Transcode Script
 # 30%(40% -lq) reduction for h264, 20%(30% -lq) reduction for hevc
-# 2025.12-2026.2 @thejjw
+# 2025.12-2026.4 @thejjw
 
 set -u
 set -o pipefail
@@ -46,6 +46,29 @@ OPTIONS
                           * 4gb  → compute video bitrate to target ~4 GiB total size
                         All presets use 2-pass SVT-AV1.
                         Default (no --quality): h264 target = 70% (30% less), hevc target = 80% (20% less).
+  --try-crf-first       Try 1-pass CRF first (complexity-derived CRF), then fallback to 2-pass ABR
+                        if the CRF output fails policy. Cannot be used with --quality.
+  --vmaf-mode <sequential|full|sampled>
+                        VMAF evaluation strategy:
+                          * sequential: single full-clip VMAF run (legacy behavior)
+                          * full: split duration into equal partitions, score all partitions in parallel
+                          * sampled: score a stratified subset of equal partitions in parallel (faster, approximate)
+                        Default: full
+  --vmaf-subsample <N>  libvmaf n_subsample (compute scores every Nth frame)
+                        Practical values:
+                          * 1 = highest-fidelity scoring (recommended for short clips/final checks)
+                          * 3 = recommended speed/accuracy balance for long videos
+                          * 5 = faster, with higher risk of score variance
+                        Avoid even values > 1 due to known potential score bias.
+                        Default policy: 3 for sufficiently long videos, forced to 1 when
+                        duration < --vmaf-min-subsample-seconds.
+  --vmaf-jobs <N>       Parallel VMAF workers for full/sampled modes (default: 4)
+  --vmaf-partitions <N> Number of equal duration partitions for full mode (default: 12)
+  --vmaf-samples <N>    Number of stratified partitions sampled in sampled mode (default: 6)
+  --vmaf-min-parallel-seconds <N>
+                        If duration < N, force sequential mode (default: 180)
+  --vmaf-min-subsample-seconds <N>
+                        If duration < N, force n_subsample=1 (default: 1800 = 30 minutes)
   -h, --help            Show this help.
 
 Output naming
@@ -136,32 +159,44 @@ log() {
 # -stats forces periodic stats even when loglevel is set. :contentReference[oaicite:5]{index=5}
 FFMPEG_OPTS=( -hide_banner -loglevel warning -stats -stats_period 180 )
 
-# Calculate VMAF score between distorted (output) and reference (original) video
-calculate_vmaf() {
+# Calculate VMAF score for a window between distorted (output) and reference (original) video.
+# If duration is empty, the whole clip is scored.
+calculate_vmaf_window() {
   local distorted="$1"
   local reference="$2"
+  local start_sec="$3"
+  local duration_sec="$4"
+  local subsample="$5"
   local output_log="$(mktemp -t vmaf_output_XXXXXXXX.log)"
-  
-  # Log to stderr to avoid capturing in command substitution
-  log "Calculating VMAF score..." >&2
-  
+
+  local libvmaf_arg="libvmaf"
+  if [[ "$subsample" =~ ^[0-9]+$ ]] && (( subsample > 1 )); then
+    libvmaf_arg="libvmaf=n_subsample=${subsample}"
+  fi
+
+  # Build optional trim args once and apply to both inputs.
+  local window_args=()
+  if [[ -n "$start_sec" && -n "$duration_sec" ]]; then
+    window_args=( -ss "$start_sec" -t "$duration_sec" )
+  fi
+
   # Run ffmpeg with libvmaf filter; map only video streams and reset PTS to avoid DTS warnings.
   # Capture all output to parse for "VMAF score: XX.YY"
   set +e
   ffmpeg -hide_banner -loglevel info \
-    -i "$distorted" \
-    -i "$reference" \
+    "${window_args[@]}" -i "$distorted" \
+    "${window_args[@]}" -i "$reference" \
     -map 0:v:0 -map 1:v:0 \
-    -filter_complex "[0:v:0]setpts=PTS-STARTPTS[dist];[1:v:0]setpts=PTS-STARTPTS[ref];[dist][ref]libvmaf" \
+    -filter_complex "[0:v:0]setpts=PTS-STARTPTS[dist];[1:v:0]setpts=PTS-STARTPTS[ref];[dist][ref]${libvmaf_arg}" \
     -an -sn -dn \
     -f null - > "$output_log" 2>&1
   local rc=$?
   set -e
-  
+
   # Parse stderr/stdout for "VMAF score: XX.YY" lines and take the last one (preserve 2 decimal places)
   local vmaf_score
   vmaf_score=$(grep -i "VMAF score:" "$output_log" 2>/dev/null | tail -n 1 | awk -F': ' '{print $2}' | awk '{printf "%.2f", $1}')
-  
+
   if [[ -z "$vmaf_score" || "$vmaf_score" == "0.00" ]]; then
     log "WARNING: Could not parse VMAF score from output (exit=$rc)" >&2
     if [[ -s "$output_log" ]]; then
@@ -172,10 +207,212 @@ calculate_vmaf() {
     echo "0"
     return 1
   fi
-  
+
   rm -f "$output_log" 2>/dev/null || true
-  
+
   echo "$vmaf_score"
+  return 0
+}
+
+get_video_width_height_fps() {
+  local f="$1"
+  ffprobe -v error -select_streams v:0 \
+    -show_entries stream=width,height,avg_frame_rate \
+    -of default=nk=1:nw=1 -- "$f" 2>/dev/null | tr '\n' ' '
+}
+
+compute_crf_from_complexity() {
+  local file="$1"
+  local src_bps="$2"
+  local whf width height fps_raw fps crf
+
+  whf="$(get_video_width_height_fps "$file")"
+  width="$(awk '{print $1}' <<< "$whf")"
+  height="$(awk '{print $2}' <<< "$whf")"
+  fps_raw="$(awk '{print $3}' <<< "$whf")"
+
+  if [[ -z "$width" || -z "$height" || -z "$fps_raw" || "$width" == "N/A" || "$height" == "N/A" || "$fps_raw" == "N/A" ]]; then
+    echo 30
+    return 0
+  fi
+
+  fps="$(awk -v r="$fps_raw" 'BEGIN{
+    split(r, a, "/");
+    if (a[2] == "" || a[2] == 0) {
+      if (r+0 > 0) printf "%.6f", r+0;
+      else print "0";
+    } else {
+      printf "%.6f", a[1]/a[2];
+    }
+  }')"
+
+  crf="$(awk -v bps="$src_bps" -v w="$width" -v h="$height" -v fps="$fps" 'BEGIN{
+    if (bps<=0 || w<=0 || h<=0 || fps<=0) { print 30; exit; }
+    bpppf = bps / (w*h*fps);
+    if (bpppf >= 0.20) print 24;
+    else if (bpppf >= 0.12) print 26;
+    else if (bpppf >= 0.08) print 28;
+    else if (bpppf >= 0.05) print 30;
+    else print 32;
+  }')"
+
+  echo "$crf"
+}
+
+run_vmaf_jobs_with_limit() {
+  local max_jobs="$1"
+  while :; do
+    local running
+    running=$(jobs -rp | wc -l)
+    if (( running < max_jobs )); then
+      break
+    fi
+    wait -n 2>/dev/null || true
+  done
+}
+
+# Returns: "avg|min|effective_mode|effective_subsample|window_count"
+calculate_vmaf_mode() {
+  local distorted="$1"
+  local reference="$2"
+  local requested_mode="$3"
+  local requested_subsample="$4"
+  local jobs="$5"
+  local partitions="$6"
+  local samples="$7"
+  local min_parallel_secs="$8"
+  local min_subsample_secs="$9"
+
+  local duration
+  duration="$(get_format_duration "$reference")"
+  if [[ -z "$duration" || "$duration" == "N/A" ]]; then
+    duration="0"
+  fi
+
+  local effective_mode="$requested_mode"
+  if awk -v d="$duration" -v min="$min_parallel_secs" 'BEGIN{ exit !(d < min) }'; then
+    if [[ "$requested_mode" != "sequential" ]]; then
+      log "VMAF duration guard: duration=${duration}s < ${min_parallel_secs}s, forcing sequential mode." >&2
+    fi
+    effective_mode="sequential"
+  fi
+
+  local effective_subsample="$requested_subsample"
+  if awk -v d="$duration" -v min="$min_subsample_secs" 'BEGIN{ exit !(d < min) }'; then
+    if [[ "$requested_subsample" -gt 1 ]]; then
+      log "VMAF subsample guard: duration=${duration}s < ${min_subsample_secs}s, forcing n_subsample=1." >&2
+    fi
+    effective_subsample=1
+  fi
+
+  if [[ "$effective_mode" == "sequential" ]]; then
+    local score
+    score="$(calculate_vmaf_window "$distorted" "$reference" "" "" "$effective_subsample")" || {
+      echo "0|0|$effective_mode|$effective_subsample|0"
+      return 1
+    }
+    echo "$score|$score|$effective_mode|$effective_subsample|1"
+    return 0
+  fi
+
+  if [[ ! "$partitions" =~ ^[0-9]+$ ]] || (( partitions < 1 )); then
+    partitions=1
+  fi
+  if [[ ! "$samples" =~ ^[0-9]+$ ]] || (( samples < 1 )); then
+    samples=1
+  fi
+  if [[ ! "$jobs" =~ ^[0-9]+$ ]] || (( jobs < 1 )); then
+    jobs=1
+  fi
+
+  local selected_count
+  local selected_indices=()
+  if [[ "$effective_mode" == "full" || samples -ge partitions ]]; then
+    local idx
+    for ((idx=0; idx<partitions; idx++)); do
+      selected_indices+=("$idx")
+    done
+  else
+    # Stratified picks across partition index space.
+    declare -A seen
+    local k idx
+    for ((k=0; k<samples; k++)); do
+      idx="$(awk -v k="$k" -v p="$partitions" -v s="$samples" 'BEGIN{ print int((k + 0.5) * p / s) }')"
+      if (( idx >= partitions )); then
+        idx=$((partitions-1))
+      fi
+      if [[ -z "${seen[$idx]:-}" ]]; then
+        seen[$idx]=1
+        selected_indices+=("$idx")
+      fi
+    done
+  fi
+
+  selected_count="${#selected_indices[@]}"
+  if (( selected_count == 0 )); then
+    log "WARNING: No VMAF windows selected; falling back to sequential." >&2
+    local score
+    score="$(calculate_vmaf_window "$distorted" "$reference" "" "" "$effective_subsample")" || {
+      echo "0|0|sequential|$effective_subsample|0"
+      return 1
+    }
+    echo "$score|$score|sequential|$effective_subsample|1"
+    return 0
+  fi
+
+  local tmpdir
+  tmpdir="$(mktemp -d -t vmaf_parts_XXXXXXXX)"
+
+  local idx start end wdur
+  for idx in "${selected_indices[@]}"; do
+    start="$(awk -v i="$idx" -v d="$duration" -v p="$partitions" 'BEGIN{ printf "%.6f", (i*d)/p }')"
+    end="$(awk -v i="$idx" -v d="$duration" -v p="$partitions" 'BEGIN{ printf "%.6f", ((i+1)*d)/p }')"
+    wdur="$(awk -v s="$start" -v e="$end" 'BEGIN{ printf "%.6f", e-s }')"
+
+    run_vmaf_jobs_with_limit "$jobs"
+    (
+      local s
+      if s="$(calculate_vmaf_window "$distorted" "$reference" "$start" "$wdur" "$effective_subsample")"; then
+        echo "$s $wdur" > "$tmpdir/$idx.ok"
+      else
+        echo "fail" > "$tmpdir/$idx.fail"
+      fi
+    ) &
+  done
+
+  wait
+
+  local weighted_sum="0"
+  local dur_sum="0"
+  local min_score="101"
+
+  for idx in "${selected_indices[@]}"; do
+    if [[ -f "$tmpdir/$idx.fail" || ! -f "$tmpdir/$idx.ok" ]]; then
+      rm -rf "$tmpdir" 2>/dev/null || true
+      log "WARNING: Windowed VMAF failed; falling back to sequential." >&2
+      local score
+      score="$(calculate_vmaf_window "$distorted" "$reference" "" "" "$effective_subsample")" || {
+        echo "0|0|sequential|$effective_subsample|0"
+        return 1
+      }
+      echo "$score|$score|sequential|$effective_subsample|1"
+      return 0
+    fi
+
+    local s d
+    s="$(awk '{print $1}' "$tmpdir/$idx.ok")"
+    d="$(awk '{print $2}' "$tmpdir/$idx.ok")"
+
+    weighted_sum="$(awk -v ws="$weighted_sum" -v sc="$s" -v du="$d" 'BEGIN{ printf "%.10f", ws + (sc*du) }')"
+    dur_sum="$(awk -v ds="$dur_sum" -v du="$d" 'BEGIN{ printf "%.10f", ds + du }')"
+    min_score="$(awk -v m="$min_score" -v sc="$s" 'BEGIN{ if (sc<m) printf "%.2f", sc; else printf "%.2f", m }')"
+  done
+
+  rm -rf "$tmpdir" 2>/dev/null || true
+
+  local avg
+  avg="$(awk -v ws="$weighted_sum" -v ds="$dur_sum" 'BEGIN{ if (ds<=0) print "0.00"; else printf "%.2f", ws/ds }')"
+  echo "$avg|$min_score|$effective_mode|$effective_subsample|$selected_count"
   return 0
 }
 
@@ -276,6 +513,14 @@ APPLY_FILTER=false
 FILTER_CHAIN='unsharp=5:5:1.0:5:5:0.0,hqdn3d=4:3:6:4'
 TARGET_SIZE_BYTES=0
 EVERYTHING=false
+TRY_CRF_FIRST=false
+VMAF_MODE="full"
+VMAF_SUBSAMPLE=3
+VMAF_JOBS=4
+VMAF_PARTITIONS=12
+VMAF_SAMPLES=6
+VMAF_MIN_PARALLEL_SECONDS=180
+VMAF_MIN_SUBSAMPLE_SECONDS=1800
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -311,6 +556,86 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=true; shift ;;
     -e|--everything) EVERYTHING=true; shift ;;
     -f|--filter) APPLY_FILTER=true; shift ;;
+    --try-crf-first)
+      TRY_CRF_FIRST=true
+      shift
+      ;;
+    --vmaf-mode)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --vmaf-mode requires a value (sequential|full|sampled)" >&2
+        usage
+        exit 1
+      fi
+      case "$2" in
+        sequential|full|sampled) VMAF_MODE="$2" ;;
+        *)
+          echo "ERROR: unknown --vmaf-mode value: $2" >&2
+          usage
+          exit 1
+          ;;
+      esac
+      shift 2
+      ;;
+    --vmaf-subsample)
+      if [[ $# -lt 2 || ! "$2" =~ ^[0-9]+$ || "$2" -lt 1 ]]; then
+        echo "ERROR: --vmaf-subsample requires integer >= 1" >&2
+        usage
+        exit 1
+      fi
+      if (( "$2" > 1 )) && (( "$2" % 2 == 0 )); then
+        echo "ERROR: --vmaf-subsample even values > 1 are not allowed (use 1, 3, 5, ...)." >&2
+        echo "       Reason: even n_subsample values may cause biased VMAF scores on some content." >&2
+        usage
+        exit 1
+      fi
+      VMAF_SUBSAMPLE="$2"
+      shift 2
+      ;;
+    --vmaf-jobs)
+      if [[ $# -lt 2 || ! "$2" =~ ^[0-9]+$ || "$2" -lt 1 ]]; then
+        echo "ERROR: --vmaf-jobs requires integer >= 1" >&2
+        usage
+        exit 1
+      fi
+      VMAF_JOBS="$2"
+      shift 2
+      ;;
+    --vmaf-partitions)
+      if [[ $# -lt 2 || ! "$2" =~ ^[0-9]+$ || "$2" -lt 1 ]]; then
+        echo "ERROR: --vmaf-partitions requires integer >= 1" >&2
+        usage
+        exit 1
+      fi
+      VMAF_PARTITIONS="$2"
+      shift 2
+      ;;
+    --vmaf-samples)
+      if [[ $# -lt 2 || ! "$2" =~ ^[0-9]+$ || "$2" -lt 1 ]]; then
+        echo "ERROR: --vmaf-samples requires integer >= 1" >&2
+        usage
+        exit 1
+      fi
+      VMAF_SAMPLES="$2"
+      shift 2
+      ;;
+    --vmaf-min-parallel-seconds)
+      if [[ $# -lt 2 || ! "$2" =~ ^[0-9]+$ || "$2" -lt 1 ]]; then
+        echo "ERROR: --vmaf-min-parallel-seconds requires integer >= 1" >&2
+        usage
+        exit 1
+      fi
+      VMAF_MIN_PARALLEL_SECONDS="$2"
+      shift 2
+      ;;
+    --vmaf-min-subsample-seconds)
+      if [[ $# -lt 2 || ! "$2" =~ ^[0-9]+$ || "$2" -lt 1 ]]; then
+        echo "ERROR: --vmaf-min-subsample-seconds requires integer >= 1" >&2
+        usage
+        exit 1
+      fi
+      VMAF_MIN_SUBSAMPLE_SECONDS="$2"
+      shift 2
+      ;;
     --quality)
       if [[ $# -lt 2 ]]; then
         echo "ERROR: --quality requires a value (low|1gb|2gb|4gb)" >&2
@@ -338,6 +663,12 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if $TRY_CRF_FIRST && [[ "$QUALITY_MODE" != "normal" ]]; then
+  echo "ERROR: --try-crf-first cannot be combined with --quality" >&2
+  usage
+  exit 1
+fi
 
 # ---- Pre-flight checks ----
 need_cmd bash
@@ -392,6 +723,7 @@ else
 fi
 log "Dry-run         : $DRY_RUN"
 log "Everything      : $EVERYTHING"
+log "Try CRF first   : $TRY_CRF_FIRST"
 log "Quality mode    : $QUALITY_MODE"
 if [[ "$QUALITY_MODE" == "size" ]]; then
   log "Target size     : $(fmt_bytes "$TARGET_SIZE_BYTES")"
@@ -399,6 +731,13 @@ fi
 log "Log             : $LOGFILE"
 log "Extensions      : ${EXTENSIONS[*]}"
 log "FFmpeg opts     : ${FFMPEG_OPTS[*]}"
+log "VMAF mode       : $VMAF_MODE"
+log "VMAF subsample  : $VMAF_SUBSAMPLE"
+log "VMAF jobs       : $VMAF_JOBS"
+log "VMAF partitions : $VMAF_PARTITIONS"
+log "VMAF samples    : $VMAF_SAMPLES"
+log "VMAF min-par sec: $VMAF_MIN_PARALLEL_SECONDS"
+log "VMAF min-sub sec: $VMAF_MIN_SUBSAMPLE_SECONDS"
 if $APPLY_FILTER; then
   log "Video filter    : ENABLED -> $FILTER_CHAIN"
 else
@@ -597,54 +936,86 @@ for i in "${!PLAN_FILES[@]}"; do
   PASS_PREFIX="${PASSDIR}/ffmpeg2pass"
   log "Passlog dir: $PASSDIR"
 
-  log "FFmpeg pass 1..."
-  set +e
-  # Optional filter args for v:0
-  VF_ARGS=()
-  if $APPLY_FILTER; then
-    VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
-  fi
-  ffmpeg "${FFMPEG_OPTS[@]}" -y \
-    -i "$FILE" \
-    -map 0:v:0 \
-    "${VF_ARGS[@]}" \
-    -c:v libsvtav1 -b:v "${TARGET_KBPS}k" \
-    -pass 1 -passlogfile "$PASS_PREFIX" \
-    -an -sn -dn \
-    -f null /dev/null
-  RC1=$?
-  set -e
+  ENCODED_WITH_CRF=false
+  if $TRY_CRF_FIRST; then
+    CRF_VALUE="$(compute_crf_from_complexity "$FILE" "$SRC_BPS")"
+    log "Trying CRF-first encode (derived CRF=${CRF_VALUE}) before ABR fallback..."
+    set +e
+    VF_ARGS=()
+    if $APPLY_FILTER; then
+      VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
+    fi
+    ffmpeg "${FFMPEG_OPTS[@]}" -y \
+      -i "$FILE" \
+      -map 0 -map_metadata 0 -map_chapters 0 \
+      -c copy \
+      "${VF_ARGS[@]}" \
+      -c:v:0 libsvtav1 -crf:v:0 "$CRF_VALUE" -b:v:0 0 \
+      "$OUT"
+    RC_CRF=$?
+    set -e
 
-  if [[ "$RC1" -ne 0 ]]; then
-    log "ERROR: pass 1 failed (exit=$RC1)."
-    rm -rf "$PASSDIR" 2>/dev/null || true
-    FILES_FAILED=$((FILES_FAILED+1))
-    log_scope_run
-    continue
+    if [[ "$RC_CRF" -eq 0 && -s "$OUT" ]]; then
+      ENCODED_WITH_CRF=true
+      RC2=0
+      log "CRF-first encode completed."
+    else
+      rm -f -- "$OUT" 2>/dev/null || true
+      log "CRF-first failed (exit=$RC_CRF). Falling back to 2-pass ABR."
+    fi
   fi
 
-  log "FFmpeg pass 2..."
-  set +e
-  # Reuse VF_ARGS for pass 2
-  VF_ARGS=()
-  if $APPLY_FILTER; then
-    VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
+  RC2=1
+  if ! $ENCODED_WITH_CRF; then
+    log "FFmpeg pass 1..."
+    set +e
+    # Optional filter args for v:0
+    VF_ARGS=()
+    if $APPLY_FILTER; then
+      VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
+    fi
+    ffmpeg "${FFMPEG_OPTS[@]}" -y \
+      -i "$FILE" \
+      -map 0:v:0 \
+      "${VF_ARGS[@]}" \
+      -c:v libsvtav1 -b:v "${TARGET_KBPS}k" \
+      -pass 1 -passlogfile "$PASS_PREFIX" \
+      -an -sn -dn \
+      -f null /dev/null
+    RC1=$?
+    set -e
+
+    if [[ "$RC1" -ne 0 ]]; then
+      log "ERROR: pass 1 failed (exit=$RC1)."
+      rm -rf "$PASSDIR" 2>/dev/null || true
+      FILES_FAILED=$((FILES_FAILED+1))
+      log_scope_run
+      continue
+    fi
+
+    log "FFmpeg pass 2..."
+    set +e
+    # Reuse VF_ARGS for pass 2
+    VF_ARGS=()
+    if $APPLY_FILTER; then
+      VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
+    fi
+    ffmpeg "${FFMPEG_OPTS[@]}" -y \
+      -i "$FILE" \
+      -map 0 -map_metadata 0 -map_chapters 0 \
+      -c copy \
+      "${VF_ARGS[@]}" \
+      -c:v:0 libsvtav1 -b:v:0 "${TARGET_KBPS}k" \
+      -pass 2 -passlogfile "$PASS_PREFIX" \
+      "$OUT" 2>&1 | tee /tmp/ffmpeg_pass2.log
+    RC2=$?
+    set -e
   fi
-  ffmpeg "${FFMPEG_OPTS[@]}" -y \
-    -i "$FILE" \
-    -map 0 -map_metadata 0 -map_chapters 0 \
-    -c copy \
-    "${VF_ARGS[@]}" \
-    -c:v:0 libsvtav1 -b:v:0 "${TARGET_KBPS}k" \
-    -pass 2 -passlogfile "$PASS_PREFIX" \
-    "$OUT" 2>&1 | tee /tmp/ffmpeg_pass2.log
-  RC2=$?
-  set -e
 
   rm -rf "$PASSDIR" 2>/dev/null || true
 
   # Check for matroska header write error - indicates corrupted/problematic input container
-  if [[ "$RC2" -ne 0 ]] && grep -q "Could not write header" /tmp/ffmpeg_pass2.log 2>/dev/null; then
+  if ! $ENCODED_WITH_CRF && [[ "$RC2" -ne 0 ]] && grep -q "Could not write header" /tmp/ffmpeg_pass2.log 2>/dev/null; then
     log "ERROR: Matroska header write error detected. Container may be corrupted."
     log "Attempting to fix by re-muxing input file to clean MKV..."
     
@@ -749,16 +1120,106 @@ for i in "${!PLAN_FILES[@]}"; do
   SAVED_BYTES=$((ORIG_BYTES - NEW_BYTES))
   SAVED_PCT="$(awk -v o="$ORIG_BYTES" -v n="$NEW_BYTES" 'BEGIN{ if(o<=0){print "0.00"} else {printf "%.2f", (o-n)*100.0/o} }')"
   log "Size: original=$(fmt_bytes "$ORIG_BYTES") new=$(fmt_bytes "$NEW_BYTES") saved=$(fmt_bytes "$SAVED_BYTES") (${SAVED_PCT}%)"
+
+  # Always delete output if it's bigger than original (skip expensive VMAF for these).
+  if (( NEW_BYTES >= ORIG_BYTES )); then
+    if $ENCODED_WITH_CRF; then
+      log "CRF-first output was not smaller; deleting and falling back to 2-pass ABR."
+      OLD_NEW_BYTES="$NEW_BYTES"
+      rm -f -- "$OUT"
+
+      PASSDIR="$(mktemp -d -t av1pass_fallback_XXXXXXXX)"
+      PASS_PREFIX="${PASSDIR}/ffmpeg2pass"
+
+      log "ABR fallback pass 1..."
+      set +e
+      VF_ARGS=()
+      if $APPLY_FILTER; then
+        VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
+      fi
+      ffmpeg "${FFMPEG_OPTS[@]}" -y \
+        -i "$FILE" \
+        -map 0:v:0 \
+        "${VF_ARGS[@]}" \
+        -c:v libsvtav1 -b:v "${TARGET_KBPS}k" \
+        -pass 1 -passlogfile "$PASS_PREFIX" \
+        -an -sn -dn \
+        -f null /dev/null
+      RC1=$?
+      set -e
+
+      if [[ "$RC1" -ne 0 ]]; then
+        log "ERROR: ABR fallback pass 1 failed (exit=$RC1)."
+        rm -rf "$PASSDIR" 2>/dev/null || true
+        FILES_FAILED=$((FILES_FAILED+1))
+        log_scope_run
+        continue
+      fi
+
+      log "ABR fallback pass 2..."
+      set +e
+      VF_ARGS=()
+      if $APPLY_FILTER; then
+        VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
+      fi
+      ffmpeg "${FFMPEG_OPTS[@]}" -y \
+        -i "$FILE" \
+        -map 0 -map_metadata 0 -map_chapters 0 \
+        -c copy \
+        "${VF_ARGS[@]}" \
+        -c:v:0 libsvtav1 -b:v:0 "${TARGET_KBPS}k" \
+        -pass 2 -passlogfile "$PASS_PREFIX" \
+        "$OUT"
+      RC2=$?
+      set -e
+      rm -rf "$PASSDIR" 2>/dev/null || true
+
+      if [[ "$RC2" -ne 0 || ! -s "$OUT" ]]; then
+        log "ERROR: ABR fallback pass 2 failed or output missing/empty (exit=$RC2)."
+        rm -f -- "$OUT" 2>/dev/null || true
+        FILES_FAILED=$((FILES_FAILED+1))
+        log_scope_run
+        continue
+      fi
+
+      NEW_BYTES="$(stat -c%s -- "$OUT")"
+      TOTAL_NEW_BYTES=$((TOTAL_NEW_BYTES - OLD_NEW_BYTES + NEW_BYTES))
+      SAVED_BYTES=$((ORIG_BYTES - NEW_BYTES))
+      SAVED_PCT="$(awk -v o="$ORIG_BYTES" -v n="$NEW_BYTES" 'BEGIN{ if(o<=0){print "0.00"} else {printf "%.2f", (o-n)*100.0/o} }')"
+      log "Fallback size: original=$(fmt_bytes "$ORIG_BYTES") new=$(fmt_bytes "$NEW_BYTES") saved=$(fmt_bytes "$SAVED_BYTES") (${SAVED_PCT}%)"
+    fi
+
+    if (( NEW_BYTES >= ORIG_BYTES )); then
+      rm -fv -- "$OUT"
+      log "Output was not smaller; deleted output and kept original."
+      TOTAL_NEW_BYTES=$((TOTAL_NEW_BYTES - NEW_BYTES))
+      TOTAL_ORIG_BYTES=$((TOTAL_ORIG_BYTES - ORIG_BYTES))
+      log_scope_run
+      continue
+    fi
+  fi
   
-  # Calculate VMAF score and rename output file
+  # Calculate VMAF score(s) and rename output file
   VMAF_SCORE=0
-  if ! VMAF_SCORE=$(calculate_vmaf "$OUT" "$FILE"); then
+  VMAF_MIN_SCORE=0
+  VMAF_EFFECTIVE_MODE="sequential"
+  VMAF_EFFECTIVE_SUBSAMPLE=1
+  VMAF_WINDOW_COUNT=0
+  VMAF_RESULT=""
+  if ! VMAF_RESULT=$(calculate_vmaf_mode "$OUT" "$FILE" "$VMAF_MODE" "$VMAF_SUBSAMPLE" "$VMAF_JOBS" "$VMAF_PARTITIONS" "$VMAF_SAMPLES" "$VMAF_MIN_PARALLEL_SECONDS" "$VMAF_MIN_SUBSAMPLE_SECONDS"); then
     VMAF_SCORE=0
+    VMAF_MIN_SCORE=0
     log "WARNING: VMAF calculation failed; continuing without VMAF-driven actions."
+  else
+    VMAF_SCORE="$(awk -F'|' '{print $1}' <<< "$VMAF_RESULT")"
+    VMAF_MIN_SCORE="$(awk -F'|' '{print $2}' <<< "$VMAF_RESULT")"
+    VMAF_EFFECTIVE_MODE="$(awk -F'|' '{print $3}' <<< "$VMAF_RESULT")"
+    VMAF_EFFECTIVE_SUBSAMPLE="$(awk -F'|' '{print $4}' <<< "$VMAF_RESULT")"
+    VMAF_WINDOW_COUNT="$(awk -F'|' '{print $5}' <<< "$VMAF_RESULT")"
   fi
 
   if [[ "$VMAF_SCORE" != "0" && "$VMAF_SCORE" != "0.00" ]]; then
-    log "VMAF score: $VMAF_SCORE"
+    log "VMAF average: $VMAF_SCORE (min window: $VMAF_MIN_SCORE, mode=$VMAF_EFFECTIVE_MODE, n_subsample=$VMAF_EFFECTIVE_SUBSAMPLE, windows=$VMAF_WINDOW_COUNT)"
     
     # Rename output to include VMAF score: basename.VMAF.av1.r.mkv
     BASE="${FILE%.*}"
@@ -783,25 +1244,15 @@ for i in "${!PLAN_FILES[@]}"; do
       LOW_VMAF_FILES+=("$FILE (VMAF: $VMAF_SCORE)")
     fi
 
-    # Always delete outputs with VMAF < 70 (bad quality encodes)
-    if awk -v score="$VMAF_SCORE" 'BEGIN { exit !(score < 70) }'; then
-      BAD_VMAF_FILES+=("$FILE (VMAF: $VMAF_SCORE)")
+    # Always delete outputs with bad quality windows or average VMAF < 70.
+    if awk -v avg="$VMAF_SCORE" -v min="$VMAF_MIN_SCORE" 'BEGIN { exit !((avg < 70) || (min < 70)) }'; then
+      BAD_VMAF_FILES+=("$FILE (VMAF avg: $VMAF_SCORE, min: $VMAF_MIN_SCORE)")
       rm -fv -- "$OUT"
-      log "Bad quality encode (VMAF $VMAF_SCORE < 70). Deleted output and kept original."
+      log "Bad quality encode (VMAF avg/min below 70). Deleted output and kept original."
       TOTAL_NEW_BYTES=$((TOTAL_NEW_BYTES - NEW_BYTES))
       log_scope_run
       continue
     fi
-  fi
-
-  # Always delete output if it's bigger than original (regardless of switch)
-  if (( NEW_BYTES >= ORIG_BYTES )); then
-    rm -fv -- "$OUT"
-    log "Output was not smaller; deleted output and kept original."
-    TOTAL_NEW_BYTES=$((TOTAL_NEW_BYTES - NEW_BYTES))
-    TOTAL_ORIG_BYTES=$((TOTAL_ORIG_BYTES - ORIG_BYTES))
-    log_scope_run
-    continue
   fi
 
   # If output is smaller and --delete flag is used, consider deleting original
