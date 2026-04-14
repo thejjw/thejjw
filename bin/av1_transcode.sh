@@ -60,6 +60,7 @@ OPTIONS
                           * 3 = recommended speed/accuracy balance for long videos
                           * 5 = faster, with higher risk of score variance
                         Avoid even values > 1 due to known potential score bias.
+                        Reference: https://github.com/Netflix/vmaf/issues/1214
                         Default policy: 3 for sufficiently long videos, forced to 1 when
                         duration < --vmaf-min-subsample-seconds.
   --vmaf-jobs <N>       Parallel VMAF workers for full/sampled modes (default: 4)
@@ -585,6 +586,8 @@ while [[ $# -gt 0 ]]; do
       if (( "$2" > 1 )) && (( "$2" % 2 == 0 )); then
         echo "ERROR: --vmaf-subsample even values > 1 are not allowed (use 1, 3, 5, ...)." >&2
         echo "       Reason: even n_subsample values may cause biased VMAF scores on some content." >&2
+        echo "       Re-check status: https://github.com/Netflix/vmaf/issues/1214" >&2
+        echo "       Search keyword: Netflix VMAF n_subsample even values" >&2
         usage
         exit 1
       fi
