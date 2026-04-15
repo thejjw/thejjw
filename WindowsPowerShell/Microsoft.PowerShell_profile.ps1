@@ -2556,7 +2556,7 @@ Last Edit: 2026-04
         '@./AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'GEMINI.md') -Encoding UTF8
 
         # QWEN.md imports AGENTS.md -- Qwen Code reads QWEN.md, not AGENTS.md
-        '@./QWEN.md' | Set-Content -LiteralPath (Join-Path $Path 'QWEN.md') -Encoding UTF8
+        '@./AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'QWEN.md') -Encoding UTF8
     }
     Write-Verbose "Changing location to: $Path"
     Set-Location -LiteralPath $Path
