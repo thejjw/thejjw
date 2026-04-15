@@ -154,6 +154,7 @@ nrd() {
 AGENT_EOF
     printf '@AGENTS.md\n' > "$dir/CLAUDE.md"
     printf '@./AGENTS.md\n' > "$dir/GEMINI.md"
+    printf '@./AGENTS.md\n' > "$dir/QWEN.md"
   fi
 
   cd "$dir" || return 1
