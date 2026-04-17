@@ -68,9 +68,9 @@ OPTIONS
   --vmaf-partitions <N> Number of equal duration partitions for full mode (default: 12)
   --vmaf-samples <N>    Number of stratified partitions sampled in sampled mode (default: 6)
   --vmaf-min-parallel-seconds <N>
-                        If duration < N, force sequential mode (default: 180)
+                        If duration < N, force sequential mode (default: 7200 = 120 minutes)
   --vmaf-min-subsample-seconds <N>
-                        If duration < N, force n_subsample=1 (default: 1800 = 30 minutes)
+                        If duration < N, force n_subsample=1 (default: 600 = 10 minutes)
   -h, --help            Show this help.
 
 Output naming
@@ -521,8 +521,8 @@ VMAF_SUBSAMPLE=3
 VMAF_JOBS=4
 VMAF_PARTITIONS=12
 VMAF_SAMPLES=6
-VMAF_MIN_PARALLEL_SECONDS=180
-VMAF_MIN_SUBSAMPLE_SECONDS=1800
+VMAF_MIN_PARALLEL_SECONDS=7200
+VMAF_MIN_SUBSAMPLE_SECONDS=600
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
