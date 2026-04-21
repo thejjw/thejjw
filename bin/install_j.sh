@@ -7,6 +7,13 @@
 
 set -e
 
+# Use zsh profile on macOS, bash profile elsewhere.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  PROFILE="${HOME}/.zshrc"
+else
+  PROFILE="${HOME}/.bashrc"
+fi
+
 if ! which apt >/dev/null; then
   echo "apt not found."
   exit 1
@@ -25,9 +32,8 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# nrd - embed into ~/.bashrc if not already present
+# nrd - embed into shell profile if not already present
 # ---------------------------------------------------------------------------
-PROFILE="${HOME}/.bashrc"
 MARKER="# >>> nrd >>>"
 
 if grep -qF "$MARKER" "$PROFILE" 2>/dev/null; then
@@ -164,4 +170,31 @@ AGENT_EOF
 NRD_EOF
 
   echo "nrd: added to $PROFILE"
+fi
+
+# ---------------------------------------------------------------------------
+# claudez alias - embed into shell profile if not already present
+# ---------------------------------------------------------------------------
+CLAUDEZ_MARKER="# >>> claudez >>>"
+
+if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudez: already in $PROFILE -- skipping"
+else
+  read -r -p "Enter your Z.AI API token for claudez alias: " ZAI_API_TOKEN
+
+  if [[ -z "$ZAI_API_TOKEN" ]]; then
+    echo "claudez: token is empty, skipping alias setup"
+  else
+    cat >> "$PROFILE" << EOF
+
+# >>> claudez >>>
+# Custom Claude Code alias with Z.AI endpoint
+alias claudez='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN" \
+  API_TIMEOUT_MS="3000000" \
+  claude'
+# <<< claudez <<<
+EOF
+    echo "claudez: added to $PROFILE"
+  fi
 fi
