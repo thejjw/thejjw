@@ -2844,3 +2844,39 @@ function Invoke-LoginAudit {
   Write-Host "Open the report:" -ForegroundColor Cyan
   Write-Host "  notepad `"$reportMd`""
 }
+
+function claudez {
+    # Check if token is already set in the function or environment
+    $token = "your_zai_api_key"  # <-- replace this, or leave as-is to always prompt
+
+    if (-not $token -or $token -eq "your_zai_api_key") {
+        $token = Read-Host "Enter your Z.AI API key"
+        if (-not $token) {
+            Write-Host "No API key provided. Aborting." -ForegroundColor Red
+            return
+        }
+        Write-Host ""
+        Write-Host "Tip: To avoid this prompt in the future, edit your profile and" -ForegroundColor Yellow
+        Write-Host "replace 'your_zai_api_key' with your actual key in the function:" -ForegroundColor Yellow
+        Write-Host "  notepad `$PROFILE" -ForegroundColor Cyan
+        Write-Host ""
+    }
+
+    $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
+    $env:ANTHROPIC_AUTH_TOKEN = $token
+    $env:API_TIMEOUT_MS = "3000000"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5.1"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
+
+    try {
+        claude @args
+    } finally {
+        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
+        Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
+    }
+}
