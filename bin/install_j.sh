@@ -220,15 +220,16 @@ EOF
         local name="$1" url="$2"
           env "${CLAUDEZ_ENV[@]}" claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
           env "${CLAUDEZ_ENV[@]}" claude mcp add --scope user --transport http \
-          --header "Authorization: Bearer $ZAI_API_TOKEN" "$name" "$url"
+          "$name" "$url" \
+          --header "Authorization: Bearer $ZAI_API_TOKEN"
       }
 
       claudez_mcp_add_stdio() {
         local name="$1"
           env "${CLAUDEZ_ENV[@]}" claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
           env "${CLAUDEZ_ENV[@]}" claude mcp add --scope user --transport stdio \
-          --env "Z_AI_API_KEY=$ZAI_API_TOKEN" \
-          --env "Z_AI_MODE=ZAI" \
+            -e "Z_AI_API_KEY=$ZAI_API_TOKEN" \
+            -e "Z_AI_MODE=ZAI" \
           "$name" -- npx -y @z_ai/mcp-server
       }
 
