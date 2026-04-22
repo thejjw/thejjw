@@ -227,7 +227,7 @@ EOF
       claudez_mcp_add_stdio() {
         local name="$1"
           env "${CLAUDEZ_ENV[@]}" claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
-          env "${CLAUDEZ_ENV[@]}" claude mcp add --scope user --transport stdio \
+          env "${CLAUDEZ_ENV[@]}" claude mcp add --scope user \
             -e "Z_AI_API_KEY=$ZAI_API_TOKEN" \
             -e "Z_AI_MODE=ZAI" \
           "$name" -- npx -y @z_ai/mcp-server
@@ -237,6 +237,8 @@ EOF
 
       if ! claudez_mcp_add_stdio "zai-mcp-server"; then
         echo "claudez: failed to configure MCP server: zai-mcp-server" >&2
+        echo "claudez: try this manually:" >&2
+        echo "ANTHROPIC_BASE_URL=\"https://api.z.ai/api/anthropic\" ANTHROPIC_AUTH_TOKEN=\"$ZAI_API_TOKEN\" API_TIMEOUT_MS=\"3000000\" CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=\"1\" claude mcp add --scope user -e \"Z_AI_API_KEY=$ZAI_API_TOKEN\" -e \"Z_AI_MODE=ZAI\" zai-mcp-server -- npx -y @z_ai/mcp-server" >&2
         mcp_failures=$((mcp_failures + 1))
       fi
 

@@ -2915,7 +2915,7 @@ function claudez {
 
                 & claude mcp remove --scope user $Name *> $null
                 $args = @(
-                    'mcp', 'add', '--scope', 'user', '--transport', 'stdio',
+                    'mcp', 'add', '--scope', 'user',
                     '-e', "Z_AI_API_KEY=$Token",
                     '-e', 'Z_AI_MODE=ZAI',
                     $Name, '--', 'npx', '-y', '@z_ai/mcp-server'
@@ -2928,6 +2928,8 @@ function claudez {
 
             if (-not (Add-ClaudezMcpStdio -Name 'zai-mcp-server' -Token $token)) {
                 Write-Warning 'claudez: failed to configure MCP server: zai-mcp-server'
+                Write-Host 'claudez: try this manually:' -ForegroundColor Yellow
+                Write-Host "claude mcp add --scope user -e 'Z_AI_API_KEY=$token' -e 'Z_AI_MODE=ZAI' zai-mcp-server -- npx -y @z_ai/mcp-server" -ForegroundColor DarkGray
                 $mcpFailures++
             }
 
