@@ -2845,6 +2845,24 @@ function Invoke-LoginAudit {
   Write-Host "  notepad `"$reportMd`""
 }
 
+<#
+.SYNOPSIS
+    Launches Claude Code through the Z.AI-backed profile helper.
+
+.DESCRIPTION
+    Prompts for the Z.AI API key when needed, configures the Claude Code MCP servers and runtime environment,
+    then invokes claude with the supplied arguments.
+
+.EXAMPLE
+    claudez
+
+.EXAMPLE
+    claudez "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-04
+#>
 function claudez {
     # Check if token is already set in the function or environment
     $token = "your_zai_api_key"  # <-- replace this, or leave as-is to always prompt
@@ -2996,5 +3014,37 @@ function claudez {
         Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
         Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
+    }
+}
+
+<#
+.SYNOPSIS
+    Launches Claude Code with Z.AI settings and GLM model overrides. (Max plan compatibility mode)
+
+.DESCRIPTION
+    Performs the same setup as claudez, then temporarily sets the default Anthropic model variables
+    to GLM-backed values before invoking claude.
+
+.EXAMPLE
+    claudezm
+
+.EXAMPLE
+    claudezm "Summarize the changed files"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-04
+#>
+function claudezm {
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5-turbo"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
+
+    try {
+        claudez @args
+    } finally {
+        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
     }
 }
