@@ -173,18 +173,20 @@ NRD_EOF
 fi
 
 # ---------------------------------------------------------------------------
-# claudez alias - embed into shell profile if not already present
+# claudez alias + MCP servers setup - embed into shell profile if not present
 # ---------------------------------------------------------------------------
 CLAUDEZ_MARKER="# >>> claudez >>>"
 
 if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez: already in $PROFILE -- skipping"
 else
-  read -r -p "Enter your Z.AI API token for claudez alias: " ZAI_API_TOKEN
+  # Prompt once for API token (used for both alias and MCP servers)
+  read -r -p "Enter your Z.AI API token for claudez alias + MCP servers: " ZAI_API_TOKEN
 
   if [[ -z "$ZAI_API_TOKEN" ]]; then
-    echo "claudez: token is empty, skipping alias setup"
+    echo "claudez: token is empty, skipping alias and MCP setup"
   else
+    # Add the claudez alias
     cat >> "$PROFILE" << EOF
 
 # >>> claudez >>>
@@ -192,9 +194,67 @@ else
 alias claudez='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN" \
   API_TIMEOUT_MS="3000000" \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   claude'
 # <<< claudez <<<
 EOF
-    echo "claudez: added to $PROFILE"
+
+    # Configure MCP servers in Claude Code settings
+    CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
+
+    # Create settings.json if it doesn't exist
+    if [[ ! -f "$CLAUDE_SETTINGS" ]]; then
+      mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
+      echo '{"$schema":"https://json.schemastore.org/claude-code-settings.json"}' > "$CLAUDE_SETTINGS"
+    fi
+
+    # Use jq to merge mcpServers configuration
+    if command -v jq &>/dev/null; then
+      # Backup existing settings
+      cp "$CLAUDE_SETTINGS" "${CLAUDE_SETTINGS}.backup"
+
+      # Add/update mcpServers using jq (merge with existing)
+      jq --arg token "$ZAI_API_TOKEN" '
+        .mcpServers = (.mcpServers // {}) + {
+          "zai-mcp-server": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "@z_ai/mcp-server"],
+            "env": {
+              "Z_AI_API_KEY": $token,
+              "Z_AI_MODE": "ZAI"
+            }
+          },
+          "web-search-prime": {
+            "type": "http",
+            "url": "https://api.z.ai/api/mcp/web_search_prime/mcp",
+            "headers": {
+              "Authorization": ("Bearer " + $token)
+            }
+          },
+          "web-reader": {
+            "type": "http",
+            "url": "https://api.z.ai/api/mcp/web_reader/mcp",
+            "headers": {
+              "Authorization": ("Bearer " + $token)
+            }
+          },
+          "zread": {
+            "type": "http",
+            "url": "https://api.z.ai/api/mcp/zread/mcp",
+            "headers": {
+              "Authorization": ("Bearer " + $token)
+            }
+          }
+        }
+      ' "$CLAUDE_SETTINGS" > "${CLAUDE_SETTINGS}.tmp" && mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
+
+      echo "claudez: alias added to $PROFILE"
+      echo "claudez: MCP servers configured in $CLAUDE_SETTINGS"
+    else
+      echo "claudez: alias added to $PROFILE"
+      echo "WARNING: jq not found, skipping MCP server configuration"
+      echo "  Install jq with: sudo apt-get install jq"
+    fi
   fi
 fi
