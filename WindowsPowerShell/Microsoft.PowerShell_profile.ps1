@@ -2862,6 +2862,128 @@ function claudez {
         Write-Host ""
     }
 
+    # Configure Claude Code MCP servers (create/merge settings.json)
+    $claudeDir = Join-Path $HOME ".claude"
+    $claudeSettings = Join-Path $claudeDir "settings.json"
+    $schemaUrl = "https://json.schemastore.org/claude-code-settings.json"
+
+    function Get-MemberValue {
+        param(
+            [Parameter(Mandatory = $false)] $Object,
+            [Parameter(Mandatory = $true)] [string] $Name
+        )
+
+        if ($null -eq $Object) { return $null }
+        if ($Object -is [System.Collections.IDictionary]) {
+            if ($Object.Contains($Name)) { return $Object[$Name] }
+            return $null
+        }
+
+        $prop = $Object.PSObject.Properties[$Name]
+        if ($null -ne $prop) { return $prop.Value }
+        return $null
+    }
+
+    $settings = $null
+    if (Test-Path -LiteralPath $claudeSettings) {
+        try {
+            $raw = Get-Content -LiteralPath $claudeSettings -Raw -ErrorAction Stop
+            if ([string]::IsNullOrWhiteSpace($raw)) {
+                $settings = [ordered]@{}
+            } else {
+                $settings = $raw | ConvertFrom-Json -ErrorAction Stop
+            }
+        } catch {
+            Write-Warning "claudez: existing settings.json is invalid JSON. Recreating with schema + MCP servers."
+            $settings = [ordered]@{}
+        }
+    } else {
+        $settings = [ordered]@{}
+    }
+
+    $expectedAuth = "Bearer $token"
+    $mcpServers = Get-MemberValue -Object $settings -Name 'mcpServers'
+    $zai = Get-MemberValue -Object $mcpServers -Name 'zai-mcp-server'
+    $webSearchPrime = Get-MemberValue -Object $mcpServers -Name 'web-search-prime'
+    $webReader = Get-MemberValue -Object $mcpServers -Name 'web-reader'
+    $zread = Get-MemberValue -Object $mcpServers -Name 'zread'
+
+    $serversAlreadyConfigured = (
+        $null -ne $zai -and
+        $null -ne $webSearchPrime -and
+        $null -ne $webReader -and
+        $null -ne $zread
+    )
+
+    if ($serversAlreadyConfigured) {
+        Write-Host "claudez: MCP servers already configured in $claudeSettings -- skipping" -ForegroundColor DarkGray
+    } else {
+        if (-not (Test-Path -LiteralPath $claudeDir)) {
+            New-Item -ItemType Directory -Path $claudeDir -Force | Out-Null
+        }
+
+        if (Test-Path -LiteralPath $claudeSettings) {
+            Copy-Item -LiteralPath $claudeSettings -Destination "${claudeSettings}.backup" -Force
+        }
+
+        if ($settings -is [System.Collections.IDictionary]) {
+            if (-not $settings.Contains('$schema')) {
+                $settings['$schema'] = $schemaUrl
+            }
+        } else {
+            if (-not ($settings.PSObject.Properties.Name -contains '$schema')) {
+                $settings | Add-Member -NotePropertyName '$schema' -NotePropertyValue $schemaUrl -Force
+            }
+        }
+
+        $existingMcp = [ordered]@{}
+        if ($mcpServers -is [System.Collections.IDictionary]) {
+            foreach ($k in $mcpServers.Keys) { $existingMcp[$k] = $mcpServers[$k] }
+        } elseif ($null -ne $mcpServers) {
+            foreach ($p in $mcpServers.PSObject.Properties) { $existingMcp[$p.Name] = $p.Value }
+        }
+
+        $existingMcp['zai-mcp-server'] = [ordered]@{
+            type = 'stdio'
+            command = 'npx'
+            args = @('-y', '@z_ai/mcp-server')
+            env = [ordered]@{
+                Z_AI_API_KEY = $token
+                Z_AI_MODE = 'ZAI'
+            }
+        }
+        $existingMcp['web-search-prime'] = [ordered]@{
+            type = 'http'
+            url = 'https://api.z.ai/api/mcp/web_search_prime/mcp'
+            headers = [ordered]@{
+                Authorization = $expectedAuth
+            }
+        }
+        $existingMcp['web-reader'] = [ordered]@{
+            type = 'http'
+            url = 'https://api.z.ai/api/mcp/web_reader/mcp'
+            headers = [ordered]@{
+                Authorization = $expectedAuth
+            }
+        }
+        $existingMcp['zread'] = [ordered]@{
+            type = 'http'
+            url = 'https://api.z.ai/api/mcp/zread/mcp'
+            headers = [ordered]@{
+                Authorization = $expectedAuth
+            }
+        }
+
+        if ($settings -is [System.Collections.IDictionary]) {
+            $settings['mcpServers'] = $existingMcp
+        } else {
+            $settings | Add-Member -NotePropertyName 'mcpServers' -NotePropertyValue $existingMcp -Force
+        }
+
+        $settings | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $claudeSettings -Encoding UTF8
+        Write-Host "claudez: MCP servers configured in $claudeSettings" -ForegroundColor Green
+    }
+
     $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $token
     $env:API_TIMEOUT_MS = "3000000"
@@ -2873,8 +2995,6 @@ function claudez {
         Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
         Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
         Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
     }
 }
