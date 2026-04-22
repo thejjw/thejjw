@@ -207,62 +207,62 @@ alias claudezm='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
 # <<< claudez <<<
 EOF
 
-    # Configure MCP servers in Claude Code settings
-    CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
+    # Configure MCP servers via Claude CLI (preferred over direct JSON edits)
+    if command -v claude &>/dev/null; then
+      CLAUDEZ_ENV=(
+        ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+        ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN"
+        API_TIMEOUT_MS="3000000"
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
+      )
 
-    # Create settings.json if it doesn't exist
-    if [[ ! -f "$CLAUDE_SETTINGS" ]]; then
-      mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
-      echo '{"$schema":"https://json.schemastore.org/claude-code-settings.json"}' > "$CLAUDE_SETTINGS"
-    fi
+      claudez_mcp_add_http() {
+        local name="$1" url="$2"
+          env "${CLAUDEZ_ENV[@]}" claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
+          env "${CLAUDEZ_ENV[@]}" claude mcp add --scope user --transport http \
+          --header "Authorization: Bearer $ZAI_API_TOKEN" "$name" "$url"
+      }
 
-    # Use jq to merge mcpServers configuration
-    if command -v jq &>/dev/null; then
-      # Backup existing settings
-      cp "$CLAUDE_SETTINGS" "${CLAUDE_SETTINGS}.backup"
+      claudez_mcp_add_stdio() {
+        local name="$1"
+          env "${CLAUDEZ_ENV[@]}" claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
+          env "${CLAUDEZ_ENV[@]}" claude mcp add --scope user --transport stdio \
+          --env "Z_AI_API_KEY=$ZAI_API_TOKEN" \
+          --env "Z_AI_MODE=ZAI" \
+          "$name" -- npx -y @z_ai/mcp-server
+      }
 
-      # Add/update mcpServers using jq (merge with existing)
-      jq --arg token "$ZAI_API_TOKEN" '
-        .mcpServers = (.mcpServers // {}) + {
-          "zai-mcp-server": {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@z_ai/mcp-server"],
-            "env": {
-              "Z_AI_API_KEY": $token,
-              "Z_AI_MODE": "ZAI"
-            }
-          },
-          "web-search-prime": {
-            "type": "http",
-            "url": "https://api.z.ai/api/mcp/web_search_prime/mcp",
-            "headers": {
-              "Authorization": ("Bearer " + $token)
-            }
-          },
-          "web-reader": {
-            "type": "http",
-            "url": "https://api.z.ai/api/mcp/web_reader/mcp",
-            "headers": {
-              "Authorization": ("Bearer " + $token)
-            }
-          },
-          "zread": {
-            "type": "http",
-            "url": "https://api.z.ai/api/mcp/zread/mcp",
-            "headers": {
-              "Authorization": ("Bearer " + $token)
-            }
-          }
-        }
-      ' "$CLAUDE_SETTINGS" > "${CLAUDE_SETTINGS}.tmp" && mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
+      mcp_failures=0
+
+      if ! claudez_mcp_add_stdio "zai-mcp-server"; then
+        echo "claudez: failed to configure MCP server: zai-mcp-server" >&2
+        mcp_failures=$((mcp_failures + 1))
+      fi
+
+      if ! claudez_mcp_add_http "web-search-prime" "https://api.z.ai/api/mcp/web_search_prime/mcp"; then
+        echo "claudez: failed to configure MCP server: web-search-prime" >&2
+        mcp_failures=$((mcp_failures + 1))
+      fi
+
+      if ! claudez_mcp_add_http "web-reader" "https://api.z.ai/api/mcp/web_reader/mcp"; then
+        echo "claudez: failed to configure MCP server: web-reader" >&2
+        mcp_failures=$((mcp_failures + 1))
+      fi
+
+      if ! claudez_mcp_add_http "zread" "https://api.z.ai/api/mcp/zread/mcp"; then
+        echo "claudez: failed to configure MCP server: zread" >&2
+        mcp_failures=$((mcp_failures + 1))
+      fi
 
       echo "claudez: alias added to $PROFILE"
-      echo "claudez: MCP servers configured in $CLAUDE_SETTINGS"
+      if [[ "$mcp_failures" -eq 0 ]]; then
+        echo "claudez: MCP servers configured via claude mcp (scope=user)"
+      else
+        echo "claudez: MCP configuration completed with $mcp_failures failure(s)" >&2
+      fi
     else
       echo "claudez: alias added to $PROFILE"
-      echo "WARNING: jq not found, skipping MCP server configuration"
-      echo "  Install jq with: sudo apt-get install jq"
+      echo "WARNING: claude CLI not found, skipping MCP server configuration"
     fi
   fi
 fi
