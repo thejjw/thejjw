@@ -2900,9 +2900,9 @@ If MCP tools are unavailable, inform the user and suggest alternatives.
     }
 
     if (Test-Path -LiteralPath $globalMd) {
-        Write-Host "claudez: $globalMd already exists -- skipping"
-        Write-Host 'claudez: edit it manually to include:'
-        Write-Host $prefText
+        Write-Host "claudez: $globalMd already exists -- skipping (use --verbose to display base text for CLAUDE.md)"
+        Write-Verbose 'claudez: edit it manually to include:'
+        Write-Verbose $prefText
     } else {
         Set-Content -LiteralPath $globalMd -Value $prefText -Encoding UTF8
         Write-Host "claudez: created $globalMd" -ForegroundColor Green
