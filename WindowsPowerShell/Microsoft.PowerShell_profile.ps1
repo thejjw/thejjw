@@ -2943,7 +2943,7 @@ If MCP tools are unavailable, inform the user and suggest alternatives.
             'mcp', 'add', '--scope', 'user', $Name,
             '-e', "Z_AI_API_KEY=$Token",
             '-e', 'Z_AI_MODE=ZAI',
-            '--', 'npx', '-y', '@z_ai/mcp-server'
+            '--', 'cmd /c', 'npx', '-y', '@z_ai/mcp-server'
         )
         & claude @cmdArgs
         return ($LASTEXITCODE -eq 0)
