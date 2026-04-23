@@ -2916,6 +2916,41 @@ If MCP tools are unavailable, inform the user and suggest alternatives.
         return $true
     }
 
+    function Test-ClaudezMcpExists {
+        param([Parameter(Mandatory = $true)][string]$Name)
+
+        $listOutput = & claude mcp list --scope user 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $listOutput) {
+            Write-Verbose "claudez: unable to read MCP list (or list is empty) while checking '$Name'"
+            return $false
+        }
+
+        # Prefer token-like match, then fall back to simple substring for flexible CLI output formats.
+        $escapedName = [regex]::Escape($Name)
+        $tokenPattern = "(?i)(^|\s|[|,:])${escapedName}(\s|$|[|,:])"
+        $isMatch = ($listOutput | Select-String -Pattern $tokenPattern -Quiet)
+        if (-not $isMatch) {
+            $isMatch = ($listOutput | Select-String -SimpleMatch -Pattern $Name -Quiet)
+            if ($isMatch) {
+                Write-Verbose "claudez: MCP '$Name' matched"
+            }
+        }
+
+        Write-Verbose "claudez: MCP '$Name' exists=$isMatch"
+        return $isMatch
+    }
+
+    function Remove-ClaudezMcpIfExists {
+        param([Parameter(Mandatory = $true)][string]$Name)
+
+        if (Test-ClaudezMcpExists -Name $Name) {
+            Write-Verbose "claudez: removing existing MCP server '$Name'"
+            & claude mcp remove --scope user $Name 2>$null | Out-Null
+        } else {
+            Write-Verbose "claudez: MCP server '$Name' not found; skipping remove"
+        }
+    }
+
     function Add-ClaudezMcpHttp {
         param(
             [Parameter(Mandatory = $true)][string]$Name,
@@ -2923,7 +2958,7 @@ If MCP tools are unavailable, inform the user and suggest alternatives.
             [Parameter(Mandatory = $true)][string]$Token
         )
 
-        & claude mcp remove --scope user $Name *> $null
+        Remove-ClaudezMcpIfExists -Name $Name
         $cmdArgs = @(
             'mcp', 'add', '--scope', 'user', '--transport', 'http',
             $Name, $Url, '--header', "Authorization: Bearer $Token"
@@ -2938,7 +2973,7 @@ If MCP tools are unavailable, inform the user and suggest alternatives.
             [Parameter(Mandatory = $true)][string]$Token
         )
 
-        & claude mcp remove --scope user $Name *> $null
+        Remove-ClaudezMcpIfExists -Name $Name
         $cmdArgs = @(
             'mcp', 'add', '--scope', 'user', $Name,
             '-e', "Z_AI_API_KEY=$Token",

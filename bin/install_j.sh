@@ -250,9 +250,28 @@ EOF
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
       )
 
+      claudez_mcp_exists() {
+        local name="$1"
+        local output
+
+        output="$(env "${CLAUDEZ_ENV[@]}" claude mcp list --scope user 2>/dev/null)" || return 1
+        [[ -n "$output" ]] || return 1
+
+        # Match the MCP name in a flexible way so list formatting changes do not break detection.
+        grep -Fqi -- "$name" <<< "$output"
+      }
+
+      claudez_mcp_remove_if_exists() {
+        local name="$1"
+
+        if claudez_mcp_exists "$name"; then
+          env "${CLAUDEZ_ENV[@]}" claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
+        fi
+      }
+
       claudez_mcp_add_http() {
         local name="$1" url="$2"
-          env "${CLAUDEZ_ENV[@]}" claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
+          claudez_mcp_remove_if_exists "$name"
           env "${CLAUDEZ_ENV[@]}" claude mcp add --scope user --transport http \
           "$name" "$url" \
           --header "Authorization: Bearer $ZAI_API_TOKEN"
@@ -260,7 +279,7 @@ EOF
 
       claudez_mcp_add_stdio() {
         local name="$1"
-          env "${CLAUDEZ_ENV[@]}" claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
+          claudez_mcp_remove_if_exists "$name"
           env "${CLAUDEZ_ENV[@]}" claude mcp add --scope user \
           "$name" \
           -e "Z_AI_API_KEY=$ZAI_API_TOKEN" \
