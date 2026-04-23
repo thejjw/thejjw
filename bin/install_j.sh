@@ -185,11 +185,11 @@ if [[ -f "$GLOBAL_MD" ]]; then
   cat << 'CLAUDE_PREF_EOF'
 ## MCP Tool Preferences
 
-**Always prefer MCP tools over alternatives:**
-- Web searches: Use `mcp__web-search-prime__web_search_prime`
-- Web content: Use `mcp__web_reader__webReader`
-- Image analysis: Use MCP image analysis tools
-- Text extraction: Use MCP OCR tools
+**Always consider using MCP tools over alternatives for below purposes:**
+- Web searches
+- Web content
+- Image analysis
+- Text extraction
 
 If MCP tools are unavailable, inform the user and suggest alternatives.
 CLAUDE_PREF_EOF
@@ -198,11 +198,11 @@ else
   cat > "$GLOBAL_MD" << 'CLAUDE_PREF_EOF'
 ## MCP Tool Preferences
 
-**Always prefer MCP tools over alternatives:**
-- Web searches: Use `mcp__web-search-prime__web_search_prime`
-- Web content: Use `mcp__web_reader__webReader`
-- Image analysis: Use MCP image analysis tools
-- Text extraction: Use MCP OCR tools
+**Always consider using MCP tools over alternatives for below purposes:**
+- Web searches
+- Web content
+- Image analysis
+- Text extraction
 
 If MCP tools are unavailable, inform the user and suggest alternatives.
 CLAUDE_PREF_EOF
@@ -221,6 +221,9 @@ else
     echo "claudez: token is empty, skipping alias and MCP setup"
   else
     # Add the claudez alias
+    # about "CLAUDE_CODE_DISABLE_1M_CONTEXT": 
+    #   GLM-5.1, GLM-5, GLM-5-Turbo Context Length = 200K (https://docs.z.ai/guides/llm/glm-5.1)
+    #   GLM-4.5(GLM-4.5-Air) Context Length = 128K (https://docs.z.ai/guides/llm/glm-4.5)
     cat >> "$PROFILE" << EOF
 
 # >>> claudez >>>
@@ -229,6 +232,7 @@ alias claudez='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  CLAUDE_CODE_DISABLE_1M_CONTEXT="1" \
   claude'
 alias claudezm='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN" \
@@ -237,6 +241,7 @@ alias claudezm='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.1" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  CLAUDE_CODE_DISABLE_1M_CONTEXT="1" \
   claude'
 # <<< claudez <<<
 EOF
@@ -248,6 +253,7 @@ EOF
         ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN"
         API_TIMEOUT_MS="3000000"
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
+        CLAUDE_CODE_DISABLE_1M_CONTEXT="1"
       )
 
       claudez_mcp_exists() {

@@ -2866,6 +2866,10 @@ function Invoke-LoginAudit {
     Install-ClaudezSetup -Token "<token>" -Force
 
 .NOTES
+    about "CLAUDE_CODE_DISABLE_1M_CONTEXT": 
+        GLM-5.1, GLM-5, GLM-5-Turbo Context Length = 200K (https://docs.z.ai/guides/llm/glm-5.1)
+        GLM-4.5(GLM-4.5-Air) Context Length = 128K (https://docs.z.ai/guides/llm/glm-4.5)
+
     Author: jjw(@thejjw)
     Last Edit: 2026-04
 #>
@@ -2882,11 +2886,11 @@ function Install-ClaudezSetup {
     $prefText = @"
 ## MCP Tool Preferences
 
-**Always prefer MCP tools over alternatives:**
-- Web searches: Use `mcp__web-search-prime__web_search_prime`
-- Web content: Use `mcp__web_reader__webReader`
-- Image analysis: Use MCP image analysis tools
-- Text extraction: Use MCP OCR tools
+**Always consider using MCP tools over alternatives for below purposes:**
+- Web searches
+- Web content
+- Image analysis
+- Text extraction
 
 If MCP tools are unavailable, inform the user and suggest alternatives.
 "@
@@ -3062,6 +3066,7 @@ function claudez {
     $env:ANTHROPIC_AUTH_TOKEN = $token
     $env:API_TIMEOUT_MS = "3000000"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"
 
     try {
         [void](Install-ClaudezSetup -Token $token)
@@ -3072,6 +3077,7 @@ function claudez {
         Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
         Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_DISABLE_1M_CONTEXT -ErrorAction SilentlyContinue
     }
 }
 
