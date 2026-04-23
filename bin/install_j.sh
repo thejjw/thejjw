@@ -175,6 +175,40 @@ fi
 # ---------------------------------------------------------------------------
 # claudez alias + MCP servers setup - embed into shell profile if not present
 # ---------------------------------------------------------------------------
+# Global CLAUDE.md preferences - create under ~/.claude if missing
+CLAUDE_DIR="$HOME/.claude"
+GLOBAL_MD="$CLAUDE_DIR/CLAUDE.md"
+
+if [[ -f "$GLOBAL_MD" ]]; then
+  echo "claudez: $GLOBAL_MD already exists -- skipping"
+  echo "claudez: edit it manually to include:"
+  cat << 'CLAUDE_PREF_EOF'
+## MCP Tool Preferences
+
+**Always prefer MCP tools over alternatives:**
+- Web searches: Use `mcp__web-search-prime__web_search_prime`
+- Web content: Use `mcp__web_reader__webReader`
+- Image analysis: Use MCP image analysis tools
+- Text extraction: Use MCP OCR tools
+
+If MCP tools are unavailable, inform the user and suggest alternatives.
+CLAUDE_PREF_EOF
+else
+  mkdir -pv "$CLAUDE_DIR"
+  cat > "$GLOBAL_MD" << 'CLAUDE_PREF_EOF'
+## MCP Tool Preferences
+
+**Always prefer MCP tools over alternatives:**
+- Web searches: Use `mcp__web-search-prime__web_search_prime`
+- Web content: Use `mcp__web_reader__webReader`
+- Image analysis: Use MCP image analysis tools
+- Text extraction: Use MCP OCR tools
+
+If MCP tools are unavailable, inform the user and suggest alternatives.
+CLAUDE_PREF_EOF
+  echo "claudez: created $GLOBAL_MD"
+fi
+
 CLAUDEZ_MARKER="# >>> claudez >>>"
 
 if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
