@@ -2870,6 +2870,12 @@ function Invoke-LoginAudit {
         GLM-5.1, GLM-5, GLM-5-Turbo Context Length = 200K (https://docs.z.ai/guides/llm/glm-5.1)
         GLM-4.5(GLM-4.5-Air) Context Length = 128K (https://docs.z.ai/guides/llm/glm-4.5)
 
+    for delete/cleanup of existing MCP servers (if you want to start fresh):
+    claude mcp list | ForEach-Object {
+        $name = ($_ -split ':')[0].Trim()
+        if ($name) { claude mcp remove $name }
+    }
+
     Author: jjw(@thejjw)
     Last Edit: 2026-04
 #>
@@ -2920,111 +2926,68 @@ If MCP tools are unavailable, inform the user and suggest alternatives.
         return $true
     }
 
-    function Test-ClaudezMcpExists {
-        param([Parameter(Mandatory = $true)][string]$Name)
+    Write-Host "claudez: configuring MCP servers..." -ForegroundColor Cyan
 
-        $listOutput = & claude mcp list --scope user 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $listOutput) {
-            Write-Verbose "claudez: unable to read MCP list (or list is empty) while checking '$Name'"
-            return $false
-        }
-
-        # Prefer token-like match, then fall back to simple substring for flexible CLI output formats.
-        $escapedName = [regex]::Escape($Name)
-        $tokenPattern = "(?i)(^|\s|[|,:])${escapedName}(\s|$|[|,:])"
-        $isMatch = ($listOutput | Select-String -Pattern $tokenPattern -Quiet)
-        if (-not $isMatch) {
-            $isMatch = ($listOutput | Select-String -SimpleMatch -Pattern $Name -Quiet)
-            if ($isMatch) {
-                Write-Verbose "claudez: MCP '$Name' matched"
-            }
-        }
-
-        Write-Verbose "claudez: MCP '$Name' exists=$isMatch"
-        return $isMatch
-    }
-
-    function Remove-ClaudezMcpIfExists {
-        param([Parameter(Mandatory = $true)][string]$Name)
-
-        if (Test-ClaudezMcpExists -Name $Name) {
-            Write-Verbose "claudez: removing existing MCP server '$Name'"
-            & claude mcp remove --scope user $Name 2>$null | Out-Null
+    # web-search-prime
+    # https://docs.z.ai/devpack/mcp/search-mcp-server
+    if (& claude mcp list | Select-String -Pattern 'web-search-prime' -Quiet) {
+        Write-Host "claudez: web-search-prime already exists -- skipping" -ForegroundColor DarkGray
+    } else {
+        & claude mcp add -s user -t http web-search-prime https://api.z.ai/api/mcp/web_search_prime/mcp --header "Authorization: Bearer $Token" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "claudez: added web-search-prime" -ForegroundColor Green
         } else {
-            Write-Verbose "claudez: MCP server '$Name' not found; skipping remove"
+            Write-Warning "claudez: failed to add web-search-prime"
         }
     }
 
-    function Add-ClaudezMcpHttp {
-        param(
-            [Parameter(Mandatory = $true)][string]$Name,
-            [Parameter(Mandatory = $true)][string]$Url,
-            [Parameter(Mandatory = $true)][string]$Token
-        )
-
-        Remove-ClaudezMcpIfExists -Name $Name
-        $cmdArgs = @(
-            'mcp', 'add', '--scope', 'user', '--transport', 'http',
-            $Name, $Url, '--header', "Authorization: Bearer $Token"
-        )
-        & claude @cmdArgs
-        return ($LASTEXITCODE -eq 0)
+    # web-reader
+    # https://docs.z.ai/devpack/mcp/reader-mcp-server
+    if (& claude mcp list | Select-String -Pattern 'web-reader' -Quiet) {
+        Write-Host "claudez: web-reader already exists -- skipping" -ForegroundColor DarkGray
+    } else {
+        & claude mcp add -s user -t http web-reader https://api.z.ai/api/mcp/web_reader/mcp --header "Authorization: Bearer $Token" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "claudez: added web-reader" -ForegroundColor Green
+        } else {
+            Write-Warning "claudez: failed to add web-reader"
+        }
     }
 
-    function Add-ClaudezMcpStdio {
-        param(
-            [Parameter(Mandatory = $true)][string]$Name,
-            [Parameter(Mandatory = $true)][string]$Token
-        )
-
-        Remove-ClaudezMcpIfExists -Name $Name
-        $cmdArgs = @(
-            'mcp', 'add', '--scope', 'user', $Name,
-            '-e', "Z_AI_API_KEY=$Token",
-            '-e', 'Z_AI_MODE=ZAI',
-            '--', 'cmd', '/c', 'npx', '-y', '@z_ai/mcp-server'
-        )
-        & claude @cmdArgs
-        return ($LASTEXITCODE -eq 0)
+    # zread
+    # https://docs.z.ai/devpack/mcp/zread-mcp-server
+    if (& claude mcp list | Select-String -Pattern 'zread' -Quiet) {
+        Write-Host "claudez: zread already exists -- skipping" -ForegroundColor DarkGray
+    } else {
+        & claude mcp add -s user -t http zread https://api.z.ai/api/mcp/zread/mcp --header "Authorization: Bearer $Token" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "claudez: added zread" -ForegroundColor Green
+        } else {
+            Write-Warning "claudez: failed to add zread"
+        }
     }
 
-    $mcpFailures = 0
-
-    if (-not (Add-ClaudezMcpStdio -Name 'zai-mcp-server' -Token $Token)) {
-        Write-Warning 'claudez: failed to configure MCP server: zai-mcp-server'
-        Write-Host 'claudez: try this manually:' -ForegroundColor Yellow
-        Write-Host "claude mcp add --scope user zai-mcp-server -e 'Z_AI_API_KEY=$Token' -e 'Z_AI_MODE=ZAI' -- npx -y @z_ai/mcp-server" -ForegroundColor DarkGray
-        $mcpFailures++
+    # zai-mcp-server
+    # https://docs.z.ai/devpack/mcp/vision-mcp-server
+    if (& claude mcp list | Select-String -Pattern 'zai-mcp-server' -Quiet) {
+        Write-Host "claudez: zai-mcp-server already exists -- skipping" -ForegroundColor DarkGray
+    } else {
+        & claude mcp add -s user zai-mcp-server --env Z_AI_API_KEY=$Token Z_AI_MODE=ZAI -- cmd /c npx -y "@z_ai/mcp-server" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "claudez: added zai-mcp-server" -ForegroundColor Green
+        } else {
+            Write-Warning "claudez: failed to add zai-mcp-server"
+        }
     }
 
-    if (-not (Add-ClaudezMcpHttp -Name 'web-search-prime' -Url 'https://api.z.ai/api/mcp/web_search_prime/mcp' -Token $Token)) {
-        Write-Warning 'claudez: failed to configure MCP server: web-search-prime'
-        $mcpFailures++
-    }
-
-    if (-not (Add-ClaudezMcpHttp -Name 'web-reader' -Url 'https://api.z.ai/api/mcp/web_reader/mcp' -Token $Token)) {
-        Write-Warning 'claudez: failed to configure MCP server: web-reader'
-        $mcpFailures++
-    }
-
-    if (-not (Add-ClaudezMcpHttp -Name 'zread' -Url 'https://api.z.ai/api/mcp/zread/mcp' -Token $Token)) {
-        Write-Warning 'claudez: failed to configure MCP server: zread'
-        $mcpFailures++
-    }
-
-    if ($mcpFailures -eq 0) {
-        $flagInfo = @(
-            "configuredAt=$(Get-Date -Format o)",
-            "user=$env:USERNAME",
-            'mode=ZAI'
-        ) -join "`r`n"
-        Set-Content -LiteralPath $setupFlag -Value $flagInfo -Encoding UTF8
-        Write-Host 'claudez: MCP servers configured via claude mcp (scope=user)' -ForegroundColor Green
-        return $true
-    }
-
-    Write-Warning "claudez: MCP configuration completed with $mcpFailures failure(s)"
-    return $false
+    $flagInfo = @(
+        "configuredAt=$(Get-Date -Format o)",
+        "user=$env:USERNAME",
+        'mode=ZAI'
+    ) -join "`r`n"
+    Set-Content -LiteralPath $setupFlag -Value $flagInfo -Encoding UTF8
+    Write-Host 'claudez: MCP setup complete' -ForegroundColor Green
+    return $true
 }
 
 <#

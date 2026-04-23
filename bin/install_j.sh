@@ -256,73 +256,58 @@ EOF
         CLAUDE_CODE_DISABLE_1M_CONTEXT="1"
       )
 
-      claudez_mcp_exists() {
-        local name="$1"
-        local output
+      echo "claudez: configuring MCP servers..."
 
-        output="$(env "${CLAUDEZ_ENV[@]}" claude mcp list --scope user 2>/dev/null)" || return 1
-        [[ -n "$output" ]] || return 1
-
-        # Match the MCP name in a flexible way so list formatting changes do not break detection.
-        grep -Fqi -- "$name" <<< "$output"
-      }
-
-      claudez_mcp_remove_if_exists() {
-        local name="$1"
-
-        if claudez_mcp_exists "$name"; then
-          env "${CLAUDEZ_ENV[@]}" claude mcp remove --scope user "$name" >/dev/null 2>&1 || true
+      # web-search-prime
+      # https://docs.z.ai/devpack/mcp/search-mcp-server
+      if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "web-search-prime"; then
+        echo "claudez: web-search-prime already exists -- skipping"
+      else
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-search-prime https://api.z.ai/api/mcp/web_search_prime/mcp --header "Authorization: Bearer $ZAI_API_TOKEN" >/dev/null 2>&1; then
+          echo "claudez: added web-search-prime"
+        else
+          echo "claudez: failed to add web-search-prime" >&2
         fi
-      }
-
-      claudez_mcp_add_http() {
-        local name="$1" url="$2"
-          claudez_mcp_remove_if_exists "$name"
-          env "${CLAUDEZ_ENV[@]}" claude mcp add --scope user --transport http \
-          "$name" "$url" \
-          --header "Authorization: Bearer $ZAI_API_TOKEN"
-      }
-
-      claudez_mcp_add_stdio() {
-        local name="$1"
-          claudez_mcp_remove_if_exists "$name"
-          env "${CLAUDEZ_ENV[@]}" claude mcp add --scope user \
-          "$name" \
-          -e "Z_AI_API_KEY=$ZAI_API_TOKEN" \
-          -e "Z_AI_MODE=ZAI" \
-          -- npx -y @z_ai/mcp-server
-      }
-
-      mcp_failures=0
-
-      if ! claudez_mcp_add_stdio "zai-mcp-server"; then
-        echo "claudez: failed to configure MCP server: zai-mcp-server" >&2
-        echo "claudez: try this manually:" >&2
-        echo "ANTHROPIC_BASE_URL=\"https://api.z.ai/api/anthropic\" ANTHROPIC_AUTH_TOKEN=\"$ZAI_API_TOKEN\" API_TIMEOUT_MS=\"3000000\" CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=\"1\" claude mcp add --scope user zai-mcp-server -e \"Z_AI_API_KEY=$ZAI_API_TOKEN\" -e \"Z_AI_MODE=ZAI\" -- npx -y @z_ai/mcp-server" >&2
-        mcp_failures=$((mcp_failures + 1))
       fi
 
-      if ! claudez_mcp_add_http "web-search-prime" "https://api.z.ai/api/mcp/web_search_prime/mcp"; then
-        echo "claudez: failed to configure MCP server: web-search-prime" >&2
-        mcp_failures=$((mcp_failures + 1))
+      # web-reader
+      # https://docs.z.ai/devpack/mcp/reader-mcp-server
+      if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "web-reader"; then
+        echo "claudez: web-reader already exists -- skipping"
+      else
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-reader https://api.z.ai/api/mcp/web_reader/mcp --header "Authorization: Bearer $ZAI_API_TOKEN" >/dev/null 2>&1; then
+          echo "claudez: added web-reader"
+        else
+          echo "claudez: failed to add web-reader" >&2
+        fi
       fi
 
-      if ! claudez_mcp_add_http "web-reader" "https://api.z.ai/api/mcp/web_reader/mcp"; then
-        echo "claudez: failed to configure MCP server: web-reader" >&2
-        mcp_failures=$((mcp_failures + 1))
+      # zread
+      # https://docs.z.ai/devpack/mcp/zread-mcp-server
+      if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "zread"; then
+        echo "claudez: zread already exists -- skipping"
+      else
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http zread https://api.z.ai/api/mcp/zread/mcp --header "Authorization: Bearer $ZAI_API_TOKEN" >/dev/null 2>&1; then
+          echo "claudez: added zread"
+        else
+          echo "claudez: failed to add zread" >&2
+        fi
       fi
 
-      if ! claudez_mcp_add_http "zread" "https://api.z.ai/api/mcp/zread/mcp"; then
-        echo "claudez: failed to configure MCP server: zread" >&2
-        mcp_failures=$((mcp_failures + 1))
+      # zai-mcp-server
+      # https://docs.z.ai/devpack/mcp/vision-mcp-server
+      if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "zai-mcp-server"; then
+        echo "claudez: zai-mcp-server already exists -- skipping"
+      else
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user zai-mcp-server --env Z_AI_API_KEY=$ZAI_API_TOKEN Z_AI_MODE=ZAI -- npx -y @z_ai/mcp-server >/dev/null 2>&1; then
+          echo "claudez: added zai-mcp-server"
+        else
+          echo "claudez: failed to add zai-mcp-server" >&2
+        fi
       fi
 
       echo "claudez: alias added to $PROFILE"
-      if [[ "$mcp_failures" -eq 0 ]]; then
-        echo "claudez: MCP servers configured via claude mcp (scope=user)"
-      else
-        echo "claudez: MCP configuration completed with $mcp_failures failure(s)" >&2
-      fi
+      echo "claudez: MCP setup complete"
     else
       echo "claudez: alias added to $PROFILE"
       echo "WARNING: claude CLI not found, skipping MCP server configuration"
