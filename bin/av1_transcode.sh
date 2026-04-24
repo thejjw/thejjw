@@ -29,8 +29,10 @@ OPTIONS
   --delete-always       Delete original after successful conversion if output is smaller,
                         regardless of VMAF score. (Original -d behavior)
                         If output is not smaller, output is deleted and original is kept.
-  NOTE: Outputs are always deleted as "bad quality encodes" when the average
-        VMAF < 70 OR any partition window VMAF < 55.
+    NOTE: "Bad quality" encodes are identified when the average VMAF < 70 OR any
+      partition window VMAF < 55.
+      - With no --delete* flag: output is kept for manual review.
+      - With any --delete* flag: output is deleted and original is kept.
 
   NOTE: -d, --delete, --delete-safe, and --delete-always are mutually exclusive.
         Only one deletion mode can be specified.
@@ -1248,17 +1250,21 @@ for i in "${!PLAN_FILES[@]}"; do
       LOW_VMAF_FILES+=("$FILE (VMAF: $VMAF_SCORE)")
     fi
 
-    # Delete outputs with average VMAF < 70 or a partition window VMAF < 55.
+    # Detect outputs with average VMAF < 70 or a partition window VMAF < 55.
     # The min-window floor is intentionally generous: a single ~4-8 min partition
     # dipping into the 60s is usually just hard content (dark/grain/heavy motion),
     # not a broken encode. Below 55 a whole partition is genuinely degraded.
     if awk -v avg="$VMAF_SCORE" -v min="$VMAF_MIN_SCORE" 'BEGIN { exit !((avg < 70) || (min < 55)) }'; then
       BAD_VMAF_FILES+=("$FILE (VMAF avg: $VMAF_SCORE, min: $VMAF_MIN_SCORE)")
-      rm -fv -- "$OUT"
-      log "Bad quality encode (VMAF avg < 70 or min window < 55). Deleted output and kept original."
-      TOTAL_NEW_BYTES=$((TOTAL_NEW_BYTES - NEW_BYTES))
-      log_scope_run
-      continue
+      if $DELETE_ORIGINAL; then
+        rm -fv -- "$OUT"
+        log "Bad quality encode (VMAF avg < 70 or min window < 55). Deleted output and kept original."
+        TOTAL_NEW_BYTES=$((TOTAL_NEW_BYTES - NEW_BYTES))
+        log_scope_run
+        continue
+      else
+        log "Bad quality encode (VMAF avg < 70 or min window < 55). Keeping output (no --delete* flag)."
+      fi
     fi
   fi
 
@@ -1327,7 +1333,11 @@ fi
 if (( ${#BAD_VMAF_FILES[@]} > 0 )); then
   log "================================================================================"
   log "=== Bad quality encodes (VMAF avg < 70 or min window < 55) ==="
-  log "Note: Outputs were deleted and originals kept."
+  if $DELETE_ORIGINAL; then
+    log "Note: Outputs were deleted and originals kept."
+  else
+    log "Note: Outputs were kept for manual review (no --delete* flag)."
+  fi
   for file in "${BAD_VMAF_FILES[@]}"; do
     log "  $file"
   done
