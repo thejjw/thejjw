@@ -2547,6 +2547,11 @@ Last Edit: 2026-04
 - Commit each logical change separately -- never bundle unrelated changes.
 - Use Conventional Commits: ``feat:``, ``fix:``, ``refactor:``, ``docs:``, ``chore:``, ``test:``, etc.
 - Write short, imperative descriptions (e.g. ``feat: add input validation``, ``fix: off-by-one in retry loop``).
+
+## Dependencies
+
+- Pick the (latest) version the package manager resolves against existing project constraints (lockfile, manifest ranges).
+- Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals (tagged `deprecated`, yanked releases, archived repository, ...) on the chosen package and version; if any are found, warn inline (package name, signal source, suggested alternative if the registry provides one) and then proceed.
 "@ | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
 
         # CLAUDE.md imports AGENTS.md -- Claude Code reads CLAUDE.md, not AGENTS.md
