@@ -3036,6 +3036,15 @@ function claudez {
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"
 
+    # delete below if this becomes obsolete
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.7-flash"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-4.7"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-4.7"
+    
+    Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
+    Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
+    Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
+    
     try {
         [void](Install-ClaudezSetup -Token $token)
 
@@ -3068,7 +3077,7 @@ function claudez {
     Last Edit: 2026-04
 #>
 function claudezm {
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.7-flash"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5-turbo"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
 
