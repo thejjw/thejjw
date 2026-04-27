@@ -3093,26 +3093,28 @@ function claudez {
     $env:API_TIMEOUT_MS = "3000000"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"
+    $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     # delete below if this becomes obsolete
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-4.7"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-4.7"
     
-    Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
-    Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
-    Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
-    
     try {
         [void](Install-ClaudezSetup -Token $token)
 
         claude @args
     } finally {
+        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
+
         Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
         Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
         Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
         Remove-Item Env:\CLAUDE_CODE_DISABLE_1M_CONTEXT -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
     }
 }
 
@@ -3135,15 +3137,49 @@ function claudez {
     Last Edit: 2026-04
 #>
 function claudezm {
+    # Read token from environment only (process first, then persisted user scope).
+    $token = $env:Z_AI_AUTH_TOKEN
+    if (-not $token) {
+        $token = [Environment]::GetEnvironmentVariable("Z_AI_AUTH_TOKEN", "User")
+    }
+
+    if (-not $token) {
+        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
+        Write-Host "  [Environment]::SetEnvironmentVariable('Z_AI_AUTH_TOKEN', '<your_token>', 'User')" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Optional (current session only):" -ForegroundColor Yellow
+        Write-Host "  `$env:Z_AI_AUTH_TOKEN = '<your_token>'" -ForegroundColor Cyan
+        return
+    }
+
+    $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
+    $env:ANTHROPIC_AUTH_TOKEN = $token
+    $env:API_TIMEOUT_MS = "3000000"
+    $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"
+    $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
+
+    # Max plan compatibility mode uses different default model routing.
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5-turbo"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
 
     try {
-        claudez @args
+        [void](Install-ClaudezSetup -Token $token)
+
+        claude @args
     } finally {
         Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
         Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
         Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
+
+        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
+        Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_DISABLE_1M_CONTEXT -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
     }
 }
