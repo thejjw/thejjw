@@ -226,6 +226,7 @@ else
     echo "claudez: token is empty, skipping alias and MCP setup"
   else
     # Add the claudez alias
+    # about supported model: "All plans support GLM-5.1, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
     # about "CLAUDE_CODE_DISABLE_1M_CONTEXT": 
     #   GLM-5.1, GLM-5, GLM-5-Turbo Context Length = 200K (https://docs.z.ai/guides/llm/glm-5.1)
     #   GLM-4.5(GLM-4.5-Air) Context Length = 128K (https://docs.z.ai/guides/llm/glm-4.5)

@@ -2871,10 +2871,6 @@ function Invoke-LoginAudit {
     Install-ClaudezSetup -Token "<token>" -Force
 
 .NOTES
-    about "CLAUDE_CODE_DISABLE_1M_CONTEXT": 
-        GLM-5.1, GLM-5, GLM-5-Turbo Context Length = 200K (https://docs.z.ai/guides/llm/glm-5.1)
-        GLM-4.5(GLM-4.5-Air) Context Length = 128K (https://docs.z.ai/guides/llm/glm-4.5)
-
     for delete/cleanup of existing MCP servers (if you want to start fresh):
     claude mcp list | ForEach-Object {
         $name = ($_ -split ':')[0].Trim()
@@ -3000,8 +2996,15 @@ If MCP tools are unavailable, inform the user and suggest alternatives.
     Launches Claude Code through the Z.AI-backed profile helper.
 
 .DESCRIPTION
-    Prompts for the Z.AI API key when needed, runs one-time claudez setup, configures runtime environment,
-    then invokes claude with the supplied arguments.
+    Reads the Z.AI API key from the Z_AI_AUTH_TOKEN environment variable
+    (current session first, then User scope), runs one-time claudez setup,
+    configures runtime environment, then invokes claude with the supplied arguments.
+    If Z_AI_AUTH_TOKEN is not set, the function aborts and prints setup guidance.
+    about supported model: 
+        "All plans support GLM-5.1, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
+    about "CLAUDE_CODE_DISABLE_1M_CONTEXT": 
+        GLM-5.1, GLM-5, GLM-5-Turbo Context Length = 200K (https://docs.z.ai/guides/llm/glm-5.1)
+        GLM-4.5(GLM-4.5-Air) Context Length = 128K (https://docs.z.ai/guides/llm/glm-4.5)
 
 .EXAMPLE
     claudez
@@ -3009,25 +3012,31 @@ If MCP tools are unavailable, inform the user and suggest alternatives.
 .EXAMPLE
     claudez "Explain the current repository"
 
+.EXAMPLE
+    [Environment]::SetEnvironmentVariable('Z_AI_AUTH_TOKEN', '<your_token>', 'User')
+    # Restart PowerShell, then run:
+    claudez
+
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-04
 #>
 function claudez {
-    # Check if token is already set in the function or environment
-    $token = "your_zai_api_key"  # <-- replace this, or leave as-is to always prompt
+    # Read token from environment only (process first, then persisted user scope).
+    $token = $env:Z_AI_AUTH_TOKEN
+    if (-not $token) {
+        $token = [Environment]::GetEnvironmentVariable("Z_AI_AUTH_TOKEN", "User")
+    }
 
-    if (-not $token -or $token -eq "your_zai_api_key") {
-        $token = Read-Host "Enter your Z.AI API key"
-        if (-not $token) {
-            Write-Host "No API key provided. Aborting." -ForegroundColor Red
-            return
-        }
+    if (-not $token) {
+        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Tip: To avoid this prompt in the future, edit your profile and" -ForegroundColor Yellow
-        Write-Host "replace 'your_zai_api_key' with your actual key in the function:" -ForegroundColor Yellow
-        Write-Host "  notepad `$PROFILE" -ForegroundColor Cyan
+        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
+        Write-Host "  [Environment]::SetEnvironmentVariable('Z_AI_AUTH_TOKEN', '<your_token>', 'User')" -ForegroundColor Cyan
         Write-Host ""
+        Write-Host "Optional (current session only):" -ForegroundColor Yellow
+        Write-Host "  `$env:Z_AI_AUTH_TOKEN = '<your_token>'" -ForegroundColor Cyan
+        return
     }
 
     $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
