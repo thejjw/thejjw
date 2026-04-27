@@ -4,6 +4,55 @@ function prompt {
     "$([char]27)]9;9;`"$loc`"$([char]27)\" + $out
 }
 
+function New-RandomPassword {
+<#
+.SYNOPSIS
+    Generates a random password using System.Web.Security.Membership.
+.DESCRIPTION
+    Wraps the built-in [System.Web.Security.Membership]::GeneratePassword() method
+    to generate cryptographically strong random passwords with customizable length
+    and special character requirements. Uses RNGCryptoServiceProvider for high entropy.
+.PARAMETER Length
+    The total number of characters in the generated password (default: 16).
+.PARAMETER MinimumSpecialCharacters
+    The minimum number of special characters to include in the password (default: 3).
+.EXAMPLE
+    PS C:\> New-RandomPassword
+    Generates a 16-character password with at least 3 special characters.
+.EXAMPLE
+    PS C:\> New-RandomPassword -Length 20 -MinimumSpecialCharacters 5
+    Generates a 20-character password with at least 5 special characters.
+.OUTPUTS
+    System.String. A randomly generated password.
+.LINK
+    https://learn.microsoft.com/en-us/dotnet/api/system.web.security.membership.generatepassword
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-04
+
+    Requires Windows PowerShell or PowerShell with .NET Framework installed.
+    Characters include: uppercase, lowercase, digits, and special characters (!@#$%^&*()_-+=[{]};:<>|./?).
+#>
+    param(
+        [int]$Length = 16,
+        [int]$MinimumSpecialCharacters = 3
+    )
+
+    try {
+        Add-Type -AssemblyName System.Web -ErrorAction Stop
+    } catch {
+        Write-Error "Failed to load System.Web assembly. Ensure .NET Framework is installed." -ErrorAction Stop
+        return
+    }
+
+    try {
+        $password = [System.Web.Security.Membership]::GeneratePassword($Length, $MinimumSpecialCharacters)
+        return $password
+    } catch {
+        Write-Error "Failed to generate password: $_" -ErrorAction Stop
+    }
+}
+
 function Clear-WorkingSet {
 <#
 .SYNOPSIS
