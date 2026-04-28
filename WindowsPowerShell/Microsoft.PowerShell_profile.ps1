@@ -3098,7 +3098,7 @@ function claudez {
     # delete below if this becomes obsolete
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-4.7"
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-4.7"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
     
     try {
         [void](Install-ClaudezSetup -Token $token)
@@ -3116,6 +3116,50 @@ function claudez {
         Remove-Item Env:\CLAUDE_CODE_DISABLE_1M_CONTEXT -ErrorAction SilentlyContinue
         Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
     }
+}
+
+<#
+.SYNOPSIS
+    Launches claudez with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to claudez and appends --dangerously-skip-permissions.
+
+.EXAMPLE
+    claudezd
+
+.EXAMPLE
+    claudezd "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-04
+#>
+function claudezd {
+    $claudeArgs = @args + '--dangerously-skip-permissions'
+    claudez @claudeArgs
+}
+
+<#
+.SYNOPSIS
+    Launches claudezm with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to claudezm and appends --dangerously-skip-permissions.
+
+.EXAMPLE
+    claudezmd
+
+.EXAMPLE
+    claudezmd "Summarize the changed files"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-04
+#>
+function claudezmd {
+    $claudeArgs = @args + '--dangerously-skip-permissions'
+    claudezm @claudeArgs
 }
 
 <#
