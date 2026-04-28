@@ -19,7 +19,7 @@ if ! which apt >/dev/null; then
   exit 1
 fi
 
-PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk neofetch curl wget ripgrep jq parallel zstd xz-utils webp btop zram-tools bubblewrap socat"
+PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk fastfetch curl wget ripgrep jq parallel zstd xz-utils webp btop zram-tools bubblewrap socat"
 NVM_VERSION="v0.40.4"
 
 sudo apt-get update && sudo apt-get install -y $PACKAGES
