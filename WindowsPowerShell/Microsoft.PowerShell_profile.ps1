@@ -3136,7 +3136,7 @@ function claudez {
     Last Edit: 2026-04
 #>
 function claudezd {
-    $claudeArgs = @args + '--dangerously-skip-permissions'
+    $claudeArgs = $args + '--dangerously-skip-permissions'
     claudez @claudeArgs
 }
 
@@ -3158,7 +3158,7 @@ function claudezd {
     Last Edit: 2026-04
 #>
 function claudezmd {
-    $claudeArgs = @args + '--dangerously-skip-permissions'
+    $claudeArgs = $args + '--dangerously-skip-permissions'
     claudezm @claudeArgs
 }
 
