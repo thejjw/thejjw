@@ -3324,7 +3324,6 @@ Last Edit: 2026-04
     }
 
     $script = @'
-set -euo pipefail
 CC_TMP="$(mktemp -d /tmp/cc-XXXXXX)"
 trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
 CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
@@ -3343,10 +3342,8 @@ if ! command -v node &>/dev/null; then
     export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
     curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh \
         | NVM_DIR="$NVM_DIR" PROFILE=/dev/null bash
-    set +u
     . "$NVM_DIR/nvm.sh" --no-use
     nvm install --lts --no-progress && nvm use --lts
-    set -u
 fi
 if ! command -v claude &>/dev/null; then
     npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
