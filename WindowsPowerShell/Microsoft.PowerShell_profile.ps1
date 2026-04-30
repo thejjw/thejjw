@@ -3227,3 +3227,211 @@ function claudezm {
         Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
     }
 }
+
+
+function Invoke-RemoteClaudeCodeBase {
+<#
+.SYNOPSIS
+Runs Claude Code on a remote SSH endpoint with temporary remote state.
+
+.DESCRIPTION
+Uploads a small bash launcher over SSH, sets the Anthropic/Z.AI environment variables inline,
+and starts claude on the remote host with a temporary HOME, npm prefix, and workspace.
+Use this when you want a one-shot remote Claude session without leaving permanent state behind.
+
+.PARAMETER RemoteHost
+SSH target in user@host form.
+
+.PARAMETER ApiKey
+Anthropic-compatible API key for the remote session.
+
+.PARAMETER Port
+SSH port to connect to. Defaults to 22.
+
+.PARAMETER BaseUrl
+Anthropic-compatible API base URL.
+
+.PARAMETER HaikuModel
+Default Haiku model name.
+
+.PARAMETER SonnetModel
+Default Sonnet model name.
+
+.PARAMETER OpusModel
+Default Opus model name.
+
+.PARAMETER TimeoutMs
+API timeout in milliseconds.
+
+.PARAMETER Disable1M
+Sets CLAUDE_CODE_DISABLE_1M_CONTEXT on the remote host.
+
+.EXAMPLE
+Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN
+
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-04
+#>
+        [CmdletBinding()]
+        param(
+        [Parameter(Mandatory = $true)]
+        [string]$RemoteHost,
+
+        [Parameter(Mandatory = $true)]
+            [string]$ApiKey,
+
+            [int]$Port = 22,
+
+            [Parameter(Mandatory = $true)]
+            [string]$BaseUrl,
+
+            [Parameter(Mandatory = $true)]
+            [string]$HaikuModel,
+
+            [Parameter(Mandatory = $true)]
+            [string]$SonnetModel,
+
+            [Parameter(Mandatory = $true)]
+            [string]$OpusModel,
+
+            [Parameter(Mandatory = $true)]
+            [string]$TimeoutMs,
+
+            [Parameter(Mandatory = $true)]
+            [string]$Disable1M
+        )
+
+        function Escape-BashSingleQuotedValue {
+                param([string]$Value)
+                if ($null -eq $Value) { return "''" }
+                return "'" + ($Value -replace "'", "'\"'\"'") + "'"
+        }
+
+    if ([string]::IsNullOrWhiteSpace($RemoteHost)) {
+        throw 'RemoteHost is required.'
+        }
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        throw 'ApiKey is required.'
+        }
+
+        $script = @'
+set -euo pipefail
+CC_TMP="$(mktemp -d /tmp/cc-XXXXXX)"
+trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
+CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
+mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?not set}"
+export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:?not set}"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-}"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-}"
+export API_TIMEOUT_MS="${API_TIMEOUT_MS:-300000}"
+export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export DISABLE_AUTOUPDATER=1
+if ! command -v node &>/dev/null; then
+    export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh \
+        | NVM_DIR="$NVM_DIR" PROFILE=/dev/null bash
+    . "$NVM_DIR/nvm.sh" --no-use
+    nvm install --lts --no-progress && nvm use --lts
+fi
+if ! command -v claude &>/dev/null; then
+    npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
+    export PATH="$CC_NPM/bin:$PATH"
+fi
+cd "$CC_WORK"
+HOME="$CC_HOME" claude --dangerously-skip-permissions
+'@
+
+        $envPrefix = @(
+                "ANTHROPIC_API_KEY=$(Escape-BashSingleQuotedValue $ApiKey)"
+                "ANTHROPIC_BASE_URL=$(Escape-BashSingleQuotedValue $BaseUrl)"
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL=$(Escape-BashSingleQuotedValue $HaikuModel)"
+                "ANTHROPIC_DEFAULT_SONNET_MODEL=$(Escape-BashSingleQuotedValue $SonnetModel)"
+                "ANTHROPIC_DEFAULT_OPUS_MODEL=$(Escape-BashSingleQuotedValue $OpusModel)"
+                "API_TIMEOUT_MS=$(Escape-BashSingleQuotedValue $TimeoutMs)"
+                "CLAUDE_CODE_DISABLE_1M_CONTEXT=$(Escape-BashSingleQuotedValue $Disable1M)"
+        ) -join ' '
+
+        $script | ssh -p $Port $RemoteHost "$envPrefix bash -s"
+}
+
+function Invoke-RemoteClaudeCodeZ {
+<#
+.SYNOPSIS
+Runs Claude Code on a remote SSH endpoint with temporary remote state.
+
+.DESCRIPTION
+Prompts for the API key from Z_AI_AUTH_TOKEN if it is not provided, then runs the remote Claude launcher
+with the remote defaults defined inside Invoke-RemoteClaudeCodeBase. The remote Claude invocation always
+uses --dangerously-skip-permissions.
+
+.PARAMETER RemoteHost
+SSH target in user@host form.
+
+.PARAMETER ApiKey
+Anthropic-compatible API key for the remote session. Optional; falls back to Z_AI_AUTH_TOKEN.
+
+.PARAMETER Port
+SSH port to connect to. Defaults to 22.
+
+.EXAMPLE
+Invoke-RemoteClaudeCodeZ -RemoteHost user@remote-host
+
+.EXAMPLE
+Invoke-RemoteClaudeCodeZ -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN
+
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-04
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RemoteHost,
+
+        [string]$ApiKey,
+
+        [int]$Port = 22
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        $ApiKey = $env:Z_AI_AUTH_TOKEN
+        if (-not $ApiKey) {
+            $ApiKey = [Environment]::GetEnvironmentVariable("Z_AI_AUTH_TOKEN", "User")
+        }
+    }
+
+    if (-not $ApiKey) {
+        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
+        Write-Host "  [Environment]::SetEnvironmentVariable('Z_AI_AUTH_TOKEN', '<your_token>', 'User')" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Optional (current session only):" -ForegroundColor Yellow
+        Write-Host "  `$env:Z_AI_AUTH_TOKEN = '<your_token>'" -ForegroundColor Cyan
+        return
+    }
+
+    # Keep the editable remote defaults here so they are easy to tweak later.
+    $BaseUrl     = "https://api.z.ai/api/anthropic"
+    $HaikuModel  = "glm-4.5-air"
+    $SonnetModel = "glm-5-turbo"
+    $OpusModel   = "glm-5.1"
+    $TimeoutMs   = "3000000"
+    $Disable1M   = "1"
+
+    Invoke-RemoteClaudeCodeBase `
+        -RemoteHost $RemoteHost `
+        -ApiKey $ApiKey `
+        -Port $Port `
+        -BaseUrl $BaseUrl `
+        -HaikuModel $HaikuModel `
+        -SonnetModel $SonnetModel `
+        -OpusModel $OpusModel `
+        -TimeoutMs $TimeoutMs `
+        -Disable1M $Disable1M
+}
