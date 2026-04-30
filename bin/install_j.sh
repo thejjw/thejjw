@@ -19,7 +19,7 @@ if ! which apt >/dev/null; then
   exit 1
 fi
 
-PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk fastfetch curl wget ripgrep jq parallel zstd xz-utils webp btop zram-tools bubblewrap socat"
+PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop zram-tools bubblewrap socat"
 NVM_VERSION="v0.40.4"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 
@@ -221,9 +221,9 @@ if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez: already in $PROFILE -- skipping"
 else
   # Prompt once for API token (used for both alias and MCP servers)
-  read -r -p "Enter your Z.AI API token for claudez alias + MCP servers: " ZAI_API_TOKEN
+  read -r -p "Enter your Z.AI API token for claudez alias + MCP servers: " Z_AI_AUTH_TOKEN
 
-  if [[ -z "$ZAI_API_TOKEN" ]]; then
+  if [[ -z "$Z_AI_AUTH_TOKEN" ]]; then
     echo "claudez: token is empty, skipping alias and MCP setup"
   else
     # Add the claudez alias
@@ -236,7 +236,7 @@ else
 # >>> claudez >>>
 # Custom Claude Code alias with Z.AI endpoint
 alias claudez='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN" \
+  ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.7" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.1" \
@@ -245,7 +245,7 @@ alias claudez='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   CLAUDE_CODE_DISABLE_1M_CONTEXT="1" \
   claude'
 alias claudezd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN" \
+  ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.7" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.1" \
@@ -254,7 +254,7 @@ alias claudezd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   CLAUDE_CODE_DISABLE_1M_CONTEXT="1" \
   claude --dangerously-skip-permissions'
 alias claudezm='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN" \
+  ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5-turbo" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.1" \
@@ -263,7 +263,7 @@ alias claudezm='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   CLAUDE_CODE_DISABLE_1M_CONTEXT="1" \
   claude'
 alias claudezmd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN" \
+  ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5-turbo" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.1" \
@@ -278,7 +278,7 @@ EOF
     if command -v claude &>/dev/null; then
       CLAUDEZ_ENV=(
         ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
-        ANTHROPIC_AUTH_TOKEN="$ZAI_API_TOKEN"
+        ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN"
         API_TIMEOUT_MS="3000000"
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
         CLAUDE_CODE_DISABLE_1M_CONTEXT="1"
@@ -291,7 +291,7 @@ EOF
       if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "web-search-prime"; then
         echo "claudez: web-search-prime already exists -- skipping"
       else
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-search-prime https://api.z.ai/api/mcp/web_search_prime/mcp --header "Authorization: Bearer $ZAI_API_TOKEN" >/dev/null 2>&1; then
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-search-prime https://api.z.ai/api/mcp/web_search_prime/mcp --header "Authorization: Bearer $Z_AI_AUTH_TOKEN" >/dev/null 2>&1; then
           echo "claudez: added web-search-prime"
         else
           echo "claudez: failed to add web-search-prime" >&2
@@ -303,7 +303,7 @@ EOF
       if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "web-reader"; then
         echo "claudez: web-reader already exists -- skipping"
       else
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-reader https://api.z.ai/api/mcp/web_reader/mcp --header "Authorization: Bearer $ZAI_API_TOKEN" >/dev/null 2>&1; then
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-reader https://api.z.ai/api/mcp/web_reader/mcp --header "Authorization: Bearer $Z_AI_AUTH_TOKEN" >/dev/null 2>&1; then
           echo "claudez: added web-reader"
         else
           echo "claudez: failed to add web-reader" >&2
@@ -315,7 +315,7 @@ EOF
       if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "zread"; then
         echo "claudez: zread already exists -- skipping"
       else
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http zread https://api.z.ai/api/mcp/zread/mcp --header "Authorization: Bearer $ZAI_API_TOKEN" >/dev/null 2>&1; then
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http zread https://api.z.ai/api/mcp/zread/mcp --header "Authorization: Bearer $Z_AI_AUTH_TOKEN" >/dev/null 2>&1; then
           echo "claudez: added zread"
         else
           echo "claudez: failed to add zread" >&2
@@ -327,7 +327,7 @@ EOF
       if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "zai-mcp-server"; then
         echo "claudez: zai-mcp-server already exists -- skipping"
       else
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user zai-mcp-server --env Z_AI_API_KEY=$ZAI_API_TOKEN Z_AI_MODE=ZAI -- npx -y @z_ai/mcp-server >/dev/null 2>&1; then
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user zai-mcp-server --env Z_AI_API_KEY=$Z_AI_AUTH_TOKEN Z_AI_MODE=ZAI -- npx -y @z_ai/mcp-server >/dev/null 2>&1; then
           echo "claudez: added zai-mcp-server"
         else
           echo "claudez: failed to add zai-mcp-server" >&2
@@ -351,7 +351,7 @@ CLAUDEZR_MARKER="# >>> claudez-remote >>>"
 if grep -qF "$CLAUDEZR_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez-remote: already in $PROFILE -- skipping"
 else
-  if [[ -n "${ZAI_API_TOKEN:-}" ]]; then
+  if [[ -n "${Z_AI_AUTH_TOKEN:-}" ]]; then
     # Quoted heredoc — no variable expansion, so $ signs in function bodies
     # are written verbatim to the profile.
     cat >> "$PROFILE" << 'CLAUDERZR_EOF'
@@ -427,12 +427,12 @@ claudezr() {
 
   [[ -z "$host" ]] && { echo "claudezr: host is required" >&2; echo "  Usage: claudezr <user@host> [port]" >&2; return 1; }
 
-  local key="${ZAI_API_TOKEN:-}"
+  local key="${Z_AI_AUTH_TOKEN:-}"
   if [[ -z "$key" ]]; then
-    echo "claudezr: ZAI_API_TOKEN is not set. Aborting." >&2
+    echo "claudezr: Z_AI_AUTH_TOKEN is not set. Aborting." >&2
     echo "" >&2
     echo "Set it in your shell profile then reload:" >&2
-    echo "  export ZAI_API_TOKEN='<your_token>'" >&2
+    echo "  export Z_AI_AUTH_TOKEN='<your_token>'" >&2
     return 1
   fi
 
@@ -447,14 +447,14 @@ claudezr() {
 
 CLAUDERZR_EOF
 
-    # Token export — separate from the quoted heredoc so $ZAI_API_TOKEN expands.
+    # Token export — separate from the quoted heredoc so $Z_AI_AUTH_TOKEN expands.
     {
-      echo "export ZAI_API_TOKEN=\"$ZAI_API_TOKEN\""
+      echo "export Z_AI_AUTH_TOKEN=\"$Z_AI_AUTH_TOKEN\""
       echo "# <<< claudez-remote <<<"
     } >> "$PROFILE"
 
     echo "claudez-remote: added to $PROFILE"
   else
-    echo "claudez-remote: ZAI_API_TOKEN not set, skipping (run claudez setup first)"
+    echo "claudez-remote: Z_AI_AUTH_TOKEN not set, skipping (run claudez setup first)"
   fi
 fi
