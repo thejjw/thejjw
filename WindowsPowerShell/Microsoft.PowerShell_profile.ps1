@@ -3343,8 +3343,10 @@ if ! command -v node &>/dev/null; then
     export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
     curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh \
         | NVM_DIR="$NVM_DIR" PROFILE=/dev/null bash
+    set +u
     . "$NVM_DIR/nvm.sh" --no-use
     nvm install --lts --no-progress && nvm use --lts
+    set -u
 fi
 if ! command -v claude &>/dev/null; then
     npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
