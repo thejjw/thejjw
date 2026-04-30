@@ -3228,16 +3228,18 @@ function claudezm {
     }
 }
 
-
 function Invoke-RemoteClaudeCodeBase {
 <#
 .SYNOPSIS
 Runs Claude Code on a remote SSH endpoint with temporary remote state.
 
 .DESCRIPTION
-Uploads a small bash launcher over SSH, sets the Anthropic/Z.AI environment variables inline,
-and starts claude on the remote host with a temporary HOME, npm prefix, and workspace.
-Use this when you want a one-shot remote Claude session without leaving permanent state behind.
+Base64-encodes a bash launcher and delivers it via the SSH command argument,
+keeping stdin free for the interactive Claude Code TUI. Sets the Anthropic
+environment variables inline and starts claude on the remote host with a
+temporary HOME, npm prefix, and workspace.
+Use this when you want a one-shot remote Claude session without leaving
+permanent state behind.
 
 .PARAMETER RemoteHost
 SSH target in user@host form.
@@ -3249,7 +3251,8 @@ Anthropic-compatible API key for the remote session.
 SSH port to connect to. Defaults to 22.
 
 .PARAMETER BaseUrl
-Anthropic-compatible API base URL.
+Anthropic-compatible API base URL. Optional — omit for direct Anthropic API access.
+Only needed when routing through a proxy or alternative endpoint.
 
 .PARAMETER HaikuModel
 Default Haiku model name.
@@ -3267,63 +3270,68 @@ API timeout in milliseconds.
 Sets CLAUDE_CODE_DISABLE_1M_CONTEXT on the remote host.
 
 .EXAMPLE
-Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN
+Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:ANTHROPIC_API_KEY
+
+.EXAMPLE
+Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN -BaseUrl "https://api.z.ai/api/anthropic"
 
 .NOTES
 Author: jjw(@thejjw)
 Last Edit: 2026-04
 #>
-        [CmdletBinding()]
-        param(
+    [CmdletBinding()]
+    param(
         [Parameter(Mandatory = $true)]
         [string]$RemoteHost,
 
         [Parameter(Mandatory = $true)]
-            [string]$ApiKey,
+        [string]$ApiKey,
 
-            [int]$Port = 22,
+        [int]$Port = 22,
 
-            [Parameter(Mandatory = $true)]
-            [string]$BaseUrl,
+        # Optional: only needed for proxy/alternative endpoints.
+        # Leave empty to use the default Anthropic API (api.anthropic.com).
+        [string]$BaseUrl = "",
 
-            [Parameter(Mandatory = $true)]
-            [string]$HaikuModel,
+        [Parameter(Mandatory = $true)]
+        [string]$HaikuModel,
 
-            [Parameter(Mandatory = $true)]
-            [string]$SonnetModel,
+        [Parameter(Mandatory = $true)]
+        [string]$SonnetModel,
 
-            [Parameter(Mandatory = $true)]
-            [string]$OpusModel,
+        [Parameter(Mandatory = $true)]
+        [string]$OpusModel,
 
-            [Parameter(Mandatory = $true)]
-            [string]$TimeoutMs,
+        [Parameter(Mandatory = $true)]
+        [string]$TimeoutMs,
 
-            [Parameter(Mandatory = $true)]
-            [string]$Disable1M
-        )
+        [Parameter(Mandatory = $true)]
+        [string]$Disable1M
+    )
 
-        function Escape-BashSingleQuotedValue {
-                param([string]$Value)
-                if ($null -eq $Value) { return "''" }
-                return "'" + ($Value -replace "'", "'\"'\"'") + "'"
-        }
+    function Escape-BashSingleQuotedValue {
+        param([string]$Value)
+        if ($null -eq $Value) { return "''" }
+        return "'" + ($Value -replace "'", "'\"'\"'") + "'"
+    }
 
     if ([string]::IsNullOrWhiteSpace($RemoteHost)) {
         throw 'RemoteHost is required.'
-        }
+    }
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
         throw 'ApiKey is required.'
-        }
+    }
 
-        $script = @'
+    $script = @'
 set -euo pipefail
 CC_TMP="$(mktemp -d /tmp/cc-XXXXXX)"
 trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
 CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
 mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?not set}"
-export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:?not set}"
+# ANTHROPIC_BASE_URL is optional — only exported when the caller provided a value
+[ -n "${ANTHROPIC_BASE_URL:-}" ] && export ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-}"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-}"
@@ -3346,17 +3354,36 @@ cd "$CC_WORK"
 HOME="$CC_HOME" claude --dangerously-skip-permissions
 '@
 
-        $envPrefix = @(
-                "ANTHROPIC_API_KEY=$(Escape-BashSingleQuotedValue $ApiKey)"
-                "ANTHROPIC_BASE_URL=$(Escape-BashSingleQuotedValue $BaseUrl)"
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL=$(Escape-BashSingleQuotedValue $HaikuModel)"
-                "ANTHROPIC_DEFAULT_SONNET_MODEL=$(Escape-BashSingleQuotedValue $SonnetModel)"
-                "ANTHROPIC_DEFAULT_OPUS_MODEL=$(Escape-BashSingleQuotedValue $OpusModel)"
-                "API_TIMEOUT_MS=$(Escape-BashSingleQuotedValue $TimeoutMs)"
-                "CLAUDE_CODE_DISABLE_1M_CONTEXT=$(Escape-BashSingleQuotedValue $Disable1M)"
-        ) -join ' '
+    # Base64-encode the script so it can be delivered via the SSH *command*
+    # argument instead of stdin. This keeps stdin free for Claude Code's
+    # interactive TUI, which would otherwise fight bash -s over the same pipe.
+    $encoded = [Convert]::ToBase64String(
+        [System.Text.Encoding]::UTF8.GetBytes($script)
+    )
 
-        $script | ssh -p $Port $RemoteHost "$envPrefix bash -s"
+    # Build the inline env prefix. BaseUrl is only included when non-empty so
+    # that a bare ANTHROPIC_BASE_URL='' never reaches the remote shell.
+    $envParts = [System.Collections.Generic.List[string]]@(
+        "ANTHROPIC_API_KEY=$(Escape-BashSingleQuotedValue $ApiKey)"
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL=$(Escape-BashSingleQuotedValue $HaikuModel)"
+        "ANTHROPIC_DEFAULT_SONNET_MODEL=$(Escape-BashSingleQuotedValue $SonnetModel)"
+        "ANTHROPIC_DEFAULT_OPUS_MODEL=$(Escape-BashSingleQuotedValue $OpusModel)"
+        "API_TIMEOUT_MS=$(Escape-BashSingleQuotedValue $TimeoutMs)"
+        "CLAUDE_CODE_DISABLE_1M_CONTEXT=$(Escape-BashSingleQuotedValue $Disable1M)"
+    )
+    if (-not [string]::IsNullOrWhiteSpace($BaseUrl)) {
+        $envParts.Insert(1, "ANTHROPIC_BASE_URL=$(Escape-BashSingleQuotedValue $BaseUrl)")
+    }
+    $envPrefix = $envParts -join ' '
+
+    # -t          : allocate a pseudo-TTY so Claude Code renders correctly
+    # -o StrictHostKeyChecking=accept-new
+    #             : auto-accept keys for hosts never seen before;
+    #               still rejects keys that changed (protects against MITM)
+    # base64 -d | bash
+    #             : decode and run the launcher with stdin untouched
+    ssh -t -o StrictHostKeyChecking=accept-new -p $Port $RemoteHost `
+        "$envPrefix bash -c 'echo $encoded | base64 -d | bash'"
 }
 
 function Invoke-RemoteClaudeCodeZ {
@@ -3365,15 +3392,17 @@ function Invoke-RemoteClaudeCodeZ {
 Runs Claude Code on a remote SSH endpoint with temporary remote state.
 
 .DESCRIPTION
-Prompts for the API key from Z_AI_AUTH_TOKEN if it is not provided, then runs the remote Claude launcher
-with the remote defaults defined inside Invoke-RemoteClaudeCodeBase. The remote Claude invocation always
-uses --dangerously-skip-permissions.
+Prompts for the API key from Z_AI_AUTH_TOKEN if it is not provided, then runs
+the remote Claude launcher with the remote defaults defined inside
+Invoke-RemoteClaudeCodeBase. The remote Claude invocation always uses
+--dangerously-skip-permissions.
 
 .PARAMETER RemoteHost
 SSH target in user@host form.
 
 .PARAMETER ApiKey
-Anthropic-compatible API key for the remote session. Optional; falls back to Z_AI_AUTH_TOKEN.
+Anthropic-compatible API key for the remote session.
+Optional — falls back to Z_AI_AUTH_TOKEN env var.
 
 .PARAMETER Port
 SSH port to connect to. Defaults to 22.
