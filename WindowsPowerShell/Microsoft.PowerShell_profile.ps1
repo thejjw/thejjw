@@ -3312,7 +3312,7 @@ Last Edit: 2026-04
     function Escape-BashSingleQuotedValue {
         param([string]$Value)
         if ($null -eq $Value) { return "''" }
-        return "'" + ($Value -replace "'", "'\"'\"'") + "'"
+        return "'" + ($Value -replace "'", "'`"'`"'") + "'"
     }
 
     if ([string]::IsNullOrWhiteSpace($RemoteHost)) {
