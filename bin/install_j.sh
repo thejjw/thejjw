@@ -21,13 +21,14 @@ fi
 
 PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk fastfetch curl wget ripgrep jq parallel zstd xz-utils webp btop zram-tools bubblewrap socat"
 NVM_VERSION="v0.40.4"
+NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 
 sudo apt-get update && sudo apt-get install -y $PACKAGES
 
 if command -v node &>/dev/null && command -v npm &>/dev/null; then
   echo "node $(node -v) / npm $(npm -v) already installed -- skipping nvm"
 else
-  curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
+  curl -o- "$NVM_INSTALL_URL" | bash
   source ~/.nvm/nvm.sh && nvm install --lts
 fi
 
@@ -339,5 +340,121 @@ EOF
       echo "claudez: alias added to $PROFILE"
       echo "WARNING: claude CLI not found, skipping MCP server configuration"
     fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# claudez-remote (claudezr) - remote Claude Code via Z.AI
+# ---------------------------------------------------------------------------
+CLAUDEZR_MARKER="# >>> claudez-remote >>>"
+
+if grep -qF "$CLAUDEZR_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudez-remote: already in $PROFILE -- skipping"
+else
+  if [[ -n "${ZAI_API_TOKEN:-}" ]]; then
+    # Quoted heredoc — no variable expansion, so $ signs in function bodies
+    # are written verbatim to the profile.
+    cat >> "$PROFILE" << 'CLAUDERZR_EOF'
+# >>> claudez-remote >>>
+
+# _claude_sq - single-quote escape a value for safe bash embedding.
+_claude_sq() {
+  printf "'"
+  printf '%s' "${1:-}" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+# remote_claude_base - Launch Claude Code on a remote SSH host with ephemeral state.
+#   Base64-encodes a bash launcher so stdin stays free for the interactive TUI.
+#
+#   Usage: remote_claude_base <user@host> <api_key> [port] [base_url] \
+#          [haiku] [sonnet] [opus] [timeout_ms] [disable_1m]
+remote_claude_base() {
+  local host="$1" key="$2" port="${3:-22}"
+  local base_url="${4:-}" haiku="$5" sonnet="$6" opus="$7"
+  local timeout="$8" disable_1m="$9"
+
+  [[ -z "$host" ]] && { echo "remote_claude_base: host is required" >&2; return 1; }
+  [[ -z "$key"  ]] && { echo "remote_claude_base: api_key is required" >&2; return 1; }
+
+  local encoded
+  encoded=$(base64 << 'REMOTE_SCRIPT'
+CC_TMP="$(mktemp -d /tmp/cc-XXXXXX)"
+trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
+CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
+mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?not set}"
+[ -n "${ANTHROPIC_BASE_URL:-}" ] && export ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-}"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-}"
+export API_TIMEOUT_MS="${API_TIMEOUT_MS:-300000}"
+export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export DISABLE_AUTOUPDATER=1
+if ! command -v node &>/dev/null; then
+    export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh \
+        | NVM_DIR="$NVM_DIR" PROFILE=/dev/null bash
+    . "$NVM_DIR/nvm.sh" --no-use
+    nvm install --lts --no-progress && nvm use --lts
+fi
+if ! command -v claude &>/dev/null; then
+    npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
+    export PATH="$CC_NPM/bin:$PATH"
+fi
+cd "$CC_WORK"
+HOME="$CC_HOME" claude --dangerously-skip-permissions
+REMOTE_SCRIPT
+  ) && encoded=$(printf '%s' "$encoded" | tr -d '\n\r')
+
+  local env="ANTHROPIC_API_KEY=$(_claude_sq "$key")"
+  env+=" ANTHROPIC_DEFAULT_HAIKU_MODEL=$(_claude_sq "$haiku")"
+  env+=" ANTHROPIC_DEFAULT_SONNET_MODEL=$(_claude_sq "$sonnet")"
+  env+=" ANTHROPIC_DEFAULT_OPUS_MODEL=$(_claude_sq "$opus")"
+  env+=" API_TIMEOUT_MS=$(_claude_sq "$timeout")"
+  env+=" CLAUDE_CODE_DISABLE_1M_CONTEXT=$(_claude_sq "$disable_1m")"
+  [[ -n "$base_url" ]] && env+=" ANTHROPIC_BASE_URL=$(_claude_sq "$base_url")"
+
+  ssh -t -o StrictHostKeyChecking=accept-new -p "$port" "$host" \
+    "$env bash -c 'echo $encoded | base64 -d | bash'"
+}
+
+# claudezr - One-shot remote Claude Code via Z.AI.
+#   Usage: claudezr <user@host> [port]
+claudezr() {
+  local host="$1" port="${2:-22}"
+
+  [[ -z "$host" ]] && { echo "claudezr: host is required" >&2; echo "  Usage: claudezr <user@host> [port]" >&2; return 1; }
+
+  local key="${ZAI_API_TOKEN:-}"
+  if [[ -z "$key" ]]; then
+    echo "claudezr: ZAI_API_TOKEN is not set. Aborting." >&2
+    echo "" >&2
+    echo "Set it in your shell profile then reload:" >&2
+    echo "  export ZAI_API_TOKEN='<your_token>'" >&2
+    return 1
+  fi
+
+  remote_claude_base "$host" "$key" "$port" \
+    "https://api.z.ai/api/anthropic" \
+    "glm-4.5-air" \
+    "glm-5-turbo" \
+    "glm-5.1" \
+    "3000000" \
+    "1"
+}
+
+CLAUDERZR_EOF
+
+    # Token export — separate from the quoted heredoc so $ZAI_API_TOKEN expands.
+    {
+      echo "export ZAI_API_TOKEN=\"$ZAI_API_TOKEN\""
+      echo "# <<< claudez-remote <<<"
+    } >> "$PROFILE"
+
+    echo "claudez-remote: added to $PROFILE"
+  else
+    echo "claudez-remote: ZAI_API_TOKEN not set, skipping (run claudez setup first)"
   fi
 fi
