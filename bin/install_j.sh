@@ -3,27 +3,28 @@
 # One-shot environment bootstrap
 # Installs packages, nvm/node, and embeds functions into ~/.bashrc.
 # ---------------------------------------------------------------------------
-# 2026.4 @thejjw
+# 2026.4-2026.5 @thejjw
 
 set -e
+
+PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop zram-tools bubblewrap socat"
+NVM_VERSION="v0.40.4"
+NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 
 # Use zsh profile on macOS, bash profile elsewhere.
 if [[ "$(uname -s)" == "Darwin" ]]; then
   PROFILE="${HOME}/.zshrc"
 else
   PROFILE="${HOME}/.bashrc"
+
+  if ! which apt >/dev/null; then
+    echo "apt not found."
+    exit 1
+  fi
+
+  sudo apt-get update && sudo apt-get install -y $PACKAGES
 fi
 
-if ! which apt >/dev/null; then
-  echo "apt not found."
-  exit 1
-fi
-
-PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop zram-tools bubblewrap socat"
-NVM_VERSION="v0.40.4"
-NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
-
-sudo apt-get update && sudo apt-get install -y $PACKAGES
 
 if command -v node &>/dev/null && command -v npm &>/dev/null; then
   echo "node $(node -v) / npm $(npm -v) already installed -- skipping nvm"
