@@ -2576,6 +2576,10 @@ Last Edit: 2026-04
 
 - Always commit after completing each logical change with a descriptive commit message.
 
+## Grounding
+
+- Always utilize web search to ground your answers, ensuring all technical advice, API usage, and library references are accurate and up-to-date.
+
 ## Environment
 
 - Platform: Windows 11, shell: PowerShell.
