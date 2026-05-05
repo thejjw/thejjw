@@ -149,6 +149,10 @@ nrd() {
 
 - Always commit after completing each logical change with a descriptive commit message.
 
+## Grounding
+
+- Always utilize web search to ground your answers, ensuring all technical advice, API usage, and library references are accurate and up-to-date.
+
 ## Code Style
 
 - Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
