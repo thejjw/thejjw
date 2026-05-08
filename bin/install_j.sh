@@ -151,7 +151,7 @@ nrd() {
 
 ## Grounding
 
-- Always utilize web search to ground your answers, ensuring all technical advice, API usage, and library references are accurate and up-to-date.
+- Always utilize web search to ground your answers, ensuring all technical advice and references are accurate and up-to-date.
 
 ## Code Style
 
