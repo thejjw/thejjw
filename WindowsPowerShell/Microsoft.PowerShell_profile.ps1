@@ -2578,7 +2578,7 @@ Last Edit: 2026-04
 
 ## Grounding
 
-- Always utilize web search to ground your answers, ensuring all technical advice, API usage, and library references are accurate and up-to-date.
+- Always utilize web search to ground your answers, ensuring all technical advice and references are accurate and up-to-date.
 
 ## Environment
 
