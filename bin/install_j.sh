@@ -34,6 +34,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# uv — required by MiniMax MCP server (uvx)
+# ---------------------------------------------------------------------------
+if command -v uv &>/dev/null; then
+  echo "uv $(uv --version 2>/dev/null || echo 'installed') already present -- skipping"
+else
+  echo "ERROR: 'uv' is not installed but is required by MiniMax MCP (uvx)." >&2
+  echo "  Install uv:" >&2
+  echo "    Linux:    curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+  echo "    macOS:    brew install uv" >&2
+  echo "" >&2
+  echo "Re-run this script after installing uv." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # nrd - embed into shell profile if not already present
 # ---------------------------------------------------------------------------
 MARKER="# >>> nrd >>>"
@@ -225,8 +240,12 @@ CLAUDEZ_MARKER="# >>> claudez >>>"
 if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez: already in $PROFILE -- skipping"
 else
-  # Prompt once for API token (used for both alias and MCP servers)
-  read -r -p "Enter your Z.AI API token for claudez alias + MCP servers: " Z_AI_AUTH_TOKEN
+  # Use existing env var if set, otherwise prompt
+  if [[ -z "${Z_AI_AUTH_TOKEN:-}" ]]; then
+    read -r -p "Enter your Z.AI API token for claudez alias + MCP servers: " Z_AI_AUTH_TOKEN
+  else
+    echo "claudez: detected Z_AI_AUTH_TOKEN from environment"
+  fi
 
   if [[ -z "$Z_AI_AUTH_TOKEN" ]]; then
     echo "claudez: token is empty, skipping alias and MCP setup"
@@ -472,13 +491,18 @@ CLAUDEMM_MARKER="# >>> claudemm >>>"
 if grep -qF "$CLAUDEMM_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudemm: already in $PROFILE -- skipping"
 else
-  # Prompt for MiniMax API key
-  read -r -p "Enter your MiniMax API key for claudemm alias + MCP server: " MINIMAX_API_KEY
+  # Use existing env var if set, otherwise prompt
+  if [[ -z "${MINIMAX_API_KEY:-}" ]]; then
+    read -r -p "Enter your MiniMax API key for claudemm alias + MCP server: " MINIMAX_API_KEY
+  else
+    echo "claudemm: detected MINIMAX_API_KEY from environment"
+  fi
 
   if [[ -z "$MINIMAX_API_KEY" ]]; then
     echo "claudemm: key is empty, skipping alias and MCP setup"
   else
     # Add the claudemm aliases
+    # https://platform.minimax.io/docs/token-plan/claude-code
     cat >> "$PROFILE" << EOF
 
 # >>> claudemm >>>
@@ -520,7 +544,8 @@ EOF
 
       echo "claudemm: configuring MCP servers..."
 
-      # MiniMax coding-plan-mcp
+      # MiniMax coding-plan-mcp (uv is required)
+      # https://platform.minimax.io/docs/token-plan/mcp-guide
       if env "${CLAUDEMM_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "minimax"; then
         echo "claudemm: MiniMax MCP server already exists -- skipping"
       else
