@@ -452,7 +452,7 @@ claudezr() {
 
 CLAUDERZR_EOF
 
-    # Token export — separate from the quoted heredoc so $Z_AI_AUTH_TOKEN expands.
+    # Token export : separate from the quoted heredoc so $Z_AI_AUTH_TOKEN expands.
     {
       echo "export Z_AI_AUTH_TOKEN=\"$Z_AI_AUTH_TOKEN\""
       echo "# <<< claudez-remote <<<"
@@ -461,5 +461,136 @@ CLAUDERZR_EOF
     echo "claudez-remote: added to $PROFILE"
   else
     echo "claudez-remote: Z_AI_AUTH_TOKEN not set, skipping (run claudez setup first)"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# claudemm alias + MCP server setup - embed into shell profile if not present
+# ---------------------------------------------------------------------------
+CLAUDEMM_MARKER="# >>> claudemm >>>"
+
+if grep -qF "$CLAUDEMM_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudemm: already in $PROFILE -- skipping"
+else
+  # Prompt for MiniMax API key
+  read -r -p "Enter your MiniMax API key for claudemm alias + MCP server: " MINIMAX_API_KEY
+
+  if [[ -z "$MINIMAX_API_KEY" ]]; then
+    echo "claudemm: key is empty, skipping alias and MCP setup"
+  else
+    # Add the claudemm aliases
+    cat >> "$PROFILE" << EOF
+
+# >>> claudemm >>>
+# Custom Claude Code alias with MiniMax endpoint
+alias claudemm='ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY" \
+  ANTHROPIC_MODEL="MiniMax-M2.7" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.7" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.7" \
+  API_TIMEOUT_MS="3000000" \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  claude'
+alias claudemmd='ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY" \
+  ANTHROPIC_MODEL="MiniMax-M2.7" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.7" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.7" \
+  API_TIMEOUT_MS="3000000" \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  claude --dangerously-skip-permissions'
+export MINIMAX_API_KEY="$MINIMAX_API_KEY"
+# <<< claudemm <<<
+EOF
+
+    # Configure MiniMax MCP server via Claude CLI
+    if command -v claude &>/dev/null; then
+      CLAUDEMM_ENV=(
+        ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
+        ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY"
+        ANTHROPIC_MODEL="MiniMax-M2.7"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.7"
+        ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7"
+        ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.7"
+        API_TIMEOUT_MS="3000000"
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
+      )
+
+      echo "claudemm: configuring MCP servers..."
+
+      # MiniMax coding-plan-mcp
+      if env "${CLAUDEMM_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "minimax"; then
+        echo "claudemm: MiniMax MCP server already exists -- skipping"
+      else
+        if env "${CLAUDEMM_ENV[@]}" claude mcp add -s user MiniMax --env MINIMAX_API_KEY="$MINIMAX_API_KEY" --env MINIMAX_API_HOST=https://api.minimax.io -- uvx minimax-coding-plan-mcp -y >/dev/null 2>&1; then
+          echo "claudemm: added MiniMax MCP server"
+        else
+          echo "claudemm: failed to add MiniMax MCP server" >&2
+        fi
+      fi
+
+      echo "claudemm: alias added to $PROFILE"
+      echo "claudemm: MCP setup complete"
+    else
+      echo "claudemm: alias added to $PROFILE"
+      echo "WARNING: claude CLI not found, skipping MCP server configuration"
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# claudemm-remote (claudemmr) - remote Claude Code via MiniMax
+# ---------------------------------------------------------------------------
+CLAUDEMMR_MARKER="# >>> claudemm-remote >>>"
+
+if grep -qF "$CLAUDEMMR_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudemm-remote: already in $PROFILE -- skipping"
+else
+  if [[ -n "${MINIMAX_API_KEY:-}" ]]; then
+    # Quoted heredoc — no variable expansion, so $ signs in function bodies
+    # are written verbatim to the profile.
+    cat >> "$PROFILE" << 'CLAUEMMR_EOF'
+# >>> claudemm-remote >>>
+
+# claudemmr - One-shot remote Claude Code via MiniMax.
+#   Usage: claudemmr <user@host> [port]
+claudemmr() {
+  local host="$1" port="${2:-22}"
+
+  [[ -z "$host" ]] && { echo "claudemmr: host is required" >&2; echo "  Usage: claudemmr <user@host> [port]" >&2; return 1; }
+
+  local key="${MINIMAX_API_KEY:-}"
+  if [[ -z "$key" ]]; then
+    echo "claudemmr: MINIMAX_API_KEY is not set. Aborting." >&2
+    echo "" >&2
+    echo "Set it in your shell profile then reload:" >&2
+    echo "  export MINIMAX_API_KEY='<your_key>'" >&2
+    return 1
+  fi
+
+  remote_claude_base "$host" "$key" "$port" \
+    "https://api.minimax.io/anthropic" \
+    "MiniMax-M2.7" \
+    "MiniMax-M2.7" \
+    "MiniMax-M2.7" \
+    "3000000" \
+    "1"
+}
+
+CLAUEMMR_EOF
+
+    # Key export : separate from the quoted heredoc so $MINIMAX_API_KEY expands.
+    # (Already exported above in the claudemm section, but re-export for safety
+    #  if claudemm was skipped but claudemm-remote runs standalone.)
+    {
+      echo "export MINIMAX_API_KEY=\"$MINIMAX_API_KEY\""
+      echo "# <<< claudemm-remote <<<"
+    } >> "$PROFILE"
+
+    echo "claudemm-remote: added to $PROFILE"
+  else
+    echo "claudemm-remote: MINIMAX_API_KEY not set, skipping (run claudemm setup first)"
   fi
 fi
