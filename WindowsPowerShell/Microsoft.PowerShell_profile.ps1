@@ -3467,3 +3467,260 @@ Last Edit: 2026-04
         -TimeoutMs $TimeoutMs `
         -Disable1M $Disable1M
 }
+
+<#
+.SYNOPSIS
+    Configures MiniMax MCP server for Claude Code.
+
+.DESCRIPTION
+    Adds the minimax-coding-plan-mcp server via Claude CLI if not already present.
+    Requires 'uv' (uvx) to be installed. Uses a flag file under ~/.claude to skip
+    duplicate setup runs unless -Force is specified.
+
+.PARAMETER Token
+    MiniMax API key used for MCP server configuration.
+
+.PARAMETER Force
+    Re-runs MCP setup even if the setup flag already exists.
+
+.EXAMPLE
+    Install-ClaudemmSetup -Token "<api_key>"
+
+.EXAMPLE
+    Install-ClaudemmSetup -Token "<api_key>" -Force
+
+.NOTES
+    Requires 'uv' to be installed (uvx is used to run minimax-coding-plan-mcp).
+    Install uv: winget install astral-sh.uv
+
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+function Install-ClaudemmSetup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Token,
+        [switch]$Force
+    )
+
+    $claudeDir = Join-Path $HOME '.claude'
+    $setupFlag = Join-Path $claudeDir '.claudemm_setup_complete'
+
+    if (-not (Test-Path -LiteralPath $claudeDir)) {
+        $null = New-Item -ItemType Directory -Path $claudeDir -Force
+    }
+
+    $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+    if ($null -eq $claudeCmd) {
+        Write-Host 'WARNING: claude CLI not found, skipping MCP server configuration' -ForegroundColor Yellow
+        return $false
+    }
+
+    if ((Test-Path -LiteralPath $setupFlag) -and -not $Force) {
+        Write-Host "claudemm: MCP setup already completed (flag: $setupFlag) -- skipping"
+        Write-Host 'claudemm: use Install-ClaudemmSetup -Force to reconfigure' -ForegroundColor DarkGray
+        return $true
+    }
+
+    # Check for uv (required by uvx for minimax-coding-plan-mcp)
+    $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+    if ($null -eq $uvCmd) {
+        Write-Host "claudemm: WARNING: 'uv' not found -- skipping MiniMax MCP server" -ForegroundColor Yellow
+        Write-Host "  Install uv:  winget install astral-sh.uv" -ForegroundColor Cyan
+        return $false
+    }
+
+    Write-Host "claudemm: configuring MCP servers..." -ForegroundColor Cyan
+
+    # MiniMax coding-plan-mcp
+    if (& claude mcp list | Select-String -Pattern 'minimax' -Quiet) {
+        Write-Host "claudemm: MiniMax MCP server already exists -- skipping" -ForegroundColor DarkGray
+    } else {
+        & claude mcp add -s user MiniMax --env MINIMAX_API_KEY="$Token" --env MINIMAX_API_HOST=https://api.minimax.io -- uvx minimax-coding-plan-mcp -y 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "claudemm: added MiniMax MCP server" -ForegroundColor Green
+        } else {
+            Write-Warning "claudemm: failed to add MiniMax MCP server"
+        }
+    }
+
+    $flagInfo = @(
+        "configuredAt=$(Get-Date -Format o)",
+        "user=$env:USERNAME",
+        'mode=MiniMax'
+    ) -join "`r`n"
+    Set-Content -LiteralPath $setupFlag -Value $flagInfo -Encoding UTF8
+    Write-Host 'claudemm: MCP setup complete' -ForegroundColor Green
+    return $true
+}
+
+<#
+.SYNOPSIS
+    Launches Claude Code through the MiniMax endpoint.
+
+.DESCRIPTION
+    Reads the MiniMax API key from the MINIMAX_API_KEY environment variable
+    (current session first, then User scope), runs one-time claudemm MCP setup,
+    configures runtime environment, then invokes claude with the supplied arguments.
+    If MINIMAX_API_KEY is not set, the function aborts and prints setup guidance.
+
+.EXAMPLE
+    claudemm
+
+.EXAMPLE
+    claudemm "Explain the current repository"
+
+.EXAMPLE
+    [Environment]::SetEnvironmentVariable('MINIMAX_API_KEY', '<your_key>', 'User')
+    # Restart PowerShell, then run:
+    claudemm
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+function claudemm {
+    # Read key from environment only (process first, then persisted user scope).
+    $key = $env:MINIMAX_API_KEY
+    if (-not $key) {
+        $key = [Environment]::GetEnvironmentVariable("MINIMAX_API_KEY", "User")
+    }
+
+    if (-not $key) {
+        Write-Host "MINIMAX_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
+        Write-Host "  [Environment]::SetEnvironmentVariable('MINIMAX_API_KEY', '<your_key>', 'User')" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Optional (current session only):" -ForegroundColor Yellow
+        Write-Host "  `$env:MINIMAX_API_KEY = '<your_key>'" -ForegroundColor Cyan
+        return
+    }
+
+    $env:ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic"
+    $env:ANTHROPIC_AUTH_TOKEN = $key
+    $env:ANTHROPIC_MODEL = "MiniMax-M2.7"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "MiniMax-M2.7"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "MiniMax-M2.7"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "MiniMax-M2.7"
+    $env:API_TIMEOUT_MS = "3000000"
+    $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
+
+    try {
+        [void](Install-ClaudemmSetup -Token $key)
+
+        claude @args
+    } finally {
+        Remove-Item Env:\ANTHROPIC_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
+
+        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
+        Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
+    }
+}
+
+<#
+.SYNOPSIS
+    Launches claudemm with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to claudemm and appends --dangerously-skip-permissions.
+
+.EXAMPLE
+    claudemmd
+
+.EXAMPLE
+    claudemmd "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+function claudemmd {
+    $claudeArgs = $args + '--dangerously-skip-permissions'
+    claudemm @claudeArgs
+}
+
+function Invoke-RemoteClaudeCodeMM {
+<#
+.SYNOPSIS
+Runs Claude Code on a remote SSH endpoint via MiniMax with temporary remote state.
+
+.DESCRIPTION
+Reads the API key from MINIMAX_API_KEY if not provided, then runs the remote
+Claude launcher with MiniMax endpoint defaults. The remote invocation always
+uses --dangerously-skip-permissions.
+
+.PARAMETER RemoteHost
+SSH target in user@host form.
+
+.PARAMETER ApiKey
+MiniMax API key for the remote session.
+Optional -- falls back to MINIMAX_API_KEY env var.
+
+.PARAMETER Port
+SSH port to connect to. Defaults to 22.
+
+.EXAMPLE
+Invoke-RemoteClaudeCodeMM -RemoteHost user@remote-host
+
+.EXAMPLE
+Invoke-RemoteClaudeCodeMM -RemoteHost user@remote-host -ApiKey $env:MINIMAX_API_KEY
+
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-05
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RemoteHost,
+
+        [string]$ApiKey,
+
+        [int]$Port = 22
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        $ApiKey = $env:MINIMAX_API_KEY
+        if (-not $ApiKey) {
+            $ApiKey = [Environment]::GetEnvironmentVariable("MINIMAX_API_KEY", "User")
+        }
+    }
+
+    if (-not $ApiKey) {
+        Write-Host "MINIMAX_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
+        Write-Host "  [Environment]::SetEnvironmentVariable('MINIMAX_API_KEY', '<your_key>', 'User')" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Optional (current session only):" -ForegroundColor Yellow
+        Write-Host "  `$env:MINIMAX_API_KEY = '<your_key>'" -ForegroundColor Cyan
+        return
+    }
+
+    # Keep the editable remote defaults here so they are easy to tweak later.
+    $BaseUrl     = "https://api.minimax.io/anthropic"
+    $HaikuModel  = "MiniMax-M2.7"
+    $SonnetModel = "MiniMax-M2.7"
+    $OpusModel   = "MiniMax-M2.7"
+    $TimeoutMs   = "3000000"
+    $Disable1M   = "1"
+
+    Invoke-RemoteClaudeCodeBase `
+        -RemoteHost $RemoteHost `
+        -ApiKey $ApiKey `
+        -Port $Port `
+        -BaseUrl $BaseUrl `
+        -HaikuModel $HaikuModel `
+        -SonnetModel $SonnetModel `
+        -OpusModel $OpusModel `
+        -TimeoutMs $TimeoutMs `
+        -Disable1M $Disable1M
+}
