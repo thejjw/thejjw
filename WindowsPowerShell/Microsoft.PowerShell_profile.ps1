@@ -2905,10 +2905,65 @@ function Invoke-LoginAudit {
 
 <#
 .SYNOPSIS
-    Configures global Claude Code preferences and claudez MCP servers.
+    Creates the global ~/.claude/CLAUDE.md with multi-model MCP tool preferences.
 
 .DESCRIPTION
-    Creates ~/.claude/CLAUDE.md if missing and configures claude MCP servers for Z.AI.
+    Idempotent — skips creation if the file already exists.
+    Shared by all Claude Code provider setup functions (claudez, claudemm, etc.).
+
+.EXAMPLE
+    Install-GlobalClaudeMd
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+function Install-GlobalClaudeMd {
+    [CmdletBinding()]
+    param()
+
+    $claudeDir = Join-Path $HOME '.claude'
+    $globalMd = Join-Path $claudeDir 'CLAUDE.md'
+    $prefText = @"
+## MCP Tool Preferences
+
+**When using Z.ai models (glm-*):**
+Use Z.ai MCP servers for:
+- Web searches
+- Web content
+- Image analysis
+- Text extraction
+
+**When using MiniMax models (MiniMax-*):**
+Use MiniMax MCP server for:
+- Web searches (``web_search``)
+- Image understanding (``understand_image``)
+
+**When using genuine Anthropic account (Claude Code with native models):**
+Use built-in web fetch and web search tools directly -- they will yield the best results.
+
+If an MCP tool is unavailable or underperforming, inform the user and suggest alternatives.
+"@
+
+    if (-not (Test-Path -LiteralPath $claudeDir)) {
+        $null = New-Item -ItemType Directory -Path $claudeDir -Force
+    }
+
+    if (Test-Path -LiteralPath $globalMd) {
+        Write-Host "global CLAUDE.md: $globalMd already exists -- skipping"
+        Write-Verbose 'global CLAUDE.md: edit it manually to include multi-model MCP preferences'
+    } else {
+        Set-Content -LiteralPath $globalMd -Value $prefText -Encoding UTF8
+        Write-Host "global CLAUDE.md: created $globalMd" -ForegroundColor Green
+    }
+}
+
+<#
+.SYNOPSIS
+    Configures claudez MCP servers for Z.AI.
+
+.DESCRIPTION
+    Configures claude MCP servers for Z.AI.
     Uses a flag file under ~/.claude to skip duplicate MCP setup runs unless -Force is specified.
 
 .PARAMETER Token
@@ -2941,32 +2996,7 @@ function Install-ClaudezSetup {
     )
 
     $claudeDir = Join-Path $HOME '.claude'
-    $globalMd = Join-Path $claudeDir 'CLAUDE.md'
     $setupFlag = Join-Path $claudeDir '.claudez_setup_complete'
-    $prefText = @"
-## MCP Tool Preferences
-
-**Always consider using MCP tools over alternatives for below purposes:**
-- Web searches
-- Web content
-- Image analysis
-- Text extraction
-
-If MCP tools are unavailable, inform the user and suggest alternatives.
-"@
-
-    if (-not (Test-Path -LiteralPath $claudeDir)) {
-        $null = New-Item -ItemType Directory -Path $claudeDir -Force
-    }
-
-    if (Test-Path -LiteralPath $globalMd) {
-        Write-Host "claudez: $globalMd already exists -- skipping (use --verbose to display base text for CLAUDE.md)"
-        Write-Verbose 'claudez: edit it manually to include:'
-        Write-Verbose $prefText
-    } else {
-        Set-Content -LiteralPath $globalMd -Value $prefText -Encoding UTF8
-        Write-Host "claudez: created $globalMd" -ForegroundColor Green
-    }
 
     $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
     if ($null -eq $claudeCmd) {
@@ -3105,6 +3135,7 @@ function claudez {
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
     
     try {
+        Install-GlobalClaudeMd
         [void](Install-ClaudezSetup -Token $token)
 
         claude @args
@@ -3215,6 +3246,7 @@ function claudezm {
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
 
     try {
+        Install-GlobalClaudeMd
         [void](Install-ClaudezSetup -Token $token)
 
         claude @args
@@ -3608,6 +3640,7 @@ function claudemm {
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     try {
+        Install-GlobalClaudeMd
         [void](Install-ClaudemmSetup -Token $key)
 
         claude @args

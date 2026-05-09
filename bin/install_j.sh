@@ -199,42 +199,43 @@ NRD_EOF
 fi
 
 # ---------------------------------------------------------------------------
-# claudez alias + MCP servers setup - embed into shell profile if not present
-# ---------------------------------------------------------------------------
 # Global CLAUDE.md preferences - create under ~/.claude if missing
+# Applies to all claudez / claudemm / native Claude Code sessions.
+# ---------------------------------------------------------------------------
 CLAUDE_DIR="$HOME/.claude"
 GLOBAL_MD="$CLAUDE_DIR/CLAUDE.md"
 
 if [[ -f "$GLOBAL_MD" ]]; then
-  echo "claudez: $GLOBAL_MD already exists -- skipping"
-  echo "claudez: edit it manually to include:"
-  cat << 'CLAUDE_PREF_EOF'
-## MCP Tool Preferences
-
-**Always consider using MCP tools over alternatives for below purposes:**
-- Web searches
-- Web content
-- Image analysis
-- Text extraction
-
-If MCP tools are unavailable, inform the user and suggest alternatives.
-CLAUDE_PREF_EOF
+  echo "global CLAUDE.md: $GLOBAL_MD already exists -- skipping"
+  echo "global CLAUDE.md: edit it manually to include multi-model MCP preferences"
 else
   mkdir -pv "$CLAUDE_DIR"
   cat > "$GLOBAL_MD" << 'CLAUDE_PREF_EOF'
 ## MCP Tool Preferences
 
-**Always consider using MCP tools over alternatives for below purposes:**
+**When using Z.ai models (glm-*):**
+Use Z.ai MCP servers for:
 - Web searches
 - Web content
 - Image analysis
 - Text extraction
 
-If MCP tools are unavailable, inform the user and suggest alternatives.
+**When using MiniMax models (MiniMax-*):**
+Use MiniMax MCP server for:
+- Web searches (`web_search`)
+- Image understanding (`understand_image`)
+
+**When using genuine Anthropic account (Claude Code with native models):**
+Use built-in web fetch and web search tools directly -- they will yield the best results.
+
+If an MCP tool is unavailable or underperforming, inform the user and suggest alternatives.
 CLAUDE_PREF_EOF
-  echo "claudez: created $GLOBAL_MD"
+  echo "global CLAUDE.md: created $GLOBAL_MD"
 fi
 
+# ---------------------------------------------------------------------------
+# claudez alias + MCP servers setup - embed into shell profile if not present
+# ---------------------------------------------------------------------------
 CLAUDEZ_MARKER="# >>> claudez >>>"
 
 if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
