@@ -2575,6 +2575,7 @@ Last Edit: 2026-04
 ## Rules
 
 - Always commit after completing each logical change with a descriptive commit message.
+- Treat AI-agent instruction files as workspace-only guidance. Do not stage or commit them unless the user explicitly asks.
 
 ## Grounding
 
@@ -2598,13 +2599,15 @@ Last Edit: 2026-04
 ## Git Discipline
 
 - Commit each logical change separately -- never bundle unrelated changes.
-- Use Conventional Commits: ``feat:``, ``fix:``, ``refactor:``, ``docs:``, ``chore:``, ``test:``, etc.
-- Write short, imperative descriptions (e.g. ``feat: add input validation``, ``fix: off-by-one in retry loop``).
+- Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
+- This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
+- Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
+- Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
 
 ## Dependencies
 
-- Pick the (latest) version the package manager resolves against existing project constraints (lockfile, manifest ranges).
-- Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals (tagged `deprecated`, yanked releases, archived repository, ...) on the chosen package and version; if any are found, warn inline (package name, signal source, suggested alternative if the registry provides one) and then proceed.
+- Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
+- Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
 "@ | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
 
         # CLAUDE.md imports AGENTS.md -- Claude Code reads CLAUDE.md, not AGENTS.md
