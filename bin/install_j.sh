@@ -237,6 +237,27 @@ CLAUDE_PREF_EOF
 fi
 
 # ---------------------------------------------------------------------------
+# ccd - shorthand for claude --dangerously-skip-permissions
+# ---------------------------------------------------------------------------
+CCD_MARKER="# >>> ccd >>>"
+
+if grep -qF "$CCD_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "ccd: already in $PROFILE -- skipping"
+else
+  cat >> "$PROFILE" << 'CCD_EOF'
+
+# >>> ccd >>>
+# ccd - Shorthand for claude --dangerously-skip-permissions
+ccd() {
+  claude --dangerously-skip-permissions "$@"
+}
+# <<< ccd <<<
+CCD_EOF
+
+  echo "ccd: added to $PROFILE"
+fi
+
+# ---------------------------------------------------------------------------
 # claudez alias + MCP servers setup - embed into shell profile if not present
 # ---------------------------------------------------------------------------
 CLAUDEZ_MARKER="# >>> claudez >>>"

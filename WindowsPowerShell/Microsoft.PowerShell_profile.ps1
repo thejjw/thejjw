@@ -3760,3 +3760,28 @@ Last Edit: 2026-05
         -TimeoutMs $TimeoutMs `
         -Disable1M $Disable1M
 }
+
+function ccd {
+<#
+.SYNOPSIS
+Shorthand for running claude with the --dangerously-skip-permissions flag.
+
+.DESCRIPTION
+Equivalent of the bash alias: alias ccd='claude --dangerously-skip-permissions'
+
+.EXAMPLE
+ccd
+
+Runs Claude Code with permissions skipped.
+
+.EXAMPLE
+ccd --model claude-opus
+
+Runs Claude Code with a specific model and permissions skipped.
+
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-05
+#>
+    claude --dangerously-skip-permissions @args
+}
