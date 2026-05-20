@@ -16,66 +16,97 @@ STATE_FILE="${TMPDIR:-/tmp}/.claude-statusline-state"
 CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'
 DIM='\033[2m'; BOLD='\033[1m'; RESET='\033[0m'
 
-# --- Parse fields ---
-model=$(echo "$input" | jq -r '.model.display_name // "?"')
-model_id=$(echo "$input" | jq -r '.model.id // ""')
-ctx_pct=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
-ctx_size=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
-ctx_input=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
-ctx_output=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
-cache_write=$(echo "$input" | jq -r '.context_window.current_usage.cache_creation_input_tokens // 0')
-cache_read=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
-cost=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
-dur_ms=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
-api_ms=$(echo "$input" | jq -r '.cost.total_api_duration_ms // 0')
-lines_add=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
-lines_rm=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
-rate_5h=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null)
-rate_7d=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty' 2>/dev/null)
-session_name=$(echo "$input" | jq -r '.session_name // empty' 2>/dev/null)
-agent_name=$(echo "$input" | jq -r '.agent.name // empty' 2>/dev/null)
-worktree_name=$(echo "$input" | jq -r '.worktree.name // empty' 2>/dev/null)
+# --- Parse all fields in a single jq call (US-delimited; non-whitespace so empty fields don't collapse) ---
+parsed=$(echo "$input" | jq -rj '[
+  .model.display_name // "?",
+  (.context_window.used_percentage // 0 | floor),
+  .context_window.context_window_size // 200000,
+  .context_window.total_input_tokens // 0,
+  .context_window.total_output_tokens // 0,
+  .context_window.current_usage.cache_creation_input_tokens // 0,
+  .context_window.current_usage.cache_read_input_tokens // 0,
+  .cost.total_cost_usd // 0,
+  .cost.total_duration_ms // 0,
+  .cost.total_api_duration_ms // 0,
+  .cost.total_lines_added // 0,
+  .cost.total_lines_removed // 0,
+  .rate_limits.five_hour.used_percentage // "",
+  .rate_limits.seven_day.used_percentage // "",
+  .session_name // "",
+  .agent.name // "",
+  .worktree.name // "",
+  .version // "?",
+  .session_id // "?",
+  .output_style.name // "default",
+  .workspace.current_dir // "?",
+  .workspace.project_dir // "?"
+] | map(tostring) | join("")')
 
-version=$(echo "$input" | jq -r '.version // "?"')
-session_id=$(echo "$input" | jq -r '.session_id // "?"')
-output_style=$(echo "$input" | jq -r '.output_style.name // "default"')
-ws_current=$(echo "$input" | jq -r '.workspace.current_dir // "?"')
-ws_project=$(echo "$input" | jq -r '.workspace.project_dir // "?"')
+IFS=$'\x1f' read -r \
+  model ctx_pct ctx_size ctx_input ctx_output \
+  cache_write cache_read cost dur_ms api_ms lines_add lines_rm \
+  rate_5h rate_7d session_name agent_name worktree_name \
+  version session_id output_style ws_current ws_project \
+  <<< "$parsed"
 
-# --- Git info (from workspace dir) ---
-git_branch=$(cd "$ws_current" 2>/dev/null && git branch --show-current 2>/dev/null)
-if [ -n "$git_branch" ]; then
-  # Truncate branch name to 20 chars
-  if [ ${#git_branch} -gt 20 ]; then
-    git_branch="${git_branch:0:19}…"
+# --- Git info: single porcelain call returns branch + ahead/behind + dirty + untracked ---
+git_branch=""
+ahead_behind=""
+dirty=""
+untracked_info=""
+git_status=$(git -C "$ws_current" status --porcelain=v1 --branch 2>/dev/null)
+if [ -n "$git_status" ]; then
+  # First line: "## branch...remote [ahead N, behind M]" / "## HEAD (no branch)" / "## No commits yet on branch"
+  branch_line="${git_status%%$'\n'*}"
+  branch_line="${branch_line#\#\# }"
+
+  # Skip detached HEAD (matches prior behavior of git branch --show-current returning empty)
+  if [[ "$branch_line" != "HEAD (no branch)"* ]]; then
+    if [[ "$branch_line" == "No commits yet on "* ]]; then
+      git_branch="${branch_line#No commits yet on }"
+    else
+      git_branch="${branch_line%%...*}"
+      git_branch="${git_branch%% *}"
+    fi
+
+    # Truncate branch to 20 chars
+    if [ ${#git_branch} -gt 20 ]; then
+      git_branch="${git_branch:0:19}…"
+    fi
+
+    # Parse [ahead N, behind M] / [ahead N] / [behind M]
+    ahead_re='\[ahead ([0-9]+)(, behind ([0-9]+))?\]'
+    behind_re='\[behind ([0-9]+)\]'
+    if [[ "$branch_line" =~ $ahead_re ]]; then
+      ahead_behind="↑${BASH_REMATCH[1]}"
+      [ -n "${BASH_REMATCH[3]}" ] && ahead_behind+="↓${BASH_REMATCH[3]}"
+    elif [[ "$branch_line" =~ $behind_re ]]; then
+      ahead_behind="↓${BASH_REMATCH[1]}"
+    fi
+
+    # Count dirty (tracked changes) and untracked from remaining status lines
+    untracked=0
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      [ "${line:0:2}" = "##" ] && continue
+      if [ "${line:0:2}" = "??" ]; then
+        untracked=$((untracked + 1))
+      else
+        dirty="*"
+      fi
+    done <<< "$git_status"
+
+    [ "$untracked" -gt 0 ] && untracked_info="?${untracked}"
   fi
-  # Dirty state: * if uncommitted changes
-  dirty=""
-  if cd "$ws_current" 2>/dev/null && ! git diff --quiet HEAD 2>/dev/null; then
-    dirty="*"
-  fi
-  # Ahead/behind remote
-  ahead_behind=""
-  counts=$(cd "$ws_current" 2>/dev/null && git rev-list --left-right --count HEAD...@{upstream} 2>/dev/null)
-  if [ -n "$counts" ]; then
-    ahead=$(echo "$counts" | cut -f1)
-    behind=$(echo "$counts" | cut -f2)
-    [ "$ahead" -gt 0 ] 2>/dev/null && ahead_behind+="↑${ahead}"
-    [ "$behind" -gt 0 ] 2>/dev/null && ahead_behind+="↓${behind}"
-  fi
-  # Untracked file count
-  untracked=$(cd "$ws_current" 2>/dev/null && git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
-  untracked_info=""
-  [ "$untracked" -gt 0 ] 2>/dev/null && untracked_info="?${untracked}"
 fi
 
 # --- Helpers ---
 fmt_tokens() {
   local t=$1
   if [ "$t" -ge 1000000 ] 2>/dev/null; then
-    printf "%.1fM" "$(echo "$t / 1000000" | bc -l 2>/dev/null || echo 0)"
+    awk -v t="$t" 'BEGIN { printf "%.1fM", t/1000000 }'
   elif [ "$t" -ge 1000 ] 2>/dev/null; then
-    printf "%.1fk" "$(echo "$t / 1000" | bc -l 2>/dev/null || echo 0)"
+    awk -v t="$t" 'BEGIN { printf "%.1fk", t/1000 }'
   else
     echo "$t"
   fi
@@ -111,7 +142,7 @@ if [ -f "$STATE_FILE" ]; then
     if [ "$delta_ms" -ge 60000 ]; then
       last_msg="$(fmt_time "$delta_ms")"
     elif [ "$delta_ms" -ge 1000 ]; then
-      last_msg="$(printf "%.1fs" "$(echo "$delta_ms / 1000" | bc -l 2>/dev/null || echo 0)")"
+      last_msg="$(awk -v ms="$delta_ms" 'BEGIN { printf "%.1fs", ms/1000 }')"
     else
       last_msg="${delta_ms}ms"
     fi
@@ -133,8 +164,8 @@ cache_r_fmt=$(fmt_tokens "$cache_read")
 
 # --- Cost color ---
 cost_val=$(printf "%.2f" "$cost")
-if (( $(echo "$cost > 1.0" | bc -l 2>/dev/null || echo 0) )); then COST_COLOR="$RED"
-elif (( $(echo "$cost > 0.25" | bc -l 2>/dev/null || echo 0) )); then COST_COLOR="$YELLOW"
+if awk -v c="$cost" 'BEGIN { exit !(c > 1.0) }'; then COST_COLOR="$RED"
+elif awk -v c="$cost" 'BEGIN { exit !(c > 0.25) }'; then COST_COLOR="$YELLOW"
 else COST_COLOR="$GREEN"; fi
 
 # --- Rate limit color ---
