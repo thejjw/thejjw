@@ -7,9 +7,49 @@
 
 set -e
 
+FORCE_REINSTALL=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --force)
+      FORCE_REINSTALL=true
+      shift
+      ;;
+    -h|--help)
+      echo "Usage: $0 [--force]"
+      exit 0
+      ;;
+    *)
+      echo "install_j.sh: unknown argument: $1" >&2
+      echo "Usage: $0 [--force]" >&2
+      exit 1
+      ;;
+  esac
+done
+
 PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop zram-tools bubblewrap socat"
 NVM_VERSION="v0.40.4"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
+
+remove_profile_section() {
+  local profile_file="$1" start_marker="$2" end_marker="$3"
+  local tmp_file
+
+  [[ -f "$profile_file" ]] || return 0
+
+  tmp_file="$(mktemp)"
+  awk -v start="$start_marker" -v end="$end_marker" '
+    $0 == start { skip = 1; next }
+    skip {
+      if ($0 == end) {
+        skip = 0
+      }
+      next
+    }
+    { print }
+  ' "$profile_file" > "$tmp_file"
+  mv "$tmp_file" "$profile_file"
+}
 
 # Use zsh profile on macOS, bash profile elsewhere.
 if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -52,6 +92,10 @@ fi
 # nrd - embed into shell profile if not already present
 # ---------------------------------------------------------------------------
 MARKER="# >>> nrd >>>"
+
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> nrd >>>" "# <<< nrd <<<"
+fi
 
 if grep -qF "$MARKER" "$PROFILE" 2>/dev/null; then
   echo "nrd: already in $PROFILE -- skipping"
@@ -209,8 +253,36 @@ CLAUDE_DIR="$HOME/.claude"
 GLOBAL_MD="$CLAUDE_DIR/CLAUDE.md"
 
 if [[ -f "$GLOBAL_MD" ]]; then
-  echo "global CLAUDE.md: $GLOBAL_MD already exists -- skipping"
-  echo "global CLAUDE.md: edit it manually to include multi-model MCP preferences"
+  if $FORCE_REINSTALL; then
+    mkdir -pv "$CLAUDE_DIR"
+    cat > "$GLOBAL_MD" << 'CLAUDE_PREF_EOF'
+## MCP Tool Preferences
+
+**When using Z.ai models (glm-*):**
+Use Z.ai MCP servers for:
+- Web searches
+- Web content
+- Image analysis
+- Text extraction
+
+**When using MiniMax models (MiniMax-*):**
+Use MiniMax MCP server for:
+- Web searches (`web_search`)
+- Image understanding (`understand_image`)
+
+**When using DeepSeek models (deepseek-*):**
+Use MiniMax MCP and Z.ai MCP servers, if available, for image analysis because DeepSeek models are text-only. Fall back to other available means if those MCP tools are unavailable or underperforming.
+
+**When using genuine Anthropic account (Claude Code with native models):**
+Use built-in web fetch and web search tools directly -- they will yield the best results.
+
+If an MCP tool is unavailable or underperforming, inform the user and suggest alternatives.
+CLAUDE_PREF_EOF
+    echo "global CLAUDE.md: force-reapplied $GLOBAL_MD"
+  else
+    echo "global CLAUDE.md: $GLOBAL_MD already exists -- skipping"
+    echo "global CLAUDE.md: edit it manually to include multi-model MCP preferences"
+  fi
 else
   mkdir -pv "$CLAUDE_DIR"
   cat > "$GLOBAL_MD" << 'CLAUDE_PREF_EOF'
@@ -244,6 +316,10 @@ fi
 # ---------------------------------------------------------------------------
 CCD_MARKER="# >>> ccd >>>"
 
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> ccd >>>" "# <<< ccd <<<"
+fi
+
 if grep -qF "$CCD_MARKER" "$PROFILE" 2>/dev/null; then
   echo "ccd: already in $PROFILE -- skipping"
 else
@@ -265,6 +341,10 @@ fi
 # ---------------------------------------------------------------------------
 AGYD_MARKER="# >>> agyd >>>"
 
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> agyd >>>" "# <<< agyd <<<"
+fi
+
 if grep -qF "$AGYD_MARKER" "$PROFILE" 2>/dev/null; then
   echo "agyd: already in $PROFILE -- skipping"
 else
@@ -285,6 +365,10 @@ fi
 # claudez alias + MCP servers setup - embed into shell profile if not present
 # ---------------------------------------------------------------------------
 CLAUDEZ_MARKER="# >>> claudez >>>"
+
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudez >>>" "# <<< claudez <<<"
+fi
 
 if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez: already in $PROFILE -- skipping"
@@ -421,6 +505,10 @@ fi
 # ---------------------------------------------------------------------------
 CLAUDEDS_MARKER="# >>> claudeds >>>"
 
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudeds >>>" "# <<< claudeds <<<"
+fi
+
 if grep -qF "$CLAUDEDS_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudeds: already in $PROFILE -- skipping"
 else
@@ -490,6 +578,10 @@ fi
 # claudez-remote (claudezr) - remote Claude Code via Z.AI
 # ---------------------------------------------------------------------------
 CLAUDEZR_MARKER="# >>> claudez-remote >>>"
+
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudez-remote >>>" "# <<< claudez-remote <<<"
+fi
 
 if grep -qF "$CLAUDEZR_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez-remote: already in $PROFILE -- skipping"
@@ -607,6 +699,10 @@ fi
 # ---------------------------------------------------------------------------
 CLAUDEMM_MARKER="# >>> claudemm >>>"
 
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudemm >>>" "# <<< claudemm <<<"
+fi
+
 if grep -qF "$CLAUDEMM_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudemm: already in $PROFILE -- skipping"
 else
@@ -689,6 +785,10 @@ fi
 # ---------------------------------------------------------------------------
 CLAUDEMMR_MARKER="# >>> claudemm-remote >>>"
 
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudemm-remote >>>" "# <<< claudemm-remote <<<"
+fi
+
 if grep -qF "$CLAUDEMMR_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudemm-remote: already in $PROFILE -- skipping"
 else
@@ -737,4 +837,8 @@ CLAUEMMR_EOF
   else
     echo "claudemm-remote: MINIMAX_API_KEY not set, skipping (run claudemm setup first)"
   fi
+fi
+
+if $FORCE_REINSTALL; then
+  echo "WARNING: --force removed and reapplied shell/profile sections; inspect the resulting files manually for a clean outcome."
 fi

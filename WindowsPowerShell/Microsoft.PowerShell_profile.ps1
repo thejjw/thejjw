@@ -1,3 +1,9 @@
+function prompt {
+    $loc = $executionContext.SessionState.Path.CurrentLocation
+    $out = "PS $loc$('>' * ($nestedPromptLevel + 1)) "
+    "$([char]27)]9;9;`"$loc`"$([char]27)\" + $out
+}
+
 $_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
 
 # Internal configuration group for New-RandomDir to keep global namespace clean
@@ -93,13 +99,6 @@ Use built-in web fetch and web search tools directly -- they will yield the best
 
 If an MCP tool is unavailable or underperforming, inform the user and suggest alternatives.
 "@
-}
-
-
-function prompt {
-    $loc = $executionContext.SessionState.Path.CurrentLocation
-    $out = "PS $loc$('>' * ($nestedPromptLevel + 1)) "
-    "$([char]27)]9;9;`"$loc`"$([char]27)\" + $out
 }
 
 function New-RandomPassword {
