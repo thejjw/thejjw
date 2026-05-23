@@ -4115,8 +4115,7 @@ function Setup-AiTools {
         'SST.OpenCodeDesktop',
         'SST.OpenCode',
         'Google.AntigravityIDE',
-        'Google.Antigravity',
-        'Tailscale.Tailscale'
+        'Google.Antigravity'
     )
 
     # Define npm packages early so we can display the full plan
