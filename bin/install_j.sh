@@ -258,6 +258,27 @@ CCD_EOF
 fi
 
 # ---------------------------------------------------------------------------
+# agyd - shorthand for agy --dangerously-skip-permissions
+# ---------------------------------------------------------------------------
+AGYD_MARKER="# >>> agyd >>>"
+
+if grep -qF "$AGYD_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "agyd: already in $PROFILE -- skipping"
+else
+  cat >> "$PROFILE" << 'AGYD_EOF'
+
+# >>> agyd >>>
+# agyd - Shorthand for agy --dangerously-skip-permissions
+agyd() {
+  agy --dangerously-skip-permissions "$@"
+}
+# <<< agyd <<<
+AGYD_EOF
+
+  echo "agyd: added to $PROFILE"
+fi
+
+# ---------------------------------------------------------------------------
 # claudez alias + MCP servers setup - embed into shell profile if not present
 # ---------------------------------------------------------------------------
 CLAUDEZ_MARKER="# >>> claudez >>>"
