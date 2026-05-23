@@ -4078,6 +4078,126 @@ function Update-Profile {
     }
 }
 
+function Setup-AiTools {
+    <#
+.SYNOPSIS
+    Installs common developer tools and CLIs via winget/npm and helper installers.
+
+.DESCRIPTION
+    Checks for the presence of a curated list of Windows packages (via `winget`) and
+    installs any that are missing. Also ensures `git` is present (offers interactive
+    winget install), installs a small set of global `npm` packages, and bootstraps the
+    Antigravity and Claude CLIs using their install scripts.
+
+    On first run this helper will ask once whether to proceed automatically with
+    installations; if you decline, it will list missing items for manual review and exit.
+
+.PARAMETER Auto
+    When supplied, skip the initial confirmation and proceed automatically.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Auto
+    )
+
+    $wingetPackages = @(
+        'Notepad++.Notepad++',
+        'OpenJS.NodeJS.LTS',
+        'Python.PythonInstallManager',
+        'jqlang.jq',
+        'astal-sh.uv',
+        'Microsoft.VisualStudioCode',
+        'GitHub.cli',
+        'SST.OpenCodeDesktop',
+        'SST.OpenCode',
+        'Google.AntigravityIDE',
+        'Google.Antigravity',
+        'Tailscale.Tailscale'
+    )
+
+    Write-Host "The following winget packages will be checked/installed:" -ForegroundColor Cyan
+    foreach ($p in $wingetPackages) { Write-Host " - $p" }
+
+    if (-not $Auto) {
+        $choice = Read-Host -Prompt "Proceed with automatic installation of missing packages? (Y/n)"
+        if ($choice -in @('n','N')) {
+            Write-Host "Aborting automatic installs. Run Setup-AiTools -Auto when ready to continue." -ForegroundColor Yellow
+            return
+        }
+    }
+
+    # Ensure winget exists
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "winget not found. Please install 'App Installer' (winget) from Microsoft Store and retry." -ForegroundColor Red
+        return
+    }
+
+    $missing = @()
+    foreach ($pkg in $wingetPackages) {
+        try {
+            $out = & winget list --id $pkg 2>$null
+            if (-not $out) { $missing += $pkg }
+        }
+        catch { $missing += $pkg }
+    }
+
+    if ($missing.Count -gt 0) {
+        Write-Host "Missing winget packages:" -ForegroundColor Yellow
+        foreach ($m in $missing) { Write-Host " - $m" }
+
+        Write-Host "Installing missing packages via winget..." -ForegroundColor Cyan
+        foreach ($m in $missing) {
+            Write-Host "Installing $m..."
+            try {
+                Start-Process -FilePath 'winget' -ArgumentList "install -s winget -e $m" -NoNewWindow -Wait
+            }
+            catch { Write-Host "Failed to start winget for $m: $_" -ForegroundColor Red }
+        }
+    }
+    else {
+        Write-Host "All winget packages already present." -ForegroundColor Green
+    }
+
+    # Ensure git is present; if not, offer interactive installer
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Host "git not found. Launching interactive winget installer for Git..." -ForegroundColor Yellow
+        Start-Process -FilePath 'winget' -ArgumentList 'install -s winget -e Git.Git -i' -NoNewWindow -Wait
+    }
+
+    # Install global npm packages if npm available
+    $npmPackages = @('opencode-ai','@openai/codex','@qwen-code/qwen-code','oh-my-free-models')
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        foreach ($np in $npmPackages) {
+            Write-Host "Installing npm package $np (global)..." -ForegroundColor Cyan
+            try { & npm install -g $np } catch { Write-Host "npm install failed for $np: $_" -ForegroundColor Red }
+        }
+    }
+    else {
+        Write-Host "npm not found; skipping npm global installs." -ForegroundColor Yellow
+    }
+
+    # Install Antigravity and Claude CLIs using their recommended installers
+    Write-Host "Bootstrapping Antigravity and Claude CLIs..." -ForegroundColor Cyan
+
+    if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
+        Write-Host "agy CLI not found; running Antigravity installer..." -ForegroundColor Yellow
+        try { iex (irm 'https://antigravity.google/cli/install.ps1') } catch { Write-Host "Antigravity install failed: $_" -ForegroundColor Red }
+    }
+    else { Write-Host "agy CLI already present; skipping Antigravity installer." -ForegroundColor Green }
+
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+        Write-Host "claude CLI not found; running Claude installer..." -ForegroundColor Yellow
+        try { iex (irm 'https://claude.ai/install.ps1') } catch { Write-Host "Claude install failed: $_" -ForegroundColor Red }
+    }
+    else { Write-Host "claude CLI already present; skipping Claude installer." -ForegroundColor Green }
+
+    Write-Host "Setup-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
+}
+
 function Setup-AiApiKeys {
     <#
 .SYNOPSIS
@@ -4098,13 +4218,17 @@ function Setup-AiApiKeys {
 
 .EXAMPLE
     Setup-AiApiKeys -Force
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
 #>
     [CmdletBinding()]
     param(
         [switch]$Force
     )
 
-    $names = @('DEEPSEEK_API_KEY','Z_AI_AUTH_TOKEN','MINIMAX_API_KEY')
+    $names = @('DEEPSEEK_API_KEY','Z_AI_AUTH_TOKEN','MINIMAX_API_KEY','NVIDIA_API_KEY','OPENROUTER_API_KEY')
 
     function Get-UserValue($n) {
         # Check process (current session) first, then persisted User scope
