@@ -4119,11 +4119,23 @@ function Setup-AiTools {
         'Tailscale.Tailscale'
     )
 
-    Write-Host "The following winget packages will be checked/installed:" -ForegroundColor Cyan
+    # Define npm packages early so we can display the full plan
+    $npmPackages = @('opencode-ai','@openai/codex','@qwen-code/qwen-code','oh-my-free-models')
+
+    Write-Host "The setup will check/install the following items:" -ForegroundColor Cyan
+    Write-Host "\nWinget packages:" -ForegroundColor Cyan
     foreach ($p in $wingetPackages) { Write-Host " - $p" }
 
+    Write-Host "\nNPM global packages (installed via npm -g):" -ForegroundColor Cyan
+    foreach ($np in $npmPackages) { Write-Host " - $np" }
+
+    Write-Host "\nCommand-line tools / CLIs to verify/install:" -ForegroundColor Cyan
+    Write-Host " - git (installed via winget if missing)"
+    Write-Host " - agy (Antigravity CLI)"
+    Write-Host " - claude (Claude CLI)"
+
     if (-not $Auto) {
-        $choice = Read-Host -Prompt "Proceed with automatic installation of missing packages? (Y/n)"
+        $choice = Read-Host -Prompt "Proceed with automatic installation of missing items? This will run winget/npm/installers. Continue? (Y/n)"
         if ($choice -in @('n','N')) {
             Write-Host "Aborting automatic installs. Run Setup-AiTools -Auto when ready to continue." -ForegroundColor Yellow
             return
