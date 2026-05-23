@@ -3351,6 +3351,11 @@ Anthropic-compatible API key for the remote session.
 .PARAMETER Port
 SSH port to connect to. Defaults to 22.
 
+.PARAMETER KeyFile
+Path to an SSH private key file. When specified, ssh uses this key
+exclusively (-i). Otherwise SSH falls back to the default agent/key or
+password prompt.
+
 .PARAMETER BaseUrl
 Anthropic-compatible API base URL. Optional — omit for direct Anthropic API access.
 Only needed when routing through a proxy or alternative endpoint.
@@ -3389,6 +3394,9 @@ Last Edit: 2026-04
         [string]$ApiKey,
 
         [int]$Port = 22,
+
+        # Optional: SSH private key file for authentication.
+        [string]$KeyFile,
 
         # Optional: only needed for proxy/alternative endpoints.
         # Leave empty to use the default Anthropic API (api.anthropic.com).
@@ -3482,8 +3490,15 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
     #               still rejects keys that changed (protects against MITM)
     # base64 -d | bash
     #             : decode and run the launcher with stdin untouched
-    ssh -t -o StrictHostKeyChecking=accept-new -p $Port $RemoteHost `
-        "$envPrefix bash -c 'echo $encoded | base64 -d | bash'"
+    # Build ssh arguments; add -i only when a key file is explicitly provided
+    $sshArgs = @('-t', '-o', 'StrictHostKeyChecking=accept-new', '-p', $Port)
+    if (-not [string]::IsNullOrWhiteSpace($KeyFile)) {
+        $resolved = (Resolve-Path -LiteralPath $KeyFile -ErrorAction Stop).Path
+        $sshArgs += @('-i', $resolved)
+    }
+    $sshArgs += $RemoteHost
+    $sshArgs += "$envPrefix bash -c 'echo $encoded | base64 -d | bash'"
+    ssh @sshArgs
 }
 
 function Invoke-RemoteClaudeCodeZ {
@@ -3524,7 +3539,10 @@ Last Edit: 2026-04
 
         [string]$ApiKey,
 
-        [int]$Port = 22
+        [int]$Port = 22,
+
+        # Optional: SSH private key file for authentication.
+        [string]$KeyFile
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
@@ -3553,16 +3571,19 @@ Last Edit: 2026-04
     $TimeoutMs = "3000000"
     $Disable1M = "1"
 
-    Invoke-RemoteClaudeCodeBase `
-        -RemoteHost $RemoteHost `
-        -ApiKey $ApiKey `
-        -Port $Port `
-        -BaseUrl $BaseUrl `
-        -HaikuModel $HaikuModel `
-        -SonnetModel $SonnetModel `
-        -OpusModel $OpusModel `
-        -TimeoutMs $TimeoutMs `
-        -Disable1M $Disable1M
+    $baseParams = @{
+        RemoteHost = $RemoteHost
+        ApiKey     = $ApiKey
+        Port       = $Port
+        BaseUrl    = $BaseUrl
+        HaikuModel = $HaikuModel
+        SonnetModel = $SonnetModel
+        OpusModel  = $OpusModel
+        TimeoutMs  = $TimeoutMs
+        Disable1M  = $Disable1M
+    }
+    if (-not [string]::IsNullOrWhiteSpace($KeyFile)) { $baseParams['KeyFile'] = $KeyFile }
+    Invoke-RemoteClaudeCodeBase @baseParams
 }
 
 function Install-ClaudemmSetup {
@@ -3785,7 +3806,10 @@ Last Edit: 2026-05
 
         [string]$ApiKey,
 
-        [int]$Port = 22
+        [int]$Port = 22,
+
+        # Optional: SSH private key file for authentication.
+        [string]$KeyFile
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
@@ -3814,16 +3838,19 @@ Last Edit: 2026-05
     $TimeoutMs = "3000000"
     $Disable1M = "1"
 
-    Invoke-RemoteClaudeCodeBase `
-        -RemoteHost $RemoteHost `
-        -ApiKey $ApiKey `
-        -Port $Port `
-        -BaseUrl $BaseUrl `
-        -HaikuModel $HaikuModel `
-        -SonnetModel $SonnetModel `
-        -OpusModel $OpusModel `
-        -TimeoutMs $TimeoutMs `
-        -Disable1M $Disable1M
+    $baseParams = @{
+        RemoteHost = $RemoteHost
+        ApiKey     = $ApiKey
+        Port       = $Port
+        BaseUrl    = $BaseUrl
+        HaikuModel = $HaikuModel
+        SonnetModel = $SonnetModel
+        OpusModel  = $OpusModel
+        TimeoutMs  = $TimeoutMs
+        Disable1M  = $Disable1M
+    }
+    if (-not [string]::IsNullOrWhiteSpace($KeyFile)) { $baseParams['KeyFile'] = $KeyFile }
+    Invoke-RemoteClaudeCodeBase @baseParams
 }
 
 function Update-Profile {
@@ -3866,6 +3893,7 @@ Shorthand for running claude with the --dangerously-skip-permissions flag.
 
 .DESCRIPTION
 Equivalent of the bash alias: alias ccd='claude --dangerously-skip-permissions'
+Checks whether the claude CLI is installed before invoking it.
 
 .EXAMPLE
 ccd
@@ -3881,6 +3909,12 @@ Runs Claude Code with a specific model and permissions skipped.
 Author: jjw(@thejjw)
 Last Edit: 2026-05
 #>
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+        Write-Host 'claude CLI not found.' -ForegroundColor Red
+        Write-Host 'Install via: irm https://claude.ai/install.ps1 | iex' -ForegroundColor Yellow
+        Write-Host 'Or visit:    https://claude.com/product/claude-code' -ForegroundColor Yellow
+        return
+    }
     claude --dangerously-skip-permissions @args
 }
 
@@ -3891,6 +3925,7 @@ function agyd {
 
 .DESCRIPTION
     Forwards all arguments to agy and appends --dangerously-skip-permissions.
+    Checks whether the agy CLI is installed before invoking it.
 
 .EXAMPLE
     agyd
@@ -3902,5 +3937,11 @@ function agyd {
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
-    agy --dangerously-skip-permissions @agyArgs
+    if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
+        Write-Host 'agy CLI not found.' -ForegroundColor Red
+        Write-Host 'Install via: irm https://antigravity.google/cli/install.ps1 | iex' -ForegroundColor Yellow
+        Write-Host 'Or visit:    https://antigravity.google' -ForegroundColor Yellow
+        return
+    }
+    agy --dangerously-skip-permissions @args
 }
