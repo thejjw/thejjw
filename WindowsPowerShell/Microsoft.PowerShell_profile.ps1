@@ -1,3 +1,5 @@
+$ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
+
 function prompt {
     $loc = $executionContext.SessionState.Path.CurrentLocation
     $out = "PS $loc$('>' * ($nestedPromptLevel + 1)) "
@@ -5,7 +7,7 @@ function prompt {
 }
 
 function New-RandomPassword {
-<#
+    <#
 .SYNOPSIS
     Generates a random password using System.Web.Security.Membership.
 .DESCRIPTION
@@ -40,7 +42,8 @@ function New-RandomPassword {
 
     try {
         Add-Type -AssemblyName System.Web -ErrorAction Stop
-    } catch {
+    }
+    catch {
         Write-Error "Failed to load System.Web assembly. Ensure .NET Framework is installed." -ErrorAction Stop
         return
     }
@@ -48,13 +51,14 @@ function New-RandomPassword {
     try {
         $password = [System.Web.Security.Membership]::GeneratePassword($Length, $MinimumSpecialCharacters)
         return $password
-    } catch {
+    }
+    catch {
         Write-Error "Failed to generate password: $_" -ErrorAction Stop
     }
 }
 
 function Clear-WorkingSet {
-<#
+    <#
 .SYNOPSIS
     function that executes EmptyWorkingSet() Win32 API call  (port from c# program)
 .DESCRIPTION
@@ -76,12 +80,12 @@ function Clear-WorkingSet {
 #>
     param (
         # list of TargetProcess
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string[]]
         $TargetProcesses
     )
 
-    if($null -eq $Global:hasEWSType) {
+    if ($null -eq $Global:hasEWSType) {
         $code = @"
 using System;
 using System.Collections.Generic;
@@ -163,7 +167,7 @@ namespace ewsConsole
 }
 
 function Get-AAA {
-<#
+    <#
 .SYNOPSIS
     function that outputs string of adjective-adjective-animal format
 .DESCRIPTION
@@ -199,7 +203,7 @@ function Get-AAA {
 
     [string[]]$result = @();
     for ($i = 0; $i -lt $Repeat; $i++) {
-        if($null -eq $Global:getAAA) {
+        if ($null -eq $Global:getAAA) {
             $Global:getAAA = @{
                 ganm = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/animals -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";
                 gadj = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/adjectives -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";        
@@ -222,7 +226,7 @@ function Get-AAA {
 }
 
 function Get-MyIP {
-<#
+    <#
 .SYNOPSIS
     Uses OpenDNS to return external IP
 .EXAMPLE
@@ -243,7 +247,7 @@ function Get-MyIP {
 }
 
 function Get-WhoisInfo {
-<#
+    <#
 .SYNOPSIS
     Returns WHOIS information for given domain or ip
 .EXAMPLE
@@ -267,16 +271,16 @@ function Get-WhoisInfo {
 #>
     param (
         # ip or domain to query for
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]
         $DomainOrIp,
         # key if not already set
-        [Parameter(Mandatory=$false)]
+        [Parameter(Mandatory = $false)]
         [string]
         $WhoisKisaApiKey = $Global:WhoisKisaApiKey
     )
 
-    if($null -eq $WhoisKisaApiKey) {
+    if ($null -eq $WhoisKisaApiKey) {
         Write-Host 'Whois API key from KISA(후이즈검색.한국) not set. Please configure either -WhoisKisaApiKey parameter or $Global:WhoisKisaApiKey. Exiting...';
         break;
     }
@@ -286,7 +290,7 @@ function Get-WhoisInfo {
 }
 
 function Get-NewPassword {
-<#!
+    <#!
 .SYNOPSIS
     Generates a random password with customizable options.
 .DESCRIPTION
@@ -336,10 +340,10 @@ function Get-NewPassword {
 
     $charPool = ""
     $required = @()
-    if ($IncludeUpper)  { $charPool += $upper;  $required += $upper  }
-    if ($IncludeLower)  { $charPool += $lower;  $required += $lower  }
-    if ($IncludeDigit)  { $charPool += $digits; $required += $digits }
-    if ($IncludeSpecial){ $charPool += $special; $required += $special}
+    if ($IncludeUpper) { $charPool += $upper; $required += $upper }
+    if ($IncludeLower) { $charPool += $lower; $required += $lower }
+    if ($IncludeDigit) { $charPool += $digits; $required += $digits }
+    if ($IncludeSpecial) { $charPool += $special; $required += $special }
 
     if ($charPool.Length -eq 0) {
         throw "No character classes selected for password generation."
@@ -363,7 +367,8 @@ function Get-NewPassword {
                 if ($count -gt $MaxConsecutive) {
                     return $false
                 }
-            } else {
+            }
+            else {
                 $count = 1
                 $lastChar = $char
             }
@@ -387,7 +392,8 @@ function Get-NewPassword {
                 $passwordChars[$i] = $passwordChars[$j]
                 $passwordChars[$j] = $tmp
             }
-        } else {
+        }
+        else {
             $passwordChars = for ($i = 0; $i -lt $Length; $i++) {
                 Get-RandomChar $charPool
             }
@@ -400,7 +406,7 @@ function Get-NewPassword {
 }
 
 function Get-NewPasswordNode {
-<#
+    <#
 .SYNOPSIS
     Generates random password using Node.js (Firefox logic)
 .DESCRIPTION
@@ -681,7 +687,8 @@ console.log(PasswordGenerator.generatePassword({
 "@;
             $code | node.exe;
         };
-    } else {
+    }
+    else {
         Write-Output "No Node.js runtime found. Please install one and try running the command again
  (ex: winget install OpenJS.NodeJSLTS)(visit http://nodejs.org/ for more information)";
     }
@@ -740,7 +747,7 @@ function Save-Download {
 }
 
 function Send-SshKey {
-<#
+    <#
 .SYNOPSIS
     Sends public SSH key to remote Linux server (ssh-copy-id equivalent for Windows PowerShell)
 .DESCRIPTION
@@ -779,10 +786,10 @@ function Send-SshKey {
 #>
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$User,
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$Hostname,
 
         [int]$Port = 22
@@ -792,7 +799,7 @@ function Send-SshKey {
     $sshDir = Join-Path $env:USERPROFILE '.ssh'
     if (-not (Test-Path $sshDir)) { New-Item -ItemType Directory -Path $sshDir | Out-Null }
 
-    $candidates = @('id_ed25519.pub','id_rsa.pub','id_ecdsa.pub','id_dsa.pub')
+    $candidates = @('id_ed25519.pub', 'id_rsa.pub', 'id_ecdsa.pub', 'id_dsa.pub')
     $pubkeyPath = $null
     foreach ($name in $candidates) {
         $p = Join-Path $sshDir $name
@@ -808,11 +815,11 @@ function Send-SshKey {
         $privateKey = Join-Path $sshDir 'id_ed25519'
         $pubkeyPath = "${privateKey}.pub"
 
-    # Prefer explicit path to ssh-keygen if available (compatible with Windows PowerShell v5.1)
-    $cmd = Get-Command ssh-keygen -ErrorAction SilentlyContinue
-    if ($cmd -ne $null) { $sshCmd = $cmd.Source } else { $sshCmd = 'ssh-keygen' }
+        # Prefer explicit path to ssh-keygen if available (compatible with Windows PowerShell v5.1)
+        $cmd = Get-Command ssh-keygen -ErrorAction SilentlyContinue
+        if ($cmd -ne $null) { $sshCmd = $cmd.Source } else { $sshCmd = 'ssh-keygen' }
 
-        $sshArgs = @('-t','ed25519','-f',$privateKey,'-N','')
+        $sshArgs = @('-t', 'ed25519', '-f', $privateKey, '-N', '')
 
         # Diagnostic output to help debug argument passing and environment
         Write-Verbose "PowerShell version: $($PSVersionTable.PSVersion)"
@@ -842,7 +849,8 @@ function Send-SshKey {
                 if ($exit -ne 0) {
                     Write-Warning "ssh-keygen failed (exit=$exit). See verbose output above for args and output."
                 }
-            } else {
+            }
+            else {
                 Write-Verbose "Invoking: $sshCmd with arg array (see above)"
                 $output = & $sshCmd @sshArgs 2>&1
                 $exit = $LASTEXITCODE
@@ -852,7 +860,8 @@ function Send-SshKey {
                     Write-Warning "ssh-keygen failed (exit=$exit). See verbose output above for args and output."
                 }
             }
-        } catch {
+        }
+        catch {
             Write-Warning "Exception while running ssh-keygen: $_"
         }
     }
@@ -862,13 +871,14 @@ function Send-SshKey {
         # Ensure remote .ssh exists and append the public key; set umask to keep permissions strict.
         Get-Content $pubkeyPath | ssh "$User@$Hostname" -p $Port 'mkdir -p ~/.ssh; umask 077; cat >> ~/.ssh/authorized_keys'
         Write-Host " Public key installed on $Hostname" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Warning " Could not locate or generate SSH public key. Searched: $($candidates -join ', ')"
     }
 }
 
 function Add-WingetPackagePaths {
-<#
+    <#
 .SYNOPSIS
     Adds directories containing executables from winget package installs to the user PATH.
 
@@ -906,8 +916,8 @@ function Add-WingetPackagePaths {
     }
 
     $binPaths = Get-ChildItem -Path $wingetPath -Directory -Recurse |
-        Where-Object { (Get-ChildItem -Path $_.FullName -Filter *.exe -File -ErrorAction SilentlyContinue).Count -gt 0 } |
-        Select-Object -ExpandProperty FullName
+    Where-Object { (Get-ChildItem -Path $_.FullName -Filter *.exe -File -ErrorAction SilentlyContinue).Count -gt 0 } |
+    Select-Object -ExpandProperty FullName
 
     $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     $currentPathArr = $currentPath -split ';'
@@ -922,7 +932,8 @@ function Add-WingetPackagePaths {
 
     if ($added.Count -eq 0) {
         Write-Host "No new paths were added. All executable directories are already in PATH."
-    } else {
+    }
+    else {
         [Environment]::SetEnvironmentVariable("PATH", $currentPath, "User")
         Write-Host " Added the following paths to your user PATH:"
         $added | ForEach-Object { Write-Host "  - $_" }
@@ -933,7 +944,7 @@ function Add-WingetPackagePaths {
 }
 
 function Remove-WingetPackagePaths {
-<#
+    <#
 .SYNOPSIS
     Removes all user PATH entries under the winget package directory.
 
@@ -969,14 +980,16 @@ function Remove-WingetPackagePaths {
     foreach ($p in $currentPathArr) {
         if ($p -like "$wingetRoot*") {
             $removed += $p
-        } else {
+        }
+        else {
             $filtered += $p
         }
     }
 
     if ($removed.Count -eq 0) {
         Write-Host "No winget paths found in user PATH. Nothing to remove."
-    } else {
+    }
+    else {
         [Environment]::SetEnvironmentVariable("PATH", ($filtered -join ';'), "User")
         Write-Host " Removed the following winget directories from your user PATH:"
         $removed | ForEach-Object { Write-Host "  - $_" }
@@ -987,7 +1000,7 @@ function Remove-WingetPackagePaths {
 }
 
 function New-RandomMacAddress {
-<#
+    <#
 .SYNOPSIS
     Generates a random MAC address, with optional locally administered format.
 
@@ -1027,7 +1040,8 @@ function New-RandomMacAddress {
     if ($FullyRandom) {
         # All octets are fully random
         $octets = @(for ($i = 0; $i -lt 6; $i++) { (Get-Random -Minimum 0 -Maximum 256).ToString("x2") })
-    } else {
+    }
+    else {
         # First octet: locally administered (bit 1 set), unicast (bit 0 cleared)
         $first = ((Get-Random -Minimum 0 -Maximum 256) -bor 0x02) -band 0xFE
         $octets = @($first.ToString("x2"))
@@ -1040,7 +1054,7 @@ function New-RandomMacAddress {
 }
 
 function Get-MacAdapters {
-<#
+    <#
 .SYNOPSIS
     Lists all network adapters and their MAC addresses.
 
@@ -1062,7 +1076,7 @@ function Get-MacAdapters {
 }
 
 function Set-RandomMacAddress {
-<#
+    <#
 .SYNOPSIS
     Sets a network adapter's MAC address to a random value.
 
@@ -1092,7 +1106,7 @@ function Set-RandomMacAddress {
 #>
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$AdapterName,
         [switch]$FullyRandom
     )
@@ -1100,7 +1114,8 @@ function Set-RandomMacAddress {
     # Generate MAC address
     if ($FullyRandom) {
         $octets = @(for ($i = 0; $i -lt 6; $i++) { (Get-Random -Minimum 0 -Maximum 256).ToString("x2") })
-    } else {
+    }
+    else {
         $first = ((Get-Random -Minimum 0 -Maximum 256) -bor 0x02) -band 0xFE
         $octets = @($first.ToString("x2"))
         for ($i = 1; $i -lt 6; $i++) {
@@ -1125,7 +1140,7 @@ function Set-RandomMacAddress {
 }
 
 function Reset-MacAddress {
-<#
+    <#
 .SYNOPSIS
     Resets a network adapter's MAC address to its default (hardware) value.
 
@@ -1144,7 +1159,7 @@ function Reset-MacAddress {
 #>
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$AdapterName
     )
 
@@ -1162,7 +1177,7 @@ function Reset-MacAddress {
 }
 
 function Convert-JpgToJxl {
-<#
+    <#
 .SYNOPSIS
     Converts all jpg images in a directory (recursively) to .jxl using ImageMagick, in parallel. DELETES ORIGINALS ON SUCCESS.
 .DESCRIPTION
@@ -1212,12 +1227,14 @@ function Convert-JpgToJxl {
                 & magick.exe $imgPath $jxlPath
                 if (Test-Path $jxlPath) {
                     Remove-Item $imgPath -Verbose
-                    [PSCustomObject]@{Status="Success"; Path=$imgPath}
-                } else {
-                    [PSCustomObject]@{Status="Fail"; Path=$imgPath}
+                    [PSCustomObject]@{Status = "Success"; Path = $imgPath }
                 }
-            } catch {
-                [PSCustomObject]@{Status="Error"; Path=$imgPath; Message=$_}
+                else {
+                    [PSCustomObject]@{Status = "Fail"; Path = $imgPath }
+                }
+            }
+            catch {
+                [PSCustomObject]@{Status = "Error"; Path = $imgPath; Message = $_ }
             }
         }
     }
@@ -1230,10 +1247,12 @@ function Convert-JpgToJxl {
             $pct = [math]::Round($completed * 100 / $total, 2)
             $elapsed = (Get-Date) - $startTime
             if ($result.Status -eq "Success") {
-                Write-Host ("[{0}] Converted [{1}] ({2}/{3}, {4}%) ({5} sec elapsed)" -f (Get-Date), $result.Path, $completed, $total, $pct, [math]::Round($elapsed.TotalSeconds,2))
-            } elseif ($result.Status -eq "Fail") {
+                Write-Host ("[{0}] Converted [{1}] ({2}/{3}, {4}%) ({5} sec elapsed)" -f (Get-Date), $result.Path, $completed, $total, $pct, [math]::Round($elapsed.TotalSeconds, 2))
+            }
+            elseif ($result.Status -eq "Fail") {
                 Write-Warning "Conversion failed for $($result.Path)"
-            } elseif ($result.Status -eq "Error") {
+            }
+            elseif ($result.Status -eq "Error") {
                 Write-Warning "Error converting $($result.Path): $($result.Message)"
             }
         }
@@ -1246,7 +1265,7 @@ function Convert-JpgToJxl {
 }
 
 function Convert-JpgToJxl-Sequential {
-<#
+    <#
 .SYNOPSIS
     Converts all jpg images in a directory (recursively) to .jxl using ImageMagick. DELETES ORIGINALS ON SUCCESS.
 .DESCRIPTION
@@ -1284,16 +1303,18 @@ function Convert-JpgToJxl-Sequential {
             & magick.exe $image.FullName $jxlPath
             if (Test-Path $jxlPath) {
                 Remove-Item $image.FullName -Verbose
-            } else {
+            }
+            else {
                 Write-Warning "Conversion failed for $($image.FullName)"
             }
-        } catch {
+        }
+        catch {
             Write-Warning "Error converting $($image.FullName): $_"
         }
         $i++
         $pct = [math]::Round($i * 100 / $total, 2)
         $elapsed = (Get-Date) - $startTime
-        Write-Host ("[{0}] Converted {1} of {2} images ({3}%) ({4} sec elapsed)" -f (Get-Date), $i, $total, $pct, [math]::Round($elapsed.TotalSeconds,2))
+        Write-Host ("[{0}] Converted {1} of {2} images ({3}%) ({4} sec elapsed)" -f (Get-Date), $i, $total, $pct, [math]::Round($elapsed.TotalSeconds, 2))
     }
     $endTime = Get-Date
     $elapsedTime = $endTime - $startTime
@@ -1301,7 +1322,7 @@ function Convert-JpgToJxl-Sequential {
 }
 
 function Convert-JxlToJpg {
-<#
+    <#
 .SYNOPSIS
     Converts all .jxl images in a directory (recursively) to .jpg using ImageMagick. DELETES ORIGINALS ON SUCCESS.
 .DESCRIPTION
@@ -1339,16 +1360,18 @@ function Convert-JxlToJpg {
             & magick.exe $image.FullName $jpgPath
             if (Test-Path $jpgPath) {
                 Remove-Item $image.FullName -Verbose
-            } else {
+            }
+            else {
                 Write-Warning "Conversion failed for $($image.FullName)"
             }
-        } catch {
+        }
+        catch {
             Write-Warning "Error converting $($image.FullName): $_"
         }
         $i++
         $pct = [math]::Round($i * 100 / $total, 2)
         $elapsed = (Get-Date) - $startTime
-        Write-Host ("[{0}] Converted {1} of {2} images ({3}%) ({4} sec elapsed)" -f (Get-Date), $i, $total, $pct, [math]::Round($elapsed.TotalSeconds,2))
+        Write-Host ("[{0}] Converted {1} of {2} images ({3}%) ({4} sec elapsed)" -f (Get-Date), $i, $total, $pct, [math]::Round($elapsed.TotalSeconds, 2))
     }
     $endTime = Get-Date
     $elapsedTime = $endTime - $startTime
@@ -1356,7 +1379,7 @@ function Convert-JxlToJpg {
 }
 
 function Get-IpInfo {
-<#
+    <#
 .SYNOPSIS
     Prints the command to query ipregistry.co for a given IP address using curl-like User-Agent.
 .DESCRIPTION
@@ -1373,7 +1396,7 @@ function Get-IpInfo {
     Last Edit: 2025-06
 #>
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$Ip
     )
     $cmd = "Invoke-RestMethod -Uri 'https://api.ipregistry.co/${Ip}?key=tryout' -Headers @{ 'User-Agent' = 'curl/7.68.0' }"
@@ -1382,7 +1405,7 @@ function Get-IpInfo {
 }
 
 function Test-IsAdministrator {
-<#
+    <#
 .SYNOPSIS
 Tests if the current PowerShell session is running with administrator privileges.
 
@@ -1405,7 +1428,7 @@ Last Edit: Aug 2025
 }
 
 function New-SafeFileNameFromCertificateName {
-<#
+    <#
 .SYNOPSIS
 Creates a filesystem-safe filename from a certificate subject or other string.
 
@@ -1451,7 +1474,7 @@ Last Edit: Aug 2025
 }
 
 function Get-CertutilPath {
-<#
+    <#
 .SYNOPSIS
 Locates the certutil.exe executable on the system.
 
@@ -1491,7 +1514,7 @@ Last Edit: Aug 2025
 }
 
 function Install-ServerCertificateTrust {
-<#
+    <#
 .SYNOPSIS
 Connects to an HTTPS server, retrieves its certificate chain, and installs selected certificates into Windows trust stores.
 
@@ -1553,10 +1576,10 @@ Last Edit: Aug 2025
         [Parameter(Mandatory = $true)]
         [string] $Url,
 
-        [ValidateSet('Root','Intermediate','Leaf','All')]
+        [ValidateSet('Root', 'Intermediate', 'Leaf', 'All')]
         [string] $WhatToInstall = 'Root',
 
-        [ValidateSet('X509Store','Certutil')]
+        [ValidateSet('X509Store', 'Certutil')]
         [string] $InstallMethod = 'X509Store',
 
         [switch] $MachineStore,
@@ -1657,7 +1680,7 @@ Last Edit: Aug 2025
         if ([string]::IsNullOrWhiteSpace($cn)) { $cn = 'Unknown' }
 
         $safeName = New-SafeFileNameFromCertificateName -InputString $cn -DefaultName "cert"
-        $thumb = $Certificate.Thumbprint -replace '\s',''
+        $thumb = $Certificate.Thumbprint -replace '\s', ''
         $fileBase = "{0}__{1}" -f $safeName, $thumb
         $path = Join-Path $Directory ($fileBase + '.cer')
 
@@ -1713,10 +1736,12 @@ Last Edit: Aug 2025
 
             if ($p.ExitCode -ne 0) {
                 throw "certutil failed (exit $($p.ExitCode)) for $CertificatePath to $StoreName. Error: $stderr`nOutput: $stdout"
-            } else {
+            }
+            else {
                 Write-Verbose $stdout.Trim()
             }
-        } finally {
+        }
+        finally {
             if ($p) { $p.Dispose() }
         }
     }
@@ -1748,9 +1773,10 @@ Last Edit: Aug 2025
         
         # Certificate validation callback configuration
         $certCallback = if ($SkipCertValidation) {
-            { param($s,$c,$chain,$errors) return $true }
-        } else {
-            { param($s,$c,$chain,$errors) 
+            { param($s, $c, $chain, $errors) return $true }
+        }
+        else {
+            { param($s, $c, $chain, $errors) 
                 if ($errors -ne [System.Net.Security.SslPolicyErrors]::None) {
                     Write-Warning "TLS certificate validation errors: $errors"
                 }
@@ -1784,7 +1810,8 @@ Last Edit: Aug 2025
             -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreCtlSignerRevocationUnknown `
             -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreEndRevocationUnknown `
             -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreRootRevocationUnknown
-    } else {
+    }
+    else {
         $chain.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
     }
     
@@ -1804,14 +1831,14 @@ Last Edit: Aug 2025
 
     # --- Certificate selection helpers ---
     function Get-RootCert { param($e) if ($e.Count -gt 0) { $e[-1] } }
-    function Get-Intermediates { param($e) if ($e.Count -gt 2) { $e[1..($e.Count-2)] } else { @() } }
+    function Get-Intermediates { param($e) if ($e.Count -gt 2) { $e[1..($e.Count - 2)] } else { @() } }
 
     # --- Select certificates to work with ---
     $toInstall = switch ($WhatToInstall) {
-        'Root'         { @(Get-RootCert $elements) | Where-Object { $_ } }
+        'Root' { @(Get-RootCert $elements) | Where-Object { $_ } }
         'Intermediate' { @(Get-Intermediates $elements) | Where-Object { $_ } }
-        'Leaf'         { @($leaf) | Where-Object { $_ } }
-        'All'          { $elements | Where-Object { $_ } }
+        'Leaf' { @($leaf) | Where-Object { $_ } }
+        'All' { $elements | Where-Object { $_ } }
     }
 
     if (-not $toInstall -or $toInstall.Count -eq 0) {
@@ -1830,7 +1857,8 @@ Last Edit: Aug 2025
                 # Certutil method uses Save-CertificateAsFile
                 $path = Save-CertificateAsFile -Certificate $cert -Directory $OutDir -Overwrite:$Force
                 Write-Verbose "Exported: ${path}"
-            } else {
+            }
+            else {
                 # X509Store method uses simpler export
                 $safeName = New-SafeFileNameFromCertificateName -InputString $cert.Subject
                 $filePath = Join-Path $OutDir ("${safeName}-${cert.Thumbprint}.cer")
@@ -1851,12 +1879,14 @@ Last Edit: Aug 2025
                 # Already saved, just get the path
                 $safeName = New-SafeFileNameFromCertificateName -InputString $cert.Subject
                 Join-Path $OutDir ("${safeName}-${cert.Thumbprint}.cer")
-            } else {
+            }
+            else {
                 # Need to save to temp for certutil
                 $tempDir = if (-not (Test-Path $OutDir)) {
                     $null = New-Item -ItemType Directory -Path $OutDir -Force
                     $OutDir
-                } else { $OutDir }
+                }
+                else { $OutDir }
                 Save-CertificateAsFile -Certificate $cert -Directory $tempDir -Overwrite:$Force
             }
 
@@ -1870,11 +1900,11 @@ Last Edit: Aug 2025
             }
 
             $plan += [pscustomobject]@{
-                Subject = $cert.Subject
-                Thumbprint = $cert.Thumbprint -replace '\s',''
-                Type = $type
-                Path = $path
-                Store = $store
+                Subject     = $cert.Subject
+                Thumbprint  = $cert.Thumbprint -replace '\s', ''
+                Type        = $type
+                Path        = $path
+                Store       = $store
                 Certificate = $cert
             }
         }
@@ -1893,7 +1923,7 @@ Last Edit: Aug 2025
             Write-Host "Leaf:   ${leaf.Subject} [${leaf.Thumbprint}]"
             Write-Host "Chain:"
             for ($i = 0; $i -lt $elements.Count; $i++) {
-                $tag = if ($i -eq 0) {'[Leaf]'} elseif ($i -eq $elements.Count-1) {'[Root]'} else {'[Interm]'}
+                $tag = if ($i -eq 0) { '[Leaf]' } elseif ($i -eq $elements.Count - 1) { '[Root]' } else { '[Interm]' }
                 Write-Host ("  ${tag} ${elements[$i].Subject} [${elements[$i].Thumbprint}]")
             }
             return $plan
@@ -1904,15 +1934,18 @@ Last Edit: Aug 2025
             try {
                 Invoke-CertutilAddStore -StoreName $item.Store -CertificatePath $item.Path -MachineStore:$MachineStore
                 Write-Host ("Installed via certutil: {0} -> {1}" -f (Split-Path -Leaf $item.Path), $item.Store)
-            } catch {
+            }
+            catch {
                 Write-Warning "Failed to install $($item.Path) into store $($item.Store): $($_.Exception.Message)"
             }
         }
-    } else {
+    }
+    else {
         # Install using X509Store method
         if ($WhatIfOnly) {
             Write-Host "`nWhatIfOnly specified: no installation attempted (X509Store method)."
-        } else {
+        }
+        else {
             foreach ($cert in $toInstall) {
                 if ($WhatToInstall -eq 'Leaf' -and -not (Test-SelfSignedCertificate -Certificate $cert)) {
                     Write-Warning "Skipping non-self-signed leaf certificate. Install its issuer instead."
@@ -1934,7 +1967,8 @@ Last Edit: Aug 2025
                     if ($existing.Count -eq 0) {
                         $store.Add($cert)
                         Write-Host ("Installed via X509Store: ${cert.Subject} => ${storeLocation}\${storeName}")
-                    } else {
+                    }
+                    else {
                         Write-Host ("Already present: ${cert.Subject} in ${storeLocation}\${storeName}")
                     }
                 }
@@ -1951,13 +1985,13 @@ Last Edit: Aug 2025
     Write-Host "Leaf:   ${leaf.Subject} [${leaf.Thumbprint}]"
     Write-Host "Chain:"
     for ($i = 0; $i -lt $elements.Count; $i++) {
-        $tag = if ($i -eq 0) {'[Leaf]'} elseif ($i -eq $elements.Count-1) {'[Root]'} else {'[Interm]'}
+        $tag = if ($i -eq 0) { '[Leaf]' } elseif ($i -eq $elements.Count - 1) { '[Root]' } else { '[Interm]' }
         Write-Host ("  ${tag} ${elements[$i].Subject} [${elements[$i].Thumbprint}]")
     }
 }
 
 function Export-TlsCertificates {
-<#
+    <#
 .SYNOPSIS
 Retrieves and exports TLS certificates from a remote server without installing them.
 
@@ -2154,14 +2188,14 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
 
     # --- Helper functions for certificate selection ---
     function Get-RootCert { param($e) if ($e.Count -gt 0) { $e[-1] } }
-    function Get-Intermediates { param($e) if ($e.Count -gt 2) { $e[1..($e.Count-2)] } else { @() } }
+    function Get-Intermediates { param($e) if ($e.Count -gt 2) { $e[1..($e.Count - 2)] } else { @() } }
 
     # --- Certificate selection and filtering ---
     $toExport = switch ($WhatToExport) {
-        'Root'         { @(Get-RootCert $elements) | Where-Object { $_ } }
+        'Root' { @(Get-RootCert $elements) | Where-Object { $_ } }
         'Intermediate' { @(Get-Intermediates $elements) | Where-Object { $_ } }
-        'Leaf'         { @($leaf) | Where-Object { $_ } }
-        'All'          { $elements | Where-Object { $_ } }
+        'Leaf' { @($leaf) | Where-Object { $_ } }
+        'All' { $elements | Where-Object { $_ } }
     }
 
     if (-not $toExport -or $toExport.Count -eq 0) {
@@ -2221,25 +2255,25 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         $cert = $elements[$i]
         $type = Get-CertificateType -Certificate $cert `
             -IsFirstInChain ($i -eq 0) `
-            -IsLastInChain ($i -eq $elements.Count-1)
-        $tag = if ($i -eq 0) {'[Leaf]'} elseif ($i -eq $elements.Count-1) {'[Root]'} else {'[Intermediate]'}
+            -IsLastInChain ($i -eq $elements.Count - 1)
+        $tag = if ($i -eq 0) { '[Leaf]' } elseif ($i -eq $elements.Count - 1) { '[Root]' } else { '[Intermediate]' }
         Write-Host "  ${tag} [${type}] $($cert.Subject) [$($cert.Thumbprint)]"
     }
     
     # --- Return certificate objects for further processing ---
     return [PSCustomObject]@{
-        LeafCertificate = $leaf
-        CertificateChain = $elements
+        LeafCertificate      = $leaf
+        CertificateChain     = $elements
         ExportedCertificates = $toExport
-        OutputDirectory = if (-not $NoExport) { $OutDir } else { $null }
-        TargetHost = $TargetHost
-        TargetPort = $TargetPort
-        SNIHost = $SNIHost
+        OutputDirectory      = if (-not $NoExport) { $OutDir } else { $null }
+        TargetHost           = $TargetHost
+        TargetPort           = $TargetPort
+        SNIHost              = $SNIHost
     }
 }
 
 function Lock-File {
-<#
+    <#
 .SYNOPSIS
 Completely locks down a file by removing all explicit and inherited access rules.
 
@@ -2307,7 +2341,7 @@ Last Edit: Sept 2025
 }
 
 function Convert-VideoWithTransposeIntelQuickSync {
-<#
+    <#
 .SYNOPSIS
 Rotates a video 90 degrees using Intel Quick Sync hardware acceleration.
 
@@ -2371,8 +2405,8 @@ Last Edit: Mar 2026
     $InputFile = $InputFile -replace '`(?=[\[\]])', ''
     $ResolvedInput = (Get-Item -LiteralPath $InputFile).FullName
     # Build output filename by appending "_v.mkv"
-    $BaseName   = [System.IO.Path]::GetFileNameWithoutExtension($ResolvedInput)
-    $Directory  = [System.IO.Path]::GetDirectoryName($ResolvedInput)
+    $BaseName = [System.IO.Path]::GetFileNameWithoutExtension($ResolvedInput)
+    $Directory = [System.IO.Path]::GetDirectoryName($ResolvedInput)
     if ([string]::IsNullOrEmpty($Directory)) {
         $Directory = "."
     }
@@ -2405,7 +2439,7 @@ Last Edit: Mar 2026
 }
 
 function New-RandomDir {
-<#
+    <#
 .SYNOPSIS
 Creates a new directory (random name by default) and changes into it.
 
@@ -2486,30 +2520,30 @@ Last Edit: 2026-04
     if ($Temp) { $BasePath = $env:TEMP }
 
     $colors = @(
-        'amber','aqua','azure','beige','black','blue','bronze','brown','coral',
-        'crimson','cyan','denim','ebony','emerald','fuchsia','gold','golden',
-        'gray','green','indigo','ivory','jade','lavender','lemon','lilac',
-        'lime','magenta','mahogany','marigold','maroon','mint','mocha','navy',
-        'ochre','olive','onyx','orange','orchid','peach','pearl','periwinkle',
-        'pine','pink','plum','purple','red','rose','ruby','rust','saffron',
-        'sage','salmon','sapphire','scarlet','sepia','silver','slate','tan',
-        'tangerine','taupe','teal','topaz','turquoise','umber','vermilion',
-        'violet','walnut','white','wine','yellow'
+        'amber', 'aqua', 'azure', 'beige', 'black', 'blue', 'bronze', 'brown', 'coral',
+        'crimson', 'cyan', 'denim', 'ebony', 'emerald', 'fuchsia', 'gold', 'golden',
+        'gray', 'green', 'indigo', 'ivory', 'jade', 'lavender', 'lemon', 'lilac',
+        'lime', 'magenta', 'mahogany', 'marigold', 'maroon', 'mint', 'mocha', 'navy',
+        'ochre', 'olive', 'onyx', 'orange', 'orchid', 'peach', 'pearl', 'periwinkle',
+        'pine', 'pink', 'plum', 'purple', 'red', 'rose', 'ruby', 'rust', 'saffron',
+        'sage', 'salmon', 'sapphire', 'scarlet', 'sepia', 'silver', 'slate', 'tan',
+        'tangerine', 'taupe', 'teal', 'topaz', 'turquoise', 'umber', 'vermilion',
+        'violet', 'walnut', 'white', 'wine', 'yellow'
     )
 
     $adjectives = @(
-        'ancient','bold','brisk','calm','clear','cool','curious','deep','eager','fast',
-        'gentle','grand','hidden','icy','jolly','kind','lively','lucky','misty','modern',
-        'mossy','nimble','odd','quiet','rapid','shiny','silent','small','solar','steady',
-        'stormy','swift','tiny','urban','warm','wild','wise','young'
+        'ancient', 'bold', 'brisk', 'calm', 'clear', 'cool', 'curious', 'deep', 'eager', 'fast',
+        'gentle', 'grand', 'hidden', 'icy', 'jolly', 'kind', 'lively', 'lucky', 'misty', 'modern',
+        'mossy', 'nimble', 'odd', 'quiet', 'rapid', 'shiny', 'silent', 'small', 'solar', 'steady',
+        'stormy', 'swift', 'tiny', 'urban', 'warm', 'wild', 'wise', 'young'
     )
 
     $nouns = @(
-        'brook','cabin','cloud','comet','delta','dream','falcon','field','fire','forest',
-        'garden','glade','harbor','hill','lab','lake','leaf','meadow','moon','mountain',
-        'otter','owl','path','peak','pine','planet','pond','rabbit','river','shadow',
-        'sky','star','stone','sun','thicket','trail','tree','valley','wave','wind',
-        'wolf','wood','workshop'
+        'brook', 'cabin', 'cloud', 'comet', 'delta', 'dream', 'falcon', 'field', 'fire', 'forest',
+        'garden', 'glade', 'harbor', 'hill', 'lab', 'lake', 'leaf', 'meadow', 'moon', 'mountain',
+        'otter', 'owl', 'path', 'peak', 'pine', 'planet', 'pond', 'rabbit', 'river', 'shadow',
+        'sky', 'star', 'stone', 'sun', 'thicket', 'trail', 'tree', 'valley', 'wave', 'wind',
+        'wolf', 'wood', 'workshop'
     )
 
     if (-not (Test-Path -LiteralPath $BasePath)) {
@@ -2522,9 +2556,9 @@ Last Edit: 2026-04
     if (-not $Name) {
         for ($i = 1; $i -le $MaxAttempts; $i++) {
             $Name = '{0}-{1}-{2}' -f
-                $colors[(Get-Random -Minimum 0 -Maximum $colors.Count)],
-                $adjectives[(Get-Random -Minimum 0 -Maximum $adjectives.Count)],
-                $nouns[(Get-Random -Minimum 0 -Maximum $nouns.Count)]
+            $colors[(Get-Random -Minimum 0 -Maximum $colors.Count)],
+            $adjectives[(Get-Random -Minimum 0 -Maximum $adjectives.Count)],
+            $nouns[(Get-Random -Minimum 0 -Maximum $nouns.Count)]
 
             $candidate = Join-Path $BasePath $Name
             Write-Verbose "Attempt ${i}: $candidate"
@@ -2569,7 +2603,7 @@ Last Edit: 2026-04
     if ($Agents) {
         Write-Verbose "Creating AGENTS.md (canonical) + CLAUDE.md/GEMINI.md (@import)"
 
-@"
+        @"
 # AGENTS.md
 
 ## Rules
@@ -2628,7 +2662,7 @@ Last Edit: 2026-04
 Set-Alias nrd New-RandomDir
 
 function Invoke-LoginAudit {
-<#
+    <#
 .SYNOPSIS
   Audits Windows login activity for the last N hours and writes a Markdown report.
 
@@ -2655,255 +2689,257 @@ function Invoke-LoginAudit {
     Tip: you can add the function declaration to $PROFILE then call it on future shell sessions with ease
     (note that script execution policy should allow local script execution at least, i.e. RemoteSigned)
 #>
-  [CmdletBinding()]
-  param(
-    [int]$Hours = 48,
-    [string]$OutDir = (Get-Location).Path
-  )
+    [CmdletBinding()]
+    param(
+        [int]$Hours = 48,
+        [string]$OutDir = (Get-Location).Path
+    )
 
-  $ErrorActionPreference = 'Stop'
+    $ErrorActionPreference = 'Stop'
 
-  # Fail fast if not elevated - Security event log read requires admin
-  $currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
-  if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw 'Invoke-LoginAudit requires an elevated PowerShell session (reading the Security event log needs Administrator rights).'
-  }
-
-  if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
-
-  $since     = (Get-Date).AddHours(-$Hours)
-  $stamp     = Get-Date -Format 'yyyyMMdd-HHmmss'
-  $reportMd  = Join-Path $OutDir "login-audit-$stamp.md"
-  $successCsv= Join-Path $OutDir "4624-success-$stamp.csv"
-  $failCsv   = Join-Path $OutDir "4625-failed-$stamp.csv"
-
-  $logonTypeMap = @{
-    2  = 'Interactive'
-    3  = 'Network'
-    4  = 'Batch'
-    5  = 'Service'
-    7  = 'Unlock'
-    8  = 'NetworkCleartext'
-    9  = 'NewCredentials'
-    10 = 'RemoteInteractive(RDP)'
-    11 = 'CachedInteractive'
-  }
-
-  # 4625 sub-status codes -> plain English (common ones)
-  $subStatusMap = @{
-    '0xC0000064' = 'User does not exist'
-    '0xC000006A' = 'Bad password'
-    '0xC000006D' = 'Bad username or password'
-    '0xC000006F' = 'Outside allowed hours'
-    '0xC0000070' = 'Workstation restriction'
-    '0xC0000071' = 'Password expired'
-    '0xC0000072' = 'Account disabled'
-    '0xC0000193' = 'Account expired'
-    '0xC0000224' = 'Password must change'
-    '0xC0000234' = 'Account locked out'
-    '0xC000015B' = 'Logon type not granted'
-  }
-
-  function Get-Events($id) {
-    try {
-      Get-WinEvent -FilterHashtable @{LogName='Security'; Id=$id; StartTime=$since} -ErrorAction Stop
-    } catch [System.Exception] {
-      if ($_.Exception.Message -match 'No events') { @() } else { throw }
+    # Fail fast if not elevated - Security event log read requires admin
+    $currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'Invoke-LoginAudit requires an elevated PowerShell session (reading the Security event log needs Administrator rights).'
     }
-  }
 
-  function Md-Table($rows, $columns) {
-    if (-not $rows) { return "_(none)_`n" }
-    $sb = [System.Text.StringBuilder]::new()
-    [void]$sb.AppendLine('| ' + ($columns -join ' | ') + ' |')
-    [void]$sb.AppendLine('|' + (($columns | ForEach-Object { '---' }) -join '|') + '|')
-    foreach ($r in $rows) {
-      $cells = $columns | ForEach-Object {
-        $v = $r.$_
-        if ($null -eq $v -or $v -eq '') { '-' } else { ($v -replace '\|','\|') }
-      }
-      [void]$sb.AppendLine('| ' + ($cells -join ' | ') + ' |')
+    if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
+
+    $since = (Get-Date).AddHours(-$Hours)
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $reportMd = Join-Path $OutDir "login-audit-$stamp.md"
+    $successCsv = Join-Path $OutDir "4624-success-$stamp.csv"
+    $failCsv = Join-Path $OutDir "4625-failed-$stamp.csv"
+
+    $logonTypeMap = @{
+        2  = 'Interactive'
+        3  = 'Network'
+        4  = 'Batch'
+        5  = 'Service'
+        7  = 'Unlock'
+        8  = 'NetworkCleartext'
+        9  = 'NewCredentials'
+        10 = 'RemoteInteractive(RDP)'
+        11 = 'CachedInteractive'
     }
-    $sb.ToString()
-  }
 
-  Write-Host "Collecting events since $since ..." -ForegroundColor Cyan
-
-  $raw4624 = Get-Events 4624
-  $raw4625 = Get-Events 4625
-  $raw4634 = Get-Events 4634
-  $raw4647 = Get-Events 4647
-  $raw4740 = try {
-    Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4740; StartTime=(Get-Date).AddDays(-30)} -ErrorAction Stop
-  } catch { @() }
-  $raw4800 = Get-Events 4800
-  $raw4801 = Get-Events 4801
-
-  $ok = $raw4624 | ForEach-Object {
-    $lt = [int]$_.Properties[8].Value
-    [PSCustomObject]@{
-      Time          = $_.TimeCreated
-      User          = $_.Properties[5].Value
-      Domain        = $_.Properties[6].Value
-      LogonType     = $lt
-      LogonTypeName = $logonTypeMap[$lt]
-      Workstation   = $_.Properties[11].Value
-      IP            = $_.Properties[18].Value
-      LogonProcess  = $_.Properties[9].Value
-      AuthPackage   = $_.Properties[10].Value
-      ProcessName   = $_.Properties[17].Value
+    # 4625 sub-status codes -> plain English (common ones)
+    $subStatusMap = @{
+        '0xC0000064' = 'User does not exist'
+        '0xC000006A' = 'Bad password'
+        '0xC000006D' = 'Bad username or password'
+        '0xC000006F' = 'Outside allowed hours'
+        '0xC0000070' = 'Workstation restriction'
+        '0xC0000071' = 'Password expired'
+        '0xC0000072' = 'Account disabled'
+        '0xC0000193' = 'Account expired'
+        '0xC0000224' = 'Password must change'
+        '0xC0000234' = 'Account locked out'
+        '0xC000015B' = 'Logon type not granted'
     }
-  }
 
-  $fail = $raw4625 | ForEach-Object {
-    $lt = [int]$_.Properties[10].Value
-    $sub = ('0x{0:X}' -f [int64]$_.Properties[9].Value)
-    [PSCustomObject]@{
-      Time          = $_.TimeCreated
-      User          = $_.Properties[5].Value
-      Domain        = $_.Properties[6].Value
-      LogonType     = $lt
-      LogonTypeName = $logonTypeMap[$lt]
-      Status        = ('0x{0:X}' -f [int64]$_.Properties[7].Value)
-      SubStatus     = $sub
-      Reason        = $subStatusMap[$sub]
-      Workstation   = $_.Properties[13].Value
-      IP            = $_.Properties[19].Value
-      ProcessName   = $_.Properties[18].Value
+    function Get-Events($id) {
+        try {
+            Get-WinEvent -FilterHashtable @{LogName = 'Security'; Id = $id; StartTime = $since } -ErrorAction Stop
+        }
+        catch [System.Exception] {
+            if ($_.Exception.Message -match 'No events') { @() } else { throw }
+        }
     }
-  }
 
-  if ($ok)   { $ok   | Export-Csv -NoTypeInformation -Path $successCsv }
-  if ($fail) { $fail | Export-Csv -NoTypeInformation -Path $failCsv }
+    function Md-Table($rows, $columns) {
+        if (-not $rows) { return "_(none)_`n" }
+        $sb = [System.Text.StringBuilder]::new()
+        [void]$sb.AppendLine('| ' + ($columns -join ' | ') + ' |')
+        [void]$sb.AppendLine('|' + (($columns | ForEach-Object { '---' }) -join '|') + '|')
+        foreach ($r in $rows) {
+            $cells = $columns | ForEach-Object {
+                $v = $r.$_
+                if ($null -eq $v -or $v -eq '') { '-' } else { ($v -replace '\|', '\|') }
+            }
+            [void]$sb.AppendLine('| ' + ($cells -join ' | ') + ' |')
+        }
+        $sb.ToString()
+    }
 
-  $humanTypes = 2,7,10,11
-  $human      = $ok | Where-Object { $_.LogonType -in $humanTypes }
-  $netNonSys  = $ok | Where-Object {
-    $_.LogonType -eq 3 -and
-    $_.User -notin 'SYSTEM','ANONYMOUS LOGON','LOCAL SERVICE','NETWORK SERVICE' -and
-    $_.IP -and $_.IP -ne '-'
-  }
+    Write-Host "Collecting events since $since ..." -ForegroundColor Cyan
 
-  # Flag non-loopback IPs on interactive/unlock events - unusual for console sign-in
-  $remoteHumanFlags = $human | Where-Object { $_.IP -and $_.IP -ne '-' -and $_.IP -ne '127.0.0.1' -and $_.IP -ne '::1' }
+    $raw4624 = Get-Events 4624
+    $raw4625 = Get-Events 4625
+    $raw4634 = Get-Events 4634
+    $raw4647 = Get-Events 4647
+    $raw4740 = try {
+        Get-WinEvent -FilterHashtable @{LogName = 'Security'; Id = 4740; StartTime = (Get-Date).AddDays(-30) } -ErrorAction Stop
+    }
+    catch { @() }
+    $raw4800 = Get-Events 4800
+    $raw4801 = Get-Events 4801
 
-  # Off-hours human logons (before 6am or after 10pm local time)
-  $offHours = $human | Where-Object { $_.Time.Hour -lt 6 -or $_.Time.Hour -ge 22 }
+    $ok = $raw4624 | ForEach-Object {
+        $lt = [int]$_.Properties[8].Value
+        [PSCustomObject]@{
+            Time          = $_.TimeCreated
+            User          = $_.Properties[5].Value
+            Domain        = $_.Properties[6].Value
+            LogonType     = $lt
+            LogonTypeName = $logonTypeMap[$lt]
+            Workstation   = $_.Properties[11].Value
+            IP            = $_.Properties[18].Value
+            LogonProcess  = $_.Properties[9].Value
+            AuthPackage   = $_.Properties[10].Value
+            ProcessName   = $_.Properties[17].Value
+        }
+    }
 
-  $userBreakdown = $ok | Group-Object User, LogonTypeName |
+    $fail = $raw4625 | ForEach-Object {
+        $lt = [int]$_.Properties[10].Value
+        $sub = ('0x{0:X}' -f [int64]$_.Properties[9].Value)
+        [PSCustomObject]@{
+            Time          = $_.TimeCreated
+            User          = $_.Properties[5].Value
+            Domain        = $_.Properties[6].Value
+            LogonType     = $lt
+            LogonTypeName = $logonTypeMap[$lt]
+            Status        = ('0x{0:X}' -f [int64]$_.Properties[7].Value)
+            SubStatus     = $sub
+            Reason        = $subStatusMap[$sub]
+            Workstation   = $_.Properties[13].Value
+            IP            = $_.Properties[19].Value
+            ProcessName   = $_.Properties[18].Value
+        }
+    }
+
+    if ($ok) { $ok   | Export-Csv -NoTypeInformation -Path $successCsv }
+    if ($fail) { $fail | Export-Csv -NoTypeInformation -Path $failCsv }
+
+    $humanTypes = 2, 7, 10, 11
+    $human = $ok | Where-Object { $_.LogonType -in $humanTypes }
+    $netNonSys = $ok | Where-Object {
+        $_.LogonType -eq 3 -and
+        $_.User -notin 'SYSTEM', 'ANONYMOUS LOGON', 'LOCAL SERVICE', 'NETWORK SERVICE' -and
+        $_.IP -and $_.IP -ne '-'
+    }
+
+    # Flag non-loopback IPs on interactive/unlock events - unusual for console sign-in
+    $remoteHumanFlags = $human | Where-Object { $_.IP -and $_.IP -ne '-' -and $_.IP -ne '127.0.0.1' -and $_.IP -ne '::1' }
+
+    # Off-hours human logons (before 6am or after 10pm local time)
+    $offHours = $human | Where-Object { $_.Time.Hour -lt 6 -or $_.Time.Hour -ge 22 }
+
+    $userBreakdown = $ok | Group-Object User, LogonTypeName |
     Sort-Object Count -Descending |
     ForEach-Object {
-      [PSCustomObject]@{
-        Count = $_.Count
-        Group = $_.Name
-      }
+        [PSCustomObject]@{
+            Count = $_.Count
+            Group = $_.Name
+        }
     }
 
-  $computer = $env:COMPUTERNAME
-  $now      = Get-Date
-  $windowEnd= $now.ToString('yyyy-MM-dd HH:mm:ss')
-  $windowStart = $since.ToString('yyyy-MM-dd HH:mm:ss')
+    $computer = $env:COMPUTERNAME
+    $now = Get-Date
+    $windowEnd = $now.ToString('yyyy-MM-dd HH:mm:ss')
+    $windowStart = $since.ToString('yyyy-MM-dd HH:mm:ss')
 
-  $md = @()
-  $md += "# Login Activity Report - $computer"
-  $md += ""
-  $md += "- **Window:** $windowStart -> $windowEnd  (last $Hours hours)"
-  $md += "- **Generated:** $now"
-  $md += "- **Generated by:** ``Invoke-LoginAudit``"
-  $csvRefs = @()
-  if (Test-Path $successCsv) { $csvRefs += "``$successCsv``" }
-  if (Test-Path $failCsv)    { $csvRefs += "``$failCsv``" }
-  if ($csvRefs) { $md += "- **Raw CSVs:** " + ($csvRefs -join ', ') }
-  $md += ""
-  $md += "## Totals"
-  $md += ""
-  $md += "| Event | Count | Meaning |"
-  $md += "|---|---:|---|"
-  $md += "| 4624 Successful logon | $($ok.Count) | All successful session creations |"
-  $md += "| 4625 Failed logon | $($fail.Count) | Bad passwords / rejected auth |"
-  $md += "| 4634 Logoff | $(($raw4634 | Measure-Object).Count) | Session teardowns |"
-  $md += "| 4647 User-initiated logoff | $(($raw4647 | Measure-Object).Count) | Explicit sign-outs |"
-  $md += "| 4740 Lockouts (last 30d) | $(($raw4740 | Measure-Object).Count) | Account lockouts |"
-  $md += "| 4800 Lock | $(($raw4800 | Measure-Object).Count) | Workstation locks |"
-  $md += "| 4801 Unlock | $(($raw4801 | Measure-Object).Count) | Workstation unlocks |"
-  $md += ""
+    $md = @()
+    $md += "# Login Activity Report - $computer"
+    $md += ""
+    $md += "- **Window:** $windowStart -> $windowEnd  (last $Hours hours)"
+    $md += "- **Generated:** $now"
+    $md += "- **Generated by:** ``Invoke-LoginAudit``"
+    $csvRefs = @()
+    if (Test-Path $successCsv) { $csvRefs += "``$successCsv``" }
+    if (Test-Path $failCsv) { $csvRefs += "``$failCsv``" }
+    if ($csvRefs) { $md += "- **Raw CSVs:** " + ($csvRefs -join ', ') }
+    $md += ""
+    $md += "## Totals"
+    $md += ""
+    $md += "| Event | Count | Meaning |"
+    $md += "|---|---:|---|"
+    $md += "| 4624 Successful logon | $($ok.Count) | All successful session creations |"
+    $md += "| 4625 Failed logon | $($fail.Count) | Bad passwords / rejected auth |"
+    $md += "| 4634 Logoff | $(($raw4634 | Measure-Object).Count) | Session teardowns |"
+    $md += "| 4647 User-initiated logoff | $(($raw4647 | Measure-Object).Count) | Explicit sign-outs |"
+    $md += "| 4740 Lockouts (last 30d) | $(($raw4740 | Measure-Object).Count) | Account lockouts |"
+    $md += "| 4800 Lock | $(($raw4800 | Measure-Object).Count) | Workstation locks |"
+    $md += "| 4801 Unlock | $(($raw4801 | Measure-Object).Count) | Workstation unlocks |"
+    $md += ""
 
-  $md += "## Automatic flags"
-  $md += ""
-  $flags = @()
-  if ($fail.Count -gt 0)               { $flags += "- **$($fail.Count) failed logon attempts** - see the failures table below." }
-  if ((($raw4740 | Measure-Object).Count) -gt 0) { $flags += "- **Account lockouts occurred** in the last 30 days." }
-  if ($remoteHumanFlags) { $flags += "- **$($remoteHumanFlags.Count) human-type logons recorded a non-loopback source IP** - unusual for a console sign-in." }
-  if ($offHours)        { $flags += "- **$($offHours.Count) human-type logons outside 06:00-22:00** - double-check these are yours." }
-  if ($netNonSys)       { $flags += "- **$($netNonSys.Count) non-SYSTEM network logons** from remote hosts - confirm each source is expected." }
-  if (-not $flags)      { $flags += "_No automatic flags raised. Still eyeball the tables below._" }
-  $md += $flags
-  $md += ""
+    $md += "## Automatic flags"
+    $md += ""
+    $flags = @()
+    if ($fail.Count -gt 0) { $flags += "- **$($fail.Count) failed logon attempts** - see the failures table below." }
+    if ((($raw4740 | Measure-Object).Count) -gt 0) { $flags += "- **Account lockouts occurred** in the last 30 days." }
+    if ($remoteHumanFlags) { $flags += "- **$($remoteHumanFlags.Count) human-type logons recorded a non-loopback source IP** - unusual for a console sign-in." }
+    if ($offHours) { $flags += "- **$($offHours.Count) human-type logons outside 06:00-22:00** - double-check these are yours." }
+    if ($netNonSys) { $flags += "- **$($netNonSys.Count) non-SYSTEM network logons** from remote hosts - confirm each source is expected." }
+    if (-not $flags) { $flags += "_No automatic flags raised. Still eyeball the tables below._" }
+    $md += $flags
+    $md += ""
 
-  $md += "## Breakdown by user + logon type (4624)"
-  $md += ""
-  $md += (Md-Table $userBreakdown @('Count','Group'))
+    $md += "## Breakdown by user + logon type (4624)"
+    $md += ""
+    $md += (Md-Table $userBreakdown @('Count', 'Group'))
 
-  $md += "## Human-type logons (Interactive / Unlock / RDP / CachedInteractive)"
-  $md += ""
-  $md += "Logon types 2, 7, 10, 11. These are the events that represent a real person signing in."
-  $md += ""
-  $md += (Md-Table ($human | Sort-Object Time -Descending) @('Time','User','Domain','LogonTypeName','Workstation','IP'))
+    $md += "## Human-type logons (Interactive / Unlock / RDP / CachedInteractive)"
+    $md += ""
+    $md += "Logon types 2, 7, 10, 11. These are the events that represent a real person signing in."
+    $md += ""
+    $md += (Md-Table ($human | Sort-Object Time -Descending) @('Time', 'User', 'Domain', 'LogonTypeName', 'Workstation', 'IP'))
 
-  $md += "## Network logons from non-SYSTEM accounts (type 3)"
-  $md += ""
-  $md += "Remote access to this machine (SMB shares, WinRM, etc.) that used a real user credential."
-  $md += ""
-  $md += (Md-Table ($netNonSys | Sort-Object Time -Descending) @('Time','User','Domain','IP','Workstation'))
+    $md += "## Network logons from non-SYSTEM accounts (type 3)"
+    $md += ""
+    $md += "Remote access to this machine (SMB shares, WinRM, etc.) that used a real user credential."
+    $md += ""
+    $md += (Md-Table ($netNonSys | Sort-Object Time -Descending) @('Time', 'User', 'Domain', 'IP', 'Workstation'))
 
-  $md += "## Failed logons (4625)"
-  $md += ""
-  $md += (Md-Table ($fail | Sort-Object Time -Descending) @('Time','User','Domain','LogonTypeName','Reason','SubStatus','IP','Workstation'))
+    $md += "## Failed logons (4625)"
+    $md += ""
+    $md += (Md-Table ($fail | Sort-Object Time -Descending) @('Time', 'User', 'Domain', 'LogonTypeName', 'Reason', 'SubStatus', 'IP', 'Workstation'))
 
-  $md += "## Account lockouts (4740, last 30 days)"
-  $md += ""
-  $lockoutRows = $raw4740 | ForEach-Object {
-    [PSCustomObject]@{
-      Time           = $_.TimeCreated
-      LockedAccount  = $_.Properties[0].Value
-      CallerComputer = $_.Properties[1].Value
+    $md += "## Account lockouts (4740, last 30 days)"
+    $md += ""
+    $lockoutRows = $raw4740 | ForEach-Object {
+        [PSCustomObject]@{
+            Time           = $_.TimeCreated
+            LockedAccount  = $_.Properties[0].Value
+            CallerComputer = $_.Properties[1].Value
+        }
     }
-  }
-  $md += (Md-Table $lockoutRows @('Time','LockedAccount','CallerComputer'))
+    $md += (Md-Table $lockoutRows @('Time', 'LockedAccount', 'CallerComputer'))
 
-  $md += "## Logon type reference"
-  $md += ""
-  $md += "| Type | Name | Meaning |"
-  $md += "|---:|---|---|"
-  $md += "| 2 | Interactive | Signed in at the console (keyboard) |"
-  $md += "| 3 | Network | Accessed a share / WinRM / remote API |"
-  $md += "| 4 | Batch | Scheduled task |"
-  $md += "| 5 | Service | Service account starting |"
-  $md += "| 7 | Unlock | Unlocked a locked session |"
-  $md += "| 8 | NetworkCleartext | Network logon with cleartext creds (!) |"
-  $md += "| 9 | NewCredentials | RunAs /netonly |"
-  $md += "| 10 | RemoteInteractive | RDP |"
-  $md += "| 11 | CachedInteractive | Cached domain creds (offline) |"
-  $md += ""
+    $md += "## Logon type reference"
+    $md += ""
+    $md += "| Type | Name | Meaning |"
+    $md += "|---:|---|---|"
+    $md += "| 2 | Interactive | Signed in at the console (keyboard) |"
+    $md += "| 3 | Network | Accessed a share / WinRM / remote API |"
+    $md += "| 4 | Batch | Scheduled task |"
+    $md += "| 5 | Service | Service account starting |"
+    $md += "| 7 | Unlock | Unlocked a locked session |"
+    $md += "| 8 | NetworkCleartext | Network logon with cleartext creds (!) |"
+    $md += "| 9 | NewCredentials | RunAs /netonly |"
+    $md += "| 10 | RemoteInteractive | RDP |"
+    $md += "| 11 | CachedInteractive | Cached domain creds (offline) |"
+    $md += ""
 
-  $md += "## What to do next"
-  $md += ""
-  $md += "1. Skim the **Human-type logons** table - do you recognize every row?"
-  $md += "2. For any flagged non-loopback IP on an interactive/unlock event, check whether an RDP / remote-management tool was running at that time."
-  $md += "3. For **Network logons**, confirm each source hostname/IP is a device you own."
-  $md += "4. If something looks off, run again with a longer window: ``-Hours 168`` for a week."
-  $md += "5. Paste this Markdown file back to other tools for further analysis - include the raw CSVs if you want row-level drilldown."
-  $md += ""
+    $md += "## What to do next"
+    $md += ""
+    $md += "1. Skim the **Human-type logons** table - do you recognize every row?"
+    $md += "2. For any flagged non-loopback IP on an interactive/unlock event, check whether an RDP / remote-management tool was running at that time."
+    $md += "3. For **Network logons**, confirm each source hostname/IP is a device you own."
+    $md += "4. If something looks off, run again with a longer window: ``-Hours 168`` for a week."
+    $md += "5. Paste this Markdown file back to other tools for further analysis - include the raw CSVs if you want row-level drilldown."
+    $md += ""
 
-  $md -join "`r`n" | Set-Content -Encoding UTF8 -Path $reportMd
+    $md -join "`r`n" | Set-Content -Encoding UTF8 -Path $reportMd
 
-  Write-Host ""
-  Write-Host "Report written: $reportMd" -ForegroundColor Green
-  if (Test-Path $successCsv) { Write-Host "Success CSV:    $successCsv" } else { Write-Host "Success CSV:    (not created - no 4624 events)" -ForegroundColor DarkGray }
-  if (Test-Path $failCsv)    { Write-Host "Failed CSV:     $failCsv" }    else { Write-Host "Failed CSV:     (not created - no 4625 events)" -ForegroundColor DarkGray }
-  Write-Host ""
-  Write-Host "Open the report:" -ForegroundColor Cyan
-  Write-Host "  notepad `"$reportMd`""
+    Write-Host ""
+    Write-Host "Report written: $reportMd" -ForegroundColor Green
+    if (Test-Path $successCsv) { Write-Host "Success CSV:    $successCsv" } else { Write-Host "Success CSV:    (not created - no 4624 events)" -ForegroundColor DarkGray }
+    if (Test-Path $failCsv) { Write-Host "Failed CSV:     $failCsv" }    else { Write-Host "Failed CSV:     (not created - no 4625 events)" -ForegroundColor DarkGray }
+    Write-Host ""
+    Write-Host "Open the report:" -ForegroundColor Cyan
+    Write-Host "  notepad `"$reportMd`""
 }
 
 <#
@@ -2955,7 +2991,8 @@ If an MCP tool is unavailable or underperforming, inform the user and suggest al
     if (Test-Path -LiteralPath $globalMd) {
         Write-Host "global CLAUDE.md: $globalMd already exists -- skipping"
         Write-Verbose 'global CLAUDE.md: edit it manually to include multi-model MCP preferences'
-    } else {
+    }
+    else {
         Set-Content -LiteralPath $globalMd -Value $prefText -Encoding UTF8
         Write-Host "global CLAUDE.md: created $globalMd" -ForegroundColor Green
     }
@@ -3019,11 +3056,13 @@ function Install-ClaudezSetup {
     # https://docs.z.ai/devpack/mcp/search-mcp-server
     if (& claude mcp list | Select-String -Pattern 'web-search-prime' -Quiet) {
         Write-Host "claudez: web-search-prime already exists -- skipping" -ForegroundColor DarkGray
-    } else {
+    }
+    else {
         & claude mcp add -s user -t http web-search-prime https://api.z.ai/api/mcp/web_search_prime/mcp --header "Authorization: Bearer $Token" 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "claudez: added web-search-prime" -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Warning "claudez: failed to add web-search-prime"
         }
     }
@@ -3032,11 +3071,13 @@ function Install-ClaudezSetup {
     # https://docs.z.ai/devpack/mcp/reader-mcp-server
     if (& claude mcp list | Select-String -Pattern 'web-reader' -Quiet) {
         Write-Host "claudez: web-reader already exists -- skipping" -ForegroundColor DarkGray
-    } else {
+    }
+    else {
         & claude mcp add -s user -t http web-reader https://api.z.ai/api/mcp/web_reader/mcp --header "Authorization: Bearer $Token" 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "claudez: added web-reader" -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Warning "claudez: failed to add web-reader"
         }
     }
@@ -3045,11 +3086,13 @@ function Install-ClaudezSetup {
     # https://docs.z.ai/devpack/mcp/zread-mcp-server
     if (& claude mcp list | Select-String -Pattern 'zread' -Quiet) {
         Write-Host "claudez: zread already exists -- skipping" -ForegroundColor DarkGray
-    } else {
+    }
+    else {
         & claude mcp add -s user -t http zread https://api.z.ai/api/mcp/zread/mcp --header "Authorization: Bearer $Token" 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "claudez: added zread" -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Warning "claudez: failed to add zread"
         }
     }
@@ -3058,11 +3101,13 @@ function Install-ClaudezSetup {
     # https://docs.z.ai/devpack/mcp/vision-mcp-server
     if (& claude mcp list | Select-String -Pattern 'zai-mcp-server' -Quiet) {
         Write-Host "claudez: zai-mcp-server already exists -- skipping" -ForegroundColor DarkGray
-    } else {
+    }
+    else {
         & claude mcp add -s user zai-mcp-server --env Z_AI_API_KEY=$Token Z_AI_MODE=ZAI -- cmd /c npx -y "@z_ai/mcp-server" 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "claudez: added zai-mcp-server" -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Warning "claudez: failed to add zai-mcp-server"
         }
     }
@@ -3142,7 +3187,8 @@ function claudez {
         [void](Install-ClaudezSetup -Token $token)
 
         claude @args
-    } finally {
+    }
+    finally {
         Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
         Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
         Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
@@ -3253,7 +3299,8 @@ function claudezm {
         [void](Install-ClaudezSetup -Token $token)
 
         claude @args
-    } finally {
+    }
+    finally {
         Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
         Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
         Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
@@ -3268,7 +3315,7 @@ function claudezm {
 }
 
 function Invoke-RemoteClaudeCodeBase {
-<#
+    <#
 .SYNOPSIS
 Runs Claude Code on a remote SSH endpoint with temporary remote state.
 
@@ -3425,7 +3472,7 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
 }
 
 function Invoke-RemoteClaudeCodeZ {
-<#
+    <#
 .SYNOPSIS
 Runs Claude Code on a remote SSH endpoint with temporary remote state.
 
@@ -3484,12 +3531,12 @@ Last Edit: 2026-04
     }
 
     # Keep the editable remote defaults here so they are easy to tweak later.
-    $BaseUrl     = "https://api.z.ai/api/anthropic"
-    $HaikuModel  = "glm-4.5-air"
+    $BaseUrl = "https://api.z.ai/api/anthropic"
+    $HaikuModel = "glm-4.5-air"
     $SonnetModel = "glm-5-turbo"
-    $OpusModel   = "glm-5.1"
-    $TimeoutMs   = "3000000"
-    $Disable1M   = "1"
+    $OpusModel = "glm-5.1"
+    $TimeoutMs = "3000000"
+    $Disable1M = "1"
 
     Invoke-RemoteClaudeCodeBase `
         -RemoteHost $RemoteHost `
@@ -3570,11 +3617,13 @@ function Install-ClaudemmSetup {
     # MiniMax coding-plan-mcp
     if (& claude mcp list | Select-String -Pattern 'minimax' -Quiet) {
         Write-Host "claudemm: MiniMax MCP server already exists -- skipping" -ForegroundColor DarkGray
-    } else {
+    }
+    else {
         & claude mcp add -s user MiniMax --env MINIMAX_API_KEY="$Token" --env MINIMAX_API_HOST=https://api.minimax.io -- uvx minimax-coding-plan-mcp -y 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "claudemm: added MiniMax MCP server" -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Warning "claudemm: failed to add MiniMax MCP server"
         }
     }
@@ -3647,7 +3696,8 @@ function claudemm {
         [void](Install-ClaudemmSetup -Token $key)
 
         claude @args
-    } finally {
+    }
+    finally {
         Remove-Item Env:\ANTHROPIC_MODEL -ErrorAction SilentlyContinue
         Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
         Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
@@ -3684,7 +3734,7 @@ function claudemmd {
 }
 
 function Invoke-RemoteClaudeCodeMM {
-<#
+    <#
 .SYNOPSIS
 Runs Claude Code on a remote SSH endpoint via MiniMax with temporary remote state.
 
@@ -3742,12 +3792,12 @@ Last Edit: 2026-05
     }
 
     # Keep the editable remote defaults here so they are easy to tweak later.
-    $BaseUrl     = "https://api.minimax.io/anthropic"
-    $HaikuModel  = "MiniMax-M2.7"
+    $BaseUrl = "https://api.minimax.io/anthropic"
+    $HaikuModel = "MiniMax-M2.7"
     $SonnetModel = "MiniMax-M2.7"
-    $OpusModel   = "MiniMax-M2.7"
-    $TimeoutMs   = "3000000"
-    $Disable1M   = "1"
+    $OpusModel = "MiniMax-M2.7"
+    $TimeoutMs = "3000000"
+    $Disable1M = "1"
 
     Invoke-RemoteClaudeCodeBase `
         -RemoteHost $RemoteHost `
@@ -3759,6 +3809,39 @@ Last Edit: 2026-05
         -OpusModel $OpusModel `
         -TimeoutMs $TimeoutMs `
         -Disable1M $Disable1M
+}
+
+function Update-Profile {
+    <#
+.SYNOPSIS
+    Updates the current PowerShell profile ($PROFILE) from the remote repository.
+.DESCRIPTION
+    Downloads the latest version of the PowerShell profile from the GitHub repository
+    and overwrites the local $PROFILE file.
+.EXAMPLE
+    Update-Profile
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    [CmdletBinding()]
+    param()
+
+    # Validate that $ProfileUpdateUrl is set
+    if (-not $ProfileUpdateUrl) {
+        Write-Error "Profile update URL is not defined."
+        return
+    }
+
+    Write-Host "Updating profile from $ProfileUpdateUrl..." -ForegroundColor Cyan
+    try {
+        # Download and overwrite $PROFILE
+        Invoke-WebRequest -Uri $ProfileUpdateUrl -OutFile $PROFILE -Verbose
+        Write-Host "Profile updated successfully! Restart your shell or run '. `$PROFILE' to apply changes." -ForegroundColor Green
+    }
+    catch {
+        Write-Error "Failed to update profile: $_"
+    }
 }
 
 function ccd {
@@ -3784,4 +3867,25 @@ Author: jjw(@thejjw)
 Last Edit: 2026-05
 #>
     claude --dangerously-skip-permissions @args
+}
+
+<#
+.SYNOPSIS
+    Launches agy with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to agy and appends --dangerously-skip-permissions.
+
+.EXAMPLE
+    agyd
+
+.EXAMPLE
+    agyd "Summarize the changed files"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+function agyd {
+    agy --dangerously-skip-permissions @agyArgs
 }
