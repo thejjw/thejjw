@@ -228,6 +228,9 @@ Use MiniMax MCP server for:
 - Web searches (`web_search`)
 - Image understanding (`understand_image`)
 
+**When using DeepSeek models (deepseek-*):**
+Use MiniMax MCP and Z.ai MCP servers, if available, for image analysis because DeepSeek models are text-only. Fall back to other available means if those MCP tools are unavailable or underperforming.
+
 **When using genuine Anthropic account (Claude Code with native models):**
 Use built-in web fetch and web search tools directly -- they will yield the best results.
 
@@ -410,6 +413,76 @@ EOF
       echo "claudez: alias added to $PROFILE"
       echo "WARNING: claude CLI not found, skipping MCP server configuration"
     fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# claudeds / claudeds2 - DeepSeek Claude Code aliases
+# ---------------------------------------------------------------------------
+CLAUDEDS_MARKER="# >>> claudeds >>>"
+
+if grep -qF "$CLAUDEDS_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudeds: already in $PROFILE -- skipping"
+else
+  # Use existing env var if set, otherwise prompt
+  if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
+    read -r -p "Enter your DeepSeek API key for claudeds alias setup: " DEEPSEEK_API_KEY
+  else
+    echo "claudeds: detected DEEPSEEK_API_KEY from environment"
+  fi
+
+  if [[ -z "$DEEPSEEK_API_KEY" ]]; then
+    echo "claudeds: key is empty, skipping alias setup"
+  else
+    cat >> "$PROFILE" << EOF
+
+# >>> claudeds >>>
+# Custom Claude Code alias with DeepSeek endpoint
+alias claudeds='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
+  ANTHROPIC_MODEL="deepseek-v4-pro[1m]" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash[1m]" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]" \
+  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash[1m]" \
+  CLAUDE_CODE_EFFORT_LEVEL="max" \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  claude'
+alias claudedsd='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
+  ANTHROPIC_MODEL="deepseek-v4-pro[1m]" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash[1m]" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]" \
+  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash[1m]" \
+  CLAUDE_CODE_EFFORT_LEVEL="max" \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  claude --dangerously-skip-permissions'
+alias claudeds2='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
+  ANTHROPIC_MODEL="deepseek-v4-flash[1m]" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash[1m]" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-flash[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]" \
+  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash[1m]" \
+  CLAUDE_CODE_EFFORT_LEVEL="high" \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  claude'
+alias claudeds2d='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
+  ANTHROPIC_MODEL="deepseek-v4-flash[1m]" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash[1m]" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-flash[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]" \
+  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash[1m]" \
+  CLAUDE_CODE_EFFORT_LEVEL="high" \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  claude --dangerously-skip-permissions'
+export DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
+# <<< claudeds <<<
+EOF
+
+    echo "claudeds: added to $PROFILE"
   fi
 fi
 

@@ -85,6 +85,9 @@ Use MiniMax MCP server for:
 - Web searches (``web_search``)
 - Image understanding (``understand_image``)
 
+**When using DeepSeek models (deepseek-*):**
+Use MiniMax MCP and Z.ai MCP servers, if available, for image analysis because DeepSeek models are text-only. Fall back to other available means if those MCP tools are unavailable or underperforming.
+
 **When using genuine Anthropic account (Claude Code with native models):**
 Use built-in web fetch and web search tools directly -- they will yield the best results.
 
@@ -3261,6 +3264,195 @@ function claudezmd {
     claudezm @claudeArgs
 }
 
+function claudeds {
+    <#
+.SYNOPSIS
+    Launches Claude Code through the DeepSeek endpoint.
+
+.DESCRIPTION
+    Reads the DeepSeek API key from the DEEPSEEK_API_KEY environment variable
+    (current session first, then User scope), configures runtime environment,
+    then invokes claude with the supplied arguments.
+    If DEEPSEEK_API_KEY is not set, the function aborts and prints setup guidance.
+
+.EXAMPLE
+    claudeds
+
+.EXAMPLE
+    claudeds "Explain the current repository"
+
+.EXAMPLE
+    [Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', '<your_key>', 'User')
+    # Restart PowerShell, then run:
+    claudeds
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    # Read key from environment only (process first, then persisted user scope).
+    $key = $env:DEEPSEEK_API_KEY
+    if (-not $key) {
+        $key = [Environment]::GetEnvironmentVariable("DEEPSEEK_API_KEY", "User")
+    }
+
+    if (-not $key) {
+        Write-Host "DEEPSEEK_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
+        Write-Host "  [Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', '<your_key>', 'User')" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Optional (current session only):" -ForegroundColor Yellow
+        Write-Host "  `$env:DEEPSEEK_API_KEY = '<your_key>'" -ForegroundColor Cyan
+        return
+    }
+
+    $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
+    $env:ANTHROPIC_AUTH_TOKEN = $key
+    $env:ANTHROPIC_MODEL = "deepseek-v4-pro[1m]"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash[1m]"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-pro[1m]"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-v4-pro[1m]"
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash[1m]"
+    $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
+    $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
+
+    try {
+        claude @args
+    }
+    finally {
+        Remove-Item Env:\ANTHROPIC_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue
+
+        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
+    }
+}
+
+function claudedsd {
+    <#
+.SYNOPSIS
+    Launches claudeds with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to claudeds and appends --dangerously-skip-permissions.
+
+.EXAMPLE
+    claudedsd
+
+.EXAMPLE
+    claudedsd "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    $claudeArgs = $args + '--dangerously-skip-permissions'
+    claudeds @claudeArgs
+}
+
+function claudeds2 {
+    <#
+.SYNOPSIS
+    Launches Claude Code through the cheaper DeepSeek endpoint profile.
+
+.DESCRIPTION
+    Reads the DeepSeek API key from the DEEPSEEK_API_KEY environment variable
+    (current session first, then User scope), configures a cheaper routing profile
+    where Sonnet uses the flash model and only Opus uses the pro model, then
+    invokes claude with the supplied arguments.
+    If DEEPSEEK_API_KEY is not set, the function aborts and prints setup guidance.
+
+.EXAMPLE
+    claudeds2
+
+.EXAMPLE
+    claudeds2 "Explain the current repository"
+
+.EXAMPLE
+    [Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', '<your_key>', 'User')
+    # Restart PowerShell, then run:
+    claudeds2
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    # Read key from environment only (process first, then persisted user scope).
+    $key = $env:DEEPSEEK_API_KEY
+    if (-not $key) {
+        $key = [Environment]::GetEnvironmentVariable("DEEPSEEK_API_KEY", "User")
+    }
+
+    if (-not $key) {
+        Write-Host "DEEPSEEK_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
+        Write-Host "  [Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', '<your_key>', 'User')" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Optional (current session only):" -ForegroundColor Yellow
+        Write-Host "  `$env:DEEPSEEK_API_KEY = '<your_key>'" -ForegroundColor Cyan
+        return
+    }
+
+    $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
+    $env:ANTHROPIC_AUTH_TOKEN = $key
+    $env:ANTHROPIC_MODEL = "deepseek-v4-flash[1m]"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash[1m]"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-flash[1m]"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-v4-pro[1m]"
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash[1m]"
+    $env:CLAUDE_CODE_EFFORT_LEVEL = "high"
+    $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
+
+    try {
+        claude @args
+    }
+    finally {
+        Remove-Item Env:\ANTHROPIC_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue
+
+        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
+    }
+}
+
+function claudeds2d {
+    <#
+.SYNOPSIS
+    Launches claudeds2 with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to claudeds2 and appends --dangerously-skip-permissions.
+
+.EXAMPLE
+    claudeds2d
+
+.EXAMPLE
+    claudeds2d "Summarize the changed files"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    $claudeArgs = $args + '--dangerously-skip-permissions'
+    claudeds2 @claudeArgs
+}
+
 function claudezm {
     <#
 .SYNOPSIS
@@ -3885,6 +4077,99 @@ function Update-Profile {
         Write-Error "Failed to update profile: $_"
     }
 }
+
+function Setup-AiApiKeys {
+    <#
+.SYNOPSIS
+    Interactive helper to view and set Claude-related API keys in the user environment.
+
+.DESCRIPTION
+    Checks for existing values of AI API key (e.g. `DEEPSEEK_API_KEY`, `Z_AI_AUTH_TOKEN`, ...) in
+    the current session and the persisted User environment. Presents a summary and prompts
+    the user to enter missing keys (or optionally overwrite existing ones). Values are
+    saved to the User environment via [Environment]::SetEnvironmentVariable so they persist
+    across sessions.
+
+.PARAMETER Force
+    When supplied, prompt to overwrite existing keys instead of skipping them.
+
+.EXAMPLE
+    Setup-AiApiKeys
+
+.EXAMPLE
+    Setup-AiApiKeys -Force
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Force
+    )
+
+    $names = @('DEEPSEEK_API_KEY','Z_AI_AUTH_TOKEN','MINIMAX_API_KEY')
+
+    function Get-UserValue($n) {
+        # Check process (current session) first, then persisted User scope
+        $v = [Environment]::GetEnvironmentVariable($n, 'Process')
+        if ($v) { return $v }
+        return [Environment]::GetEnvironmentVariable($n, 'User')
+    }
+
+    function MaskValue($v) {
+        if (-not $v) { return '<missing>' }
+        return "<set, length=$($v.Length)>"
+    }
+
+    Write-Host "Checking existing keys (session and User scope):" -ForegroundColor Cyan
+    $found = @{}
+    foreach ($n in $names) {
+        $v = Get-UserValue $n
+        $found[$n] = $v
+        Write-Host " - $($n) : $(MaskValue $v)"
+    }
+
+    Write-Host "";
+    Write-Host "You can press Enter to skip setting a key. To keep an existing value, leave it blank when prompted." -ForegroundColor Yellow
+
+    foreach ($n in $names) {
+        $current = $found[$n]
+        if ($current -and -not $Force) {
+            Write-Host "Skipping $n (already set). Use -Force to overwrite." -ForegroundColor DarkGray
+            continue
+        }
+
+        if ($current -and $Force) {
+            $resp = Read-Host -Prompt "$n already set. Overwrite? (y/N)"
+            if ($resp -notin @('y','Y')) { Write-Host "Keeping existing $n." -ForegroundColor DarkGray; continue }
+        }
+
+        # Read hidden input as SecureString. If the input isn't a SecureString or is empty, skip.
+        $secure = Read-Host -AsSecureString -Prompt "Enter value for $n (input hidden, blank to skip)"
+        if ($null -eq $secure -or -not ($secure -is [System.Security.SecureString])) {
+            Write-Host "Skipped $n." -ForegroundColor DarkGray
+            continue
+        }
+
+        $ptr = [IntPtr]::Zero
+        try {
+            $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+            $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto($ptr)
+        }
+        catch {
+            Write-Host "Failed to read secure input for $($n): $_" -ForegroundColor Red
+            continue
+        }
+        finally {
+            if ($ptr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+        }
+
+        [Environment]::SetEnvironmentVariable($n, $plain, 'User')
+        Write-Host "Set $n in User environment." -ForegroundColor Green
+    }
+
+    Write-Host "";
+    Write-Host "Done. To apply changes to this session run:`n  . `$PROFILE" -ForegroundColor Cyan
+    Write-Host "Or restart PowerShell to pick up the new values." -ForegroundColor Cyan
+}
+
 
 function ccd {
     <#
