@@ -4155,7 +4155,7 @@ function Setup-AiTools {
             try {
                 Start-Process -FilePath 'winget' -ArgumentList "install -s winget -e $m" -NoNewWindow -Wait
             }
-            catch { Write-Host "Failed to start winget for $m: $_" -ForegroundColor Red }
+            catch { Write-Host "Failed to start winget for $($m): $_" -ForegroundColor Red }
         }
     }
     else {
@@ -4173,7 +4173,7 @@ function Setup-AiTools {
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         foreach ($np in $npmPackages) {
             Write-Host "Installing npm package $np (global)..." -ForegroundColor Cyan
-            try { & npm install -g $np } catch { Write-Host "npm install failed for $np: $_" -ForegroundColor Red }
+            try { & npm install -g $np } catch { Write-Host "npm install failed for $($np): $_" -ForegroundColor Red }
         }
     }
     else {
