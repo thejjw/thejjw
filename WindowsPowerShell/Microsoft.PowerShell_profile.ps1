@@ -1,4 +1,97 @@
-$ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
+$_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
+
+# Internal configuration group for New-RandomDir to keep global namespace clean
+$_NrdInternal = @{
+    Colors         = @(
+        'amber', 'aqua', 'azure', 'beige', 'black', 'blue', 'bronze', 'brown', 'coral',
+        'crimson', 'cyan', 'denim', 'ebony', 'emerald', 'fuchsia', 'gold', 'golden',
+        'gray', 'green', 'indigo', 'ivory', 'jade', 'lavender', 'lemon', 'lilac',
+        'lime', 'magenta', 'mahogany', 'marigold', 'maroon', 'mint', 'mocha', 'navy',
+        'ochre', 'olive', 'onyx', 'orange', 'orchid', 'peach', 'pearl', 'periwinkle',
+        'pine', 'pink', 'plum', 'purple', 'red', 'rose', 'ruby', 'rust', 'saffron',
+        'sage', 'salmon', 'sapphire', 'scarlet', 'sepia', 'silver', 'slate', 'tan',
+        'tangerine', 'taupe', 'teal', 'topaz', 'turquoise', 'umber', 'vermilion',
+        'violet', 'walnut', 'white', 'wine', 'yellow'
+    )
+    Adjectives     = @(
+        'ancient', 'bold', 'brisk', 'calm', 'clear', 'cool', 'curious', 'deep', 'eager', 'fast',
+        'gentle', 'grand', 'hidden', 'icy', 'jolly', 'kind', 'lively', 'lucky', 'misty', 'modern',
+        'mossy', 'nimble', 'odd', 'quiet', 'rapid', 'shiny', 'silent', 'small', 'solar', 'steady',
+        'stormy', 'swift', 'tiny', 'urban', 'warm', 'wild', 'wise', 'young'
+    )
+    Nouns          = @(
+        'brook', 'cabin', 'cloud', 'comet', 'delta', 'dream', 'falcon', 'field', 'fire', 'forest',
+        'garden', 'glade', 'harbor', 'hill', 'lab', 'lake', 'leaf', 'meadow', 'moon', 'mountain',
+        'otter', 'owl', 'path', 'peak', 'pine', 'planet', 'pond', 'rabbit', 'river', 'shadow',
+        'sky', 'star', 'stone', 'sun', 'thicket', 'trail', 'tree', 'valley', 'wave', 'wind',
+        'wolf', 'wood', 'workshop'
+    )
+    AgentsMarkdown = @"
+# AGENTS.md
+
+## Rules
+
+- Always commit after completing each logical change with a descriptive commit message.
+- Treat AI-agent instruction files as workspace-only guidance. Do not stage or commit them unless the user explicitly asks.
+
+## Grounding
+
+- Always utilize web search to ground your answers, ensuring all technical advice and references are accurate and up-to-date.
+
+## Environment
+
+- Platform: Windows 11, shell: PowerShell.
+- Use PowerShell commands and syntax -- not Unix/bash equivalents.
+  - ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
+  - Redirect to ``$null`` not ``/dev/null``.
+  - Use semicolons or separate statements -- not ``&&`` to chain commands.
+  - Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
+- If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
+
+## Code Style
+
+- Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
+- Comment every public function/method and any non-obvious logic inline.
+
+## Git Discipline
+
+- Commit each logical change separately -- never bundle unrelated changes.
+- Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
+- This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
+- Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
+- Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
+
+## Dependencies
+
+- Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
+- Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
+"@
+}
+
+# Internal configuration for Install-GlobalClaudeMd and related Claude Code setup functions
+$_ClaudeInternal = @{
+    GlobalClaudeMd = @"
+## MCP Tool Preferences
+
+**When using Z.ai models (glm-*):**
+Use Z.ai MCP servers for:
+- Web searches
+- Web content
+- Image analysis
+- Text extraction
+
+**When using MiniMax models (MiniMax-*):**
+Use MiniMax MCP server for:
+- Web searches (``web_search``)
+- Image understanding (``understand_image``)
+
+**When using genuine Anthropic account (Claude Code with native models):**
+Use built-in web fetch and web search tools directly -- they will yield the best results.
+
+If an MCP tool is unavailable or underperforming, inform the user and suggest alternatives.
+"@
+}
+
 
 function prompt {
     $loc = $executionContext.SessionState.Path.CurrentLocation
@@ -2519,32 +2612,10 @@ Last Edit: 2026-04
     # Override base path to user temp directory when -Temp is specified
     if ($Temp) { $BasePath = $env:TEMP }
 
-    $colors = @(
-        'amber', 'aqua', 'azure', 'beige', 'black', 'blue', 'bronze', 'brown', 'coral',
-        'crimson', 'cyan', 'denim', 'ebony', 'emerald', 'fuchsia', 'gold', 'golden',
-        'gray', 'green', 'indigo', 'ivory', 'jade', 'lavender', 'lemon', 'lilac',
-        'lime', 'magenta', 'mahogany', 'marigold', 'maroon', 'mint', 'mocha', 'navy',
-        'ochre', 'olive', 'onyx', 'orange', 'orchid', 'peach', 'pearl', 'periwinkle',
-        'pine', 'pink', 'plum', 'purple', 'red', 'rose', 'ruby', 'rust', 'saffron',
-        'sage', 'salmon', 'sapphire', 'scarlet', 'sepia', 'silver', 'slate', 'tan',
-        'tangerine', 'taupe', 'teal', 'topaz', 'turquoise', 'umber', 'vermilion',
-        'violet', 'walnut', 'white', 'wine', 'yellow'
-    )
-
-    $adjectives = @(
-        'ancient', 'bold', 'brisk', 'calm', 'clear', 'cool', 'curious', 'deep', 'eager', 'fast',
-        'gentle', 'grand', 'hidden', 'icy', 'jolly', 'kind', 'lively', 'lucky', 'misty', 'modern',
-        'mossy', 'nimble', 'odd', 'quiet', 'rapid', 'shiny', 'silent', 'small', 'solar', 'steady',
-        'stormy', 'swift', 'tiny', 'urban', 'warm', 'wild', 'wise', 'young'
-    )
-
-    $nouns = @(
-        'brook', 'cabin', 'cloud', 'comet', 'delta', 'dream', 'falcon', 'field', 'fire', 'forest',
-        'garden', 'glade', 'harbor', 'hill', 'lab', 'lake', 'leaf', 'meadow', 'moon', 'mountain',
-        'otter', 'owl', 'path', 'peak', 'pine', 'planet', 'pond', 'rabbit', 'river', 'shadow',
-        'sky', 'star', 'stone', 'sun', 'thicket', 'trail', 'tree', 'valley', 'wave', 'wind',
-        'wolf', 'wood', 'workshop'
-    )
+    # Retrieve randomized elements from global internal configuration
+    $colors = $_NrdInternal.Colors
+    $adjectives = $_NrdInternal.Adjectives
+    $nouns = $_NrdInternal.Nouns
 
     if (-not (Test-Path -LiteralPath $BasePath)) {
         throw "Base path does not exist: $BasePath"
@@ -2603,46 +2674,8 @@ Last Edit: 2026-04
     if ($Agents) {
         Write-Verbose "Creating AGENTS.md (canonical) + CLAUDE.md/GEMINI.md (@import)"
 
-        @"
-# AGENTS.md
-
-## Rules
-
-- Always commit after completing each logical change with a descriptive commit message.
-- Treat AI-agent instruction files as workspace-only guidance. Do not stage or commit them unless the user explicitly asks.
-
-## Grounding
-
-- Always utilize web search to ground your answers, ensuring all technical advice and references are accurate and up-to-date.
-
-## Environment
-
-- Platform: Windows 11, shell: PowerShell.
-- Use PowerShell commands and syntax -- not Unix/bash equivalents.
-  - ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
-  - Redirect to ``$null`` not ``/dev/null``.
-  - Use semicolons or separate statements -- not ``&&`` to chain commands.
-  - Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
-- If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
-
-## Code Style
-
-- Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
-- Comment every public function/method and any non-obvious logic inline.
-
-## Git Discipline
-
-- Commit each logical change separately -- never bundle unrelated changes.
-- Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
-- This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
-- Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
-- Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
-
-## Dependencies
-
-- Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
-- Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
-"@ | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
+        # Write canonical AGENTS.md using the template defined in global internal configuration
+        $_NrdInternal.AgentsMarkdown | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
 
         # CLAUDE.md imports AGENTS.md -- Claude Code reads CLAUDE.md, not AGENTS.md
         '@AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'CLAUDE.md') -Encoding UTF8
@@ -2942,7 +2975,8 @@ function Invoke-LoginAudit {
     Write-Host "  notepad `"$reportMd`""
 }
 
-<#
+function Install-GlobalClaudeMd {
+    <#
 .SYNOPSIS
     Creates the global ~/.claude/CLAUDE.md with multi-model MCP tool preferences.
 
@@ -2957,32 +2991,13 @@ function Invoke-LoginAudit {
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
-function Install-GlobalClaudeMd {
     [CmdletBinding()]
     param()
 
     $claudeDir = Join-Path $HOME '.claude'
     $globalMd = Join-Path $claudeDir 'CLAUDE.md'
-    $prefText = @"
-## MCP Tool Preferences
-
-**When using Z.ai models (glm-*):**
-Use Z.ai MCP servers for:
-- Web searches
-- Web content
-- Image analysis
-- Text extraction
-
-**When using MiniMax models (MiniMax-*):**
-Use MiniMax MCP server for:
-- Web searches (``web_search``)
-- Image understanding (``understand_image``)
-
-**When using genuine Anthropic account (Claude Code with native models):**
-Use built-in web fetch and web search tools directly -- they will yield the best results.
-
-If an MCP tool is unavailable or underperforming, inform the user and suggest alternatives.
-"@
+    # Retrieve template from internal configuration
+    $prefText = $_ClaudeInternal.GlobalClaudeMd
 
     if (-not (Test-Path -LiteralPath $claudeDir)) {
         $null = New-Item -ItemType Directory -Path $claudeDir -Force
@@ -2998,7 +3013,8 @@ If an MCP tool is unavailable or underperforming, inform the user and suggest al
     }
 }
 
-<#
+function Install-ClaudezSetup {
+    <#
 .SYNOPSIS
     Configures claudez MCP servers for Z.AI.
 
@@ -3028,7 +3044,6 @@ If an MCP tool is unavailable or underperforming, inform the user and suggest al
     Author: jjw(@thejjw)
     Last Edit: 2026-04
 #>
-function Install-ClaudezSetup {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$Token,
@@ -3122,7 +3137,8 @@ function Install-ClaudezSetup {
     return $true
 }
 
-<#
+function claudez {
+    <#
 .SYNOPSIS
     Launches Claude Code through the Z.AI-backed profile helper.
 
@@ -3152,7 +3168,6 @@ function Install-ClaudezSetup {
     Author: jjw(@thejjw)
     Last Edit: 2026-04
 #>
-function claudez {
     # Read token from environment only (process first, then persisted user scope).
     $token = $env:Z_AI_AUTH_TOKEN
     if (-not $token) {
@@ -3202,7 +3217,8 @@ function claudez {
     }
 }
 
-<#
+function claudezd {
+    <#
 .SYNOPSIS
     Launches claudez with permissions skipped.
 
@@ -3219,12 +3235,12 @@ function claudez {
     Author: jjw(@thejjw)
     Last Edit: 2026-04
 #>
-function claudezd {
     $claudeArgs = $args + '--dangerously-skip-permissions'
     claudez @claudeArgs
 }
 
-<#
+function claudezmd {
+    <#
 .SYNOPSIS
     Launches claudezm with permissions skipped.
 
@@ -3241,12 +3257,12 @@ function claudezd {
     Author: jjw(@thejjw)
     Last Edit: 2026-04
 #>
-function claudezmd {
     $claudeArgs = $args + '--dangerously-skip-permissions'
     claudezm @claudeArgs
 }
 
-<#
+function claudezm {
+    <#
 .SYNOPSIS
     Launches Claude Code with Z.AI settings and GLM model overrides. (Max plan compatibility mode)
 
@@ -3264,7 +3280,6 @@ function claudezmd {
     Author: jjw(@thejjw)
     Last Edit: 2026-04
 #>
-function claudezm {
     # Read token from environment only (process first, then persisted user scope).
     $token = $env:Z_AI_AUTH_TOKEN
     if (-not $token) {
@@ -3550,7 +3565,8 @@ Last Edit: 2026-04
         -Disable1M $Disable1M
 }
 
-<#
+function Install-ClaudemmSetup {
+    <#
 .SYNOPSIS
     Configures MiniMax MCP server for Claude Code.
 
@@ -3578,7 +3594,6 @@ Last Edit: 2026-04
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
-function Install-ClaudemmSetup {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$Token,
@@ -3638,7 +3653,8 @@ function Install-ClaudemmSetup {
     return $true
 }
 
-<#
+function claudemm {
+    <#
 .SYNOPSIS
     Launches Claude Code through the MiniMax endpoint.
 
@@ -3663,7 +3679,6 @@ function Install-ClaudemmSetup {
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
-function claudemm {
     # Read key from environment only (process first, then persisted user scope).
     $key = $env:MINIMAX_API_KEY
     if (-not $key) {
@@ -3711,7 +3726,8 @@ function claudemm {
     }
 }
 
-<#
+function claudemmd {
+    <#
 .SYNOPSIS
     Launches claudemm with permissions skipped.
 
@@ -3728,7 +3744,6 @@ function claudemm {
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
-function claudemmd {
     $claudeArgs = $args + '--dangerously-skip-permissions'
     claudemm @claudeArgs
 }
@@ -3827,16 +3842,16 @@ function Update-Profile {
     [CmdletBinding()]
     param()
 
-    # Validate that $ProfileUpdateUrl is set
-    if (-not $ProfileUpdateUrl) {
-        Write-Error "Profile update URL is not defined."
+    # Validate that $_ProfileUpdateUrl is set
+    if (-not $_ProfileUpdateUrl) {
+        Write-Error "Profile update URL is not defined (`$_ProfileUpdateUrl)."
         return
     }
 
-    Write-Host "Updating profile from $ProfileUpdateUrl..." -ForegroundColor Cyan
+    Write-Host "Updating profile from $_ProfileUpdateUrl..." -ForegroundColor Cyan
     try {
         # Download and overwrite $PROFILE
-        Invoke-WebRequest -Uri $ProfileUpdateUrl -OutFile $PROFILE -Verbose
+        Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $PROFILE -Verbose
         Write-Host "Profile updated successfully! Restart your shell or run '. `$PROFILE' to apply changes." -ForegroundColor Green
     }
     catch {
@@ -3845,7 +3860,7 @@ function Update-Profile {
 }
 
 function ccd {
-<#
+    <#
 .SYNOPSIS
 Shorthand for running claude with the --dangerously-skip-permissions flag.
 
@@ -3869,7 +3884,8 @@ Last Edit: 2026-05
     claude --dangerously-skip-permissions @args
 }
 
-<#
+function agyd {
+    <#
 .SYNOPSIS
     Launches agy with permissions skipped.
 
@@ -3886,6 +3902,5 @@ Last Edit: 2026-05
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
-function agyd {
     agy --dangerously-skip-permissions @agyArgs
 }
