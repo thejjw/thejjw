@@ -4108,7 +4108,7 @@ function Setup-AiTools {
         'OpenJS.NodeJS.LTS',
         'Python.PythonInstallManager',
         'jqlang.jq',
-        'astal-sh.uv',
+        'astral-sh.uv',
         'Microsoft.VisualStudioCode',
         'GitHub.cli',
         'SST.OpenCodeDesktop',
@@ -4121,13 +4121,13 @@ function Setup-AiTools {
     $npmPackages = @('opencode-ai','@openai/codex','@qwen-code/qwen-code','oh-my-free-models')
 
     Write-Host "The setup will check/install the following items:" -ForegroundColor Cyan
-    Write-Host "\nWinget packages:" -ForegroundColor Cyan
+    Write-Host "Winget packages:" -ForegroundColor Cyan
     foreach ($p in $wingetPackages) { Write-Host " - $p" }
 
-    Write-Host "\nNPM global packages (installed via npm -g):" -ForegroundColor Cyan
+    Write-Host "NPM global packages (installed via npm -g):" -ForegroundColor Cyan
     foreach ($np in $npmPackages) { Write-Host " - $np" }
 
-    Write-Host "\nCommand-line tools / CLIs to verify/install:" -ForegroundColor Cyan
+    Write-Host "Command-line tools / CLIs to verify/install:" -ForegroundColor Cyan
     Write-Host " - git (installed via winget if missing)"
     Write-Host " - agy (Antigravity CLI)"
     Write-Host " - claude (Claude CLI)"
@@ -4146,13 +4146,45 @@ function Setup-AiTools {
         return
     }
 
+    $wingetListOutput = @()
+    try {
+        $wingetListOutput = & winget list 2>$null
+    }
+    catch {
+        Write-Host "Failed to query winget package inventory: $_" -ForegroundColor Red
+        return
+    }
+
+    function Test-WingetInstalledPackage {
+        param(
+            [string[]]$Rows,
+            [string]$PackageId
+        )
+
+        $escapedId = [regex]::Escape($PackageId)
+        foreach ($row in $Rows) {
+            if ($row -notmatch $escapedId) {
+                continue
+            }
+
+            if ($row -match "\bwinget\b") {
+                return $true
+            }
+        }
+
+        return $false
+    }
+
     $missing = @()
     foreach ($pkg in $wingetPackages) {
-        try {
-            $out = & winget list --id $pkg 2>$null
-            if (-not $out) { $missing += $pkg }
+        $isInstalled = Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $pkg
+        if ($isInstalled) {
+            Write-Host "installed:   $pkg" -ForegroundColor Green
         }
-        catch { $missing += $pkg }
+        else {
+            Write-Host "not installed: $pkg" -ForegroundColor Yellow
+            $missing += $pkg
+        }
     }
 
     if ($missing.Count -gt 0) {
