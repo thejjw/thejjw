@@ -4187,13 +4187,19 @@ function Setup-AiTools {
         Write-Host "agy CLI not found; running Antigravity installer..." -ForegroundColor Yellow
         try { iex (irm 'https://antigravity.google/cli/install.ps1') } catch { Write-Host "Antigravity install failed: $_" -ForegroundColor Red }
     }
-    else { Write-Host "agy CLI already present; skipping Antigravity installer." -ForegroundColor Green }
+    else {
+        Write-Host "agy CLI already present; running 'agy update'..." -ForegroundColor Green
+        try { & agy update 2>$null } catch { Write-Host "agy update failed: $($_)" -ForegroundColor Yellow }
+    }
 
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
         Write-Host "claude CLI not found; running Claude installer..." -ForegroundColor Yellow
         try { iex (irm 'https://claude.ai/install.ps1') } catch { Write-Host "Claude install failed: $_" -ForegroundColor Red }
     }
-    else { Write-Host "claude CLI already present; skipping Claude installer." -ForegroundColor Green }
+    else {
+        Write-Host "claude CLI already present; running 'claude update'..." -ForegroundColor Green
+        try { & claude update 2>$null } catch { Write-Host "claude update failed: $($_)" -ForegroundColor Yellow }
+    }
 
     Write-Host "Setup-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
 }
