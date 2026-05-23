@@ -4189,7 +4189,8 @@ function Setup-AiTools {
         }
     }
     else {
-        Write-Host "npm not found; skipping npm global installs." -ForegroundColor Yellow
+        Write-Host "npm not found — aborting Setup-AiTools. Please inspect your Node/npm installation and re-run." -ForegroundColor Red
+        return
     }
 
     # Install Antigravity and Claude CLIs using their recommended installers
