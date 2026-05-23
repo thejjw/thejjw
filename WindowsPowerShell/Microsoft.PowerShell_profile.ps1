@@ -4112,7 +4112,7 @@ function Setup-AiTools {
         'Microsoft.VisualStudioCode',
         'GitHub.cli',
         'SST.OpenCodeDesktop',
-        'SST.OpenCode',
+        'SST.opencode',
         'Google.AntigravityIDE',
         'Google.Antigravity'
     )
@@ -4195,7 +4195,7 @@ function Setup-AiTools {
         foreach ($m in $missing) {
             Write-Host "Installing $m..."
             try {
-                Start-Process -FilePath 'winget' -ArgumentList "install -s winget -e $m" -NoNewWindow -Wait
+                Start-Process -FilePath 'winget' -ArgumentList "install -s winget -e --id $m" -NoNewWindow -Wait
             }
             catch { Write-Host "Failed to start winget for $($m): $_" -ForegroundColor Red }
         }
@@ -4207,7 +4207,7 @@ function Setup-AiTools {
     # Ensure git is present; if not, offer interactive installer
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Write-Host "git not found. Launching interactive winget installer for Git..." -ForegroundColor Yellow
-        Start-Process -FilePath 'winget' -ArgumentList 'install -s winget -e Git.Git -i' -NoNewWindow -Wait
+        Start-Process -FilePath 'winget' -ArgumentList 'install -s winget -e --id Git.Git -i' -NoNewWindow -Wait
     }
 
     # Install global npm packages if npm available
