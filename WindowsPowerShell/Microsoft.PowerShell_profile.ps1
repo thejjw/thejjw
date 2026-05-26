@@ -376,7 +376,7 @@ function Get-WhoisInfo {
     )
 
     if ($null -eq $WhoisKisaApiKey) {
-        Write-Host 'Whois API key from KISA(후이즈검색.한국) not set. Please configure either -WhoisKisaApiKey parameter or $Global:WhoisKisaApiKey. Exiting...';
+        Write-Host 'Whois API key from KISA (whois.kisa.or.kr) not set. Please configure either -WhoisKisaApiKey parameter or $Global:WhoisKisaApiKey. Exiting...';
         break;
     }
     $DomainOrIp = $DomainOrIp.Trim();
@@ -1049,7 +1049,7 @@ function Remove-WingetPackagePaths {
 
 .EXAMPLE
     PS C:\> Remove-WingetPackagePaths
-    ✔ Removed the following winget directories from your user PATH:
+    [OK] Removed the following winget directories from your user PATH:
       - C:\Users\User\AppData\Local\Microsoft\WinGet\Packages\SomeTool\bin
 
 .INPUTS
@@ -2983,7 +2983,7 @@ function Install-GlobalClaudeMd {
     Creates the global ~/.claude/CLAUDE.md with multi-model MCP tool preferences.
 
 .DESCRIPTION
-    Idempotent — skips creation if the file already exists.
+    Idempotent - skips creation if the file already exists.
     Shared by all Claude Code provider setup functions (claudez, claudemm, etc.).
 
 .EXAMPLE
@@ -3548,7 +3548,7 @@ exclusively (-i). Otherwise SSH falls back to the default agent/key or
 password prompt.
 
 .PARAMETER BaseUrl
-Anthropic-compatible API base URL. Optional — omit for direct Anthropic API access.
+Anthropic-compatible API base URL. Optional - omit for direct Anthropic API access.
 Only needed when routing through a proxy or alternative endpoint.
 
 .PARAMETER HaikuModel
@@ -3629,7 +3629,7 @@ trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
 CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
 mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?not set}"
-# ANTHROPIC_BASE_URL is optional — only exported when the caller provided a value
+# ANTHROPIC_BASE_URL is optional - only exported when the caller provided a value
 [ -n "${ANTHROPIC_BASE_URL:-}" ] && export ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-}"
@@ -3708,7 +3708,7 @@ SSH target in user@host form.
 
 .PARAMETER ApiKey
 Anthropic-compatible API key for the remote session.
-Optional — falls back to Z_AI_AUTH_TOKEN env var.
+Optional - falls back to Z_AI_AUTH_TOKEN env var.
 
 .PARAMETER Port
 SSH port to connect to. Defaults to 22.
@@ -4219,7 +4219,7 @@ function Setup-AiTools {
         }
     }
     else {
-        Write-Host "npm not found — aborting Setup-AiTools. Please inspect your Node/npm installation and re-run." -ForegroundColor Red
+        Write-Host "npm not found - aborting Setup-AiTools. Please inspect your Node/npm installation and re-run." -ForegroundColor Red
         return
     }
 
