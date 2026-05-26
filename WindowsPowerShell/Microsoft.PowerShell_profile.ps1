@@ -4094,13 +4094,17 @@ function Setup-AiTools {
 .PARAMETER Auto
     When supplied, skip the initial confirmation and proceed automatically.
 
+.PARAMETER Update
+    When supplied, upgrade any already-installed winget packages to their latest versions.
+
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
     [CmdletBinding()]
     param(
-        [switch]$Auto
+        [switch]$Auto,
+        [switch]$Update
     )
 
     $wingetPackages = @(
@@ -4176,10 +4180,12 @@ function Setup-AiTools {
     }
 
     $missing = @()
+    $installed = @()
     foreach ($pkg in $wingetPackages) {
         $isInstalled = Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $pkg
         if ($isInstalled) {
             Write-Host "installed:   $pkg" -ForegroundColor Green
+            $installed += $pkg
         }
         else {
             Write-Host "not installed: $pkg" -ForegroundColor Yellow
@@ -4202,6 +4208,17 @@ function Setup-AiTools {
     }
     else {
         Write-Host "All winget packages already present." -ForegroundColor Green
+    }
+
+    if ($Update -and $installed.Count -gt 0) {
+        Write-Host "Upgrading existing winget packages..." -ForegroundColor Cyan
+        foreach ($pkg in $installed) {
+            Write-Host "Upgrading $pkg..."
+            try {
+                Start-Process -FilePath 'winget' -ArgumentList "upgrade -s winget -e --id $pkg" -NoNewWindow -Wait
+            }
+            catch { Write-Host "Failed to start winget upgrade for $($pkg): $_" -ForegroundColor Red }
+        }
     }
 
     # Ensure git is present; if not, offer interactive installer
