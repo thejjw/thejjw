@@ -200,7 +200,7 @@ nrd() {
   fi
 
   if $use_agents; then
-    $verbose && echo "creating AGENTS.md (canonical) + CLAUDE.md/GEMINI.md (@import)"
+    $verbose && echo "creating AGENTS.md (canonical) + CLAUDE.md/etc (@import)"
     cat > "$dir/AGENTS.md" << 'AGENT_EOF'
 # AGENTS.md
 
