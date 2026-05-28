@@ -4109,6 +4109,8 @@ function Setup-AiTools {
         'Microsoft.Edit',
         'OpenJS.NodeJS.LTS',
         'Python.PythonInstallManager',
+        'cURL.cURL',
+        'aria2.aria2',
         'jqlang.jq',
         'BurntSushi.ripgrep.MSVC',
         'junegunn.fzf',
@@ -4120,10 +4122,7 @@ function Setup-AiTools {
         'eza-community.eza',
         'dalance.procs',
         'MrKaran.Doggo',
-        'HTTPie.HTTPie',
-        'Insecure.Nmap',
         'ducaale.xh',
-        'uutils.coreutils',
         'uutils.diffutils',
         'astral-sh.uv',
         'Microsoft.VisualStudioCode',
@@ -4139,6 +4138,9 @@ function Setup-AiTools {
         'marlocarlo.pstop',
         'marlocarlo.psnet'
     )
+#         'Insecure.Nmap',
+#         'HTTPie.HTTPie',
+#         'uutils.coreutils',
 
     # Define npm packages early so we can display the full plan
     $npmPackages = @('@qwen-code/qwen-code', 'oh-my-free-models')
