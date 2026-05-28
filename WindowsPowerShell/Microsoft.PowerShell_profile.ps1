@@ -37,38 +37,38 @@ $_NrdInternal = @{
 
 ## Grounding
 
-- Always utilize web search to ground your answers, ensuring all technical advice and references are accurate and up-to-date.
+* Always utilize web search to ground your answers, ensuring all technical advice and references are accurate and up-to-date.
 
 ## Environment
 
-- Platform: Windows 11, shell: PowerShell.
-- Use PowerShell commands and syntax -- not Unix/bash equivalents.
-  - ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
-  - Redirect to ``$null`` not ``/dev/null``.
-  - Use semicolons or separate statements -- not ``&&`` to chain commands.
-  - Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
-- When useful and already available, use fast CLI tools such as `rg`, `fd`, `fzf`, or comparable installed tools; otherwise use PowerShell-native commands.
-- If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
+* Platform: Windows 11, shell: PowerShell.
+* Use PowerShell commands and syntax -- not Unix/bash equivalents.
+  * ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
+  * Redirect to ``$null`` not ``/dev/null``.
+  * Use semicolons or separate statements -- not ``&&`` to chain commands.
+  * Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
+* When useful and already available, use fast CLI tools such as `rg`, `fd`, `fzf`, or comparable installed tools; otherwise use PowerShell-native commands.
+* If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
 
 ## Code Style
 
-- Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
-- Comment every public function/method and any non-obvious logic inline.
-- Prefer ASCII in source code. Use non-ASCII characters only when required for user-facing text, test fixtures, protocol/data literals, or existing project conventions.
+* Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
+* Comment every public function/method and any non-obvious logic inline.
+* Prefer ASCII in source code. Use non-ASCII characters only when required for user-facing text, test fixtures, protocol/data literals, or existing project conventions.
 
 ## Git Discipline
 
-- Always commit after completing each logical change separately with a descriptive commit message and never bundle unrelated changes.
-- Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
-- This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
-- Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
-- Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
-- Never append Co-Authored-By trailers to commit messages.
+* Always commit after each logical change with a descriptive commit message; never bundle unrelated changes.
+* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
+* This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
+* Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
+* Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
+* Never append Co-Authored-By trailers to commit messages.
 
 ## Dependencies
 
-- Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
-- Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed. Prefer a non-deprecated alternative when practical.
+* Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
+* Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, prefer a non-deprecated alternative when practical; otherwise warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
 "@
 }
 
