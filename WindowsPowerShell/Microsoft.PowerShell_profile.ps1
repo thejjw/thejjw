@@ -4277,6 +4277,16 @@ function Setup-AiTools {
             }
             catch { Write-Host "Failed to start winget for $($m): $_" -ForegroundColor Red }
         }
+
+        $wingetListOutput = & winget list 2>$null
+        $stillMissing = $missing | Where-Object { -not (Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $_) }
+        if ($stillMissing) {
+            Write-Host "The following packages failed to install:" -ForegroundColor Red
+            foreach ($m in $stillMissing) { Write-Host " - $m" -ForegroundColor Red }
+        }
+        else {
+            Write-Host "All packages installed successfully." -ForegroundColor Green
+        }
     }
     else {
         Write-Host "All winget packages already present." -ForegroundColor Green
