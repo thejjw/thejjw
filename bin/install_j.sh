@@ -362,6 +362,38 @@ CLAUDE_PREF_EOF
 fi
 
 # ---------------------------------------------------------------------------
+# Global Claude Code settings.json - set attribution to suppress Co-Authored-By
+# ---------------------------------------------------------------------------
+SENTINEL="$CLAUDE_DIR/no-attribution"
+SETTINGS_JSON="$CLAUDE_DIR/settings.json"
+
+if [[ -f "$SENTINEL" ]]; then
+  echo "global settings.json: $SENTINEL exists -- skipping"
+elif command -v jq &>/dev/null; then
+  if [[ -f "$SETTINGS_JSON" ]]; then
+    jq '.attribution = {"commit": "", "pr": ""}' "$SETTINGS_JSON" > "$SETTINGS_JSON.tmp" && mv "$SETTINGS_JSON.tmp" "$SETTINGS_JSON"
+  else
+    mkdir -pv "$CLAUDE_DIR"
+    echo '{"attribution": {"commit": "", "pr": ""}}' | jq '.' > "$SETTINGS_JSON"
+  fi
+  touch "$SENTINEL"
+  echo "global settings.json: attribution disabled"
+elif command -v python3 &>/dev/null; then
+  mkdir -pv "$CLAUDE_DIR"
+  python3 -c "
+import json, os
+p = os.environ.get('SETTINGS_JSON', '')
+data = {}
+if os.path.isfile(p):
+    with open(p) as f: data = json.load(f)
+data['attribution'] = {'commit': '', 'pr': ''}
+with open(p, 'w') as f: json.dump(data, f, indent=2)
+" && touch "$SENTINEL" && echo "global settings.json: attribution disabled"
+else
+  echo "global settings.json: jq/python3 not found -- skipping attribution setup"
+fi
+
+# ---------------------------------------------------------------------------
 # ccd - shorthand for claude --dangerously-skip-permissions
 # ---------------------------------------------------------------------------
 CCD_MARKER="# >>> ccd >>>"

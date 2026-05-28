@@ -3097,6 +3097,55 @@ function Install-GlobalClaudeMd {
     }
 }
 
+function Install-GlobalClaudeSettings {
+    <#
+.SYNOPSIS
+    Ensures ~/.claude/settings.json has attribution disabled (no Co-Authored-By).
+
+.DESCRIPTION
+    One-shot: after successful update, drops a sentinel file (.claude/no-attribution)
+    so subsequent calls skip immediately. Uses native PowerShell JSON handling (no jq).
+    Shared by all Claude Code provider setup functions (claudez, claudemm, etc.).
+
+.EXAMPLE
+    Install-GlobalClaudeSettings
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    [CmdletBinding()]
+    param()
+
+    $claudeDir = Join-Path $HOME '.claude'
+    $sentinel = Join-Path $claudeDir 'no-attribution'
+
+    if (Test-Path -LiteralPath $sentinel) {
+        Write-Host "global settings.json: $sentinel exists -- skipping"
+        return
+    }
+
+    $settingsJson = Join-Path $claudeDir 'settings.json'
+
+    if (-not (Test-Path -LiteralPath $claudeDir)) {
+        $null = New-Item -ItemType Directory -Path $claudeDir -Force
+    }
+
+    $attribution = @{ commit = ''; pr = '' }
+
+    if (Test-Path -LiteralPath $settingsJson) {
+        $settings = Get-Content -LiteralPath $settingsJson -Raw | ConvertFrom-Json
+        $settings | Add-Member -NotePropertyName 'attribution' -NotePropertyValue $attribution -Force
+    }
+    else {
+        $settings = [pscustomobject]@{ attribution = $attribution }
+    }
+
+    $settings | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $settingsJson -Encoding UTF8
+    $null = New-Item -ItemType File -Path $sentinel -Force
+    Write-Host "global settings.json: attribution disabled" -ForegroundColor Green
+}
+
 function Install-ClaudezSetup {
     <#
 .SYNOPSIS
@@ -3276,9 +3325,10 @@ function claudez {
 
     $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-4.7"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "high"
-    
+
     try {
         Install-GlobalClaudeMd
+        Install-GlobalClaudeSettings
         [void](Install-ClaudezSetup -Token $token)
 
         claude @args
@@ -3346,6 +3396,7 @@ function claudezm {
 
     try {
         Install-GlobalClaudeMd
+        Install-GlobalClaudeSettings
         [void](Install-ClaudezSetup -Token $token)
 
         claude @args
@@ -3976,6 +4027,7 @@ function claudemm {
 
     try {
         Install-GlobalClaudeMd
+        Install-GlobalClaudeSettings
         [void](Install-ClaudemmSetup -Token $key)
 
         claude @args
