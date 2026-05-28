@@ -4113,8 +4113,10 @@ function Setup-AiTools {
         'GitHub.cli',
         'SST.OpenCodeDesktop',
         'SST.opencode',
+        'Google.Antigravity',
         'Google.AntigravityIDE',
-        'Google.Antigravity'
+        'Google.AntigravityCLI',
+        'marlocarlo.psmux'
     )
 
     # Define npm packages early so we can display the full plan
