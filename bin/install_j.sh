@@ -108,7 +108,7 @@ else
 #   nrd                  random name in $PWD
 #   nrd -n my-project    explicit name        (or: nrd my-project)
 #   nrd -g               init git + synthetic identity
-#   nrd -a               create AGENTS.md + CLAUDE.md + GEMINI.md (@import); requires -g
+#   nrd -a               create AGENTS.md + CLAUDE.md + etc (@import); requires -g
 #   nrd -t               use $TMPDIR as base
 #   nrd -v               verbose
 
@@ -221,7 +221,7 @@ nrd() {
 ## Git Discipline
 
 - Commit each logical change separately -- never bundle unrelated changes.
-- Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
+- Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
 - This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
 - Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
 - Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
@@ -231,8 +231,7 @@ nrd() {
 - Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
 - Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
 AGENT_EOF
-    printf '@AGENTS.md\n' > "$dir/CLAUDE.md"
-    printf '@./AGENTS.md\n' > "$dir/GEMINI.md"
+    printf '@AGENTS.md\n' > "$dir/CLAUDE.local.md"
     printf '@./AGENTS.md\n' > "$dir/QWEN.md"
   fi
 
