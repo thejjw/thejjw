@@ -62,7 +62,7 @@ $_NrdInternal = @{
 ## Git Discipline
 
 - Commit each logical change separately -- never bundle unrelated changes.
-- Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
+- Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
 - This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
 - Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
 - Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
@@ -2544,8 +2544,7 @@ not provided, a random human-readable name is generated. The command then
 changes the current location to the newly created directory.
 
 Optional switches allow initializing a git repository with a synthetic local
-identity and creating basic agent documentation files (AGENTS.md, CLAUDE.md,
-and GEMINI.md).
+identity and creating basic agent documentation files (AGENTS.md, etc).
 
 .PARAMETER BasePath
 The parent directory where the new directory will be created.
@@ -2680,10 +2679,7 @@ Last Edit: 2026-04
         $_NrdInternal.AgentsMarkdown | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
 
         # CLAUDE.md imports AGENTS.md -- Claude Code reads CLAUDE.md, not AGENTS.md
-        '@AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'CLAUDE.md') -Encoding UTF8
-
-        # GEMINI.md imports AGENTS.md -- Gemini CLI reads GEMINI.md, not AGENTS.md
-        '@./AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'GEMINI.md') -Encoding UTF8
+        '@AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'CLAUDE.local.md') -Encoding UTF8
 
         # QWEN.md imports AGENTS.md -- Qwen Code reads QWEN.md, not AGENTS.md
         '@./AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'QWEN.md') -Encoding UTF8
