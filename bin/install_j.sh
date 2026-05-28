@@ -8,6 +8,7 @@
 set -e
 
 FORCE_REINSTALL=false
+INSTALL_GHOSTTY=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -15,13 +16,17 @@ while [[ $# -gt 0 ]]; do
       FORCE_REINSTALL=true
       shift
       ;;
+    --ghostty)
+      INSTALL_GHOSTTY=true
+      shift
+      ;;
     -h|--help)
-      echo "Usage: $0 [--force]"
+      echo "Usage: $0 [--force] [--ghostty]"
       exit 0
       ;;
     *)
       echo "install_j.sh: unknown argument: $1" >&2
-      echo "Usage: $0 [--force]" >&2
+      echo "Usage: $0 [--force] [--ghostty]" >&2
       exit 1
       ;;
   esac
@@ -65,6 +70,24 @@ else
   sudo apt-get update && sudo apt-get install -y $PACKAGES
 fi
 
+# ---------------------------------------------------------------------------
+# Ghostty terminal - Ubuntu only, opt-in via --ghostty
+# ---------------------------------------------------------------------------
+if $INSTALL_GHOSTTY; then
+  if [[ "$(uname -s)" != "Linux" ]] || ! grep -qi '^ID=ubuntu' /etc/os-release 2>/dev/null; then
+    echo "ghostty: skipping -- Ubuntu Linux required (detected: $(uname -s)/$(grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 || echo unknown))"
+  elif command -v ghostty &>/dev/null && ! $FORCE_REINSTALL; then
+    echo "ghostty: already installed -- skipping (use --force to reinstall)"
+  else
+    echo "ghostty: installing via mkasberg/ghostty-ubuntu..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/mkasberg/ghostty-ubuntu/HEAD/install.sh)"
+    echo "ghostty: done"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# node install via nvm
+# ---------------------------------------------------------------------------
 
 if command -v node &>/dev/null && command -v npm &>/dev/null; then
   echo "node $(node -v) / npm $(npm -v) already installed -- skipping nvm"
@@ -74,7 +97,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# uv — required by MiniMax MCP server (uvx)
+# uv -- required by MiniMax MCP server (uvx)
 # ---------------------------------------------------------------------------
 if command -v uv &>/dev/null; then
   echo "uv $(uv --version 2>/dev/null || echo 'installed') already present -- skipping"
