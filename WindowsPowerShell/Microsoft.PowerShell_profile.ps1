@@ -53,6 +53,7 @@ $_NrdInternal = @{
   - Use semicolons or separate statements -- not ``&&`` to chain commands.
   - Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
 - If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
+- When useful and already available, use fast CLI tools such as `rg`, `fd`, `fzf`, or comparable installed tools; otherwise use PowerShell-native commands.
 
 ## Code Style
 
@@ -4110,6 +4111,20 @@ function Setup-AiTools {
         'Python.PythonInstallManager',
         'jqlang.jq',
         'BurntSushi.ripgrep.MSVC',
+        'junegunn.fzf',
+        'sharkdp.fd',
+        'JFLarvoire.Ag',
+        'chmln.sd',
+        'dandavison.delta',
+        'sharkdp.bat',
+        'eza-community.eza',
+        'dalance.procs',
+        'MrKaran.Doggo',
+        'HTTPie.HTTPie',
+        'Insecure.Nmap',
+        'ducaale.xh',
+        'uutils.coreutils',
+        'uutils.diffutils',
         'astral-sh.uv',
         'Microsoft.VisualStudioCode',
         'GitHub.cli',
