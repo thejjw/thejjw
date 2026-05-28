@@ -3251,20 +3251,13 @@ function claudez {
     Author: jjw(@thejjw)
     Last Edit: 2026-04
 #>
-    # Read token from environment only (process first, then persisted user scope).
-    $token = $env:Z_AI_AUTH_TOKEN
-    if (-not $token) {
-        $token = [Environment]::GetEnvironmentVariable("Z_AI_AUTH_TOKEN", "User")
-    }
+    # Read token using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
+    $token = Get-AiApiKey 'Z_AI_AUTH_TOKEN'
 
     if (-not $token) {
         Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
-        Write-Host "  [Environment]::SetEnvironmentVariable('Z_AI_AUTH_TOKEN', '<your_token>', 'User')" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "Optional (current session only):" -ForegroundColor Yellow
-        Write-Host "  `$env:Z_AI_AUTH_TOKEN = '<your_token>'" -ForegroundColor Cyan
+        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -3325,20 +3318,13 @@ function claudezm {
     Author: jjw(@thejjw)
     Last Edit: 2026-04
 #>
-    # Read token from environment only (process first, then persisted user scope).
-    $token = $env:Z_AI_AUTH_TOKEN
-    if (-not $token) {
-        $token = [Environment]::GetEnvironmentVariable("Z_AI_AUTH_TOKEN", "User")
-    }
+    # Read token using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
+    $token = Get-AiApiKey 'Z_AI_AUTH_TOKEN'
 
     if (-not $token) {
         Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
-        Write-Host "  [Environment]::SetEnvironmentVariable('Z_AI_AUTH_TOKEN', '<your_token>', 'User')" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "Optional (current session only):" -ForegroundColor Yellow
-        Write-Host "  `$env:Z_AI_AUTH_TOKEN = '<your_token>'" -ForegroundColor Cyan
+        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -3450,20 +3436,13 @@ function claudeds {
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
-    # Read key from environment only (process first, then persisted user scope).
-    $key = $env:DEEPSEEK_API_KEY
-    if (-not $key) {
-        $key = [Environment]::GetEnvironmentVariable("DEEPSEEK_API_KEY", "User")
-    }
+    # Read key using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
+    $key = Get-AiApiKey 'DEEPSEEK_API_KEY'
 
     if (-not $key) {
         Write-Host "DEEPSEEK_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
-        Write-Host "  [Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', '<your_key>', 'User')" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "Optional (current session only):" -ForegroundColor Yellow
-        Write-Host "  `$env:DEEPSEEK_API_KEY = '<your_key>'" -ForegroundColor Cyan
+        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -3545,20 +3524,13 @@ function claudeds2 {
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
-    # Read key from environment only (process first, then persisted user scope).
-    $key = $env:DEEPSEEK_API_KEY
-    if (-not $key) {
-        $key = [Environment]::GetEnvironmentVariable("DEEPSEEK_API_KEY", "User")
-    }
+    # Read key using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
+    $key = Get-AiApiKey 'DEEPSEEK_API_KEY'
 
     if (-not $key) {
         Write-Host "DEEPSEEK_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
-        Write-Host "  [Environment]::SetEnvironmentVariable('DEEPSEEK_API_KEY', '<your_key>', 'User')" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "Optional (current session only):" -ForegroundColor Yellow
-        Write-Host "  `$env:DEEPSEEK_API_KEY = '<your_key>'" -ForegroundColor Cyan
+        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -3831,20 +3803,13 @@ Last Edit: 2026-04
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        $ApiKey = $env:Z_AI_AUTH_TOKEN
-        if (-not $ApiKey) {
-            $ApiKey = [Environment]::GetEnvironmentVariable("Z_AI_AUTH_TOKEN", "User")
-        }
+        $ApiKey = Get-AiApiKey 'Z_AI_AUTH_TOKEN'
     }
 
     if (-not $ApiKey) {
         Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
-        Write-Host "  [Environment]::SetEnvironmentVariable('Z_AI_AUTH_TOKEN', '<your_token>', 'User')" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "Optional (current session only):" -ForegroundColor Yellow
-        Write-Host "  `$env:Z_AI_AUTH_TOKEN = '<your_token>'" -ForegroundColor Cyan
+        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -3985,20 +3950,13 @@ function claudemm {
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
-    # Read key from environment only (process first, then persisted user scope).
-    $key = $env:MINIMAX_API_KEY
-    if (-not $key) {
-        $key = [Environment]::GetEnvironmentVariable("MINIMAX_API_KEY", "User")
-    }
+    # Read key using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
+    $key = Get-AiApiKey 'MINIMAX_API_KEY'
 
     if (-not $key) {
         Write-Host "MINIMAX_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
-        Write-Host "  [Environment]::SetEnvironmentVariable('MINIMAX_API_KEY', '<your_key>', 'User')" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "Optional (current session only):" -ForegroundColor Yellow
-        Write-Host "  `$env:MINIMAX_API_KEY = '<your_key>'" -ForegroundColor Cyan
+        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -4104,20 +4062,13 @@ Last Edit: 2026-05
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        $ApiKey = $env:MINIMAX_API_KEY
-        if (-not $ApiKey) {
-            $ApiKey = [Environment]::GetEnvironmentVariable("MINIMAX_API_KEY", "User")
-        }
+        $ApiKey = Get-AiApiKey 'MINIMAX_API_KEY'
     }
 
     if (-not $ApiKey) {
         Write-Host "MINIMAX_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
-        Write-Host "  [Environment]::SetEnvironmentVariable('MINIMAX_API_KEY', '<your_key>', 'User')" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "Optional (current session only):" -ForegroundColor Yellow
-        Write-Host "  `$env:MINIMAX_API_KEY = '<your_key>'" -ForegroundColor Cyan
+        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -4401,6 +4352,7 @@ function Setup-AiApiKeys {
     <#
 .SYNOPSIS
     Interactive helper to view and set Claude-related API keys in the user environment.
+    (DEPRECATED: Now delegates securely to Setup-AiApiKeysCS)
 
 .DESCRIPTION
     Checks for existing values of AI API key (e.g. `DEEPSEEK_API_KEY`, `Z_AI_AUTH_TOKEN`, ...) in
@@ -4427,44 +4379,180 @@ function Setup-AiApiKeys {
         [switch]$Force
     )
 
-    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    Write-Host "WARNING: Setup-AiApiKeys is deprecated. Delegating securely to Setup-AiApiKeysCS..." -ForegroundColor Yellow
+    Setup-AiApiKeysCS -Force:$Force
 
-    function Get-UserValue($n) {
-        # Check process (current session) first, then persisted User scope
-        $v = [Environment]::GetEnvironmentVariable($n, 'Process')
-        if ($v) { return $v }
-        return [Environment]::GetEnvironmentVariable($n, 'User')
+    # <# Legacy environment variable implementation commented out below:
+    # $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    #
+    # function Get-UserValue($n) {
+    #     # Check process (current session) first, then persisted User scope
+    #     $v = [Environment]::GetEnvironmentVariable($n, 'Process')
+    #     if ($v) { return $v }
+    #     return [Environment]::GetEnvironmentVariable($n, 'User')
+    # }
+    #
+    # function MaskValue($v) {
+    #     if (-not $v) { return '<missing>' }
+    #     return "<set, length=$($v.Length)>"
+    # }
+    #
+    # Write-Host "Checking existing keys (session and User scope):" -ForegroundColor Cyan
+    # $found = @{}
+    # foreach ($n in $names) {
+    #     $v = Get-UserValue $n
+    #     $found[$n] = $v
+    #     Write-Host " - $($n) : $(MaskValue $v)"
+    # }
+    #
+    # Write-Host "";
+    # Write-Host "You can press Enter to skip setting a key. To keep an existing value, leave it blank when prompted." -ForegroundColor Yellow
+    #
+    # foreach ($n in $names) {
+    #     $current = $found[$n]
+    #     if ($current -and -not $Force) {
+    #         Write-Host "Skipping $n (already set). Use -Force to overwrite." -ForegroundColor DarkGray
+    #         continue
+    #     }
+    #
+    #     if ($current -and $Force) {
+    #         $resp = Read-Host -Prompt "$n already set. Overwrite? (y/N)"
+    #         if ($resp -notin @('y', 'Y')) { Write-Host "Keeping existing $n." -ForegroundColor DarkGray; continue }
+    #     }
+    #
+    #     # Read hidden input as SecureString. If the input isn't a SecureString or is empty, skip.
+    #     $secure = Read-Host -AsSecureString -Prompt "Enter value for $n (input hidden, blank to skip)"
+    #     if ($null -eq $secure -or -not ($secure -is [System.Security.SecureString])) {
+    #         Write-Host "Skipped $n." -ForegroundColor DarkGray
+    #         continue
+    #     }
+    #
+    #     $ptr = [IntPtr]::Zero
+    #     try {
+    #         $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    #         $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto($ptr)
+    #     }
+    #     catch {
+    #         Write-Host "Failed to read secure input for $($n): $_" -ForegroundColor Red
+    #         continue
+    #     }
+    #     finally {
+    #         if ($ptr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+    #     }
+    #
+    #     [Environment]::SetEnvironmentVariable($n, $plain, 'User')
+    #     Write-Host "Set $n in User environment." -ForegroundColor Green
+    # }
+    #
+    # Write-Host "";
+    # Write-Host "Done. To apply changes to this session run:`n  . `$PROFILE" -ForegroundColor Cyan
+    # Write-Host "Or restart PowerShell to pick up the new values." -ForegroundColor Cyan
+    # #>
+}
+
+function Get-AiApiKey {
+    <#
+    .SYNOPSIS
+        Retrieves an API key, prioritizing current process environment, then Windows Credential Manager,
+        and finally legacy User environment variables.
+
+    .NOTES
+        Author: jjw(@thejjw)
+        Last Edit: 2026-05
+#>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+    # 1. Process environment (allows temporary session overrides)
+    $v = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if ($v) { return $v }
+
+    # 2. Windows Credential Manager
+    [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+    $vault = New-Object Windows.Security.Credentials.PasswordVault
+    try {
+        $cred = $vault.Retrieve($Name, 'api-key')
+        $cred.RetrievePassword()
+        return $cred.Password
+    }
+    catch {
+        # 3. Fallback to legacy User environment variable
+        return [Environment]::GetEnvironmentVariable($Name, 'User')
+    }
+}
+
+function Setup-AiApiKeysCS {
+    <#
+    .SYNOPSIS
+        Interactive helper to view and set Claude-related API keys in Windows Credential Manager.
+
+    .DESCRIPTION
+        Checks for existing values of AI API keys in the Windows Credential Manager (PasswordVault).
+        Presents a summary and prompts the user to enter missing keys (or optionally overwrite existing ones).
+        Values are securely saved using Windows Credential Manager (DPAPI-encrypted), keeping plaintext
+        credentials out of your registry.
+
+    .PARAMETER Force
+        When supplied, prompt to overwrite existing keys instead of skipping them.
+
+    .NOTES
+        Author: jjw(@thejjw)
+        Last Edit: 2026-05
+    #>
+    [CmdletBinding()]
+    param(
+        [switch]$Force
+    )
+
+    # Load native WinRT assembly for Credential Manager
+    [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+    $vault = New-Object Windows.Security.Credentials.PasswordVault
+    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $userName = 'api-key'
+
+    # Retrieve a stored key's plaintext value from vault
+    function Get-StoredKey($n) {
+        try {
+            $cred = $vault.Retrieve($n, $userName)
+            $cred.RetrievePassword()
+            return $cred.Password
+        }
+        catch {
+            return $null
+        }
     }
 
+    # Format the masked key display status
     function MaskValue($v) {
         if (-not $v) { return '<missing>' }
-        return "<set, length=$($v.Length)>"
+        return "<secured in Credential Manager, length=$($v.Length)>"
     }
 
-    Write-Host "Checking existing keys (session and User scope):" -ForegroundColor Cyan
+    Write-Host "Checking existing keys in Windows Credential Manager:" -ForegroundColor Cyan
     $found = @{}
     foreach ($n in $names) {
-        $v = Get-UserValue $n
+        $v = Get-StoredKey $n
         $found[$n] = $v
         Write-Host " - $($n) : $(MaskValue $v)"
     }
 
-    Write-Host "";
+    Write-Host ""
     Write-Host "You can press Enter to skip setting a key. To keep an existing value, leave it blank when prompted." -ForegroundColor Yellow
 
     foreach ($n in $names) {
         $current = $found[$n]
         if ($current -and -not $Force) {
-            Write-Host "Skipping $n (already set). Use -Force to overwrite." -ForegroundColor DarkGray
+            Write-Host "Skipping $n (already set in vault). Use -Force to overwrite." -ForegroundColor DarkGray
             continue
         }
 
         if ($current -and $Force) {
-            $resp = Read-Host -Prompt "$n already set. Overwrite? (y/N)"
+            $resp = Read-Host -Prompt "$n already set in vault. Overwrite? (y/N)"
             if ($resp -notin @('y', 'Y')) { Write-Host "Keeping existing $n." -ForegroundColor DarkGray; continue }
         }
 
-        # Read hidden input as SecureString. If the input isn't a SecureString or is empty, skip.
+        # Read hidden input as SecureString. Skip if empty.
         $secure = Read-Host -AsSecureString -Prompt "Enter value for $n (input hidden, blank to skip)"
         if ($null -eq $secure -or -not ($secure -is [System.Security.SecureString])) {
             Write-Host "Skipped $n." -ForegroundColor DarkGray
@@ -4475,22 +4563,74 @@ function Setup-AiApiKeys {
         try {
             $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
             $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto($ptr)
+
+            # Store inside the vault
+            $newCred = New-Object Windows.Security.Credentials.PasswordCredential($n, $userName, $plain)
+            $vault.Add($newCred)
+            Write-Host "Successfully saved $n to Windows Credential Manager." -ForegroundColor Green
         }
         catch {
-            Write-Host "Failed to read secure input for $($n): $_" -ForegroundColor Red
+            Write-Host "Failed to save secure input for $($n): $_" -ForegroundColor Red
             continue
         }
         finally {
             if ($ptr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
         }
-
-        [Environment]::SetEnvironmentVariable($n, $plain, 'User')
-        Write-Host "Set $n in User environment." -ForegroundColor Green
     }
 
-    Write-Host "";
-    Write-Host "Done. To apply changes to this session run:`n  . `$PROFILE" -ForegroundColor Cyan
-    Write-Host "Or restart PowerShell to pick up the new values." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Done! Run 'Load-AiApiKeysFromCS' to load these into your current terminal process." -ForegroundColor Cyan
+}
+
+function Load-AiApiKeysFromCS {
+    <#
+    .SYNOPSIS
+        Loads secure API keys from Windows Credential Manager into the current process environment.
+
+    .DESCRIPTION
+        Retrieves saved credentials from the Windows PasswordVault and registers them as
+        session-level (Process) environment variables. This makes them immediately available
+        to all CLI tools, scripts, and processes run from this PowerShell terminal (e.g. claude, python, etc.),
+        without saving them as plaintext in registry variables.
+
+    .PARAMETER Quiet
+        When supplied, skips detailed output and only prints an ambiguous completion message.
+
+    .NOTES
+        Author: jjw(@thejjw)
+        Last Edit: 2026-05
+    #>
+    [CmdletBinding()]
+    param(
+        [switch]$Quiet
+    )
+    [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+    $vault = New-Object Windows.Security.Credentials.PasswordVault
+    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $userName = 'api-key'
+
+    $loadedCount = 0
+    foreach ($n in $names) {
+        try {
+            $cred = $vault.Retrieve($n, $userName)
+            $cred.RetrievePassword()
+            $envKey = $cred.Password
+            if ($envKey) {
+                [Environment]::SetEnvironmentVariable($n, $envKey, 'Process')
+                $loadedCount++
+            }
+        }
+        catch {
+            # Silent skip if credential is not in vault
+        }
+    }
+    if ($loadedCount -gt 0) {
+        if ($Quiet) {
+            Write-Host "Credential storage load completed." -ForegroundColor Green
+        } else {
+            Write-Host "Loaded $loadedCount API key(s) from Windows Credential Manager into session environment." -ForegroundColor Green
+        }
+    }
 }
 
 
@@ -4740,3 +4880,7 @@ function Test-OpenAiApi {
         }
     }
 }
+
+# Load secure API keys from Windows Credential Manager into process environment on startup
+Load-AiApiKeysFromCS -Quiet
+
