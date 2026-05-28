@@ -102,6 +102,76 @@ If an MCP tool is unavailable or underperforming, inform the user and suggest al
 "@
 }
 
+# Internal configuration for Setup-AiTools
+$_SetupAiToolsInternal = @{
+    WingetPackages         = @(
+        'Notepad++.Notepad++',
+        'Microsoft.Edit',
+        'OpenJS.NodeJS.LTS',
+        'Python.PythonInstallManager',
+        'cURL.cURL',
+        'aria2.aria2',
+        'jqlang.jq',
+        'BurntSushi.ripgrep.MSVC',
+        'junegunn.fzf',
+        'sharkdp.fd',
+        'JFLarvoire.Ag',
+        'chmln.sd',
+        'dandavison.delta',
+        'sharkdp.bat',
+        'eza-community.eza',
+        'dalance.procs',
+        'MrKaran.Doggo',
+        'ducaale.xh',
+        'medialab.xan',
+        'oschwartz10612.Poppler',
+        'uutils.diffutils',
+        'EliFulkerson.tcping',
+        'FujiApple.Trippy',
+        'natesales.q',
+        'Orange-OpenSource.Hurl',
+        'astral-sh.uv',
+        'SQLite.SQLite',
+        'koalaman.shellcheck',
+        'Microsoft.VisualStudioCode',
+        'GitHub.cli',
+        'SST.OpenCodeDesktop',
+        'SST.opencode',
+        'OpenAI.Codex',
+        'Anthropic.ClaudeCode',
+        'Google.Antigravity',
+        'Google.AntigravityIDE',
+        'Google.AntigravityCLI',
+        'marlocarlo.psmux',
+        'marlocarlo.pstop',
+        'marlocarlo.psnet'
+    )
+    ExtendedWingetPackages = @(
+        'Insecure.Nmap',
+        'HTTPie.HTTPie',
+        'uutils.coreutils',
+        'Gyan.FFmpeg',
+        'ImageMagick.ImageMagick',
+        'Inkscape.Inkscape',
+        'Google.Libwebp',
+        'libjxl.libjxl',
+        'JohnMacFarlane.Pandoc',
+        'tesseract-ocr.tesseract',
+        'Microsoft.OpenJDK.25',
+        'GoLang.Go',
+        'AquaSecurity.Trivy',
+        'Cisco.ClamAV',
+        'astral-sh.ruff',
+        'Microsoft.Sqlcmd',
+        'Oracle.MySQLShell',
+        'PostgreSQL.psqlODBC'
+    )
+    NpmPackages            = @(
+        '@qwen-code/qwen-code',
+        'oh-my-free-models'
+    )
+}
+
 function New-RandomPassword {
     <#
 .SYNOPSIS
@@ -4094,6 +4164,14 @@ function Setup-AiTools {
 .PARAMETER Update
     When supplied, upgrade any already-installed winget packages to their latest versions.
 
+.PARAMETER ExtendedSetup
+    When supplied, also installs the extended (non-minimal) package set: heavier tools such as
+    FFmpeg, ImageMagick, Java, Go, security scanners, database CLIs, and similar large-scope packages.
+
+.PARAMETER Dotnet
+    When supplied, installs the .NET SDK via the official dotnet-install.ps1 script from dot.net.
+    Runs in a separate PowerShell process to avoid the script's exit call ending the current session.
+
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-05
@@ -4101,79 +4179,20 @@ function Setup-AiTools {
     [CmdletBinding()]
     param(
         [switch]$Auto,
-        [switch]$Update
+        [switch]$Update,
+        [switch]$ExtendedSetup,
+        [switch]$Dotnet
     )
 
-    $wingetPackages = @(
-        'Notepad++.Notepad++',
-        'Microsoft.Edit',
-        'OpenJS.NodeJS.LTS',
-        'Python.PythonInstallManager',
-        'cURL.cURL',
-        'aria2.aria2',
-        'jqlang.jq',
-        'BurntSushi.ripgrep.MSVC',
-        'junegunn.fzf',
-        'sharkdp.fd',
-        'JFLarvoire.Ag',
-        'chmln.sd',
-        'dandavison.delta',
-        'sharkdp.bat',
-        'eza-community.eza',
-        'dalance.procs',
-        'MrKaran.Doggo',
-        'ducaale.xh',
-        'medialab.xan',
-        'oschwartz10612.Poppler',
-        'uutils.diffutils',
-        'EliFulkerson.tcping',
-        'FujiApple.Trippy',
-        'natesales.q',
-        'Orange-OpenSource.Hurl',
-        'astral-sh.uv',
-        'SQLite.SQLite',
-        'koalaman.shellcheck',
-        'Microsoft.VisualStudioCode',
-        'GitHub.cli',
-        'SST.OpenCodeDesktop',
-        'SST.opencode',
-        'OpenAI.Codex',
-        'Anthropic.ClaudeCode',
-        'Google.Antigravity',
-        'Google.AntigravityIDE',
-        'Google.AntigravityCLI',
-        'marlocarlo.psmux',
-        'marlocarlo.pstop',
-        'marlocarlo.psnet'
-    )
-#         'Insecure.Nmap',
-#         'HTTPie.HTTPie',
-#         'uutils.coreutils',
-#         'Gyan.FFmpeg',
-#         'ImageMagick.ImageMagick',
-#         'Inkscape.Inkscape',
-#         'Google.Libwebp',
-#         'libjxl.libjxl',
-#         'JohnMacFarlane.Pandoc',
-#         'tesseract-ocr.tesseract',
-#         'Microsoft.OpenJDK.25',
-#         'GoLang.Go',
-#         'AquaSecurity.Trivy',
-#         'Cisco.ClamAV',
-#         'astral-sh.ruff',
-#         'Microsoft.Sqlcmd',
-#         'Oracle.MySQLShell',
-#         'PostgreSQL.psqlODBC',
+    $wingetPackages = $_SetupAiToolsInternal.WingetPackages
+    if ($ExtendedSetup) {
+        $wingetPackages += $_SetupAiToolsInternal.ExtendedWingetPackages
+    }
 
+    $npmPackages = $_SetupAiToolsInternal.NpmPackages
 
-# https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-install-script
-# # Run a separate PowerShell process because the script calls exit, so it will end the current PowerShell session.
-# &powershell -NoProfile -ExecutionPolicy unrestricted -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; &([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1')))"
-
-    # Define npm packages early so we can display the full plan
-    $npmPackages = @('@qwen-code/qwen-code', 'oh-my-free-models')
-
-    Write-Host "The setup will check/install the following items:" -ForegroundColor Cyan
+    $setupLabel = if ($ExtendedSetup) { "extended" } else { "standard" }
+    Write-Host "The setup will check/install the following items ($setupLabel):" -ForegroundColor Cyan
     Write-Host "Winget packages:" -ForegroundColor Cyan
     foreach ($p in $wingetPackages) { Write-Host " - $p" }
 
@@ -4182,6 +4201,7 @@ function Setup-AiTools {
 
     Write-Host "Command-line tools to verify/install:" -ForegroundColor Cyan
     Write-Host " - git (installed via winget if missing)"
+    if ($Dotnet) { Write-Host " - .NET SDK (via dotnet-install.ps1)" }
 
     Write-Host "CLIs to verify:" -ForegroundColor Cyan
     Write-Host " - agy (Antigravity CLI)"
@@ -4277,6 +4297,14 @@ function Setup-AiTools {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Write-Host "git not found. Launching interactive winget installer for Git..." -ForegroundColor Yellow
         Start-Process -FilePath 'winget' -ArgumentList 'install -s winget -e --id Git.Git -i' -NoNewWindow -Wait
+    }
+
+    # Install .NET SDK via official install script (https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-install-script)
+    if ($Dotnet) {
+        Write-Host "Installing .NET SDK via dotnet-install.ps1..." -ForegroundColor Cyan
+        # Runs in a child process because the install script calls exit, which would end this session
+        & powershell -NoProfile -ExecutionPolicy Unrestricted -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; &([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1')))"
+        Write-Host ".NET SDK install script completed." -ForegroundColor Green
     }
 
     # Install global npm packages if npm available
