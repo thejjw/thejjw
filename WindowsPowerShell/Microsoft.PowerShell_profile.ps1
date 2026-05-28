@@ -2080,7 +2080,7 @@ Last Edit: Aug 2025
     Write-Host "Leaf:   ${leaf.Subject} [${leaf.Thumbprint}]"
     Write-Host "Chain:"
     for ($i = 0; $i -lt $elements.Count; $i++) {
-        $tag = if ($i -eq 0) { '[Leaf]' } elseif ($i -eq $elements.Count - 1) { '[Root]' } else { '[Interm]' }
+        $tag = if ($i -eq 0) { '[Leaf]' } elseif ($i -eq $elements.Count - 1) { '[Root]' } else { '[Intermediate]' }
         Write-Host ("  ${tag} ${elements[$i].Subject} [${elements[$i].Thumbprint}]")
     }
 }
@@ -4491,7 +4491,8 @@ function Test-AnthropicApi {
             -Method POST `
             -Headers $headers `
             -Body $body `
-            -TimeoutSec 30
+            -TimeoutSec 30 `
+            -UseBasicParsing
 
         Write-Host "Status Code: $($response.StatusCode)"
 
@@ -4500,6 +4501,99 @@ function Test-AnthropicApi {
             Write-Host "[OK] API is responding!"
             if ($data.content -and $data.content.Count -gt 0) {
                 Write-Host "Response: $($data.content[0].text)"
+            }
+        }
+    }
+    catch {
+        Write-Host "[ERROR] $($_.Exception.Message)"
+        if ($_.Exception.Response) {
+            $errorBody = $_.Exception.Response.GetResponseStream()
+            $reader = New-Object System.IO.StreamReader($errorBody)
+            $errorText = $reader.ReadToEnd()
+            Write-Host $errorText
+        }
+    }
+}
+
+function Test-OpenAiApi {
+    <#
+.SYNOPSIS
+    Tests connectivity to an OpenAI-compatible API endpoint.
+
+.DESCRIPTION
+    Sends a minimal chat-completion request to the specified OpenAI Chat Completions
+    API endpoint and reports whether the API key, URL, and model combination is working.
+    Useful for verifying credentials and endpoint reachability before integrating
+    with tools or scripts.
+
+.PARAMETER ApiKey
+    The API key used for authentication (sent as Bearer token in Authorization header).
+
+.PARAMETER ApiUrl
+    The base URL of the OpenAI-compatible API (e.g. "https://api.openai.com/v1"
+    or "https://api.deepseek.com/v1").
+
+.PARAMETER Model
+    The model identifier to use for the test request (e.g. "gpt-4o", "deepseek-chat").
+
+.EXAMPLE
+    Test-OpenAiApi -ApiKey $env:OPENAI_API_KEY -ApiUrl "https://api.openai.com/v1" -Model "gpt-4o"
+
+.EXAMPLE
+    Test-OpenAiApi $env:DEEPSEEK_API_KEY "https://api.deepseek.com/v1" "deepseek-chat"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string]$ApiKey,
+
+        [Parameter(Mandatory, Position = 1)]
+        [string]$ApiUrl,
+
+        [Parameter(Mandatory, Position = 2)]
+        [string]$Model
+    )
+
+    Write-Host "Testing API connectivity..."
+    Write-Host "URL: $ApiUrl"
+    Write-Host "Model: $Model"
+    Write-Host ("-" * 40)
+
+    $headers = @{
+        "Authorization" = "Bearer $ApiKey"
+        "Content-Type"  = "application/json"
+    }
+
+    $body = @{
+        model      = $Model
+        max_tokens = 100
+        messages   = @(
+            @{
+                role    = "user"
+                content = "Say 'API is working'"
+            }
+        )
+    } | ConvertTo-Json
+
+    try {
+        $response = Invoke-WebRequest -Uri "$ApiUrl/chat/completions" `
+            -Method POST `
+            -Headers $headers `
+            -Body $body `
+            -TimeoutSec 30 `
+            -UseBasicParsing
+
+        Write-Host "Status Code: $($response.StatusCode)"
+
+        if ($response.StatusCode -eq 200) {
+            $data = $response.Content | ConvertFrom-Json
+            Write-Host "[OK] API is responding!"
+            if ($data.choices -and $data.choices.Count -gt 0) {
+                Write-Host "Response: $($data.choices[0].message.content)"
             }
         }
     }
