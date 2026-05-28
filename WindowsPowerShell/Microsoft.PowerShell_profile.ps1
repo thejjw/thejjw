@@ -162,10 +162,6 @@ $_SetupAiToolsInternal = @{
         'libjxl.libjxl',
         'JohnMacFarlane.Pandoc',
         'tesseract-ocr.tesseract',
-        'Microsoft.OpenJDK.25',
-        'Rustlang.Rustup',
-        'GoLang.Go',
-        'StrawberryPerl.StrawberryPerl',
         'AquaSecurity.Trivy',
         'Cisco.ClamAV',
         'astral-sh.ruff',
@@ -173,6 +169,17 @@ $_SetupAiToolsInternal = @{
         'Oracle.MySQLShell',
         'PostgreSQL.psqlODBC'
     )
+    SdkWingetPackages      = @(
+        'Microsoft.OpenJDK.25',
+        'Rustlang.Rustup',
+        'GoLang.Go',
+        'StrawberryPerl.StrawberryPerl'
+    )
+    Urls                   = @{
+        AgyCli           = 'https://antigravity.google/cli/install.ps1'
+        ClaudeCli        = 'https://claude.ai/install.ps1'
+        CodexCli         = 'https://chatgpt.com/codex/install.ps1'
+    }
     NpmPackages            = @(
         '@qwen-code/qwen-code',
         'oh-my-free-models'
@@ -4173,7 +4180,10 @@ function Setup-AiTools {
 
 .PARAMETER ExtendedSetup
     When supplied, also installs the extended (non-minimal) package set: heavier tools such as
-    FFmpeg, ImageMagick, Java, Go, security scanners, database CLIs, and similar large-scope packages.
+    FFmpeg, ImageMagick, security scanners, database CLIs, and similar large-scope packages.
+
+.PARAMETER Sdk
+    When supplied, also installs language SDK runtimes: Java (OpenJDK), Rust, Go, and Perl.
 
 .PARAMETER Dotnet
     When supplied, installs the .NET SDK via the official dotnet-install.ps1 script from dot.net.
@@ -4188,6 +4198,7 @@ function Setup-AiTools {
         [switch]$Auto,
         [switch]$Update,
         [switch]$ExtendedSetup,
+        [switch]$Sdk,
         [switch]$Dotnet
     )
 
@@ -4195,10 +4206,18 @@ function Setup-AiTools {
     if ($ExtendedSetup) {
         $wingetPackages += $_SetupAiToolsInternal.ExtendedWingetPackages
     }
+    if ($Sdk) {
+        $wingetPackages += $_SetupAiToolsInternal.SdkWingetPackages
+        $Dotnet = $true
+    }
 
     $npmPackages = $_SetupAiToolsInternal.NpmPackages
 
-    $setupLabel = if ($ExtendedSetup) { "extended" } else { "standard" }
+    $setupLabels = @('standard')
+    if ($ExtendedSetup) { $setupLabels += 'extended' }
+    if ($Sdk) { $setupLabels += 'sdk' }
+    if ($Dotnet) { $setupLabels += 'dotnet' }
+    $setupLabel = $setupLabels -join ', '
     Write-Host "The setup will check/install the following items ($setupLabel):" -ForegroundColor Cyan
     Write-Host "Winget packages:" -ForegroundColor Cyan
     foreach ($p in $wingetPackages) { Write-Host " - $p" }
@@ -4345,15 +4364,15 @@ function Setup-AiTools {
     Write-Host "Verifying CLIs..." -ForegroundColor Cyan
 
     if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
-        Write-Host "agy CLI not found; fix winget installation of Google.AntigravityCLI or run agy CLI installer via iex (irm 'https://antigravity.google/cli/install.ps1')" -ForegroundColor Yellow
+        Write-Host "agy CLI not found; fix winget installation of Google.AntigravityCLI or run agy CLI installer via iex (irm '$($_SetupAiToolsInternal.Urls.AgyCli)')" -ForegroundColor Yellow
     }
 
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-        Write-Host "claude CLI not found; fix winget installation of Anthropic.ClaudeCode or run Claude installer via iex (irm 'https://claude.ai/install.ps1')" -ForegroundColor Yellow
+        Write-Host "claude CLI not found; fix winget installation of Anthropic.ClaudeCode or run Claude installer via iex (irm '$($_SetupAiToolsInternal.Urls.ClaudeCli)')" -ForegroundColor Yellow
     }
 
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-        Write-Host "codex CLI not found; fix winget installation of OpenAI.Codex or run codex installer via iex (irm 'https://chatgpt.com/codex/install.ps1')" -ForegroundColor Yellow
+        Write-Host "codex CLI not found; fix winget installation of OpenAI.Codex or run codex installer via iex (irm '$($_SetupAiToolsInternal.Urls.CodexCli)')" -ForegroundColor Yellow
     }
 
     Write-Host "Setup-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
