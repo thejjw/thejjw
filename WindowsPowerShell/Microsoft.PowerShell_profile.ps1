@@ -4116,7 +4116,9 @@ function Setup-AiTools {
         'Google.Antigravity',
         'Google.AntigravityIDE',
         'Google.AntigravityCLI',
-        'marlocarlo.psmux'
+        'marlocarlo.psmux',
+        'marlocarlo.pstop',
+        'marlocarlo.psnet'
     )
 
     # Define npm packages early so we can display the full plan
