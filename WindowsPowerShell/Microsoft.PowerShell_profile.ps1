@@ -3103,7 +3103,7 @@ function Install-GlobalClaudeSettings {
     Ensures ~/.claude/settings.json has attribution disabled (no Co-Authored-By).
 
 .DESCRIPTION
-    One-shot: after successful update, drops a sentinel file (.claude/no-attribution)
+    One-shot: after successful update, drops a sentinel file (.claude/.no_attribution)
     so subsequent calls skip immediately. Uses native PowerShell JSON handling (no jq).
     Shared by all Claude Code provider setup functions (claudez, claudemm, etc.).
 
