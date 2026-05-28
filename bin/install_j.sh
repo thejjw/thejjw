@@ -254,11 +254,6 @@ nrd() {
     cat > "$dir/AGENTS.md" << 'AGENT_EOF'
 # AGENTS.md
 
-## Rules
-
-- Always commit after completing each logical change with a descriptive commit message.
-- Treat AI-agent instruction files as workspace-only guidance. Do not stage or commit them unless the user explicitly asks.
-
 ## Grounding
 
 - Always utilize web search to ground your answers, ensuring all technical advice and references are accurate and up-to-date.
@@ -271,7 +266,7 @@ nrd() {
 
 ## Git Discipline
 
-- Commit each logical change separately -- never bundle unrelated changes.
+- Always commit after completing each logical change separately with a descriptive commit message and never bundle unrelated changes.
 - Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
 - This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
 - Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
@@ -281,7 +276,7 @@ nrd() {
 ## Dependencies
 
 - Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
-- Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
+- Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed. Prefer a non-deprecated alternative when practical.
 AGENT_EOF
     printf '@AGENTS.md\n' > "$dir/CLAUDE.local.md"
     printf '@./AGENTS.md\n' > "$dir/QWEN.md"
