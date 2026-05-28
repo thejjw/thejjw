@@ -275,6 +275,7 @@ nrd() {
 - This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
 - Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
 - Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
+- Never append Co-Authored-By trailers to commit messages.
 
 ## Dependencies
 
