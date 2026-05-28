@@ -364,7 +364,7 @@ fi
 # ---------------------------------------------------------------------------
 # Global Claude Code settings.json - set attribution to suppress Co-Authored-By
 # ---------------------------------------------------------------------------
-SENTINEL="$CLAUDE_DIR/.no-attribution"
+SENTINEL="$CLAUDE_DIR/.no_attribution"
 SETTINGS_JSON="$CLAUDE_DIR/settings.json"
 
 if [[ -f "$SENTINEL" ]]; then

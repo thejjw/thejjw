@@ -3118,7 +3118,7 @@ function Install-GlobalClaudeSettings {
     param()
 
     $claudeDir = Join-Path $HOME '.claude'
-    $sentinel = Join-Path $claudeDir '.no-attribution'
+    $sentinel = Join-Path $claudeDir '.no_attribution'
 
     if (Test-Path -LiteralPath $sentinel) {
         Write-Host "global settings.json: $sentinel exists -- skipping"
