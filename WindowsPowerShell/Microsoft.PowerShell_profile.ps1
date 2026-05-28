@@ -4123,8 +4123,16 @@ function Setup-AiTools {
         'dalance.procs',
         'MrKaran.Doggo',
         'ducaale.xh',
+        'medialab.xan',
+        'oschwartz10612.Poppler',
         'uutils.diffutils',
+        'EliFulkerson.tcping',
+        'FujiApple.Trippy',
+        'natesales.q',
+        'Orange-OpenSource.Hurl',
         'astral-sh.uv',
+        'SQLite.SQLite',
+        'koalaman.shellcheck',
         'Microsoft.VisualStudioCode',
         'GitHub.cli',
         'SST.OpenCodeDesktop',
@@ -4141,6 +4149,26 @@ function Setup-AiTools {
 #         'Insecure.Nmap',
 #         'HTTPie.HTTPie',
 #         'uutils.coreutils',
+#         'Gyan.FFmpeg',
+#         'ImageMagick.ImageMagick',
+#         'Inkscape.Inkscape',
+#         'Google.Libwebp',
+#         'libjxl.libjxl',
+#         'JohnMacFarlane.Pandoc',
+#         'tesseract-ocr.tesseract',
+#         'Microsoft.OpenJDK.25',
+#         'GoLang.Go',
+#         'AquaSecurity.Trivy',
+#         'Cisco.ClamAV',
+#         'astral-sh.ruff',
+#         'Microsoft.Sqlcmd',
+#         'Oracle.MySQLShell',
+#         'PostgreSQL.psqlODBC',
+
+
+# https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-install-script
+# # Run a separate PowerShell process because the script calls exit, so it will end the current PowerShell session.
+# &powershell -NoProfile -ExecutionPolicy unrestricted -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; &([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1')))"
 
     # Define npm packages early so we can display the full plan
     $npmPackages = @('@qwen-code/qwen-code', 'oh-my-free-models')
