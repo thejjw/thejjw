@@ -3763,15 +3763,15 @@ Last Edit: 2026-04
     $Disable1M = "1"
 
     $baseParams = @{
-        RemoteHost = $RemoteHost
-        ApiKey     = $ApiKey
-        Port       = $Port
-        BaseUrl    = $BaseUrl
-        HaikuModel = $HaikuModel
+        RemoteHost  = $RemoteHost
+        ApiKey      = $ApiKey
+        Port        = $Port
+        BaseUrl     = $BaseUrl
+        HaikuModel  = $HaikuModel
         SonnetModel = $SonnetModel
-        OpusModel  = $OpusModel
-        TimeoutMs  = $TimeoutMs
-        Disable1M  = $Disable1M
+        OpusModel   = $OpusModel
+        TimeoutMs   = $TimeoutMs
+        Disable1M   = $Disable1M
     }
     if (-not [string]::IsNullOrWhiteSpace($KeyFile)) { $baseParams['KeyFile'] = $KeyFile }
     Invoke-RemoteClaudeCodeBase @baseParams
@@ -4030,15 +4030,15 @@ Last Edit: 2026-05
     $Disable1M = "1"
 
     $baseParams = @{
-        RemoteHost = $RemoteHost
-        ApiKey     = $ApiKey
-        Port       = $Port
-        BaseUrl    = $BaseUrl
-        HaikuModel = $HaikuModel
+        RemoteHost  = $RemoteHost
+        ApiKey      = $ApiKey
+        Port        = $Port
+        BaseUrl     = $BaseUrl
+        HaikuModel  = $HaikuModel
         SonnetModel = $SonnetModel
-        OpusModel  = $OpusModel
-        TimeoutMs  = $TimeoutMs
-        Disable1M  = $Disable1M
+        OpusModel   = $OpusModel
+        TimeoutMs   = $TimeoutMs
+        Disable1M   = $Disable1M
     }
     if (-not [string]::IsNullOrWhiteSpace($KeyFile)) { $baseParams['KeyFile'] = $KeyFile }
     Invoke-RemoteClaudeCodeBase @baseParams
@@ -4122,7 +4122,7 @@ function Setup-AiTools {
     )
 
     # Define npm packages early so we can display the full plan
-    $npmPackages = @('opencode-ai','@openai/codex','@qwen-code/qwen-code','oh-my-free-models')
+    $npmPackages = @('opencode-ai', '@openai/codex', '@qwen-code/qwen-code', 'oh-my-free-models')
 
     Write-Host "The setup will check/install the following items:" -ForegroundColor Cyan
     Write-Host "Winget packages:" -ForegroundColor Cyan
@@ -4138,7 +4138,7 @@ function Setup-AiTools {
 
     if (-not $Auto) {
         $choice = Read-Host -Prompt "Proceed with automatic installation of missing items? This will run winget/npm/installers. Continue? (Y/n)"
-        if ($choice -in @('n','N')) {
+        if ($choice -in @('n', 'N')) {
             Write-Host "Aborting automatic installs. Run Setup-AiTools -Auto when ready to continue." -ForegroundColor Yellow
             return
         }
@@ -4228,7 +4228,7 @@ function Setup-AiTools {
     }
 
     # Install global npm packages if npm available
-    $npmPackages = @('opencode-ai','@openai/codex','@qwen-code/qwen-code','oh-my-free-models')
+    $npmPackages = @('opencode-ai', '@openai/codex', '@qwen-code/qwen-code', 'oh-my-free-models')
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         foreach ($np in $npmPackages) {
             Write-Host "Installing npm package $np (global)..." -ForegroundColor Cyan
@@ -4294,7 +4294,7 @@ function Setup-AiApiKeys {
         [switch]$Force
     )
 
-    $names = @('DEEPSEEK_API_KEY','Z_AI_AUTH_TOKEN','MINIMAX_API_KEY','NVIDIA_API_KEY','OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
 
     function Get-UserValue($n) {
         # Check process (current session) first, then persisted User scope
@@ -4328,7 +4328,7 @@ function Setup-AiApiKeys {
 
         if ($current -and $Force) {
             $resp = Read-Host -Prompt "$n already set. Overwrite? (y/N)"
-            if ($resp -notin @('y','Y')) { Write-Host "Keeping existing $n." -ForegroundColor DarkGray; continue }
+            if ($resp -notin @('y', 'Y')) { Write-Host "Keeping existing $n." -ForegroundColor DarkGray; continue }
         }
 
         # Read hidden input as SecureString. If the input isn't a SecureString or is empty, skip.
@@ -4419,4 +4419,97 @@ function agyd {
         return
     }
     agy --dangerously-skip-permissions @args
+}
+
+function Test-AnthropicApi {
+    <#
+.SYNOPSIS
+    Tests connectivity to an Anthropic-compatible API endpoint.
+
+.DESCRIPTION
+    Sends a minimal chat-completion request to the specified Anthropic Messages API
+    endpoint and reports whether the API key, URL, and model combination is working.
+    Useful for verifying credentials and endpoint reachability before integrating
+    with tools or scripts.
+
+.PARAMETER ApiKey
+    The API key used for authentication (sent as x-api-key header).
+
+.PARAMETER ApiUrl
+    The base URL of the Anthropic-compatible API (e.g. "https://api.anthropic.com"
+    or "https://api.z.ai/api/anthropic").
+
+.PARAMETER Model
+    The model identifier to use for the test request (e.g. "claude-sonnet-4-20250514").
+
+.EXAMPLE
+    Test-AnthropicApi -ApiKey $env:ANTHROPIC_API_KEY -ApiUrl "https://api.anthropic.com" -Model "claude-sonnet-4-20250514"
+
+.EXAMPLE
+    Test-AnthropicApi $env:SOME_AUTH_TOKEN "https://api.z.ai/api/anthropic" "glm-5.1"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string]$ApiKey,
+
+        [Parameter(Mandatory, Position = 1)]
+        [string]$ApiUrl,
+
+        [Parameter(Mandatory, Position = 2)]
+        [string]$Model
+    )
+
+    Write-Host "Testing API connectivity..."
+    Write-Host "URL: $ApiUrl"
+    Write-Host "Model: $Model"
+    Write-Host ("-" * 40)
+
+    $headers = @{
+        "x-api-key"         = $ApiKey
+        "Content-Type"      = "application/json"
+        "anthropic-version" = "2023-06-01"
+    }
+
+    $body = @{
+        model      = $Model
+        max_tokens = 100
+        messages   = @(
+            @{
+                role    = "user"
+                content = "Say 'API is working'"
+            }
+        )
+    } | ConvertTo-Json
+
+    try {
+        $response = Invoke-WebRequest -Uri "$ApiUrl/v1/messages" `
+            -Method POST `
+            -Headers $headers `
+            -Body $body `
+            -TimeoutSec 30
+
+        Write-Host "Status Code: $($response.StatusCode)"
+
+        if ($response.StatusCode -eq 200) {
+            $data = $response.Content | ConvertFrom-Json
+            Write-Host "[OK] API is responding!"
+            if ($data.content -and $data.content.Count -gt 0) {
+                Write-Host "Response: $($data.content[0].text)"
+            }
+        }
+    }
+    catch {
+        Write-Host "[ERROR] $($_.Exception.Message)"
+        if ($_.Exception.Response) {
+            $errorBody = $_.Exception.Response.GetResponseStream()
+            $reader = New-Object System.IO.StreamReader($errorBody)
+            $errorText = $reader.ReadToEnd()
+            Write-Host $errorText
+        }
+    }
 }
