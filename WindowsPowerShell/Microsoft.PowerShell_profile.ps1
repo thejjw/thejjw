@@ -176,9 +176,9 @@ $_SetupAiToolsInternal = @{
         'StrawberryPerl.StrawberryPerl'
     )
     Urls                   = @{
-        AgyCli           = 'https://antigravity.google/cli/install.ps1'
-        ClaudeCli        = 'https://claude.ai/install.ps1'
-        CodexCli         = 'https://chatgpt.com/codex/install.ps1'
+        AgyCli    = 'https://antigravity.google/cli/install.ps1'
+        ClaudeCli = 'https://claude.ai/install.ps1'
+        CodexCli  = 'https://chatgpt.com/codex/install.ps1'
     }
     NpmPackages            = @(
         '@qwen-code/qwen-code',
@@ -3279,6 +3279,9 @@ function claudez {
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-4.7"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
+
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-4.7"
+    $env:CLAUDE_CODE_EFFORT_LEVEL = "high"
     
     try {
         Install-GlobalClaudeMd
@@ -3297,6 +3300,83 @@ function claudez {
         Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
         Remove-Item Env:\CLAUDE_CODE_DISABLE_1M_CONTEXT -ErrorAction SilentlyContinue
         Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
+
+        Remove-Item Env:\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue
+    }
+}
+
+function claudezm {
+    <#
+.SYNOPSIS
+    Launches Claude Code with Z.AI settings and GLM model overrides. (Max plan compatibility mode)
+
+.DESCRIPTION
+    Performs the same setup as claudez, then temporarily sets the default Anthropic model variables
+    to GLM-backed values before invoking claude.
+
+.EXAMPLE
+    claudezm
+
+.EXAMPLE
+    claudezm "Summarize the changed files"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-04
+#>
+    # Read token from environment only (process first, then persisted user scope).
+    $token = $env:Z_AI_AUTH_TOKEN
+    if (-not $token) {
+        $token = [Environment]::GetEnvironmentVariable("Z_AI_AUTH_TOKEN", "User")
+    }
+
+    if (-not $token) {
+        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
+        Write-Host "  [Environment]::SetEnvironmentVariable('Z_AI_AUTH_TOKEN', '<your_token>', 'User')" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Optional (current session only):" -ForegroundColor Yellow
+        Write-Host "  `$env:Z_AI_AUTH_TOKEN = '<your_token>'" -ForegroundColor Cyan
+        return
+    }
+
+    $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
+    $env:ANTHROPIC_AUTH_TOKEN = $token
+    $env:API_TIMEOUT_MS = "3000000"
+    $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"
+    $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
+
+    # Max plan compatibility mode uses different default model routing.
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5-turbo"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
+
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-5-turbo"
+    $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
+
+    try {
+        Install-GlobalClaudeMd
+        [void](Install-ClaudezSetup -Token $token)
+
+        claude @args
+    }
+    finally {
+        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
+
+        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
+        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
+        Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_DISABLE_1M_CONTEXT -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
+
+        Remove-Item Env:\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue
     }
 }
 
@@ -3533,73 +3613,6 @@ function claudeds2d {
     claudeds2 @claudeArgs
 }
 
-function claudezm {
-    <#
-.SYNOPSIS
-    Launches Claude Code with Z.AI settings and GLM model overrides. (Max plan compatibility mode)
-
-.DESCRIPTION
-    Performs the same setup as claudez, then temporarily sets the default Anthropic model variables
-    to GLM-backed values before invoking claude.
-
-.EXAMPLE
-    claudezm
-
-.EXAMPLE
-    claudezm "Summarize the changed files"
-
-.NOTES
-    Author: jjw(@thejjw)
-    Last Edit: 2026-04
-#>
-    # Read token from environment only (process first, then persisted user scope).
-    $token = $env:Z_AI_AUTH_TOKEN
-    if (-not $token) {
-        $token = [Environment]::GetEnvironmentVariable("Z_AI_AUTH_TOKEN", "User")
-    }
-
-    if (-not $token) {
-        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
-        Write-Host ""
-        Write-Host "Set it once in your user environment, then restart PowerShell:" -ForegroundColor Yellow
-        Write-Host "  [Environment]::SetEnvironmentVariable('Z_AI_AUTH_TOKEN', '<your_token>', 'User')" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "Optional (current session only):" -ForegroundColor Yellow
-        Write-Host "  `$env:Z_AI_AUTH_TOKEN = '<your_token>'" -ForegroundColor Cyan
-        return
-    }
-
-    $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
-    $env:ANTHROPIC_AUTH_TOKEN = $token
-    $env:API_TIMEOUT_MS = "3000000"
-    $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
-    $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"
-    $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
-
-    # Max plan compatibility mode uses different default model routing.
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5-turbo"
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
-
-    try {
-        Install-GlobalClaudeMd
-        [void](Install-ClaudezSetup -Token $token)
-
-        claude @args
-    }
-    finally {
-        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
-
-        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
-        Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_DISABLE_1M_CONTEXT -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
-    }
-}
 
 function Invoke-RemoteClaudeCodeBase {
     <#
