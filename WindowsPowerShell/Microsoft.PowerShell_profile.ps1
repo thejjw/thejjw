@@ -52,8 +52,8 @@ $_NrdInternal = @{
   - Redirect to ``$null`` not ``/dev/null``.
   - Use semicolons or separate statements -- not ``&&`` to chain commands.
   - Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
-- If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
 - When useful and already available, use fast CLI tools such as `rg`, `fd`, `fzf`, or comparable installed tools; otherwise use PowerShell-native commands.
+- If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
 
 ## Code Style
 
