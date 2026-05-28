@@ -130,6 +130,10 @@ $_SetupAiToolsInternal = @{
         'FujiApple.Trippy',
         'natesales.q',
         'Orange-OpenSource.Hurl',
+        'tstack.lnav',
+        'Microsoft.Pave',
+        'Microsoft.err',
+        'wagoodman.dive',
         'astral-sh.uv',
         'SQLite.SQLite',
         'koalaman.shellcheck',
@@ -148,6 +152,7 @@ $_SetupAiToolsInternal = @{
     )
     ExtendedWingetPackages = @(
         'Insecure.Nmap',
+        'Buct0r.fullfetch',
         'HTTPie.HTTPie',
         'uutils.coreutils',
         'Gyan.FFmpeg',
@@ -158,7 +163,9 @@ $_SetupAiToolsInternal = @{
         'JohnMacFarlane.Pandoc',
         'tesseract-ocr.tesseract',
         'Microsoft.OpenJDK.25',
+        'Rustlang.Rustup',
         'GoLang.Go',
+        'StrawberryPerl.StrawberryPerl',
         'AquaSecurity.Trivy',
         'Cisco.ClamAV',
         'astral-sh.ruff',
