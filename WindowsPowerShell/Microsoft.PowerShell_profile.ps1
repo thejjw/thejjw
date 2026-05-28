@@ -4113,6 +4113,8 @@ function Setup-AiTools {
         'GitHub.cli',
         'SST.OpenCodeDesktop',
         'SST.opencode',
+        'OpenAI.Codex',
+        'Anthropic.ClaudeCode',
         'Google.Antigravity',
         'Google.AntigravityIDE',
         'Google.AntigravityCLI',
@@ -4122,7 +4124,7 @@ function Setup-AiTools {
     )
 
     # Define npm packages early so we can display the full plan
-    $npmPackages = @('opencode-ai', '@openai/codex', '@qwen-code/qwen-code', 'oh-my-free-models')
+    $npmPackages = @('@qwen-code/qwen-code', 'oh-my-free-models')
 
     Write-Host "The setup will check/install the following items:" -ForegroundColor Cyan
     Write-Host "Winget packages:" -ForegroundColor Cyan
@@ -4131,10 +4133,13 @@ function Setup-AiTools {
     Write-Host "NPM global packages (installed via npm -g):" -ForegroundColor Cyan
     foreach ($np in $npmPackages) { Write-Host " - $np" }
 
-    Write-Host "Command-line tools / CLIs to verify/install:" -ForegroundColor Cyan
+    Write-Host "Command-line tools to verify/install:" -ForegroundColor Cyan
     Write-Host " - git (installed via winget if missing)"
+
+    Write-Host "CLIs to verify:" -ForegroundColor Cyan
     Write-Host " - agy (Antigravity CLI)"
     Write-Host " - claude (Claude CLI)"
+    Write-Host " - codex (Codex CLI)"
 
     if (-not $Auto) {
         $choice = Read-Host -Prompt "Proceed with automatic installation of missing items? This will run winget/npm/installers. Continue? (Y/n)"
@@ -4228,7 +4233,6 @@ function Setup-AiTools {
     }
 
     # Install global npm packages if npm available
-    $npmPackages = @('opencode-ai', '@openai/codex', '@qwen-code/qwen-code', 'oh-my-free-models')
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         foreach ($np in $npmPackages) {
             Write-Host "Installing npm package $np (global)..." -ForegroundColor Cyan
@@ -4240,25 +4244,24 @@ function Setup-AiTools {
         return
     }
 
+    Write-Host "CLIs to verify:" -ForegroundColor Cyan
+    Write-Host " - agy (Antigravity CLI)"
+    Write-Host " - claude (Claude CLI)"
+    Write-Host " - codex (Codex CLI)"
+
     # Install Antigravity and Claude CLIs using their recommended installers
-    Write-Host "Bootstrapping Antigravity and Claude CLIs..." -ForegroundColor Cyan
+    Write-Host "Verifying CLIs..." -ForegroundColor Cyan
 
     if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
-        Write-Host "agy CLI not found; running Antigravity installer..." -ForegroundColor Yellow
-        try { iex (irm 'https://antigravity.google/cli/install.ps1') } catch { Write-Host "Antigravity install failed: $_" -ForegroundColor Red }
-    }
-    else {
-        Write-Host "agy CLI already present; running 'agy update'..." -ForegroundColor Green
-        try { & agy update 2>$null } catch { Write-Host "agy update failed: $($_)" -ForegroundColor Yellow }
+        Write-Host "agy CLI not found; fix winget installation of Google.AntigravityCLI or run agy CLI installer via iex (irm 'https://antigravity.google/cli/install.ps1')" -ForegroundColor Yellow
     }
 
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-        Write-Host "claude CLI not found; running Claude installer..." -ForegroundColor Yellow
-        try { iex (irm 'https://claude.ai/install.ps1') } catch { Write-Host "Claude install failed: $_" -ForegroundColor Red }
+        Write-Host "claude CLI not found; fix winget installation of Anthropic.ClaudeCode or run Claude installer via iex (irm 'https://claude.ai/install.ps1')" -ForegroundColor Yellow
     }
-    else {
-        Write-Host "claude CLI already present; running 'claude update'..." -ForegroundColor Green
-        try { & claude update 2>$null } catch { Write-Host "claude update failed: $($_)" -ForegroundColor Yellow }
+
+    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+        Write-Host "codex CLI not found; fix winget installation of OpenAI.Codex or run codex installer via iex (irm 'https://chatgpt.com/codex/install.ps1')" -ForegroundColor Yellow
     }
 
     Write-Host "Setup-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
