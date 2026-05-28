@@ -59,6 +59,7 @@ $_NrdInternal = @{
 
 - Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
 - Comment every public function/method and any non-obvious logic inline.
+- Prefer ASCII in source code. Use non-ASCII characters only when required for user-facing text, test fixtures, protocol/data literals, or existing project conventions.
 
 ## Git Discipline
 
