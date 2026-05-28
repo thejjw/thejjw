@@ -112,6 +112,33 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Antigravity CLI (agy)
+# ---------------------------------------------------------------------------
+if command -v agy &>/dev/null; then
+  echo "agy $(agy --version 2>/dev/null || echo 'installed') already present -- skipping"
+else
+  curl -fsSL https://antigravity.google/cli/install.sh | bash
+fi
+
+# ---------------------------------------------------------------------------
+# Claude Code (claude)
+# ---------------------------------------------------------------------------
+if command -v claude &>/dev/null; then
+  echo "claude $(claude --version 2>/dev/null || echo 'installed') already present -- skipping"
+else
+  curl -fsSL https://claude.ai/install.sh | bash
+fi
+
+# ---------------------------------------------------------------------------
+# OpenAI Codex CLI (codex)
+# ---------------------------------------------------------------------------
+if command -v codex &>/dev/null; then
+  echo "codex $(codex --version 2>/dev/null || echo 'installed') already present -- skipping"
+else
+  curl -fsSL https://chatgpt.com/codex/install.sh | sh
+fi
+
+# ---------------------------------------------------------------------------
 # nrd - embed into shell profile if not already present
 # ---------------------------------------------------------------------------
 MARKER="# >>> nrd >>>"
