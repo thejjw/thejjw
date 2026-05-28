@@ -4105,9 +4105,11 @@ function Setup-AiTools {
 
     $wingetPackages = @(
         'Notepad++.Notepad++',
+        'Microsoft.Edit',
         'OpenJS.NodeJS.LTS',
         'Python.PythonInstallManager',
         'jqlang.jq',
+        'BurntSushi.ripgrep.MSVC',
         'astral-sh.uv',
         'Microsoft.VisualStudioCode',
         'GitHub.cli',
