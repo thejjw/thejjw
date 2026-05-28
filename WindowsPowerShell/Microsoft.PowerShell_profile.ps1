@@ -4012,6 +4012,9 @@ function claudemm {
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "MiniMax-M2.7"
+    $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
+
     try {
         Install-GlobalClaudeMd
         [void](Install-ClaudemmSetup -Token $key)
@@ -4029,6 +4032,9 @@ function claudemm {
         Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
         Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
         Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
+
+        Remove-Item Env:\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue
+        Remove-Item Env:\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue
     }
 }
 
