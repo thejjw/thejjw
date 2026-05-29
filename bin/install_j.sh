@@ -163,7 +163,8 @@ configure_zswap() {
         sudo update-grub
         echo "zswap configured. Reboot to take effect."
     else
-        echo "zswap already enabled (compressor: $(cat /sys/module/zswap/parameters/compressor)), skipping"
+        echo "zswap already enabled:"
+        grep -r . /sys/module/zswap/parameters/
     fi
 }
 
