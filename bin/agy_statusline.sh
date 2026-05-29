@@ -1,4 +1,11 @@
 #!/bin/bash
+
+# --- jq check ---
+if ! command -v jq &>/dev/null; then
+  echo "[!] jq not found -- install jq for statusline"
+  exit 0
+fi
+
 # Read the live JSON payload from agy
 payload=$(cat)
 
