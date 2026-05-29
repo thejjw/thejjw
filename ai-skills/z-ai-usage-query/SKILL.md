@@ -12,7 +12,7 @@ metadata:
 - Query **model usage** stats from the Z.AI Global platform (`api.z.ai`)
 - Query **tool usage** stats from the Z.AI Global platform
 - Query **quota limits** including Token usage (5-hour window) and MCP usage (1-month window)
-- Authenticate using a token from the `Z_AI_AUTH_TOKEN` environment variable and output all data in JSON format
+- Authenticate using a token from the `Z_AI_AUTH_TOKEN` environment variable and output all data in JSON format. On Windows personal installs, this may be populated from Windows Credential Store by `Load-AiApiKeysFromCS`.
 - Automatically compute a time window from yesterday at the current hour to today
 
 ## When to use me
@@ -22,14 +22,19 @@ Use this skill when you need to check your Z.AI GLM Coding Plan usage, monitor t
 ## Configuration
 
 **Auth Token:**
-- **Windows:** Read from the `$env:Z_AI_AUTH_TOKEN` environment variable.
+- **Windows:** Read from the `$env:Z_AI_AUTH_TOKEN` environment variable. In the personal Windows setup, this is usually loaded from Windows Credential Store by the `Load-AiApiKeysFromCS` function in the PowerShell profile.
 - **Linux/Mac:** Read from the `Z_AI_AUTH_TOKEN` environment variable.
 
 ## Usage
 
 ### Windows
 
-Use the **PowerShell** tool. Ensure `$env:Z_AI_AUTH_TOKEN` is set, then execute the query:
+Use the **PowerShell** tool. Ensure `$env:Z_AI_AUTH_TOKEN` is set, then execute the query. If the token is missing on a personal Windows install, load the PowerShell profile and run `Load-AiApiKeysFromCS` first:
+
+```powershell
+. $PROFILE
+Load-AiApiKeysFromCS
+```
 
 ```powershell
 $token = $env:Z_AI_AUTH_TOKEN
