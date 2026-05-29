@@ -39,7 +39,13 @@ parsed=$(echo "$input" | jq -rj '[
   .session_id // "?",
   .output_style.name // "default",
   .workspace.current_dir // "?",
-  .workspace.project_dir // "?"
+  .workspace.project_dir // "?",
+  .effort.level // "",
+  (.thinking.enabled // false | tostring),
+  (.fast_mode // false | tostring),
+  .rate_limits.five_hour.resets_at // "",
+  .rate_limits.seven_day.resets_at // "",
+  (.exceeds_200k_tokens // false | tostring)
 ] | map(tostring) | join("")')
 
 IFS=$'\x1f' read -r \
