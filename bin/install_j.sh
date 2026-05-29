@@ -155,7 +155,37 @@ else
 
 # >>> install_j_misc >>>
 
+setup_swap() {
+    if swapon --show | grep -q .; then
+        echo "setup_swap: swap already configured, skipping"
+        swapon --show
+        return 0
+    fi
+
+    local avail_gb
+    avail_gb=$(( $(df --output=avail / | tail -1) / 1024 / 1024 ))
+
+    local swap_size
+    if   (( avail_gb >= 5 )); then swap_size="4G"
+    elif (( avail_gb >= 3 )); then swap_size="2G"
+    elif (( avail_gb >= 2 )); then swap_size="1G"
+    else
+        echo "setup_swap: insufficient disk space (${avail_gb}GB available), aborting"
+        return 1
+    fi
+
+    echo "setup_swap: creating ${swap_size} swap file at /swapfile"
+    sudo fallocate -l "$swap_size" /swapfile
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile
+    sudo swapon /swapfile
+    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+    echo "setup_swap: done"
+}
+
 configure_zswap() {
+    setup_swap || return 1
+
     if grep -q '^N$' /sys/module/zswap/parameters/enabled; then
         sudo sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/{
             /zswap.enabled/! s/"$/ zswap.enabled=1 zswap.compressor=zstd"/
@@ -167,7 +197,6 @@ configure_zswap() {
         grep -r . /sys/module/zswap/parameters/
     fi
 }
-
 # <<< install_j_misc <<<
 MISC_EOF
 
