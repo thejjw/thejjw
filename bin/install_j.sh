@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PACKAGES="libjxl-tools tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop bubblewrap socat fd-find fzf"
+PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop bubblewrap socat"
 NVM_VERSION="v0.40.4"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 
@@ -212,17 +212,6 @@ configure_zswap() {
     fi
 }
 
-use_kakao_ubuntu_mirror() {
-    if grep -q 'kr.archive.ubuntu.com' /etc/apt/sources.list.d/ubuntu.sources; then
-        sudo sed -i 's|http://kr.archive.ubuntu.com/ubuntu/|http://mirror.kakao.com/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources
-        echo "use_kakao_ubuntu_mirror: mirror updated"
-        cat /etc/apt/sources.list.d/ubuntu.sources
-    else
-        echo "use_kakao_ubuntu_mirror: non-default mirror detected, skipping"
-        grep '^URIs:' /etc/apt/sources.list.d/ubuntu.sources
-    fi
-}
-
 install_docker() {
     if command -v docker &>/dev/null; then
         echo "install_docker: docker already installed, skipping"
@@ -309,7 +298,6 @@ install_dotnet() {
 if command -v podman &>/dev/null && ! command -v docker &>/dev/null; then
     alias docker=podman
 fi
-
 # <<< install_j_misc <<<
 MISC_EOF
 
@@ -536,35 +524,58 @@ CLAUDE_PREF_EOF
 fi
 
 # ---------------------------------------------------------------------------
-# Global Claude Code settings.json - set attribution to suppress Co-Authored-By
+# Global Claude Code config - set attribution and statusline
 # ---------------------------------------------------------------------------
-SENTINEL="$CLAUDE_DIR/.no_attribution"
+CC_CONFIG_SENTINEL="$CLAUDE_DIR/.config_setup_done"
 SETTINGS_JSON="$CLAUDE_DIR/settings.json"
 
-if [[ -f "$SENTINEL" ]]; then
-  echo "global settings.json: $SENTINEL exists -- skipping"
-elif command -v jq &>/dev/null; then
-  if [[ -f "$SETTINGS_JSON" ]]; then
-    jq '.attribution = {"commit": "", "pr": ""}' "$SETTINGS_JSON" > "$SETTINGS_JSON.tmp" && mv "$SETTINGS_JSON.tmp" "$SETTINGS_JSON"
-  else
-    mkdir -pv "$CLAUDE_DIR"
-    echo '{"attribution": {"commit": "", "pr": ""}}' | jq '.' > "$SETTINGS_JSON"
-  fi
-  touch "$SENTINEL"
-  echo "global settings.json: attribution disabled"
-elif command -v python3 &>/dev/null; then
-  mkdir -pv "$CLAUDE_DIR"
-  python3 -c "
-import json, os
-p = os.environ.get('SETTINGS_JSON', '')
-data = {}
-if os.path.isfile(p):
-    with open(p) as f: data = json.load(f)
-data['attribution'] = {'commit': '', 'pr': ''}
-with open(p, 'w') as f: json.dump(data, f, indent=2)
-" && touch "$SENTINEL" && echo "global settings.json: attribution disabled"
+if [[ -f "$CC_CONFIG_SENTINEL" ]]; then
+  echo "claude: global config setup already done -- skipping"
 else
-  echo "global settings.json: jq/python3 not found -- skipping attribution setup"
+  echo "claude: configuring global settings..."
+  mkdir -pv "$CLAUDE_DIR/bin"
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  
+  if [ -f "$SCRIPT_DIR/cc_statusline.sh" ]; then
+    cp -fv "$SCRIPT_DIR/cc_statusline.sh" "$CLAUDE_DIR/bin/cc_statusline.sh"
+    chmod +x "$CLAUDE_DIR/bin/cc_statusline.sh"
+  fi
+
+  if command -v jq &>/dev/null; then
+    [ ! -f "$SETTINGS_JSON" ] && echo "{}" > "$SETTINGS_JSON"
+    jq '.attribution = false | .customStatusLineCommand = "'"$CLAUDE_DIR/bin/cc_statusline.sh"'"' "$SETTINGS_JSON" > "$SETTINGS_JSON.tmp" && mv "$SETTINGS_JSON.tmp" "$SETTINGS_JSON"
+    touch "$CC_CONFIG_SENTINEL"
+    echo "claude: config setup complete via jq"
+  else
+    echo "claude: jq not found, skipping config setup"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Antigravity CLI (agy) config - set statusline
+# ---------------------------------------------------------------------------
+AGY_DIR="$HOME/.gemini/antigravity-cli"
+AGY_CONFIG_SENTINEL="$AGY_DIR/.config_setup_done"
+if [[ -f "$AGY_CONFIG_SENTINEL" ]]; then
+  echo "agy: config setup already done -- skipping"
+else
+  echo "agy: configuring settings..."
+  mkdir -pv "$AGY_DIR/bin"
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "$SCRIPT_DIR/agy_statusline.sh" ]; then
+    cp -fv "$SCRIPT_DIR/agy_statusline.sh" "$AGY_DIR/bin/agy_statusline.sh"
+    chmod +x "$AGY_DIR/bin/agy_statusline.sh"
+    if command -v jq &>/dev/null; then
+      AGY_SETTINGS="$AGY_DIR/settings.json"
+      [ ! -f "$AGY_SETTINGS" ] && echo "{}" > "$AGY_SETTINGS"
+      jq '.statusLine = {"type": "command", "command": "'"$AGY_DIR/bin/agy_statusline.sh"'"}' "$AGY_SETTINGS" > "$AGY_SETTINGS.tmp" && mv "$AGY_SETTINGS.tmp" "$AGY_SETTINGS"
+      echo "agy: statusline configured"
+    else
+      echo "agy: jq not found, skipping statusline config"
+    fi
+  fi
+  touch "$AGY_CONFIG_SENTINEL"
+  echo "agy: config setup complete"
 fi
 
 # ---------------------------------------------------------------------------
