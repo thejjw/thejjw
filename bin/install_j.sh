@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop bubblewrap socat"
+PACKAGES="libjxl-tools tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop bubblewrap socat fd-find fzf"
 NVM_VERSION="v0.40.4"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 
@@ -209,6 +209,17 @@ configure_zswap() {
     else
         echo "zswap already enabled:"
         grep -r . /sys/module/zswap/parameters/
+    fi
+}
+
+use_kakao_ubuntu_mirror() {
+    if grep -q 'kr.archive.ubuntu.com' /etc/apt/sources.list.d/ubuntu.sources; then
+        sudo sed -i 's|http://kr.archive.ubuntu.com/ubuntu/|http://mirror.kakao.com/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources
+        echo "use_kakao_ubuntu_mirror: mirror updated"
+        cat /etc/apt/sources.list.d/ubuntu.sources
+    else
+        echo "use_kakao_ubuntu_mirror: non-default mirror detected, skipping"
+        grep '^URIs:' /etc/apt/sources.list.d/ubuntu.sources
     fi
 }
 
