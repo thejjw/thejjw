@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PACKAGES="libjxl-tools tmux build-essential cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop bubblewrap socat fd-find fzf"
+PACKAGES="libjxl-tools tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop bubblewrap socat fd-find fzf"
 NVM_VERSION="v0.40.4"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 
