@@ -209,6 +209,41 @@ use_kakao_ubuntu_mirror() {
     fi
 }
 
+install_docker() {
+    if command -v docker &>/dev/null; then
+        echo "install_docker: docker already installed, skipping"
+        return 0
+    fi
+    echo "install_docker: installing docker..."
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sudo sh get-docker.sh
+    sudo usermod -aG docker "$USER"
+    rm -fv get-docker.sh
+    echo "install_docker: done (you may need to log out and back in)"
+}
+
+install_podman() {
+    if command -v podman &>/dev/null; then
+        echo "install_podman: podman already installed, skipping"
+        return 0
+    fi
+    echo "install_podman: installing podman and podman-compose..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update
+        sudo apt-get install -y podman podman-compose
+    elif command -v brew &>/dev/null; then
+        brew install podman podman-compose
+    else
+        echo "install_podman: unsupported package manager"
+        return 1
+    fi
+    echo "install_podman: done"
+}
+
+if command -v podman &>/dev/null && ! command -v docker &>/dev/null; then
+    alias docker=podman
+fi
+
 # <<< install_j_misc <<<
 MISC_EOF
 
