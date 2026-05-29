@@ -4336,17 +4336,19 @@ function Update-Profile {
         return
     }
 
-    # Show remote HEAD commit ID and date via a minimal shallow clone (no file content downloaded).
+    # Show the last commit that touched the profile file. --filter=blob:none fetches the full
+    # commit graph but zero file content, keeping bandwidth minimal while enabling per-file log.
     if ((Get-Command git -ErrorAction SilentlyContinue) -and
-        ($_ProfileUpdateUrl -match 'raw\.githubusercontent\.com/([^/]+/[^/]+)/refs/heads/[^/]+/')) {
+        ($_ProfileUpdateUrl -match 'raw\.githubusercontent\.com/([^/]+/[^/]+)/refs/heads/[^/]+/(.+)')) {
         $tmpDir = $null
         try {
-            $repoUrl = "https://github.com/$($Matches[1]).git"
-            $tmpDir  = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
-            git clone --depth 1 --filter=blob:none --no-checkout --quiet $repoUrl $tmpDir
-            $commitInfo = git -C $tmpDir log -1 --format="%h  %ci"
+            $repoUrl  = "https://github.com/$($Matches[1]).git"
+            $filePath = $Matches[2]
+            $tmpDir   = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+            git clone --filter=blob:none --no-checkout --quiet $repoUrl $tmpDir
+            $commitInfo = git -C $tmpDir log -1 --format="%h  %ci" -- $filePath
             if ($commitInfo) {
-                Write-Host "Remote HEAD: $commitInfo" -ForegroundColor DarkGray
+                Write-Host "Remote commit: $commitInfo" -ForegroundColor DarkGray
             }
         } catch {
         } finally {
