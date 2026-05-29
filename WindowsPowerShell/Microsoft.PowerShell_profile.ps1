@@ -4468,6 +4468,205 @@ function Update-Profile {
     }
 }
 
+function Install-AiSkills {
+    <#
+.SYNOPSIS
+    Installs public AI skills from the thejjw repository.
+.DESCRIPTION
+    Uses a shallow, blobless, sparse Git clone to fetch only the ai-skills directory,
+    then overwrites the configured skill directories for OpenCode, Claude Code, and
+    Antigravity CLI. Existing named skill directories are replaced so repeat manual
+    runs refresh changed files and remove stale files.
+.PARAMETER RepoUrl
+    Git repository URL that contains the ai-skills directory.
+.PARAMETER Branch
+    Branch to clone from the repository.
+.PARAMETER KeepTemp
+    Preserves the temporary sparse clone for debugging.
+.EXAMPLE
+    Install-AiSkills
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    [CmdletBinding()]
+    param(
+        [string]$RepoUrl = 'https://github.com/thejjw/thejjw.git',
+        [string]$Branch = 'main',
+        [switch]$KeepTemp
+    )
+
+    $previousVerbosePreference = $VerbosePreference
+    $VerbosePreference = 'Continue'
+    $tmpDir = $null
+
+    $openCodeClaudeSkills = @('web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query')
+    $antigravitySkills = @('session-exporter')
+
+    $openCodeSkillsDir = Join-Path $env:USERPROFILE '.agents\skills'
+    $claudeSkillsDir = Join-Path $env:USERPROFILE '.claude\skills'
+    $antigravitySkillsDir = Join-Path $env:USERPROFILE '.gemini\antigravity-cli\skills'
+    $openCodeConfigDir = Join-Path $env:USERPROFILE '.config\opencode'
+    $openCodeConfigFile = Join-Path $openCodeConfigDir 'opencode.json'
+
+    function Test-ChildPath {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$ParentPath,
+            [Parameter(Mandatory = $true)]
+            [string]$ChildPath
+        )
+
+        $parentFull = [System.IO.Path]::GetFullPath($ParentPath).TrimEnd('\')
+        $childFull = [System.IO.Path]::GetFullPath($ChildPath).TrimEnd('\')
+        return $childFull.StartsWith("$parentFull\", [System.StringComparison]::OrdinalIgnoreCase)
+    }
+
+    function Copy-SkillDirectory {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$SkillName,
+            [Parameter(Mandatory = $true)]
+            [string]$SourceRoot,
+            [Parameter(Mandatory = $true)]
+            [string]$DestinationRoot,
+            [Parameter(Mandatory = $true)]
+            [string]$ToolName
+        )
+
+        $src = Join-Path $SourceRoot $SkillName
+        $dst = Join-Path $DestinationRoot $SkillName
+
+        if (-not (Test-Path -LiteralPath $src -PathType Container)) {
+            throw "Missing skill source: $src"
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $src 'SKILL.md') -PathType Leaf)) {
+            throw "Missing SKILL.md for skill '$SkillName': $src"
+        }
+        if (-not (Test-ChildPath -ParentPath $DestinationRoot -ChildPath $dst)) {
+            throw "Refusing to remove destination outside expected skill root: $dst"
+        }
+
+        Write-Host "[info] Installing skill '$SkillName' to $ToolName"
+        if (-not (Test-Path -LiteralPath $DestinationRoot)) {
+            Write-Verbose "Creating skill root: $DestinationRoot"
+            $null = New-Item -ItemType Directory -Path $DestinationRoot -Force -Verbose
+        }
+        if (Test-Path -LiteralPath $dst) {
+            Write-Verbose "Removing existing skill directory: $dst"
+            Remove-Item -LiteralPath $dst -Recurse -Force -Verbose
+        }
+
+        Write-Verbose "Creating destination skill directory: $dst"
+        $null = New-Item -ItemType Directory -Path $dst -Force -Verbose
+        Write-Verbose "Copying '$src\*' to '$dst'"
+        Copy-Item -Path (Join-Path $src '*') -Destination $dst -Recurse -Force -Verbose
+    }
+
+    function Set-OpenCodeSkillPermissions {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string[]]$SkillNames
+        )
+
+        if (-not (Test-Path -LiteralPath $openCodeConfigDir)) {
+            Write-Verbose "Creating OpenCode config directory: $openCodeConfigDir"
+            $null = New-Item -ItemType Directory -Path $openCodeConfigDir -Force -Verbose
+        }
+
+        if (-not (Test-Path -LiteralPath $openCodeConfigFile)) {
+            Write-Verbose "Creating OpenCode config file: $openCodeConfigFile"
+            Set-Content -Path $openCodeConfigFile -Value '{}' -Encoding UTF8
+        }
+
+        Write-Verbose "Reading OpenCode config: $openCodeConfigFile"
+        try {
+            $config = Get-Content -LiteralPath $openCodeConfigFile -Raw | ConvertFrom-Json
+        }
+        catch {
+            throw "OpenCode config is not valid JSON: $openCodeConfigFile"
+        }
+
+        if (-not $config) {
+            $config = [pscustomobject]@{}
+        }
+        if (-not $config.PSObject.Properties['permission']) {
+            Write-Verbose "Adding OpenCode permission object"
+            $config | Add-Member -NotePropertyName 'permission' -NotePropertyValue ([pscustomobject]@{})
+        }
+        if (-not $config.permission.PSObject.Properties['skill']) {
+            Write-Verbose "Adding OpenCode permission.skill object"
+            $config.permission | Add-Member -NotePropertyName 'skill' -NotePropertyValue ([pscustomobject]@{})
+        }
+
+        foreach ($skill in $SkillNames) {
+            Write-Verbose "Allowing OpenCode skill permission: $skill"
+            $config.permission.skill | Add-Member -NotePropertyName $skill -NotePropertyValue 'allow' -Force
+        }
+
+        Write-Verbose "Writing updated OpenCode config: $openCodeConfigFile"
+        $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $openCodeConfigFile -Encoding UTF8
+        Write-Host "[info] Updated OpenCode skill permissions."
+    }
+
+    try {
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            throw 'git is required but was not found in PATH.'
+        }
+
+        $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+        Write-Verbose "Temporary clone directory: $tmpDir"
+        Write-Verbose "Cloning only branch '$Branch' from $RepoUrl"
+        & git clone --depth 1 --single-branch --branch $Branch --filter=blob:none --sparse $RepoUrl $tmpDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "git clone failed with exit code $LASTEXITCODE"
+        }
+
+        Write-Verbose "Sparse-checking out ai-skills"
+        & git -C $tmpDir sparse-checkout set ai-skills
+        if ($LASTEXITCODE -ne 0) {
+            throw "git sparse-checkout failed with exit code $LASTEXITCODE"
+        }
+
+        $skillsSourceDir = Join-Path $tmpDir 'ai-skills'
+        if (-not (Test-Path -LiteralPath $skillsSourceDir -PathType Container)) {
+            throw "Sparse checkout did not produce expected directory: $skillsSourceDir"
+        }
+        Write-Verbose "Skill source directory: $skillsSourceDir"
+
+        Set-OpenCodeSkillPermissions -SkillNames $openCodeClaudeSkills
+
+        foreach ($skill in $openCodeClaudeSkills) {
+            Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $openCodeSkillsDir -ToolName 'OpenCode'
+            Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $claudeSkillsDir -ToolName 'Claude Code'
+        }
+
+        foreach ($skill in $antigravitySkills) {
+            Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $antigravitySkillsDir -ToolName 'Antigravity CLI'
+        }
+
+        Write-Host ""
+        Write-Host "[done] Installed AI skills:" -ForegroundColor Green
+        Write-Host "  OpenCode and Claude Code: $($openCodeClaudeSkills -join ', ')"
+        Write-Host "  Antigravity CLI: $($antigravitySkills -join ', ')"
+    }
+    catch {
+        Write-Error "Install-AiSkills failed: $_"
+    }
+    finally {
+        if ($tmpDir -and (Test-Path -LiteralPath $tmpDir)) {
+            if ($KeepTemp) {
+                Write-Verbose "Keeping temporary clone for debugging: $tmpDir"
+            }
+            else {
+                Write-Verbose "Removing temporary clone: $tmpDir"
+                Remove-Item -LiteralPath $tmpDir -Recurse -Force -Verbose
+            }
+        }
+        $VerbosePreference = $previousVerbosePreference
+    }
+}
+
 function Setup-AiTools {
     <#
 .SYNOPSIS
