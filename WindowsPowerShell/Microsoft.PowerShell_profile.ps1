@@ -101,8 +101,8 @@ If an MCP tool is unavailable or underperforming, inform the user and suggest al
 "@
 }
 
-# Internal configuration for Setup-AiTools
-$_SetupAiToolsInternal = @{
+# Internal configuration for Install-AiTools
+$_AiToolsInternal = @{
     WingetPackages         = @(
         'Notepad++.Notepad++',
         'Microsoft.Edit',
@@ -185,6 +185,19 @@ $_SetupAiToolsInternal = @{
         '@qwen-code/qwen-code',
         'oh-my-free-models'
     )
+}
+
+# Internal configuration for Install-AiSkills
+$_AiSkillsInternal = @{
+    RepoUrl               = 'https://github.com/thejjw/thejjw.git'
+    Branch                = 'main'
+    SparsePath            = 'ai-skills'
+    OpenCodeClaudeSkills  = @('web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query')
+    AntigravitySkills     = @('session-exporter')
+    OpenCodeSkillsPath    = '.agents\skills'
+    ClaudeSkillsPath      = '.claude\skills'
+    AntigravitySkillsPath = '.gemini\antigravity-cli\skills'
+    OpenCodeConfigPath    = '.config\opencode\opencode.json'
 }
 
 function New-RandomPassword {
@@ -3239,7 +3252,7 @@ function Install-GlobalClaudeSettings {
     $targetStatusLine = Join-Path $claudeBinDir 'cc_statusline.sh'
 
     try {
-        Invoke-RestMethod -Uri $_SetupAiToolsInternal.Urls.CcStatusline -OutFile $targetStatusLine
+        Invoke-RestMethod -Uri $_AiToolsInternal.Urls.CcStatusline -OutFile $targetStatusLine
     } catch {
         Write-Warning "claude: download failure caused setup to stop ($($_)). Please check internet availability and run the command again."
         return
@@ -3287,7 +3300,7 @@ function Install-AgySettings {
     $targetStatusLine = Join-Path $agyBinDir 'agy_statusline.sh'
 
     try {
-        Invoke-RestMethod -Uri $_SetupAiToolsInternal.Urls.AgyStatusline -OutFile $targetStatusLine
+        Invoke-RestMethod -Uri $_AiToolsInternal.Urls.AgyStatusline -OutFile $targetStatusLine
     } catch {
         Write-Warning "agy: download failure caused setup to stop ($($_)). Please check internet availability and run the command again."
         return
@@ -3573,7 +3586,7 @@ function claudez {
     if (-not $token) {
         Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -3638,7 +3651,7 @@ function claudezm {
     if (-not $token) {
         Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -3753,7 +3766,7 @@ function claudeds {
     if (-not $key) {
         Write-Host "DEEPSEEK_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -3841,7 +3854,7 @@ function claudeds2 {
     if (-not $key) {
         Write-Host "DEEPSEEK_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -4123,7 +4136,7 @@ Last Edit: 2026-04
     if (-not $ApiKey) {
         Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -4270,7 +4283,7 @@ function claudemm {
     if (-not $key) {
         Write-Host "MINIMAX_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -4380,7 +4393,7 @@ Last Edit: 2026-05
     if (-not $ApiKey) {
         Write-Host "MINIMAX_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
-        Write-Host "Please set it securely using: Setup-AiApiKeysCS" -ForegroundColor Yellow
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
 
@@ -4491,8 +4504,8 @@ function Install-AiSkills {
 #>
     [CmdletBinding()]
     param(
-        [string]$RepoUrl = 'https://github.com/thejjw/thejjw.git',
-        [string]$Branch = 'main',
+        [string]$RepoUrl = $_AiSkillsInternal.RepoUrl,
+        [string]$Branch = $_AiSkillsInternal.Branch,
         [switch]$KeepTemp
     )
 
@@ -4500,14 +4513,14 @@ function Install-AiSkills {
     $VerbosePreference = 'Continue'
     $tmpDir = $null
 
-    $openCodeClaudeSkills = @('web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query')
-    $antigravitySkills = @('session-exporter')
+    $openCodeClaudeSkills = $_AiSkillsInternal.OpenCodeClaudeSkills
+    $antigravitySkills = $_AiSkillsInternal.AntigravitySkills
 
-    $openCodeSkillsDir = Join-Path $env:USERPROFILE '.agents\skills'
-    $claudeSkillsDir = Join-Path $env:USERPROFILE '.claude\skills'
-    $antigravitySkillsDir = Join-Path $env:USERPROFILE '.gemini\antigravity-cli\skills'
-    $openCodeConfigDir = Join-Path $env:USERPROFILE '.config\opencode'
-    $openCodeConfigFile = Join-Path $openCodeConfigDir 'opencode.json'
+    $openCodeSkillsDir = Join-Path $env:USERPROFILE $_AiSkillsInternal.OpenCodeSkillsPath
+    $claudeSkillsDir = Join-Path $env:USERPROFILE $_AiSkillsInternal.ClaudeSkillsPath
+    $antigravitySkillsDir = Join-Path $env:USERPROFILE $_AiSkillsInternal.AntigravitySkillsPath
+    $openCodeConfigFile = Join-Path $env:USERPROFILE $_AiSkillsInternal.OpenCodeConfigPath
+    $openCodeConfigDir = Split-Path -Parent $openCodeConfigFile
 
     function Test-ChildPath {
         param(
@@ -4622,13 +4635,13 @@ function Install-AiSkills {
             throw "git clone failed with exit code $LASTEXITCODE"
         }
 
-        Write-Verbose "Sparse-checking out ai-skills"
-        & git -C $tmpDir sparse-checkout set ai-skills
+        Write-Verbose "Sparse-checking out $($_AiSkillsInternal.SparsePath)"
+        & git -C $tmpDir sparse-checkout set $_AiSkillsInternal.SparsePath
         if ($LASTEXITCODE -ne 0) {
             throw "git sparse-checkout failed with exit code $LASTEXITCODE"
         }
 
-        $skillsSourceDir = Join-Path $tmpDir 'ai-skills'
+        $skillsSourceDir = Join-Path $tmpDir $_AiSkillsInternal.SparsePath
         if (-not (Test-Path -LiteralPath $skillsSourceDir -PathType Container)) {
             throw "Sparse checkout did not produce expected directory: $skillsSourceDir"
         }
@@ -4667,7 +4680,7 @@ function Install-AiSkills {
     }
 }
 
-function Setup-AiTools {
+function Install-AiTools {
     <#
 .SYNOPSIS
     Installs common developer tools and CLIs via winget/npm and helper installers.
@@ -4723,13 +4736,13 @@ function Setup-AiTools {
         throw "Cannot specify both -Docker and -Podman switches simultaneously."
     }
 
-    $wingetPackages = $_SetupAiToolsInternal.WingetPackages
+    $wingetPackages = $_AiToolsInternal.WingetPackages
     if ($ExtendedSetup) {
-        $wingetPackages += $_SetupAiToolsInternal.ExtendedWingetPackages
+        $wingetPackages += $_AiToolsInternal.ExtendedWingetPackages
     }
     # -Sdk implicitly enables -Dotnet because .NET is part of the SDK runtime stack.
     if ($Sdk) {
-        $wingetPackages += $_SetupAiToolsInternal.SdkWingetPackages
+        $wingetPackages += $_AiToolsInternal.SdkWingetPackages
         $Dotnet = $true
     }
     if ($Docker) {
@@ -4739,7 +4752,7 @@ function Setup-AiTools {
         $wingetPackages += 'RedHat.Podman'
     }
 
-    $npmPackages = $_SetupAiToolsInternal.NpmPackages
+    $npmPackages = $_AiToolsInternal.NpmPackages
 
     $setupLabels = @('standard')
     if ($ExtendedSetup) { $setupLabels += 'extended' }
@@ -4765,7 +4778,7 @@ function Setup-AiTools {
     if (-not $Auto) {
         $choice = Read-Host -Prompt "Proceed with automatic installation of missing items? This will run winget/npm/installers. Continue? (Y/n)"
         if ($choice -in @('n', 'N')) {
-            Write-Host "Aborting automatic installs. Run Setup-AiTools -Auto when ready to continue." -ForegroundColor Yellow
+            Write-Host "Aborting automatic installs. Run Install-AiTools -Auto when ready to continue." -ForegroundColor Yellow
             return
         }
     }
@@ -4913,7 +4926,7 @@ function Setup-AiTools {
         }
     }
     else {
-        Write-Host "npm not found - aborting Setup-AiTools. Please inspect your Node/npm installation and re-run." -ForegroundColor Red
+        Write-Host "npm not found - aborting Install-AiTools. Please inspect your Node/npm installation and re-run." -ForegroundColor Red
         return
     }
 
@@ -4926,21 +4939,21 @@ function Setup-AiTools {
     Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
 
     if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
-        Write-Host "agy CLI not found; fix winget installation of Google.AntigravityCLI or run agy CLI installer via iex (irm '$($_SetupAiToolsInternal.Urls.AgyCli)')" -ForegroundColor Yellow
+        Write-Host "agy CLI not found; fix winget installation of Google.AntigravityCLI or run agy CLI installer via iex (irm '$($_AiToolsInternal.Urls.AgyCli)')" -ForegroundColor Yellow
     } else {
         # If agy is present, ensure it's configured with the default settings
         Install-AgySettings
     }
 
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-        Write-Host "claude CLI not found; fix winget installation of Anthropic.ClaudeCode or run Claude installer via iex (irm '$($_SetupAiToolsInternal.Urls.ClaudeCli)')" -ForegroundColor Yellow
+        Write-Host "claude CLI not found; fix winget installation of Anthropic.ClaudeCode or run Claude installer via iex (irm '$($_AiToolsInternal.Urls.ClaudeCli)')" -ForegroundColor Yellow
     } else {
         # If claude is present, ensure it's configured with the default settings
         Install-GlobalClaudeSettings
     }
 
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-        Write-Host "codex CLI not found; fix winget installation of OpenAI.Codex or run codex installer via iex (irm '$($_SetupAiToolsInternal.Urls.CodexCli)')" -ForegroundColor Yellow
+        Write-Host "codex CLI not found; fix winget installation of OpenAI.Codex or run codex installer via iex (irm '$($_AiToolsInternal.Urls.CodexCli)')" -ForegroundColor Yellow
     } else {
         # If codex is present, ensure it's configured with the default settings
         Install-CodexSettings
@@ -4959,14 +4972,34 @@ function Setup-AiTools {
         Write-Host "Created docker alias (docker.bat) for podman in Winget Links directory." -ForegroundColor Green
     }
 
-    Write-Host "Setup-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
+    Write-Host "Install-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
 }
 
-function Setup-AiApiKeys {
+function Setup-AiTools {
+    <#
+.SYNOPSIS
+    Compatibility wrapper for Install-AiTools.
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Auto,
+        [switch]$Update,
+        [switch]$ExtendedSetup,
+        [switch]$Sdk,
+        [switch]$Dotnet,
+        [switch]$Docker,
+        [switch]$Podman
+    )
+
+    Write-Warning "Setup-AiTools is deprecated. Use Install-AiTools instead."
+    Install-AiTools -Auto:$Auto -Update:$Update -ExtendedSetup:$ExtendedSetup -Sdk:$Sdk -Dotnet:$Dotnet -Docker:$Docker -Podman:$Podman
+}
+
+function Set-AiApiKeys {
     <#
 .SYNOPSIS
     Interactive helper to view and set Claude-related API keys in the user environment.
-    (DEPRECATED: Now delegates securely to Setup-AiApiKeysCS)
+    (DEPRECATED: Now delegates securely to Set-AiApiKeysCS)
 
 .DESCRIPTION
     Checks for existing values of AI API key (e.g. `DEEPSEEK_API_KEY`, `Z_AI_AUTH_TOKEN`, ...) in
@@ -4979,10 +5012,10 @@ function Setup-AiApiKeys {
     When supplied, prompt to overwrite existing keys instead of skipping them.
 
 .EXAMPLE
-    Setup-AiApiKeys
+    Set-AiApiKeys
 
 .EXAMPLE
-    Setup-AiApiKeys -Force
+    Set-AiApiKeys -Force
 
 .NOTES
     Author: jjw(@thejjw)
@@ -4993,8 +5026,8 @@ function Setup-AiApiKeys {
         [switch]$Force
     )
 
-    Write-Host "WARNING: Setup-AiApiKeys is deprecated. Delegating securely to Setup-AiApiKeysCS..." -ForegroundColor Yellow
-    Setup-AiApiKeysCS -Force:$Force
+    Write-Host "WARNING: Set-AiApiKeys is deprecated. Delegating securely to Set-AiApiKeysCS..." -ForegroundColor Yellow
+    Set-AiApiKeysCS -Force:$Force
 
     # <# Legacy environment variable implementation commented out below:
     # $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
@@ -5064,6 +5097,20 @@ function Setup-AiApiKeys {
     # #>
 }
 
+function Setup-AiApiKeys {
+    <#
+.SYNOPSIS
+    Compatibility wrapper for Set-AiApiKeys.
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Force
+    )
+
+    Write-Warning "Setup-AiApiKeys is deprecated. Use Set-AiApiKeys instead."
+    Set-AiApiKeys -Force:$Force
+}
+
 function Get-AiApiKey {
     <#
     .SYNOPSIS
@@ -5096,7 +5143,7 @@ function Get-AiApiKey {
     }
 }
 
-function Setup-AiApiKeysCS {
+function Set-AiApiKeysCS {
     <#
     .SYNOPSIS
         Interactive helper to view and set Claude-related API keys in Windows Credential Manager.
@@ -5198,6 +5245,20 @@ function Setup-AiApiKeysCS {
 
     Write-Host ""
     Write-Host "Done! Run 'Load-AiApiKeysFromCS' to load these into your current terminal process." -ForegroundColor Cyan
+}
+
+function Setup-AiApiKeysCS {
+    <#
+.SYNOPSIS
+    Compatibility wrapper for Set-AiApiKeysCS.
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Force
+    )
+
+    Write-Warning "Setup-AiApiKeysCS is deprecated. Use Set-AiApiKeysCS instead."
+    Set-AiApiKeysCS -Force:$Force
 }
 
 function Load-AiApiKeysFromCS {
@@ -5502,4 +5563,3 @@ function Test-OpenAiApi {
 # Auto-load vault credentials at profile load time so every session starts with
 # keys available. Uses -Quiet to avoid printing key counts in transient shells.
 Load-AiApiKeysFromCS -Quiet
-
