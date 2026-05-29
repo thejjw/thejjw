@@ -9,16 +9,23 @@ fi
 # Read the live JSON payload from agy
 payload=$(cat)
 
-# Extract data using jq
-cwd=$(echo "$payload" | jq -r '.cwd // "N/A"')
-model=$(echo "$payload" | jq -r '.model.display_name // "N/A"')
-agent_state=$(echo "$payload" | jq -r '.agent_state // "idle"')
-used_pct=$(echo "$payload" | jq -r '.context_window.used_percentage // 0' | awk '{printf "%.1f", $1}')
-tokens_in=$(echo "$payload" | jq -r '.context_window.total_input_tokens // 0')
-tokens_out=$(echo "$payload" | jq -r '.context_window.total_output_tokens // 0')
-plan=$(echo "$payload" | jq -r '.plan_tier // "Standard"')
-email=$(echo "$payload" | jq -r '.email // "user"')
-sandbox=$(echo "$payload" | jq -r '.sandbox.enabled')
+# Extract data using a single jq call
+parsed=$(echo "$payload" | jq -rj '[
+  (.cwd // "N/A"),
+  (.model.display_name // "N/A"),
+  (.agent_state // "idle"),
+  (.context_window.used_percentage // 0),
+  (.context_window.total_input_tokens // 0),
+  (.context_window.total_output_tokens // 0),
+  (.plan_tier // "Standard"),
+  (.email // "user"),
+  (.sandbox.enabled // false)
+] | map(tostring) | join("\u001f")')
+
+IFS=$'\x1f' read -r cwd model agent_state used_pct_raw tokens_in tokens_out plan email sandbox <<< "$parsed"
+
+# Format percentage
+used_pct=$(awk -v p="$used_pct_raw" 'BEGIN {printf "%.1f", p}')
 
 # Format Git Branch
 git_info=""
