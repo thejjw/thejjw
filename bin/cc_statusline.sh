@@ -47,6 +47,7 @@ IFS=$'\x1f' read -r \
   cache_write cache_read cost dur_ms api_ms lines_add lines_rm \
   rate_5h rate_7d session_name agent_name worktree_name \
   version session_id output_style ws_current ws_project \
+  effort_level thinking_enabled fast_mode rate_5h_resets rate_7d_resets exceeds_200k \
   <<< "$parsed"
 
 # --- Git info: single porcelain call returns branch + ahead/behind + dirty + untracked ---
@@ -100,6 +101,23 @@ if [ -n "$git_status" ]; then
   fi
 fi
 
+# --- Effort / thinking display ---
+case "$effort_level" in
+  low)    effort_short="L" ;;
+  medium) effort_short="M" ;;
+  high)   effort_short="H" ;;
+  *)      effort_short="$effort_level" ;;
+esac
+
+think_tag=""
+if [ "$fast_mode" = "true" ]; then
+  think_tag="${CYAN}fast${RESET}"
+elif [ "$thinking_enabled" = "true" ]; then
+  think_tag="${YELLOW}T:${effort_short}${RESET}"
+elif [ -n "$effort_level" ]; then
+  think_tag="${DIM}${effort_short}${RESET}"
+fi
+
 # --- Helpers ---
 fmt_tokens() {
   local t=$1
@@ -128,7 +146,7 @@ fmt_time() {
 }
 
 # --- Context color based on usage percentage ---
-if [ "$ctx_pct" -ge 90 ] 2>/dev/null; then CTX_COLOR="$RED"
+if [ "$exceeds_200k" = "true" ] || [ "$ctx_pct" -ge 90 ] 2>/dev/null; then CTX_COLOR="$RED"
 elif [ "$ctx_pct" -ge 70 ] 2>/dev/null; then CTX_COLOR="$YELLOW"
 else CTX_COLOR="$GREEN"; fi
 
@@ -179,8 +197,12 @@ rate_color() {
 # ============================================================
 # LINE 1: Model | Context | Git (dirty+branch ahead/behind untracked) | Cost
 # ============================================================
-line1="${BOLD}[${model}]${RESET} "
-line1+="${CTX_COLOR}${tok_used}${RESET}/${DIM}${tok_max}${RESET}"
+line1="${BOLD}[${model}]${RESET}"
+[ -n "$think_tag" ] && line1+=" ${think_tag}"
+line1+=" "
+ctx_pfx=""
+[ "$exceeds_200k" = "true" ] && ctx_pfx="${RED}!${RESET}"
+line1+="${ctx_pfx}${CTX_COLOR}${tok_used}${RESET}/${DIM}${tok_max}${RESET}"
 if [ "$cache_read" -gt 0 ] 2>/dev/null || [ "$cache_write" -gt 0 ] 2>/dev/null; then
   line1+="  ${DIM}(c) r:${cache_r_fmt} w:${cache_w_fmt}${RESET}"
 fi
@@ -218,11 +240,15 @@ line3=""
 line3_parts=()
 if [ -n "$rate_5h" ]; then
   rc=$(rate_color "$rate_5h")
-  line3_parts+=("${DIM}Rate 5h:${RESET} ${rc}$(printf "%.0f" "$rate_5h")%${RESET}")
+  rst=""
+  [ -n "$rate_5h_resets" ] && rst=" $(date -d "@${rate_5h_resets}" +%H:%M 2>/dev/null)"
+  line3_parts+=("${DIM}Rate 5h:${RESET} ${rc}$(printf "%.0f" "$rate_5h")%${RESET}${DIM}${rst}${RESET}")
 fi
 if [ -n "$rate_7d" ]; then
   rc=$(rate_color "$rate_7d")
-  line3_parts+=("${DIM}7d:${RESET} ${rc}$(printf "%.0f" "$rate_7d")%${RESET}")
+  rst=""
+  [ -n "$rate_7d_resets" ] && rst=" $(date -d "@${rate_7d_resets}" +%H:%M 2>/dev/null)"
+  line3_parts+=("${DIM}7d:${RESET} ${rc}$(printf "%.0f" "$rate_7d")%${RESET}${DIM}${rst}${RESET}")
 fi
 if [ -n "$agent_name" ]; then
   line3_parts+=("${CYAN}agent:${agent_name}${RESET}")
