@@ -1,9 +1,11 @@
+# OSC 9;9 hyperlink lets Windows Terminal / VS Code detect and click the working directory
 function prompt {
     $loc = $executionContext.SessionState.Path.CurrentLocation
     $out = "PS $loc$('>' * ($nestedPromptLevel + 1)) "
     "$([char]27)]9;9;`"$loc`"$([char]27)\" + $out
 }
 
+# Raw content URL used by Update-Profile to self-update; keep in sync with repo path
 $_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
 
 # Internal configuration group for New-RandomDir to keep global namespace clean
@@ -219,6 +221,7 @@ function New-RandomPassword {
         [int]$MinimumSpecialCharacters = 3
     )
 
+    # System.Web is only available on .NET Framework (WinPS); pwsh on non-Windows lacks it
     try {
         Add-Type -AssemblyName System.Web -ErrorAction Stop
     }
@@ -264,6 +267,7 @@ function Clear-WorkingSet {
         $TargetProcesses
     )
 
+    # Compile C# shim once into the session via Add-Type so repeated calls avoid recompilation
     if ($null -eq $Global:hasEWSType) {
         $code = @"
 using System;
@@ -342,6 +346,7 @@ namespace ewsConsole
         $Global:hasEWSType = $true;
     }
 
+    # Invoke the compiled C# entry point; it writes results directly to stdout
     [ewsConsole.Program]::Main($TargetProcesses);
 }
 
@@ -380,6 +385,7 @@ function Get-AAA {
         $Repeat = 1
     )
 
+    # Fetch word lists once per session; subsequent calls reuse the cached $Global:getAAA
     try {
         if ($null -eq $Global:getAAA) {
             $Global:getAAA = @{
@@ -392,6 +398,7 @@ function Get-AAA {
         return
     }
     
+    # HashSet guarantees two distinct adjectives per iteration without a retry loop
     $result = [System.Collections.Generic.List[string]]::new()
     for ($i = 0; $i -lt $Repeat; $i++) {
         $adjs = New-Object System.Collections.Generic.HashSet[string]
@@ -427,6 +434,7 @@ function Get-MyIP {
 
     Tested with Windows Powershell. Should work with pwsh.
 #>
+    # Google's TXT record for this hostname reflects the querier's public IP
     return (Resolve-DnsName -Name o-o.myaddr.l.google.com -Server ns1.google.com -Type TXT | Select-Object -ExpandProperty Strings);
 }
 
@@ -536,6 +544,7 @@ function Get-NewPassword {
         throw "Password length too short for all required classes."
     }
 
+    # Inner functions capture $charPool and $MaxConsecutive from the outer scope
     function Get-RandomChar {
         param($set)
         if ($null -eq $set) { $set = $charPool }
@@ -560,9 +569,12 @@ function Get-NewPassword {
         return $true
     }
 
+    # Generate-and-validate loop: build a candidate, reject if it violates MaxConsecutive.
+    # Rejection rate is negligible for reasonable lengths and pool sizes.
     do {
         $passwordChars = @()
         if ($MoreSecure) {
+            # Seed one character from each enabled class to guarantee coverage
             foreach ($class in $required) {
                 $passwordChars += Get-RandomChar $class
             }
@@ -581,6 +593,8 @@ function Get-NewPassword {
             $passwordChars = for ($i = 0; $i -lt $Length; $i++) {
                 Get-RandomChar $charPool
             }
+            # Sort-Object { Get-Random } is a quick-and-dirty shuffle (not perfectly
+            # uniform like Fisher-Yates, but acceptable for the non-MoreSecure path)
             $passwordChars = $passwordChars | Sort-Object { Get-Random }
         }
         $password = -join $passwordChars
@@ -627,6 +641,7 @@ function Get-NewPasswordNode {
         $Length = 15
     )
 
+    # Delegates to Node.js because the Firefox password generator uses Web Crypto APIs
     if (Get-Command node.exe -ErrorAction SilentlyContinue) {
         $code = @"
 /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -906,6 +921,8 @@ function Save-Download {
         Write-Error $errorMessage -ErrorAction Stop
     }
 
+    # Parse Content-Disposition with the framework class rather than regex to handle
+    # quoted filenames, charset parameters, and RFC 6266 edge cases correctly
     $content = [System.Net.Mime.ContentDisposition]::new($WebResponse.Headers["Content-Disposition"])
     
     $fileName = $content.FileName
@@ -922,6 +939,8 @@ function Save-Download {
 
     Write-Verbose "Downloading to $fullPath"
 
+    # Write via FileStream instead of Set-Content/Out-File because the response
+    # body is a raw byte array; converting to string would corrupt binary downloads
     $file = [System.IO.FileStream]::new($fullPath, [System.IO.FileMode]::Create)
     try {
         $file.Write($WebResponse.Content, 0, $WebResponse.RawContentLength)
@@ -1099,10 +1118,14 @@ function Add-WingetPackagePaths {
         return
     }
 
+    # Scan all subdirectories containing .exe files; winget does not use a
+    # standard bin/ layout so we must discover executable dirs heuristically.
     $binPaths = Get-ChildItem -Path $wingetPath -Directory -Recurse |
     Where-Object { (Get-ChildItem -Path $_.FullName -Filter *.exe -File -ErrorAction SilentlyContinue).Count -gt 0 } |
     Select-Object -ExpandProperty FullName
 
+    # Read the persisted user PATH from the registry, not $env:PATH, so that
+    # the update sticks across sessions and doesn't duplicate machine-level entries.
     $currentPath = (Get-ItemPropertyValue -Path 'HKCU:\Environment' -Name 'PATH')
     $currentPathArr = $currentPath -split ';'
 
@@ -1118,7 +1141,11 @@ function Add-WingetPackagePaths {
         Write-Host "No new paths were added. All executable directories are already in PATH."
     }
     else {
+        # Write back via .NET registry API instead of Set-ItemProperty to
+        # guarantee REG_EXPAND_SZ, avoiding environment-variable literal expansion.
         [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $currentPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        # Also update the process PATH so the current session picks up new dirs
+        # immediately without needing a shell restart.
         $env:PATH = $env:PATH.TrimEnd(';') + ';' + ($added -join ';')
         Write-Host " Added the following paths to your user PATH:"
         $added | ForEach-Object { Write-Host "  - $_" }
@@ -1162,6 +1189,9 @@ function Remove-WingetPackagePaths {
     $filtered = @()
     $removed = @()
 
+    # Use -like prefix match rather than exact comparison so that any
+    # subdirectory under the winget packages root is caught, even if the
+    # specific package structure changes between winget versions.
     foreach ($p in $currentPathArr) {
         if ($p -like "$wingetRoot*") {
             $removed += $p
@@ -1176,8 +1206,11 @@ function Remove-WingetPackagePaths {
     }
     else {
         $newRegPath = $filtered -join ';'
+        # Persist the cleaned PATH to the registry (REG_EXPAND_SZ) for future sessions.
         [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $newRegPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
-        
+
+        # Strip the same entries from the live process PATH so the current
+        # session stops resolving executables from removed winget directories.
         $processPathArr = $env:PATH -split ';' | Where-Object { $_ -ne '' }
         $newProcessPath = ($processPathArr | Where-Object { $_ -notlike "$wingetRoot*" }) -join ';'
         $env:PATH = $newProcessPath
@@ -1234,6 +1267,9 @@ function New-RandomMacAddress {
     }
     else {
         # First octet: locally administered (bit 1 set), unicast (bit 0 cleared)
+        # Per IEEE 802, bit 0 = multicast, bit 1 = locally administered.
+        # Setting bit 1 and clearing bit 0 produces addresses safe for VMs
+        # and containers that won't collide with OUI-assigned hardware MACs.
         $first = ((Get-Random -Minimum 0 -Maximum 256) -bor 0x02) -band 0xFE
         $octets = @($first.ToString("x2"))
         for ($i = 1; $i -lt 6; $i++) {
@@ -1313,6 +1349,8 @@ function Set-RandomMacAddress {
             $octets += (Get-Random -Minimum 0 -Maximum 256).ToString("x2")
         }
     }
+    # Set-NetAdapter expects a bare hex string (no colons), unlike the
+    # colon-separated format New-RandomMacAddress returns for display.
     $newMac = $octets -join ""
     Write-Host "Attempting to set MAC address for adapter '$AdapterName' to $newMac..."
 
@@ -1396,6 +1434,8 @@ function Convert-JpgToJxl {
         [int]$ThrottleLimit = 4
     )
 
+    # Collect both extensions explicitly; WinPS 5.1's -Filter does not
+    # accept comma-separated values or -Include reliably with -Recurse.
     $images = @(Get-ChildItem -Path $Path -Filter *.jpg -Recurse -File) + @(Get-ChildItem -Path $Path -Filter *.jpeg -Recurse -File)
     $total = $images.Count
     if ($total -eq 0) {
@@ -1407,7 +1447,8 @@ function Convert-JpgToJxl {
     $i = 0
 
     foreach ($image in $images) {
-        # Limit the number of concurrent jobs
+        # Throttle by polling running-job count; WinPS 5.1 lacks the
+        # -ThrottleLimit parameter available in pwsh's Start-Job.
         while (@(Get-Job -State "Running").Count -ge $ThrottleLimit) {
             Start-Sleep -Milliseconds 200
         }
@@ -1430,6 +1471,8 @@ function Convert-JpgToJxl {
         }
     }
 
+    # Drain jobs as they complete rather than Wait-Job on the full array,
+    # so progress updates stream in real time instead of appearing all at once.
     $completed = 0
     while ($jobs.Count -gt 0) {
         $finishedJobs = Wait-Job -Job $jobs -Any
@@ -1457,6 +1500,8 @@ function Convert-JpgToJxl {
     Write-Host "The script took $($elapsedTime.TotalSeconds) seconds to convert $total images."
 }
 
+# Sequential variant kept for systems where background jobs are unavailable
+# or undesirable (e.g., constrained runspaces, CI pipelines, single-core VMs).
 function Convert-JpgToJxl-Sequential {
     <#
 .SYNOPSIS
@@ -1514,6 +1559,9 @@ function Convert-JpgToJxl-Sequential {
     Write-Host "The script took $($elapsedTime.TotalSeconds) seconds to convert $total images."
 }
 
+# Reverse conversion utility -- kept separate from the jpg-to-jxl functions
+# because the output extension logic and error semantics differ enough that
+# merging them would add branching complexity for little benefit.
 function Convert-JxlToJpg {
     <#
 .SYNOPSIS
@@ -1786,6 +1834,8 @@ Last Edit: Aug 2025
     )
 
     # --- Internal helper functions ---
+    # HashSet-based dedup by thumbprint; SslStream can return duplicate
+    # chain elements depending on the server's chain configuration.
     function Get-UniqueByThumbprint {
         param([System.Collections.IEnumerable] $Certificates)
         $certList = @($Certificates)
@@ -1825,19 +1875,25 @@ Last Edit: Aug 2025
         else { return "Leaf" }
     }
 
+    # Maps a certificate to the correct Windows store name (Root/CA/My)
+    # for X509Store-based installation. Falls through to 'My' (Personal) for
+    # end-entity certs that lack BasicConstraints.
     function Get-CertificateStoreName {
         param([System.Security.Cryptography.X509Certificates.X509Certificate2] $Certificate)
-        
+
         if (Test-SelfSignedCertificate -Certificate $Certificate) { return 'Root' }
-        
+
         $bc = $Certificate.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.19' } | Select-Object -First 1
         if ($bc -is [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]) {
             if ($bc.CertificateAuthority) { return 'CA' }
         }
-        
+
         return 'My'
     }
 
+    # Separate classification for certutil install planning -- uses
+    # 'CA'/'EndEntity' labels instead of 'Intermediate'/'Leaf' to align
+    # with certutil's own store naming (Root, CA, My).
     function Classify-Certificate {
         param([System.Security.Cryptography.X509Certificates.X509Certificate2] $Certificate)
 
@@ -1872,6 +1928,8 @@ Last Edit: Aug 2025
         }
         if ([string]::IsNullOrWhiteSpace($cn)) { $cn = 'Unknown' }
 
+        # Double-underscore separates human-readable name from thumbprint so
+        # filenames stay unique across renewals without collisions.
         $safeName = New-SafeFileNameFromCertificateName -InputString $cn -DefaultName "cert"
         $thumb = $Certificate.Thumbprint -replace '\s', ''
         $fileBase = "{0}__{1}" -f $safeName, $thumb
@@ -1892,6 +1950,10 @@ Last Edit: Aug 2025
         return $Argument
     }
 
+    # Launches certutil.exe via System.Diagnostics.Process instead of
+    # direct invocation so we can capture stdout/stderr and check the exit
+    # code -- certutil returns non-zero on failure but still writes to stderr
+    # on partial success, so we need both streams.
     function Invoke-CertutilAddStore {
         param(
             [string] $StoreName,
@@ -1965,6 +2027,11 @@ Last Edit: Aug 2025
         $tcp.Connect($targetHost, $targetPort)
         
         # Certificate validation callback configuration
+        # GetNewClosure() captures $serverChainElements by reference so both
+        # branches of the callback can populate it during the TLS handshake.
+        # We always return $true to let the handshake complete even with
+        # invalid certs -- the user explicitly opted in via -SkipCertValidation
+        # or wants to inspect chain issues via -WhatIfOnly.
         $serverChainElements = [System.Collections.ArrayList]::new()
         $certCallback = if ($SkipCertValidation) {
             { param($s, $c, $chain, $errors)
@@ -1996,12 +2063,16 @@ Last Edit: Aug 2025
     }
 
     # --- Chain building ---
+    # Prefer certs collected by the validation callback (they reflect what the
+    # server actually sent). Fall back to X509Chain.Build() when the callback
+    # didn't capture anything -- e.g. on older .NET Framework where the chain
+    # parameter may be null in the callback.
     if ($serverChainElements.Count -gt 0) {
         $chainCertsRaw = $serverChainElements.ToArray()
     } else {
         $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
         $chain.ChainPolicy.RevocationMode = 'NoCheck'
-        
+
         if ($InstallMethod -eq 'Certutil') {
             # More extensive verification flags for certutil method
             $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EndCertificateOnly
@@ -2029,6 +2100,8 @@ Last Edit: Aug 2025
         Write-Warning "Server did not provide a certificate chain. Using only leaf certificate."
     }
 
+    # Chain is ordered leaf-first from the TLS handshake, so root is the
+    # last element. Intermediates are everything between leaf and root.
     # --- Certificate selection helpers ---
     function Get-RootCert { param($e) if ($e.Count -gt 0) { $e[-1] } }
     function Get-Intermediates { param($e) if ($e.Count -gt 2) { $e[1..($e.Count - 2)] } else { @() } }
@@ -2154,7 +2227,9 @@ Last Edit: Aug 2025
 
                 $storeName = Get-CertificateStoreName -Certificate $cert
                 
-                # Skip end-entity certs unless explicitly requested
+                # Skip end-entity certs unless explicitly requested -- installing
+                # a server cert into the Personal store is rarely needed for
+                # trust and can cause confusion with SChannel cert selection.
                 if ($storeName -eq 'My' -and -not $InstallEndEntity -and $WhatToInstall -ne 'Leaf') {
                     Write-Verbose "Skipping end-entity certificate (use -InstallEndEntity to include)"
                     continue
@@ -2433,6 +2508,8 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
             
             if ($Format -eq 'PEM' -or $Format -eq 'Both') {
                 $pemPath = Join-Path $OutDir "${baseFileName}.pem"
+                # Explicit CRLF line endings match what most tools (OpenSSL, certutil)
+                # expect on Windows; .NET's InsertLineBreaks produces LF-only.
                 $pemContent = @(
                     "-----BEGIN CERTIFICATE-----"
                     [Convert]::ToBase64String($cert.Export('Cert'), 'InsertLineBreaks')
@@ -2617,7 +2694,7 @@ Last Edit: Mar 2026
         $Directory = "."
     }
     $OutputFile = Join-Path $Directory ($BaseName + "_v.mkv")
-    # Select transpose mode based on switch
+    # QSV vpp_qsv transpose operates in the GPU's video pipeline, avoiding CPU decode/encode
     if ($CounterClockwise) {
         $Mode = "vpp_qsv=transpose=cclock"
     }
@@ -2628,7 +2705,8 @@ Last Edit: Mar 2026
     if ($Enhance) {
         $Mode = "${Mode}:detail=30"
     }
-    # Construct the ffmpeg arguments properly
+    # Pipe input through QSV hardware pipeline: decode -> transpose -> HEVC encode
+    # -hwaccel qsv and -hwaccel_output_format qsv keep frames on the GPU throughout
     $ffmpegArgs = @(
         "-hwaccel", "qsv",
         "-hwaccel_output_format", "qsv",
@@ -2954,8 +3032,11 @@ function Invoke-LoginAudit {
     if ($ok) { $ok   | Export-Csv -NoTypeInformation -Path $successCsv }
     if ($fail) { $fail | Export-Csv -NoTypeInformation -Path $failCsv }
 
+    # Logon types that indicate a real person at a keyboard (interactive, unlock, RDP, cached)
     $humanTypes = 2, 7, 10, 11
     $human = $ok | Where-Object { $_.LogonType -in $humanTypes }
+    # Network (type 3) logons from real user accounts are worth reviewing -- these represent
+    # remote access to this machine via SMB, WinRM, etc.
     $netNonSys = $ok | Where-Object {
         $_.LogonType -eq 3 -and
         $_.User -notin 'SYSTEM', 'ANONYMOUS LOGON', 'LOCAL SERVICE', 'NETWORK SERVICE' -and
@@ -2965,7 +3046,7 @@ function Invoke-LoginAudit {
     # Flag non-loopback IPs on interactive/unlock events - unusual for console sign-in
     $remoteHumanFlags = $human | Where-Object { $_.IP -and $_.IP -ne '-' -and $_.IP -ne '127.0.0.1' -and $_.IP -ne '::1' }
 
-    # Off-hours human logons (before 6am or after 10pm local time)
+    # Flag human logons outside business hours -- often worth investigating for compromised accounts
     $offHours = $human | Where-Object { $_.Time.Hour -lt 6 -or $_.Time.Hour -ge 22 }
 
     $userBreakdown = $ok | Group-Object User, LogonTypeName |
@@ -3337,6 +3418,7 @@ function Install-ClaudezSetup {
 
     Write-Host "claudez: configuring MCP servers..." -ForegroundColor Cyan
 
+    # Check-before-add pattern: 'claude mcp list' is slow but idempotent; avoids duplicate entries
     # web-search-prime
     # https://docs.z.ai/devpack/mcp/search-mcp-server
     if (& claude mcp list | Select-String -Pattern 'web-search-prime' -Quiet) {
@@ -3382,6 +3464,7 @@ function Install-ClaudezSetup {
         }
     }
 
+    # zai-mcp-server runs locally via npx (stdio transport), unlike the HTTP-based servers above
     # zai-mcp-server
     # https://docs.z.ai/devpack/mcp/vision-mcp-server
     if (& claude mcp list | Select-String -Pattern 'zai-mcp-server' -Quiet) {
@@ -3397,6 +3480,7 @@ function Install-ClaudezSetup {
         }
     }
 
+    # Write a sentinel flag with metadata so future runs can detect and skip re-setup
     $flagInfo = @(
         "configuredAt=$(Get-Date -Format o)",
         "user=$env:USERNAME",
@@ -3505,10 +3589,11 @@ function claudez {
     $env:ANTHROPIC_AUTH_TOKEN = $token
     $env:API_TIMEOUT_MS = "3000000"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    # Z.AI models have <200K context, so disable Claude's 1M context window to avoid truncation
     $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
-    # delete below if this becomes obsolete
+    # Map Anthropic model slots to Z.AI equivalents; remove once Claude Code auto-detects these
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-4.7"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
@@ -3682,10 +3767,12 @@ function claudeds {
 
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
+    # [1m] suffix requests 1M context window from DeepSeek's Anthropic-compatible endpoint
     $env:ANTHROPIC_MODEL = "deepseek-v4-pro[1m]"
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash[1m]"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-pro[1m]"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-v4-pro[1m]"
+    # Use flash for subagents -- they handle tool routing, not heavy reasoning
     $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash[1m]"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
@@ -3768,6 +3855,7 @@ function claudeds2 {
 
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
+    # Cheaper profile: Sonnet routes to flash (fast/cheap), only Opus uses pro (expensive/capable)
     $env:ANTHROPIC_MODEL = "deepseek-v4-flash[1m]"
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash[1m]"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-flash[1m]"
@@ -3897,6 +3985,10 @@ Last Edit: 2026-04
         [string]$Disable1M
     )
 
+    # Bash single-quote escaping: end quote, insert a literal quote, reopen quote
+    # (Bash has no backslash escape inside single quotes, so this is the only way)
+    # Bash has no backslash escape inside single quotes; the only way to embed a
+    # literal quote is to end the quote, add an escaped quote, and reopen: 'foo'\''bar'
     function Escape-BashSingleQuotedValue {
         param([string]$Value)
         if ($null -eq $Value) { return "''" }
@@ -3941,15 +4033,15 @@ cd "$CC_WORK"
 HOME="$CC_HOME" claude --dangerously-skip-permissions
 '@
 
-    # Base64-encode the script so it can be delivered via the SSH *command*
-    # argument instead of stdin. This keeps stdin free for Claude Code's
-    # interactive TUI, which would otherwise fight bash -s over the same pipe.
+    # Base64-encode the script so it travels as an SSH command argument, not stdin.
+    # Claude Code's interactive TUI needs stdin; piping via 'bash -s' would steal it.
     $encoded = [Convert]::ToBase64String(
         [System.Text.Encoding]::UTF8.GetBytes($script)
     )
 
-    # Build the inline env prefix. BaseUrl is only included when non-empty so
-    # that a bare ANTHROPIC_BASE_URL='' never reaches the remote shell.
+    # Prepend environment variables as SSH command arguments.
+    # BaseUrl is conditionally included to avoid sending an empty value that
+    # would override the remote's default (Anthropic direct) endpoint.
     $envParts = [System.Collections.Generic.List[string]]@(
         "ANTHROPIC_API_KEY=$(Escape-BashSingleQuotedValue $ApiKey)"
         "ANTHROPIC_DEFAULT_HAIKU_MODEL=$(Escape-BashSingleQuotedValue $HaikuModel)"
@@ -3963,19 +4055,19 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
     }
     $envPrefix = $envParts -join ' '
 
-    # -t          : allocate a pseudo-TTY so Claude Code renders correctly
-    # -o StrictHostKeyChecking=accept-new
-    #             : auto-accept keys for hosts never seen before;
-    #               still rejects keys that changed (protects against MITM)
-    # base64 -d | bash
-    #             : decode and run the launcher with stdin untouched
+    # -t: pseudo-TTY required for Claude Code's TUI rendering
+    # StrictHostKeyChecking=accept-new: trusts first-seen host keys but
+    #   still rejects changed keys (protects against MITM on reconnects)
+    # The base64 payload is decoded and executed with stdin still available to claude
     # Build ssh arguments; add -i only when a key file is explicitly provided
     $sshArgs = @('-t', '-o', 'StrictHostKeyChecking=accept-new', '-p', $Port)
     if (-not [string]::IsNullOrWhiteSpace($KeyFile)) {
+        # Resolve to absolute path before passing to ssh on Windows (PS cwd may differ from ssh's)
         $resolved = (Resolve-Path -LiteralPath $KeyFile -ErrorAction Stop).Path
         $sshArgs += @('-i', $resolved)
     }
     $sshArgs += $RemoteHost
+    # The encoded script is echoed into base64 for decoding; echo avoids stdin consumption
     $sshArgs += "$envPrefix bash -c 'echo $encoded | base64 -d | bash'"
     ssh @sshArgs
 }
@@ -4192,6 +4284,7 @@ function claudemm {
 
     $env:ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
+    # MiniMax offers a single model (M2.7), so all Anthropic model slots route to it
     $env:ANTHROPIC_MODEL = "MiniMax-M2.7"
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "MiniMax-M2.7"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "MiniMax-M2.7"
@@ -4291,14 +4384,18 @@ Last Edit: 2026-05
         return
     }
 
-    # Keep the editable remote defaults here so they are easy to tweak later.
+    # All three model tiers map to the same MiniMax model; Claude Code selects
+    # the tier internally and MiniMax routes accordingly.
     $BaseUrl = "https://api.minimax.io/anthropic"
     $HaikuModel = "MiniMax-M2.7"
     $SonnetModel = "MiniMax-M2.7"
     $OpusModel = "MiniMax-M2.7"
+    # 50-minute timeout -- MiniMax inference can be slow for complex agentic loops.
     $TimeoutMs = "3000000"
     $Disable1M = "1"
 
+    # Build the splat hashtable and optionally attach KeyFile so a single
+    # Invoke-RemoteClaudeCodeBase call covers both key-file and API-key modes.
     $baseParams = @{
         RemoteHost  = $RemoteHost
         ApiKey      = $ApiKey
@@ -4336,8 +4433,8 @@ function Update-Profile {
         return
     }
 
-    # Show the last commit that touched the profile file. --filter=blob:none fetches the full
-    # commit graph but zero file content, keeping bandwidth minimal while enabling per-file log.
+    # Fetch just enough commit metadata to show which version we are updating from.
+    # --filter=blob:none avoids downloading file content, saving bandwidth.
     if ((Get-Command git -ErrorAction SilentlyContinue) -and
         ($_ProfileUpdateUrl -match 'raw\.githubusercontent\.com/([^/]+/[^/]+)/refs/heads/[^/]+/(.+)')) {
         $tmpDir = $null
@@ -4360,7 +4457,7 @@ function Update-Profile {
 
     Write-Host "Updating profile from $_ProfileUpdateUrl..." -ForegroundColor Cyan
     try {
-        # Download to a temporary file first to avoid truncating $PROFILE on failure
+        # Download to a temp file first; only overwrite $PROFILE on success to avoid corruption
         $tempFile = [System.IO.Path]::GetTempFileName()
         Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $tempFile -Verbose
         Move-Item -Path $tempFile -Destination $PROFILE -Force
@@ -4431,6 +4528,7 @@ function Setup-AiTools {
     if ($ExtendedSetup) {
         $wingetPackages += $_SetupAiToolsInternal.ExtendedWingetPackages
     }
+    # -Sdk implicitly enables -Dotnet because .NET is part of the SDK runtime stack.
     if ($Sdk) {
         $wingetPackages += $_SetupAiToolsInternal.SdkWingetPackages
         $Dotnet = $true
@@ -4479,6 +4577,9 @@ function Setup-AiTools {
         return
     }
 
+    # Winget installs shim executables into this Links directory, but some
+    # system images don't include it in the default User PATH.  Ensure it's
+    # present so `winget list` results translate to discoverable commands.
     $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
     try {
         $userPath = Get-ItemPropertyValue -Path 'HKCU:\Environment' -Name 'PATH' -ErrorAction Stop
@@ -4493,13 +4594,15 @@ function Setup-AiTools {
             }
             if (-not $inPath) {
                 $newUserPath = $userPath.TrimEnd(';') + ';' + $wingetLinksDir
+                # Write directly to the registry rather than [Environment]::SetEnvironmentVariable
+                # to preserve the existing ExpandString value kind.
                 [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $newUserPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
                 $env:PATH = $env:PATH.TrimEnd(';') + ';' + $wingetLinksDir
                 Write-Host "Added Winget Links directory ($wingetLinksDir) to your User PATH." -ForegroundColor Green
             }
         }
     } catch {
-        # Fallback if registry fails
+        # Non-critical -- if registry is inaccessible (e.g. restricted GPO), just proceed.
     }
 
     $wingetListOutput = @()
@@ -4511,6 +4614,9 @@ function Setup-AiTools {
         return
     }
 
+    # winget list output is unstructured text; we match the package id then
+    # verify the "Source" column contains "winget" to avoid false positives from
+    # similarly-named packages in other sources (e.g. MSStore).
     function Test-WingetInstalledPackage {
         param(
             [string[]]$Rows,
@@ -4553,6 +4659,8 @@ function Setup-AiTools {
         foreach ($m in $missing) {
             Write-Host "Installing $m..."
             try {
+                # Start-Process is used instead of direct invocation so winget can
+                # prompt for UAC elevation without deadlocking the parent console.
                 Start-Process -FilePath 'winget' -ArgumentList "install -s winget -e --id $m" -NoNewWindow -Wait
             }
             catch { Write-Host "Failed to start winget for $($m): $_" -ForegroundColor Red }
@@ -4592,7 +4700,8 @@ function Setup-AiTools {
     # Install .NET SDK via official install script (https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-install-script)
     if ($Dotnet) {
         Write-Host "Installing .NET SDK via dotnet-install.ps1..." -ForegroundColor Cyan
-        # Runs in a child process because the install script calls exit, which would end this session
+        # dotnet-install.ps1 calls exit internally, so it must run in a child process.
+        # Forcing TLS 1.2 ensures the download succeeds on older Windows 10 builds.
         & powershell -NoProfile -ExecutionPolicy Unrestricted -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; &([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1')))"
         Write-Host ".NET SDK install script completed." -ForegroundColor Green
     }
@@ -4638,6 +4747,8 @@ function Setup-AiTools {
         Install-CodexSettings
     }
 
+    # Create a docker.bat shim so tools that hardcode `docker` commands
+    # (compose files, scripts) transparently route through podman.
     if ($Podman) {
         Write-Host "Configuring Podman aliases..." -ForegroundColor Cyan
         $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
@@ -4772,7 +4883,7 @@ function Get-AiApiKey {
     $v = [Environment]::GetEnvironmentVariable($Name, 'Process')
     if ($v) { return $v }
 
-    # 2. Windows Credential Manager
+    # 2. Windows Credential Manager (DPAPI-backed, survives reboots, no plaintext in registry)
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
     try {
@@ -4781,7 +4892,7 @@ function Get-AiApiKey {
         return $cred.Password
     }
     catch {
-        # 3. Fallback to legacy User environment variable
+        # 3. Fallback: legacy plaintext env vars for keys stored before Credential Manager migration
         return [Environment]::GetEnvironmentVariable($Name, 'User')
     }
 }
@@ -4809,10 +4920,14 @@ function Setup-AiApiKeysCS {
         [switch]$Force
     )
 
-    # Load native WinRT assembly for Credential Manager
+    # WinRT PasswordVault is per-user and DPAPI-encrypted at rest -- no plaintext
+    # credentials in the registry. The explicit type load is required for both
+    # Windows PowerShell 5.1 and PowerShell 7+ on Windows.
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
     $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    # All keys share a single resource userName so they form a logical group in
+    # Credential Manager and can be enumerated/cleared together.
     $userName = 'api-key'
 
     # Retrieve a stored key's plaintext value from vault
@@ -5185,6 +5300,7 @@ function Test-OpenAiApi {
     }
 }
 
-# Load secure API keys from Windows Credential Manager into process environment on startup
+# Auto-load vault credentials at profile load time so every session starts with
+# keys available. Uses -Quiet to avoid printing key counts in transient shells.
 Load-AiApiKeysFromCS -Quiet
 
