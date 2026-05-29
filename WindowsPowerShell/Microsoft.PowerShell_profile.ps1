@@ -4975,26 +4975,6 @@ function Install-AiTools {
     Write-Host "Install-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
 }
 
-function Setup-AiTools {
-    <#
-.SYNOPSIS
-    Compatibility wrapper for Install-AiTools.
-#>
-    [CmdletBinding()]
-    param(
-        [switch]$Auto,
-        [switch]$Update,
-        [switch]$ExtendedSetup,
-        [switch]$Sdk,
-        [switch]$Dotnet,
-        [switch]$Docker,
-        [switch]$Podman
-    )
-
-    Write-Warning "Setup-AiTools is deprecated. Use Install-AiTools instead."
-    Install-AiTools -Auto:$Auto -Update:$Update -ExtendedSetup:$ExtendedSetup -Sdk:$Sdk -Dotnet:$Dotnet -Docker:$Docker -Podman:$Podman
-}
-
 function Set-AiApiKeys {
     <#
 .SYNOPSIS
@@ -5095,20 +5075,6 @@ function Set-AiApiKeys {
     # Write-Host "Done. To apply changes to this session run:`n  . `$PROFILE" -ForegroundColor Cyan
     # Write-Host "Or restart PowerShell to pick up the new values." -ForegroundColor Cyan
     # #>
-}
-
-function Setup-AiApiKeys {
-    <#
-.SYNOPSIS
-    Compatibility wrapper for Set-AiApiKeys.
-#>
-    [CmdletBinding()]
-    param(
-        [switch]$Force
-    )
-
-    Write-Warning "Setup-AiApiKeys is deprecated. Use Set-AiApiKeys instead."
-    Set-AiApiKeys -Force:$Force
 }
 
 function Get-AiApiKey {
@@ -5245,20 +5211,6 @@ function Set-AiApiKeysCS {
 
     Write-Host ""
     Write-Host "Done! Run 'Load-AiApiKeysFromCS' to load these into your current terminal process." -ForegroundColor Cyan
-}
-
-function Setup-AiApiKeysCS {
-    <#
-.SYNOPSIS
-    Compatibility wrapper for Set-AiApiKeysCS.
-#>
-    [CmdletBinding()]
-    param(
-        [switch]$Force
-    )
-
-    Write-Warning "Setup-AiApiKeysCS is deprecated. Use Set-AiApiKeysCS instead."
-    Set-AiApiKeysCS -Force:$Force
 }
 
 function Load-AiApiKeysFromCS {
