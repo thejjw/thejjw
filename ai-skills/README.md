@@ -5,15 +5,21 @@ Reusable agent skill documentation for AI coding environments.
 ## Skills
 
 - `deepseek-usage-query`: Query DeepSeek API balance and estimate token budget from current pricing.
+  - Intended for OpenCode and Claude Code.
 - `minimax-usage-query`: Query MiniMax token usage, quota limits, and model-specific allowances.
+  - Intended for OpenCode and Claude Code.
 - `session-exporter`: Export the current session conversation history to Markdown.
+  - Intended for Antigravity CLI only.
 - `web-search-ddg`: Search current web information using DuckDuckGo with no API key.
+  - Intended for OpenCode and Claude Code.
 - `web-search-startpage`: Search current web information using Startpage with no API key.
+  - Intended for OpenCode and Claude Code.
 - `z-ai-usage-query`: Query Z.AI GLM Coding Plan usage, tool usage, and quota limits.
+  - Intended for OpenCode and Claude Code.
 
 ## Install
 
-Copy a skill directory into the target tool's skill directory, preserving the `SKILL.md` filename:
+Copy a skill directory into its intended tool's skill directory, preserving the `SKILL.md` filename:
 
 - OpenCode: `%USERPROFILE%\.agents\skills\<skill-name>\SKILL.md`
 - Claude Code: `%USERPROFILE%\.claude\skills\<skill-name>\SKILL.md`
