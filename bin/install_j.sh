@@ -102,13 +102,10 @@ fi
 if command -v uv &>/dev/null; then
   echo "uv $(uv --version 2>/dev/null || echo 'installed') already present -- skipping"
 else
-  echo "ERROR: 'uv' is not installed but is required by MiniMax MCP (uvx)." >&2
-  echo "  Install uv:" >&2
-  echo "    Linux:    curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
-  echo "    macOS:    brew install uv" >&2
-  echo "" >&2
-  echo "Re-run this script after installing uv." >&2
-  exit 1
+  echo "uv: installing via astral.sh..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  # Add default uv installation paths to current session so subsequent MCP setups don't fail
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
 
 # ---------------------------------------------------------------------------
