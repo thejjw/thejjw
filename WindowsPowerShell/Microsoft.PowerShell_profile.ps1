@@ -4673,7 +4673,13 @@ function Install-AiSkills {
             }
             else {
                 Write-Verbose "Removing temporary clone: $tmpDir"
-                Remove-Item -LiteralPath $tmpDir -Recurse -Force -Verbose
+                Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction Stop
+                if (Test-Path -LiteralPath $tmpDir) {
+                    Write-Warning "Temporary clone still exists after cleanup: $tmpDir"
+                }
+                else {
+                    Write-Verbose "Temporary clone removed successfully."
+                }
             }
         }
         $VerbosePreference = $previousVerbosePreference
