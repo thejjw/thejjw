@@ -4336,20 +4336,24 @@ function Update-Profile {
         return
     }
 
-    # Show the remote commit ID and date for the profile file if gh is available.
-    if (Get-Command gh -ErrorAction SilentlyContinue) {
+    # Show remote HEAD commit ID and date via a minimal shallow clone (no file content downloaded).
+    if ((Get-Command git -ErrorAction SilentlyContinue) -and
+        ($_ProfileUpdateUrl -match 'raw\.githubusercontent\.com/([^/]+/[^/]+)/refs/heads/[^/]+/')) {
+        $tmpDir = $null
         try {
-            # Derive owner/repo and file path from the raw URL.
-            # Expected pattern: https://raw.githubusercontent.com/{owner}/{repo}/refs/heads/{branch}/{path}
-            if ($_ProfileUpdateUrl -match 'raw\.githubusercontent\.com/([^/]+/[^/]+)/refs/heads/[^/]+/(.+)') {
-                $repoSlug = $Matches[1]
-                $filePath  = $Matches[2]
-                $commitInfo = gh api "repos/$repoSlug/commits?path=$filePath&per_page=1" --jq '.[0] | .sha[0:12] + "  " + .commit.committer.date' 2>$null
-                if ($commitInfo) {
-                    Write-Host "Remote commit: $commitInfo" -ForegroundColor DarkGray
-                }
+            $repoUrl = "https://github.com/$($Matches[1]).git"
+            $tmpDir  = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+            git clone --depth 1 --filter=blob:none --no-checkout --quiet $repoUrl $tmpDir
+            $commitInfo = git -C $tmpDir log -1 --format="%h  %ci"
+            if ($commitInfo) {
+                Write-Host "Remote HEAD: $commitInfo" -ForegroundColor DarkGray
             }
-        } catch {}
+        } catch {
+        } finally {
+            if ($tmpDir -and (Test-Path $tmpDir)) {
+                Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     Write-Host "Updating profile from $_ProfileUpdateUrl..." -ForegroundColor Cyan
