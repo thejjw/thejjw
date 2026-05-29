@@ -139,6 +139,39 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# misc functions
+# ---------------------------------------------------------------------------
+
+MISC_MARKER="# >>> install_j_misc >>>"
+
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> install_j_misc >>>" "# <<< install_j_misc <<<"
+fi
+
+if grep -qF "$MISC_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "install_j_misc: already in $PROFILE -- skipping"
+else
+  cat >> "$PROFILE" << 'MISC_EOF'
+
+# >>> install_j_misc >>>
+
+configure_zswap() {
+    if grep -q '^N$' /sys/module/zswap/parameters/enabled; then
+        sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="zswap.enabled=1 zswap.compressor=zstd"/' /etc/default/grub
+        sudo update-grub
+        echo "zswap configured. Reboot to take effect."
+    else
+        echo "zswap already enabled (compressor: $(cat /sys/module/zswap/parameters/compressor)), skipping"
+    fi
+}
+
+# <<< install_j_misc <<<
+MISC_EOF
+
+  echo "install_j_misc: added to $PROFILE"
+fi
+
+# ---------------------------------------------------------------------------
 # nrd - embed into shell profile if not already present
 # ---------------------------------------------------------------------------
 MARKER="# >>> nrd >>>"
