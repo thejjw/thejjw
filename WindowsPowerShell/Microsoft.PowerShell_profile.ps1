@@ -3173,7 +3173,7 @@ function Install-GlobalClaudeSettings {
         $settings = [pscustomobject]@{}
     }
 
-    $settings | Add-Member -NotePropertyName 'attribution' -NotePropertyValue $false -Force
+    $settings | Add-Member -NotePropertyName 'attribution' -NotePropertyValue ([pscustomobject]@{ commit = ''; pr = '' }) -Force
 
     if (Test-Path -LiteralPath $targetStatusLine) {
         $targetStatusLineBash = $targetStatusLine -replace '\\', '/'
