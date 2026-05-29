@@ -173,9 +173,11 @@ $_SetupAiToolsInternal = @{
         'StrawberryPerl.StrawberryPerl'
     )
     Urls                   = @{
-        AgyCli    = 'https://antigravity.google/cli/install.ps1'
-        ClaudeCli = 'https://claude.ai/install.ps1'
-        CodexCli  = 'https://chatgpt.com/codex/install.ps1'
+        AgyCli        = 'https://antigravity.google/cli/install.ps1'
+        ClaudeCli     = 'https://claude.ai/install.ps1'
+        CodexCli      = 'https://chatgpt.com/codex/install.ps1'
+        CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
+        AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/agy_statusline.sh'
     }
     NpmPackages            = @(
         '@qwen-code/qwen-code',
@@ -3114,32 +3116,144 @@ function Install-GlobalClaudeSettings {
     param()
 
     $claudeDir = Join-Path $HOME '.claude'
-    $sentinel = Join-Path $claudeDir '.no_attribution'
+    $claudeBinDir = Join-Path $claudeDir 'bin'
+    $sentinel = Join-Path $claudeDir '.config_setup_done'
 
     if (Test-Path -LiteralPath $sentinel) {
-        Write-Host "global settings.json: $sentinel exists -- skipping"
+        Write-Host "claude: global config setup already done -- skipping"
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $claudeBinDir)) {
+        $null = New-Item -ItemType Directory -Path $claudeBinDir -Force
+    }
+
+    $targetStatusLine = Join-Path $claudeBinDir 'cc_statusline.sh'
+
+    try {
+        Invoke-RestMethod -Uri $_SetupAiToolsInternal.Urls.CcStatusline -OutFile $targetStatusLine
+    } catch {
+        Write-Warning "claude: download failure caused setup to stop ($($_)). Please check internet availability and run the command again."
         return
     }
 
     $settingsJson = Join-Path $claudeDir 'settings.json'
 
-    if (-not (Test-Path -LiteralPath $claudeDir)) {
-        $null = New-Item -ItemType Directory -Path $claudeDir -Force
+    if (Test-Path -LiteralPath $settingsJson) {
+        $settings = Get-Content -LiteralPath $settingsJson -Raw | ConvertFrom-Json
+    }
+    else {
+        $settings = [pscustomobject]@{}
     }
 
-    $attribution = @{ commit = ''; pr = '' }
+    $settings | Add-Member -NotePropertyName 'attribution' -NotePropertyValue $false -Force
+
+    if (Test-Path -LiteralPath $targetStatusLine) {
+        $targetStatusLineBash = $targetStatusLine -replace '\\', '/'
+        $settings | Add-Member -NotePropertyName 'customStatusLineCommand' -NotePropertyValue $targetStatusLineBash -Force
+    }
+
+    $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $settingsJson -Encoding UTF8
+    $null = New-Item -ItemType File -Path $sentinel -Force
+    Write-Host "claude: config setup complete" -ForegroundColor Green
+}
+
+function Install-AgySettings {
+    <#
+.SYNOPSIS
+    Ensures ~/.gemini/antigravity-cli/settings.json has the custom status line configured.
+#>
+    $agyDir = Join-Path $HOME '.gemini\antigravity-cli'
+    $agyBinDir = Join-Path $agyDir 'bin'
+    $sentinel = Join-Path $agyDir '.config_setup_done'
+
+    if (Test-Path -LiteralPath $sentinel) {
+        Write-Host "agy: config setup already done -- skipping"
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $agyBinDir)) {
+        $null = New-Item -ItemType Directory -Path $agyBinDir -Force
+    }
+
+    $targetStatusLine = Join-Path $agyBinDir 'agy_statusline.sh'
+
+    try {
+        Invoke-RestMethod -Uri $_SetupAiToolsInternal.Urls.AgyStatusline -OutFile $targetStatusLine
+    } catch {
+        Write-Warning "agy: download failure caused setup to stop ($($_)). Please check internet availability and run the command again."
+        return
+    }
+
+    $settingsJson = Join-Path $agyDir 'settings.json'
 
     if (Test-Path -LiteralPath $settingsJson) {
         $settings = Get-Content -LiteralPath $settingsJson -Raw | ConvertFrom-Json
-        $settings | Add-Member -NotePropertyName 'attribution' -NotePropertyValue $attribution -Force
     }
     else {
-        $settings = [pscustomobject]@{ attribution = $attribution }
+        $settings = [pscustomobject]@{}
     }
 
-    $settings | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $settingsJson -Encoding UTF8
+    if (Test-Path -LiteralPath $targetStatusLine) {
+        $targetStatusLineBash = $targetStatusLine -replace '\\', '/'
+        $statusLineObj = [pscustomobject]@{ type = 'command'; command = $targetStatusLineBash }
+        $settings | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue $statusLineObj -Force
+    }
+
+    $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $settingsJson -Encoding UTF8
     $null = New-Item -ItemType File -Path $sentinel -Force
-    Write-Host "global settings.json: attribution disabled" -ForegroundColor Green
+    Write-Host "agy: config setup complete" -ForegroundColor Green
+}
+
+function Install-CodexSettings {
+    <#
+.SYNOPSIS
+    Ensures ~/.codex/config.toml has the custom status line array and no attribution.
+#>
+    $codexDir = Join-Path $HOME '.codex'
+    $sentinel = Join-Path $codexDir '.config_setup_done'
+
+    if (Test-Path -LiteralPath $sentinel) {
+        Write-Host "codex: config setup already done -- skipping"
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $codexDir)) {
+        $null = New-Item -ItemType Directory -Path $codexDir -Force
+    }
+
+    $configToml = Join-Path $codexDir 'config.toml'
+    if (-not (Test-Path -LiteralPath $configToml)) {
+        New-Item -ItemType File -Path $configToml -Force | Out-Null
+    }
+
+    $content = Get-Content -LiteralPath $configToml -Raw
+    if ($content -match '\[tui\]') {
+        Write-Host "codex: [tui] block already present -- skipping statusline preset"
+    }
+    else {
+        $preset = @"
+
+commit_attribution = ""
+
+[tui]
+status_line = [
+    "model-with-reasoning",
+    "git-branch",
+    "current-dir",
+    "context-used",
+    "total-output-tokens",
+    "five-hour-limit",
+    "weekly-limit",
+    "fast-mode"
+]
+"@
+        Add-Content -LiteralPath $configToml -Value $preset -Encoding UTF8
+        Write-Host "codex: statusline preset configured"
+    }
+
+    $null = New-Item -ItemType File -Path $sentinel -Force
+    Write-Host "codex: config setup complete" -ForegroundColor Green
 }
 
 function Install-ClaudezSetup {
@@ -4380,18 +4494,27 @@ function Setup-AiTools {
     Write-Host " - codex (Codex CLI)"
 
     # Install Antigravity and Claude CLIs using their recommended installers
-    Write-Host "Verifying CLIs..." -ForegroundColor Cyan
+    Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
 
     if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
         Write-Host "agy CLI not found; fix winget installation of Google.AntigravityCLI or run agy CLI installer via iex (irm '$($_SetupAiToolsInternal.Urls.AgyCli)')" -ForegroundColor Yellow
+    } else {
+        # If agy is present, ensure it's configured with the default settings
+        Install-AgySettings
     }
 
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
         Write-Host "claude CLI not found; fix winget installation of Anthropic.ClaudeCode or run Claude installer via iex (irm '$($_SetupAiToolsInternal.Urls.ClaudeCli)')" -ForegroundColor Yellow
+    } else {
+        # If claude is present, ensure it's configured with the default settings
+        Install-GlobalClaudeSettings
     }
 
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
         Write-Host "codex CLI not found; fix winget installation of OpenAI.Codex or run codex installer via iex (irm '$($_SetupAiToolsInternal.Urls.CodexCli)')" -ForegroundColor Yellow
+    } else {
+        # If codex is present, ensure it's configured with the default settings
+        Install-CodexSettings
     }
 
     Write-Host "Setup-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
