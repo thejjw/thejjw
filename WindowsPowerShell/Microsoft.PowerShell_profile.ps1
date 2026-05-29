@@ -380,28 +380,33 @@ function Get-AAA {
         $Repeat = 1
     )
 
-    [string[]]$result = @();
-    for ($i = 0; $i -lt $Repeat; $i++) {
+    try {
         if ($null -eq $Global:getAAA) {
             $Global:getAAA = @{
-                ganm = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/animals -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";
-                gadj = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/adjectives -UseBasicParsing | Select-Object -ExpandProperty Content).Trim() -split "`n";        
+                ganm = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/animals -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content).Trim() -split "`n"
+                gadj = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/adjectives -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content).Trim() -split "`n"
             }
         }
+    } catch {
+        Write-Error "Failed to retrieve words for Get-AAA: $_"
+        return
+    }
     
-        $adjs = New-Object System.Collections.Generic.HashSet[string];
+    $result = [System.Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $Repeat; $i++) {
+        $adjs = New-Object System.Collections.Generic.HashSet[string]
         while ($adjs.Count -ne 2) {
-            $adjs.Add($Global:getAAA.gadj.Get((Get-Random) % $Global:getAAA.gadj.Count)) | Out-Null;
+            $adjs.Add($Global:getAAA.gadj.Get((Get-Random) % $Global:getAAA.gadj.Count)) | Out-Null
         }
         
-        [string[]]$adjsarr = @();
+        $adjsarr = [System.Collections.Generic.List[string]]::new()
         foreach ($adj in $adjs) {
-            $adjsarr += ([string]$adj).Trim();
+            $adjsarr.Add(([string]$adj).Trim())
         }
-        $adjsarr += $Global:getAAA.ganm.Get((Get-Random) % $Global:getAAA.ganm.Count);
-        $result += ($adjsarr -join "-");
+        $adjsarr.Add($Global:getAAA.ganm.Get((Get-Random) % $Global:getAAA.ganm.Count))
+        $result.Add(($adjsarr -join "-"))
     }
-    return $result;
+    return $result.ToArray()
 }
 
 function Get-MyIP {
@@ -461,7 +466,7 @@ function Get-WhoisInfo {
 
     if ($null -eq $WhoisKisaApiKey) {
         Write-Host 'Whois API key from KISA (whois.kisa.or.kr) not set. Please configure either -WhoisKisaApiKey parameter or $Global:WhoisKisaApiKey. Exiting...';
-        break;
+        return;
     }
     $DomainOrIp = $DomainOrIp.Trim();
     Set-Variable -Name queryurl -Value "http://whois.kisa.or.kr/openapi/whois.jsp?query=$DomainOrIp&key=$WhoisKisaApiKey&answer=json" -Option Constant;
@@ -622,10 +627,8 @@ function Get-NewPasswordNode {
         $Length = 15
     )
 
-    $hasNode = Get-Package | Where-Object name -eq "Node.js";
-    if ($null -ne $hasNode) {
-        Invoke-Command {
-            $code = @"
+    if (Get-Command node.exe -ErrorAction SilentlyContinue) {
+        $code = @"
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -864,8 +867,7 @@ console.log(PasswordGenerator.generatePassword({
     rules: DEFAULT_RULES
 }));
 "@;
-            $code | node.exe;
-        };
+        $code | node.exe;
     }
     else {
         Write-Output "No Node.js runtime found. Please install one and try running the command again
@@ -921,8 +923,11 @@ function Save-Download {
     Write-Verbose "Downloading to $fullPath"
 
     $file = [System.IO.FileStream]::new($fullPath, [System.IO.FileMode]::Create)
-    $file.Write($WebResponse.Content, 0, $WebResponse.RawContentLength)
-    $file.Close()
+    try {
+        $file.Write($WebResponse.Content, 0, $WebResponse.RawContentLength)
+    } finally {
+        $file.Close()
+    }
 }
 
 function Send-SshKey {
@@ -1048,7 +1053,7 @@ function Send-SshKey {
     if (Test-Path $pubkeyPath) {
         Write-Host "Sending public key $pubkeyPath to ${User}@${Hostname}:${Port} ..." -ForegroundColor Cyan
         # Ensure remote .ssh exists and append the public key; set umask to keep permissions strict.
-        Get-Content $pubkeyPath | ssh "$User@$Hostname" -p $Port 'mkdir -p ~/.ssh; umask 077; cat >> ~/.ssh/authorized_keys'
+        Get-Content -Raw $pubkeyPath | ssh "$User@$Hostname" -p $Port 'mkdir -p ~/.ssh; umask 077; cat >> ~/.ssh/authorized_keys'
         Write-Host " Public key installed on $Hostname" -ForegroundColor Green
     }
     else {
@@ -1098,7 +1103,7 @@ function Add-WingetPackagePaths {
     Where-Object { (Get-ChildItem -Path $_.FullName -Filter *.exe -File -ErrorAction SilentlyContinue).Count -gt 0 } |
     Select-Object -ExpandProperty FullName
 
-    $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    $currentPath = (Get-ItemPropertyValue -Path 'HKCU:\Environment' -Name 'PATH')
     $currentPathArr = $currentPath -split ';'
 
     $added = @()
@@ -1113,7 +1118,8 @@ function Add-WingetPackagePaths {
         Write-Host "No new paths were added. All executable directories are already in PATH."
     }
     else {
-        [Environment]::SetEnvironmentVariable("PATH", $currentPath, "User")
+        [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $currentPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        $env:PATH = $env:PATH.TrimEnd(';') + ';' + ($added -join ';')
         Write-Host " Added the following paths to your user PATH:"
         $added | ForEach-Object { Write-Host "  - $_" }
     }
@@ -1150,7 +1156,7 @@ function Remove-WingetPackagePaths {
     See Add-WingetPackagePaths
 #>
     $wingetRoot = [IO.Path]::Combine($env:LOCALAPPDATA, "Microsoft\WinGet\Packages")
-    $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    $currentPath = (Get-ItemPropertyValue -Path 'HKCU:\Environment' -Name 'PATH')
     $currentPathArr = $currentPath -split ';' | Where-Object { $_ -ne '' }
 
     $filtered = @()
@@ -1169,7 +1175,13 @@ function Remove-WingetPackagePaths {
         Write-Host "No winget paths found in user PATH. Nothing to remove."
     }
     else {
-        [Environment]::SetEnvironmentVariable("PATH", ($filtered -join ';'), "User")
+        $newRegPath = $filtered -join ';'
+        [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $newRegPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        
+        $processPathArr = $env:PATH -split ';' | Where-Object { $_ -ne '' }
+        $newProcessPath = ($processPathArr | Where-Object { $_ -notlike "$wingetRoot*" }) -join ';'
+        $env:PATH = $newProcessPath
+
         Write-Host " Removed the following winget directories from your user PATH:"
         $removed | ForEach-Object { Write-Host "  - $_" }
     }
@@ -1419,8 +1431,10 @@ function Convert-JpgToJxl {
     }
 
     $completed = 0
-    while ($completed -lt $total) {
-        $results = Receive-Job -Job $jobs -Wait -AutoRemoveJob
+    while ($jobs.Count -gt 0) {
+        $finishedJobs = Wait-Job -Job $jobs -Any
+        $results = Receive-Job -Job $finishedJobs -AutoRemoveJob
+        $jobs = @($jobs | Where-Object { $finishedJobs.Id -notcontains $_.Id })
         foreach ($result in $results) {
             $completed++
             $pct = [math]::Round($completed * 100 / $total, 2)
@@ -1951,16 +1965,21 @@ Last Edit: Aug 2025
         $tcp.Connect($targetHost, $targetPort)
         
         # Certificate validation callback configuration
+        $serverChainElements = [System.Collections.ArrayList]::new()
         $certCallback = if ($SkipCertValidation) {
-            { param($s, $c, $chain, $errors) return $true }
+            { param($s, $c, $chain, $errors)
+                if ($chain) { foreach ($e in $chain.ChainElements) { [void]$serverChainElements.Add($e.Certificate) } }
+                return $true 
+            }.GetNewClosure()
         }
         else {
             { param($s, $c, $chain, $errors) 
+                if ($chain) { foreach ($e in $chain.ChainElements) { [void]$serverChainElements.Add($e.Certificate) } }
                 if ($errors -ne [System.Net.Security.SslPolicyErrors]::None) {
                     Write-Warning "TLS certificate validation errors: $errors"
                 }
                 return $true  # Still proceed but warn about issues
-            }
+            }.GetNewClosure()
         }
         
         $ssl = [System.Net.Security.SslStream]::new($tcp.GetStream(), $false, $certCallback)
@@ -1977,30 +1996,32 @@ Last Edit: Aug 2025
     }
 
     # --- Chain building ---
-    $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
-    $chain.ChainPolicy.RevocationMode = 'NoCheck'
-    
-    if ($InstallMethod -eq 'Certutil') {
-        # More extensive verification flags for certutil method
-        $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EndCertificateOnly
-        $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(20)
-        $chain.ChainPolicy.VerificationFlags = `
-            [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreCertificateAuthorityRevocationUnknown `
-            -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreCtlSignerRevocationUnknown `
-            -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreEndRevocationUnknown `
-            -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreRootRevocationUnknown
+    if ($serverChainElements.Count -gt 0) {
+        $chainCertsRaw = $serverChainElements.ToArray()
+    } else {
+        $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+        $chain.ChainPolicy.RevocationMode = 'NoCheck'
+        
+        if ($InstallMethod -eq 'Certutil') {
+            # More extensive verification flags for certutil method
+            $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EndCertificateOnly
+            $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(20)
+            $chain.ChainPolicy.VerificationFlags = `
+                [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreCertificateAuthorityRevocationUnknown `
+                -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreCtlSignerRevocationUnknown `
+                -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreEndRevocationUnknown `
+                -bor [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreRootRevocationUnknown
+        }
+        else {
+            $chain.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
+        }
+        
+        $buildResult = $chain.Build($leaf)
+        if (-not $buildResult -and $InstallMethod -eq 'Certutil') {
+            Write-Warning "Certificate chain building incomplete. Some intermediate certificates may be missing. Chain status: $($chain.ChainStatus | ForEach-Object { $_.Status })"
+        }
+        $chainCertsRaw = @($chain.ChainElements | ForEach-Object { $_.Certificate })
     }
-    else {
-        $chain.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
-    }
-    
-    $buildResult = $chain.Build($leaf)
-    if (-not $buildResult -and $InstallMethod -eq 'Certutil') {
-        Write-Warning "Certificate chain building incomplete. Some intermediate certificates may be missing. Chain status: $($chain.ChainStatus | ForEach-Object { $_.Status })"
-    }
-
-    # --- Get unique certificates from chain ---
-    $chainCertsRaw = @($chain.ChainElements | ForEach-Object { $_.Certificate })
     $elements = @(Get-UniqueByThumbprint -Certificates $chainCertsRaw)
 
     if (-not $elements -or $elements.Count -eq 0) {
@@ -2334,9 +2355,13 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         Write-Verbose "Establishing TCP connection to ${TargetHost}:${TargetPort}..."
         $tcp = [System.Net.Sockets.TcpClient]::new()
         $tcp.Connect($TargetHost, $TargetPort)
+        $serverChainElements = [System.Collections.ArrayList]::new()
         $ssl = [System.Net.Security.SslStream]::new(
             $tcp.GetStream(), $false,
-            { param($sender, $cert, $chain, $errors) $true }
+            { param($sender, $cert, $chain, $errors) 
+                if ($chain) { foreach ($e in $chain.ChainElements) { [void]$serverChainElements.Add($e.Certificate) } }
+                return $true 
+            }.GetNewClosure()
         )
         $ssl.AuthenticateAsClient($SNIHost)
         $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
@@ -2351,13 +2376,15 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
     }
 
     # --- Chain building ---
-    $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
-    $chain.ChainPolicy.RevocationMode = 'NoCheck'
-    $chain.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
-    $null = $chain.Build($leaf)
-
-    # --- Chain element processing ---
-    $chainCertsRaw = @($chain.ChainElements | ForEach-Object { $_.Certificate })
+    if ($serverChainElements.Count -gt 0) {
+        $chainCertsRaw = $serverChainElements.ToArray()
+    } else {
+        $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+        $chain.ChainPolicy.RevocationMode = 'NoCheck'
+        $chain.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
+        $null = $chain.Build($leaf)
+        $chainCertsRaw = @($chain.ChainElements | ForEach-Object { $_.Certificate })
+    }
     $elements = @(Get-UniqueByThumbprint -Certificates $chainCertsRaw)
 
     if (-not $elements -or $elements.Count -eq 0) {
@@ -2858,7 +2885,7 @@ function Invoke-LoginAudit {
             Get-WinEvent -FilterHashtable @{LogName = 'Security'; Id = $id; StartTime = $since } -ErrorAction Stop
         }
         catch [System.Exception] {
-            if ($_.Exception.Message -match 'No events') { @() } else { throw }
+            if ($_.FullyQualifiedErrorId -match 'NoMatchingEventsFound') { @() } else { throw }
         }
     }
 
@@ -3380,6 +3407,51 @@ function Install-ClaudezSetup {
     return $true
 }
 
+function Save-ProcessEnvVars {
+    <#
+.SYNOPSIS
+    Snapshot process-scope environment variables so they can be restored later.
+
+.DESCRIPTION
+    Returns an ordered hashtable mapping each name to its current process-scope
+    value (or $null when unset). Pass the result to Restore-ProcessEnvVars in a
+    finally block to undo any temporary overrides cleanly.
+
+.PARAMETER Names
+    The environment variable names to capture.
+#>
+    param([Parameter(Mandatory)][string[]]$Names)
+
+    $saved = [ordered]@{}
+    foreach ($n in $Names) {
+        $saved[$n] = [Environment]::GetEnvironmentVariable($n, 'Process')
+    }
+    return $saved
+}
+
+function Restore-ProcessEnvVars {
+    <#
+.SYNOPSIS
+    Restore environment variables captured by Save-ProcessEnvVars.
+
+.DESCRIPTION
+    Re-applies each saved value, or removes the variable entirely when it was
+    unset at snapshot time, leaving the process environment as it was found.
+
+.PARAMETER Saved
+    The hashtable produced by Save-ProcessEnvVars.
+#>
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Saved)
+
+    foreach ($n in $Saved.Keys) {
+        if ($null -eq $Saved[$n]) {
+            Remove-Item "Env:\$n" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($n, $Saved[$n], 'Process')
+        }
+    }
+}
+
 function claudez {
     <#
 .SYNOPSIS
@@ -3421,6 +3493,14 @@ function claudez {
         return
     }
 
+    $originalEnvVars = Save-ProcessEnvVars @(
+        'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'API_TIMEOUT_MS',
+        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_DISABLE_1M_CONTEXT',
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL'
+    )
+
     $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $token
     $env:API_TIMEOUT_MS = "3000000"
@@ -3444,19 +3524,7 @@ function claudez {
         claude @args
     }
     finally {
-        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
-
-        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
-        Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_DISABLE_1M_CONTEXT -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
-
-        Remove-Item Env:\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue
+        Restore-ProcessEnvVars $originalEnvVars
     }
 }
 
@@ -3489,6 +3557,14 @@ function claudezm {
         return
     }
 
+    $originalEnvVars = Save-ProcessEnvVars @(
+        'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'API_TIMEOUT_MS',
+        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_DISABLE_1M_CONTEXT',
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL'
+    )
+
     $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $token
     $env:API_TIMEOUT_MS = "3000000"
@@ -3512,19 +3588,7 @@ function claudezm {
         claude @args
     }
     finally {
-        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
-
-        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
-        Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_DISABLE_1M_CONTEXT -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
-
-        Remove-Item Env:\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue
+        Restore-ProcessEnvVars $originalEnvVars
     }
 }
 
@@ -3608,6 +3672,14 @@ function claudeds {
         return
     }
 
+    $originalEnvVars = Save-ProcessEnvVars @(
+        'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_MODEL',
+        'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
+        'CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+    )
+
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
     $env:ANTHROPIC_MODEL = "deepseek-v4-pro[1m]"
@@ -3623,17 +3695,7 @@ function claudeds {
         claude @args
     }
     finally {
-        Remove-Item Env:\ANTHROPIC_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue
-
-        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
+        Restore-ProcessEnvVars $originalEnvVars
     }
 }
 
@@ -3696,6 +3758,14 @@ function claudeds2 {
         return
     }
 
+    $originalEnvVars = Save-ProcessEnvVars @(
+        'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_MODEL',
+        'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
+        'CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+    )
+
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
     $env:ANTHROPIC_MODEL = "deepseek-v4-flash[1m]"
@@ -3711,17 +3781,7 @@ function claudeds2 {
         claude @args
     }
     finally {
-        Remove-Item Env:\ANTHROPIC_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue
-
-        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
+        Restore-ProcessEnvVars $originalEnvVars
     }
 }
 
@@ -4122,6 +4182,14 @@ function claudemm {
         return
     }
 
+    $originalEnvVars = Save-ProcessEnvVars @(
+        'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_MODEL',
+        'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL', 'API_TIMEOUT_MS',
+        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_USE_POWERSHELL_TOOL',
+        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL'
+    )
+
     $env:ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
     $env:ANTHROPIC_MODEL = "MiniMax-M2.7"
@@ -4143,19 +4211,7 @@ function claudemm {
         claude @args
     }
     finally {
-        Remove-Item Env:\ANTHROPIC_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_HAIKU_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_SONNET_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_DEFAULT_OPUS_MODEL -ErrorAction SilentlyContinue
-
-        Remove-Item Env:\ANTHROPIC_BASE_URL -ErrorAction SilentlyContinue
-        Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
-        Remove-Item Env:\API_TIMEOUT_MS -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_USE_POWERSHELL_TOOL -ErrorAction SilentlyContinue
-
-        Remove-Item Env:\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue
-        Remove-Item Env:\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue
+        Restore-ProcessEnvVars $originalEnvVars
     }
 }
 
@@ -4282,8 +4338,10 @@ function Update-Profile {
 
     Write-Host "Updating profile from $_ProfileUpdateUrl..." -ForegroundColor Cyan
     try {
-        # Download and overwrite $PROFILE
-        Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $PROFILE -Verbose
+        # Download to a temporary file first to avoid truncating $PROFILE on failure
+        $tempFile = [System.IO.Path]::GetTempFileName()
+        Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $tempFile -Verbose
+        Move-Item -Path $tempFile -Destination $PROFILE -Force
         Write-Host "Profile updated successfully! Restart your shell or run '. `$PROFILE' to apply changes." -ForegroundColor Green
     }
     catch {
@@ -4400,21 +4458,26 @@ function Setup-AiTools {
     }
 
     $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
-    $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-    if ($userPath) {
-        $userPathArr = $userPath -split ';'
-        $inPath = $false
-        foreach ($p in $userPathArr) {
-            if ($p.TrimEnd('\') -eq $wingetLinksDir.TrimEnd('\')) {
-                $inPath = $true
-                break
+    try {
+        $userPath = Get-ItemPropertyValue -Path 'HKCU:\Environment' -Name 'PATH' -ErrorAction Stop
+        if ($userPath) {
+            $userPathArr = $userPath -split ';'
+            $inPath = $false
+            foreach ($p in $userPathArr) {
+                if ($p.TrimEnd('\') -eq $wingetLinksDir.TrimEnd('\')) {
+                    $inPath = $true
+                    break
+                }
+            }
+            if (-not $inPath) {
+                $newUserPath = $userPath.TrimEnd(';') + ';' + $wingetLinksDir
+                [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $newUserPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+                $env:PATH = $env:PATH.TrimEnd(';') + ';' + $wingetLinksDir
+                Write-Host "Added Winget Links directory ($wingetLinksDir) to your User PATH." -ForegroundColor Green
             }
         }
-        if (-not $inPath) {
-            $newUserPath = $userPath.TrimEnd(';') + ';' + $wingetLinksDir
-            [Environment]::SetEnvironmentVariable("PATH", $newUserPath, "User")
-            Write-Host "Added Winget Links directory ($wingetLinksDir) to your User PATH." -ForegroundColor Green
-        }
+    } catch {
+        # Fallback if registry fails
     }
 
     $wingetListOutput = @()
@@ -4773,7 +4836,7 @@ function Setup-AiApiKeysCS {
 
         # Read hidden input as SecureString. Skip if empty.
         $secure = Read-Host -AsSecureString -Prompt "Enter value for $n (input hidden, blank to skip)"
-        if ($null -eq $secure -or -not ($secure -is [System.Security.SecureString])) {
+        if ($null -eq $secure -or -not ($secure -is [System.Security.SecureString]) -or $secure.Length -eq 0) {
             Write-Host "Skipped $n." -ForegroundColor DarkGray
             continue
         }
@@ -4976,7 +5039,7 @@ function Test-AnthropicApi {
                 content = "Say 'API is working'"
             }
         )
-    } | ConvertTo-Json
+    } | ConvertTo-Json -Depth 10
 
     try {
         $response = Invoke-WebRequest -Uri "$ApiUrl/v1/messages" `
@@ -5069,7 +5132,7 @@ function Test-OpenAiApi {
                 content = "Say 'API is working'"
             }
         )
-    } | ConvertTo-Json
+    } | ConvertTo-Json -Depth 10
 
     try {
         $response = Invoke-WebRequest -Uri "$ApiUrl/chat/completions" `
