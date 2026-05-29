@@ -282,6 +282,30 @@ install_rust() {
     echo "install_rust: done (you may need to restart your shell or run 'source \$HOME/.cargo/env')"
 }
 
+install_dotnet() {
+    if command -v dotnet &>/dev/null; then
+        echo "install_dotnet: dotnet is already installed ($(dotnet --version))"
+        return 0
+    fi
+    echo "install_dotnet: installing dotnet via dotnet-install.sh..."
+    curl -fsSL https://dot.net/v1/dotnet-install.sh | bash
+    export DOTNET_ROOT="$HOME/.dotnet"
+    export PATH="$DOTNET_ROOT:$DOTNET_ROOT/tools:$PATH"
+    
+    local profile_file="${HOME}/.bashrc"
+    [[ "$(uname -s)" == "Darwin" ]] && profile_file="${HOME}/.zshrc"
+    
+    if ! grep -q "DOTNET_ROOT" "$profile_file" 2>/dev/null; then
+        echo "" >> "$profile_file"
+        echo '# .NET Core' >> "$profile_file"
+        echo 'export DOTNET_ROOT="$HOME/.dotnet"' >> "$profile_file"
+        echo 'export PATH="$DOTNET_ROOT:$DOTNET_ROOT/tools:$PATH"' >> "$profile_file"
+        echo "install_dotnet: added DOTNET_ROOT to $profile_file"
+    fi
+    
+    echo "install_dotnet: done"
+}
+
 if command -v podman &>/dev/null && ! command -v docker &>/dev/null; then
     alias docker=podman
 fi
