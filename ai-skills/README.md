@@ -19,10 +19,18 @@ Reusable agent skill documentation for AI coding environments.
 
 ## Install
 
-Copy a skill directory into its intended tool's skill directory, preserving the `SKILL.md` filename:
+From the PowerShell profile, run:
+
+```powershell
+Install-AiSkills
+```
+
+The installer fetches this `ai-skills` directory with a shallow sparse Git clone, overwrites the intended skill directories, and updates OpenCode skill permissions.
+
+For manual installs, copy a skill directory into its intended tool's skill directory, preserving the `SKILL.md` filename:
 
 - OpenCode: `%USERPROFILE%\.agents\skills\<skill-name>\SKILL.md`
 - Claude Code: `%USERPROFILE%\.claude\skills\<skill-name>\SKILL.md`
 - Antigravity CLI: `%USERPROFILE%\.gemini\antigravity-cli\skills\<skill-name>\SKILL.md`
 
-Some skills require credentials. Provide those through local environment variables or your own credential-store setup; do not commit secrets to this repository.
+Some skills require credentials. Provide those through local environment variables or the PowerShell profile's `Set-AiApiKeysCS` / `Load-AiApiKeysFromCS` helpers; do not commit secrets to this repository.

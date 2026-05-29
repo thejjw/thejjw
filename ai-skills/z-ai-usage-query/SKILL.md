@@ -29,10 +29,11 @@ Use this skill when you need to check your Z.AI GLM Coding Plan usage, monitor t
 
 ### Windows
 
-Use the **PowerShell** tool. Ensure `$env:Z_AI_AUTH_TOKEN` is set, then execute the query. If the token is missing on a personal Windows install, load the PowerShell profile and run `Load-AiApiKeysFromCS` first:
+Use the **PowerShell** tool. Ensure `$env:Z_AI_AUTH_TOKEN` is set, then execute the query. If the token is missing on a personal Windows install, configure it with `Set-AiApiKeysCS` if needed, then load the PowerShell profile and run `Load-AiApiKeysFromCS`:
 
 ```powershell
 . $PROFILE
+Set-AiApiKeysCS
 Load-AiApiKeysFromCS
 ```
 
