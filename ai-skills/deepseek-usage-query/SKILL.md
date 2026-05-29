@@ -14,7 +14,9 @@ Use the returned **CNY** and **USD** balances to estimate how much DeepSeek V4 F
 
 ## Configuration
 
-**API Key:** `$env:DEEPSEEK_API_KEY` (Windows) or `DEEPSEEK_API_KEY` (Linux/Mac).
+**API Key:**
+- **Windows:** Read from the `$env:DEEPSEEK_API_KEY` environment variable. In the personal Windows setup, this is usually loaded from Windows Credential Store by the `Load-AiApiKeysFromCS` function in the PowerShell profile.
+- **Linux/Mac:** Read from the `DEEPSEEK_API_KEY` environment variable.
 
 ## API Endpoint
 

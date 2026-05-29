@@ -12,7 +12,9 @@ Query **token usage** and **remaining quota** from MiniMax platform. Returns JSO
 
 ## Configuration
 
-**API Key:** `$env:MINIMAX_API_KEY` (Windows) or `MINIMAX_API_KEY` (Linux/Mac).
+**API Key:**
+- **Windows:** Read from the `$env:MINIMAX_API_KEY` environment variable. In the personal Windows setup, this is usually loaded from Windows Credential Store by the `Load-AiApiKeysFromCS` function in the PowerShell profile.
+- **Linux/Mac:** Read from the `MINIMAX_API_KEY` environment variable.
 
 ## API Endpoint
 
