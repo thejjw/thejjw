@@ -4322,6 +4322,12 @@ function Setup-AiTools {
     When supplied, installs the .NET SDK via the official dotnet-install.ps1 script from dot.net.
     Runs in a separate PowerShell process to avoid the script's exit call ending the current session.
 
+.PARAMETER Docker
+    When supplied, installs Docker Desktop via winget.
+
+.PARAMETER Podman
+    When supplied, installs Podman via winget. Cannot be used together with -Docker.
+
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-05
@@ -4332,8 +4338,14 @@ function Setup-AiTools {
         [switch]$Update,
         [switch]$ExtendedSetup,
         [switch]$Sdk,
-        [switch]$Dotnet
+        [switch]$Dotnet,
+        [switch]$Docker,
+        [switch]$Podman
     )
+
+    if ($Docker -and $Podman) {
+        throw "Cannot specify both -Docker and -Podman switches simultaneously."
+    }
 
     $wingetPackages = $_SetupAiToolsInternal.WingetPackages
     if ($ExtendedSetup) {
@@ -4342,6 +4354,12 @@ function Setup-AiTools {
     if ($Sdk) {
         $wingetPackages += $_SetupAiToolsInternal.SdkWingetPackages
         $Dotnet = $true
+    }
+    if ($Docker) {
+        $wingetPackages += 'Docker.DockerDesktop'
+    }
+    if ($Podman) {
+        $wingetPackages += 'RedHat.Podman'
     }
 
     $npmPackages = $_SetupAiToolsInternal.NpmPackages
@@ -4379,6 +4397,24 @@ function Setup-AiTools {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host "winget not found. Please install 'App Installer' (winget) from Microsoft Store and retry." -ForegroundColor Red
         return
+    }
+
+    $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
+    $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($userPath) {
+        $userPathArr = $userPath -split ';'
+        $inPath = $false
+        foreach ($p in $userPathArr) {
+            if ($p.TrimEnd('\') -eq $wingetLinksDir.TrimEnd('\')) {
+                $inPath = $true
+                break
+            }
+        }
+        if (-not $inPath) {
+            $newUserPath = $userPath.TrimEnd(';') + ';' + $wingetLinksDir
+            [Environment]::SetEnvironmentVariable("PATH", $newUserPath, "User")
+            Write-Host "Added Winget Links directory ($wingetLinksDir) to your User PATH." -ForegroundColor Green
+        }
     }
 
     $wingetListOutput = @()
@@ -4515,6 +4551,17 @@ function Setup-AiTools {
     } else {
         # If codex is present, ensure it's configured with the default settings
         Install-CodexSettings
+    }
+
+    if ($Podman) {
+        Write-Host "Configuring Podman aliases..." -ForegroundColor Cyan
+        $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
+        if (-not (Test-Path -LiteralPath $wingetLinksDir)) {
+            $null = New-Item -ItemType Directory -Path $wingetLinksDir -Force -Verbose
+        }
+        $dockerBat = Join-Path $wingetLinksDir "docker.bat"
+        "@echo off`r`npodman %*" | Out-File -FilePath $dockerBat -Encoding ascii
+        Write-Host "Created docker alias (docker.bat) for podman in Winget Links directory." -ForegroundColor Green
     }
 
     Write-Host "Setup-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
