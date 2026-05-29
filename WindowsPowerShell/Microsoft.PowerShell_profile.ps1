@@ -4346,7 +4346,7 @@ function Update-Profile {
             $filePath = $Matches[2]
             $tmpDir   = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
             git clone --filter=blob:none --no-checkout --quiet $repoUrl $tmpDir
-            $commitInfo = git -C $tmpDir log -1 --format="%h  %ci" -- $filePath
+            $commitInfo = git -C $tmpDir log -1 --format="%cs  %s" -- $filePath
             if ($commitInfo) {
                 Write-Host "Remote commit: $commitInfo" -ForegroundColor DarkGray
             }
