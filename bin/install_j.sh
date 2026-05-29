@@ -240,6 +240,34 @@ install_podman() {
     echo "install_podman: done"
 }
 
+install_golang() {
+    if command -v go &>/dev/null; then
+        echo "install_golang: go is already installed ($(go version))"
+        return 0
+    fi
+    echo "install_golang: installing golang..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update
+        sudo apt-get install -y golang
+    elif command -v brew &>/dev/null; then
+        brew install go
+    else
+        echo "install_golang: unsupported package manager"
+        return 1
+    fi
+    echo "install_golang: done"
+}
+
+install_rust() {
+    if command -v rustc &>/dev/null; then
+        echo "install_rust: rust is already installed ($(rustc --version))"
+        return 0
+    fi
+    echo "install_rust: installing rust via rustup..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    echo "install_rust: done (you may need to restart your shell or run 'source \$HOME/.cargo/env')"
+}
+
 if command -v podman &>/dev/null && ! command -v docker &>/dev/null; then
     alias docker=podman
 fi
