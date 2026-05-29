@@ -590,6 +590,48 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Codex CLI config - set statusline preset
+# ---------------------------------------------------------------------------
+CODEX_DIR="$HOME/.codex"
+CODEX_CONFIG_SENTINEL="$CODEX_DIR/.config_setup_done"
+if [[ -f "$CODEX_CONFIG_SENTINEL" ]]; then
+  echo "codex: config setup already done -- skipping"
+else
+  echo "codex: configuring settings..."
+  mkdir -p "$CODEX_DIR"
+  CODEX_CONFIG="$CODEX_DIR/config.toml"
+  
+  if [ ! -f "$CODEX_CONFIG" ]; then
+    touch "$CODEX_CONFIG"
+  fi
+  
+  if grep -q "\[tui\]" "$CODEX_CONFIG"; then
+    echo "codex: [tui] block already present -- skipping statusline preset"
+  else
+    cat << 'EOF' >> "$CODEX_CONFIG"
+
+commit_attribution = ""
+
+[tui]
+status_line = [
+    "model-with-reasoning",
+    "git-branch",
+    "current-dir",
+    "context-used",
+    "total-output-tokens",
+    "five-hour-limit",
+    "weekly-limit",
+    "fast-mode"
+]
+EOF
+    echo "codex: statusline preset configured"
+  fi
+  
+  touch "$CODEX_CONFIG_SENTINEL"
+  echo "codex: config setup complete"
+fi
+
+# ---------------------------------------------------------------------------
 # ccd - shorthand for claude --dangerously-skip-permissions
 # ---------------------------------------------------------------------------
 CCD_MARKER="# >>> ccd >>>"
