@@ -157,7 +157,9 @@ else
 
 configure_zswap() {
     if grep -q '^N$' /sys/module/zswap/parameters/enabled; then
-        sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="zswap.enabled=1 zswap.compressor=zstd"/' /etc/default/grub
+        sudo sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/{
+            /zswap.enabled/! s/"$/ zswap.enabled=1 zswap.compressor=zstd"/
+        }; s/=" /="/' /etc/default/grub
         sudo update-grub
         echo "zswap configured. Reboot to take effect."
     else
