@@ -152,6 +152,19 @@ fmt_time() {
   fi
 }
 
+fmt_reset_delta() {
+  local ts=$1 now delta
+  [ -z "$ts" ] && return
+  now=$(date +%s)
+  delta=$(( ts - now ))
+  [ "$delta" -le 0 ] && return
+  if [ "$delta" -ge 3600 ]; then
+    printf "%dh" "$(( delta / 3600 ))"
+  else
+    printf "%dm" "$(( delta / 60 ))"
+  fi
+}
+
 # --- Context color based on usage percentage ---
 if [ "$exceeds_200k" = "true" ] || [ "$ctx_pct" -ge 90 ] 2>/dev/null; then CTX_COLOR="$RED"
 elif [ "$ctx_pct" -ge 70 ] 2>/dev/null; then CTX_COLOR="$YELLOW"
@@ -248,13 +261,13 @@ line3_parts=()
 if [ -n "$rate_5h" ]; then
   rc=$(rate_color "$rate_5h")
   rst=""
-  [ -n "$rate_5h_resets" ] && rst=" $(date -d "@${rate_5h_resets}" +%H:%M 2>/dev/null)"
+  r=$(fmt_reset_delta "$rate_5h_resets"); [ -n "$r" ] && rst=" ${r}"
   line3_parts+=("${DIM}Rate 5h:${RESET} ${rc}$(printf "%.0f" "$rate_5h")%${RESET}${DIM}${rst}${RESET}")
 fi
 if [ -n "$rate_7d" ]; then
   rc=$(rate_color "$rate_7d")
   rst=""
-  [ -n "$rate_7d_resets" ] && rst=" $(date -d "@${rate_7d_resets}" +%H:%M 2>/dev/null)"
+  r=$(fmt_reset_delta "$rate_7d_resets"); [ -n "$r" ] && rst=" ${r}"
   line3_parts+=("${DIM}7d:${RESET} ${rc}$(printf "%.0f" "$rate_7d")%${RESET}${DIM}${rst}${RESET}")
 fi
 if [ -n "$agent_name" ]; then
