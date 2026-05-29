@@ -16,13 +16,13 @@ payload=$(cat)
 parsed=$(echo "$payload" | jq -rj '[
   (.cwd // "N/A"),
   (.model.display_name // "N/A"),
-  (.agent_state // "idle"),
+  (.agent_state // "unknown-state"),
   (.context_window.used_percentage // 0),
   (.context_window.total_input_tokens // 0),
   (.context_window.total_output_tokens // 0),
   (.context_window.context_window_size // 0),
-  (.plan_tier // "Standard"),
-  (.email // "user"),
+  (.plan_tier // "unknown-tier"),
+  (.email // "unknown-user"),
   (.sandbox.enabled // false)
 ] | map(tostring) | join("\u001f")')
 
