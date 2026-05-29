@@ -1,4 +1,7 @@
 #!/bin/bash
+# agy cli statusline script
+# Cross-platform: macOS, Linux, Windows (Git Bash). jq required.
+# Copyright (c) 2026 @thejjw
 
 # --- jq check ---
 if ! command -v jq &>/dev/null; then
