@@ -97,6 +97,23 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+if command -v python3 &>/dev/null || command -v python &>/dev/null; then
+  echo "python already present -- skipping installation"
+else
+  echo "python not found: installing via native package manager..."
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get update
+    sudo apt-get install -y python3 python3-pip python3-venv
+  elif command -v brew &>/dev/null; then
+    brew install python
+  else
+    echo "python: unsupported package manager, please install manually"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # uv -- required by MiniMax MCP server (uvx)
 # ---------------------------------------------------------------------------
 if command -v uv &>/dev/null; then
