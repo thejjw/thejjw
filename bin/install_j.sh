@@ -197,6 +197,18 @@ configure_zswap() {
         grep -r . /sys/module/zswap/parameters/
     fi
 }
+
+use_kakao_ubuntu_mirror() {
+    if grep -q 'kr.archive.ubuntu.com' /etc/apt/sources.list.d/ubuntu.sources; then
+        sudo sed -i 's|http://kr.archive.ubuntu.com/ubuntu/|http://mirror.kakao.com/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources
+        echo "use_kakao_ubuntu_mirror: mirror updated"
+        cat /etc/apt/sources.list.d/ubuntu.sources
+    else
+        echo "use_kakao_ubuntu_mirror: non-default mirror detected, skipping"
+        grep '^URIs:' /etc/apt/sources.list.d/ubuntu.sources
+    fi
+}
+
 # <<< install_j_misc <<<
 MISC_EOF
 
