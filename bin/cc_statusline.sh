@@ -106,6 +106,7 @@ case "$effort_level" in
   low)    effort_short="L" ;;
   medium) effort_short="M" ;;
   high)   effort_short="H" ;;
+  xhigh)  effort_short="XH" ;;
   *)      effort_short="$effort_level" ;;
 esac
 
