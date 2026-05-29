@@ -48,4 +48,4 @@ if [ "$sandbox" == "true" ]; then
 fi
 
 # Print it out with nice colors
-echo -e "🧠 \033[35m$model\033[0m | 🔄 \033[36m$agent_state\033[0m | 📊 \033[33m$used_pct%\033[0m \033[36mI\033[33m${ctx_in_fmt}\033[0m+\033[31mO\033[33m${ctx_out_fmt}\033[0m/\033[32mT\033[33m${ctx_max_fmt}\033[0m | 📁 \033[34m$cwd\033[0m$git_info | 👤 \033[37m$email ($plan)\033[0m$sandbox_warn"
+echo -e "🧠 \033[35m$model\033[0m | 🔄 \033[36m$agent_state\033[0m | 📊 \033[33m$used_pct%\033[0m \033[36mR\033[33m${ctx_in_fmt}\033[0m+\033[31mW\033[33m${ctx_out_fmt}\033[0m/\033[32mT\033[33m${ctx_max_fmt}\033[0m | 📁 \033[34m$cwd\033[0m$git_info | 👤 \033[37m$email ($plan)\033[0m$sandbox_warn"
