@@ -165,7 +165,9 @@ $_AiToolsInternal = @{
         'Cisco.ClamAV',
         'astral-sh.ruff',
         'Microsoft.Sqlcmd',
-        'HeidiSQL.HeidiSQL'
+        'HeidiSQL.HeidiSQL',
+        'TheDocumentFoundation.LibreOffice',
+        'OlegShparber.Zeal'
     )
     DbWingetPackages       = @(
         'Oracle.MySQLShell',
