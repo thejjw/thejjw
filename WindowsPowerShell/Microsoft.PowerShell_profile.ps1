@@ -167,7 +167,8 @@ $_AiToolsInternal = @{
         'Microsoft.Sqlcmd',
         'HeidiSQL.HeidiSQL',
         'TheDocumentFoundation.LibreOffice',
-        'OlegShparber.Zeal'
+        'OlegShparber.Zeal',
+        'Mozilla.SeaMonkey'
     )
     DbWingetPackages       = @(
         'Oracle.MySQLShell',
