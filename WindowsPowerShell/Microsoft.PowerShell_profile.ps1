@@ -166,7 +166,8 @@ $_AiToolsInternal = @{
         'astral-sh.ruff',
         'Microsoft.Sqlcmd',
         'Oracle.MySQLShell',
-        'PostgreSQL.psqlODBC'
+        'PostgreSQL.psqlODBC',
+        'HeidiSQL.HeidiSQL'
     )
     SdkWingetPackages      = @(
         'Microsoft.OpenJDK.25',
