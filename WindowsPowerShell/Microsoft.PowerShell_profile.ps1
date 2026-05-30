@@ -165,9 +165,13 @@ $_AiToolsInternal = @{
         'Cisco.ClamAV',
         'astral-sh.ruff',
         'Microsoft.Sqlcmd',
-        'Oracle.MySQLShell',
-        'PostgreSQL.psqlODBC',
         'HeidiSQL.HeidiSQL'
+    )
+    DbWingetPackages       = @(
+        'Oracle.MySQLShell',
+        'Oracle.SQLcl',
+        'PostgreSQL.psqlODBC',
+        'PostgreSQL.pgAdmin'
     )
     SdkWingetPackages      = @(
         'Microsoft.OpenJDK.25',
@@ -4712,7 +4716,7 @@ function Install-AiTools {
     FFmpeg, ImageMagick, security scanners, database CLIs, and similar large-scope packages.
 
 .PARAMETER Sdk
-    When supplied, also installs language SDK runtimes: Java (OpenJDK), Rust, Go, and Perl.
+    When supplied, also installs language SDK runtimes.
 
 .PARAMETER Dotnet
     When supplied, installs the .NET SDK via the official dotnet-install.ps1 script from dot.net.
@@ -4723,6 +4727,9 @@ function Install-AiTools {
 
 .PARAMETER Podman
     When supplied, installs Podman via winget. Cannot be used together with -Docker.
+
+.PARAMETER Db
+    When supplied, installs database client tools.
 
 .NOTES
     Author: jjw(@thejjw)
@@ -4736,7 +4743,8 @@ function Install-AiTools {
         [switch]$Sdk,
         [switch]$Dotnet,
         [switch]$Docker,
-        [switch]$Podman
+        [switch]$Podman,
+        [switch]$Db
     )
 
     if ($Docker -and $Podman) {
@@ -4758,6 +4766,9 @@ function Install-AiTools {
     if ($Podman) {
         $wingetPackages += 'RedHat.Podman'
     }
+    if ($Db) {
+        $wingetPackages += $_AiToolsInternal.DbWingetPackages
+    }
 
     $npmPackages = $_AiToolsInternal.NpmPackages
 
@@ -4765,6 +4776,7 @@ function Install-AiTools {
     if ($ExtendedSetup) { $setupLabels += 'extended' }
     if ($Sdk) { $setupLabels += 'sdk' }
     if ($Dotnet) { $setupLabels += 'dotnet' }
+    if ($Db) { $setupLabels += 'db' }
     $setupLabel = $setupLabels -join ', '
     Write-Host "The setup will check/install the following items ($setupLabel):" -ForegroundColor Cyan
     Write-Host "Winget packages:" -ForegroundColor Cyan
