@@ -4734,6 +4734,11 @@ function Install-AiTools {
 .PARAMETER Db
     When supplied, installs database client tools.
 
+.PARAMETER All
+    When supplied, enables all optional package groups: extended tools, SDK runtimes, .NET SDK,
+    Docker Desktop, and database clients. Equivalent to -ExtendedSetup -Sdk -Docker -Db.
+    Since Docker and Podman are alternatives, -All selects Docker; use -Podman explicitly if preferred.
+
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-05
@@ -4747,11 +4752,21 @@ function Install-AiTools {
         [switch]$Dotnet,
         [switch]$Docker,
         [switch]$Podman,
-        [switch]$Db
+        [switch]$Db,
+        [switch]$All
     )
 
     if ($Docker -and $Podman) {
         throw "Cannot specify both -Docker and -Podman switches simultaneously."
+    }
+
+    # -All expands into every optional group; Docker is chosen over Podman since they are alternatives.
+    # If -Podman was explicitly passed alongside -All, honour Podman instead of Docker.
+    if ($All) {
+        $ExtendedSetup = $true
+        $Sdk = $true
+        if (-not $Podman) { $Docker = $true }
+        $Db = $true
     }
 
     $wingetPackages = $_AiToolsInternal.WingetPackages
@@ -4779,7 +4794,10 @@ function Install-AiTools {
     if ($ExtendedSetup) { $setupLabels += 'extended' }
     if ($Sdk) { $setupLabels += 'sdk' }
     if ($Dotnet) { $setupLabels += 'dotnet' }
+    if ($Docker) { $setupLabels += 'docker' }
+    if ($Podman) { $setupLabels += 'podman' }
     if ($Db) { $setupLabels += 'db' }
+    if ($All) { $setupLabels = @('all') }
     $setupLabel = $setupLabels -join ', '
     Write-Host "The setup will check/install the following items ($setupLabel):" -ForegroundColor Cyan
     Write-Host "Winget packages:" -ForegroundColor Cyan
