@@ -139,11 +139,8 @@ $_AiToolsInternal = @{
         'GitHub.cli',
         'SST.OpenCodeDesktop',
         'SST.opencode',
-        'OpenAI.Codex',
-        'Anthropic.ClaudeCode',
         'Google.Antigravity',
         'Google.AntigravityIDE',
-        'Google.AntigravityCLI',
         'marlocarlo.psmux',
         'marlocarlo.pstop',
         'marlocarlo.psnet'
@@ -4731,12 +4728,12 @@ function Install-AiTools {
 .PARAMETER Podman
     When supplied, installs Podman via winget. Cannot be used together with -Docker.
 
-.PARAMETER Db
+.PARAMETER Database
     When supplied, installs database client tools.
 
 .PARAMETER All
     When supplied, enables all optional package groups: extended tools, SDK runtimes, .NET SDK,
-    Docker Desktop, and database clients. Equivalent to -ExtendedSetup -Sdk -Docker -Db.
+    Docker Desktop, and database clients. Equivalent to -ExtendedSetup -Sdk -Docker -Database.
     Since Docker and Podman are alternatives, -All selects Docker; use -Podman explicitly if preferred.
 
 .NOTES
@@ -4752,7 +4749,7 @@ function Install-AiTools {
         [switch]$Dotnet,
         [switch]$Docker,
         [switch]$Podman,
-        [switch]$Db,
+        [switch]$Database,
         [switch]$All
     )
 
@@ -4766,7 +4763,7 @@ function Install-AiTools {
         $ExtendedSetup = $true
         $Sdk = $true
         if (-not $Podman) { $Docker = $true }
-        $Db = $true
+        $Database = $true
     }
 
     $wingetPackages = $_AiToolsInternal.WingetPackages
@@ -4784,7 +4781,7 @@ function Install-AiTools {
     if ($Podman) {
         $wingetPackages += 'RedHat.Podman'
     }
-    if ($Db) {
+    if ($Database) {
         $wingetPackages += $_AiToolsInternal.DbWingetPackages
     }
 
@@ -4796,7 +4793,7 @@ function Install-AiTools {
     if ($Dotnet) { $setupLabels += 'dotnet' }
     if ($Docker) { $setupLabels += 'docker' }
     if ($Podman) { $setupLabels += 'podman' }
-    if ($Db) { $setupLabels += 'db' }
+    if ($Database) { $setupLabels += 'db' }
     if ($All) { $setupLabels = @('all') }
     $setupLabel = $setupLabels -join ', '
     Write-Host "The setup will check/install the following items ($setupLabel):" -ForegroundColor Cyan
@@ -4979,21 +4976,34 @@ function Install-AiTools {
     Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
 
     if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
-        Write-Host "agy CLI not found; fix winget installation of Google.AntigravityCLI or run agy CLI installer via iex (irm '$($_AiToolsInternal.Urls.AgyCli)')" -ForegroundColor Yellow
+        Write-Host "agy CLI not found; installing via $($_AiToolsInternal.Urls.AgyCli)..." -ForegroundColor Yellow
+        try { & powershell -NoProfile -Command "iex (irm '$($_AiToolsInternal.Urls.AgyCli)')" } catch { Write-Host "Failed to install agy: $_" -ForegroundColor Red }
     } else {
         # If agy is present, ensure it's configured with the default settings
         Install-AgySettings
     }
 
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-        Write-Host "claude CLI not found; fix winget installation of Anthropic.ClaudeCode or run Claude installer via iex (irm '$($_AiToolsInternal.Urls.ClaudeCli)')" -ForegroundColor Yellow
+        Write-Host "claude CLI not found; installing via $($_AiToolsInternal.Urls.ClaudeCli)..." -ForegroundColor Yellow
+        try { & powershell -NoProfile -Command "iex (irm '$($_AiToolsInternal.Urls.ClaudeCli)')" } catch { Write-Host "Failed to install claude: $_" -ForegroundColor Red }
+        # The claude installer places the binary in ~/.local/bin; ensure it's on the user PATH.
+        $claudeBin = Join-Path $env:USERPROFILE '.local\bin'
+        $regPath = (Get-ItemPropertyValue -Path 'HKCU:\Environment' -Name 'PATH' -ErrorAction SilentlyContinue)
+        $regArr = if ($regPath) { $regPath -split ';' } else { @() }
+        if ($regArr -notcontains $claudeBin) {
+            $newRegPath = if ($regPath) { $regPath.TrimEnd(';') + ';' + $claudeBin } else { $claudeBin }
+            [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $newRegPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+            $env:PATH = $env:PATH.TrimEnd(';') + ';' + $claudeBin
+            Write-Host "Added $claudeBin to user PATH for claude CLI." -ForegroundColor Green
+        }
     } else {
         # If claude is present, ensure it's configured with the default settings
         Install-GlobalClaudeSettings
     }
 
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-        Write-Host "codex CLI not found; fix winget installation of OpenAI.Codex or run codex installer via iex (irm '$($_AiToolsInternal.Urls.CodexCli)')" -ForegroundColor Yellow
+        Write-Host "codex CLI not found; installing via $($_AiToolsInternal.Urls.CodexCli)..." -ForegroundColor Yellow
+        try { & powershell -NoProfile -ExecutionPolicy ByPass -Command "irm '$($_AiToolsInternal.Urls.CodexCli)' | iex" } catch { Write-Host "Failed to install codex: $_" -ForegroundColor Red }
     } else {
         # If codex is present, ensure it's configured with the default settings
         Install-CodexSettings
