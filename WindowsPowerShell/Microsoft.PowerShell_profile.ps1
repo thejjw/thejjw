@@ -3307,7 +3307,7 @@ function Install-GlobalClaudeSettings {
         $settings | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue ([pscustomobject]@{ type = 'command'; command = $statusLineCommand }) -Force
     }
 
-    $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $settingsJson -Encoding UTF8
+    [IO.File]::WriteAllText($settingsJson, ($settings | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
     $null = New-Item -ItemType File -Path $sentinel -Force
     Write-Host "claude: config setup complete" -ForegroundColor Green
 }
@@ -3362,7 +3362,9 @@ function Install-AgySettings {
         $settings | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue $statusLineObj -Force
     }
 
-    $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $settingsJson -Encoding UTF8
+    # Set-Content -Encoding UTF8 writes a BOM in WinPS 5.1; use WriteAllText
+    # with an explicit no-BOM encoder so JSON parsers don't choke on it.
+    [IO.File]::WriteAllText($settingsJson, ($settings | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
     $null = New-Item -ItemType File -Path $sentinel -Force
     Write-Host "agy: config setup complete" -ForegroundColor Green
 }
@@ -4638,7 +4640,7 @@ function Install-AiSkills {
 
         if (-not (Test-Path -LiteralPath $openCodeConfigFile)) {
             Write-Verbose "Creating OpenCode config file: $openCodeConfigFile"
-            Set-Content -Path $openCodeConfigFile -Value '{}' -Encoding UTF8
+            [IO.File]::WriteAllText($openCodeConfigFile, '{}', [Text.UTF8Encoding]::new($false))
         }
 
         Write-Verbose "Reading OpenCode config: $openCodeConfigFile"
@@ -4667,7 +4669,7 @@ function Install-AiSkills {
         }
 
         Write-Verbose "Writing updated OpenCode config: $openCodeConfigFile"
-        $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $openCodeConfigFile -Encoding UTF8
+        [IO.File]::WriteAllText($openCodeConfigFile, ($config | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
         Write-Host "[info] Updated OpenCode skill permissions."
     }
 
