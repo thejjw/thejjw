@@ -3234,18 +3234,26 @@ function Install-GlobalClaudeSettings {
 .EXAMPLE
     Install-GlobalClaudeSettings
 
+.EXAMPLE
+    Install-GlobalClaudeSettings -Force
+
+.PARAMETER Force
+    Bypass the sentinel check and reapply settings even if setup was previously completed.
+
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-05
+    Last Edit: 2026-06
 #>
     [CmdletBinding()]
-    param()
+    param(
+        [switch]$Force
+    )
 
     $claudeDir = Join-Path $HOME '.claude'
     $claudeBinDir = Join-Path $claudeDir 'bin'
     $sentinel = Join-Path $claudeDir '.config_setup_done'
 
-    if (Test-Path -LiteralPath $sentinel) {
+    if ((Test-Path -LiteralPath $sentinel) -and -not $Force) {
         Write-Host "claude: global config setup already done -- skipping"
         return
     }
@@ -3275,8 +3283,27 @@ function Install-GlobalClaudeSettings {
     $settings | Add-Member -NotePropertyName 'attribution' -NotePropertyValue ([pscustomobject]@{ commit = ''; pr = '' }) -Force
 
     if (Test-Path -LiteralPath $targetStatusLine) {
-        $targetStatusLineBash = $targetStatusLine -replace '\\', '/'
-        $settings | Add-Member -NotePropertyName 'customStatusLineCommand' -NotePropertyValue $targetStatusLineBash -Force
+        # On Windows, .sh files are not directly executable; locate Git bash and
+        # write a .cmd wrapper so Claude Code can invoke the script without PATH issues.
+        $bashExe = $null
+        foreach ($candidate in @('C:\Program Files\Git\bin\bash.exe', 'C:\Program Files\Git\usr\bin\bash.exe')) {
+            if (Test-Path $candidate) { $bashExe = $candidate; break }
+        }
+        if (-not $bashExe) {
+            $bashCmd = Get-Command bash.exe -ErrorAction SilentlyContinue
+            if ($bashCmd) { $bashExe = $bashCmd.Source }
+        }
+
+        if ($bashExe) {
+            $wrapperPath = Join-Path $claudeBinDir 'statusline.cmd'
+            $wrapperContent = "@echo off`r`n`"$bashExe`" `"$targetStatusLine`"`r`n"
+            [IO.File]::WriteAllText($wrapperPath, $wrapperContent, [Text.Encoding]::ASCII)
+            $settings | Add-Member -NotePropertyName 'customStatusLineCommand' -NotePropertyValue ($wrapperPath -replace '\\', '/') -Force
+        } else {
+            # No bash found; fall back to raw .sh (may not work on Windows)
+            $settings | Add-Member -NotePropertyName 'customStatusLineCommand' -NotePropertyValue ($targetStatusLine -replace '\\', '/') -Force
+            Write-Warning "claude: bash.exe not found; statusline may not work. Install Git for Windows and re-run."
+        }
     }
 
     $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $settingsJson -Encoding UTF8
@@ -3288,12 +3315,20 @@ function Install-AgySettings {
     <#
 .SYNOPSIS
     Ensures ~/.gemini/antigravity-cli/settings.json has the custom status line configured.
+
+.PARAMETER Force
+    Bypass the sentinel check and reapply settings even if setup was previously completed.
 #>
+    [CmdletBinding()]
+    param(
+        [switch]$Force
+    )
+
     $agyDir = Join-Path $HOME '.gemini\antigravity-cli'
     $agyBinDir = Join-Path $agyDir 'bin'
     $sentinel = Join-Path $agyDir '.config_setup_done'
 
-    if (Test-Path -LiteralPath $sentinel) {
+    if ((Test-Path -LiteralPath $sentinel) -and -not $Force) {
         Write-Host "agy: config setup already done -- skipping"
         return
     }
@@ -3335,11 +3370,19 @@ function Install-CodexSettings {
     <#
 .SYNOPSIS
     Ensures ~/.codex/config.toml has the custom status line array and no attribution.
+
+.PARAMETER Force
+    Bypass the sentinel check and reapply settings even if setup was previously completed.
 #>
+    [CmdletBinding()]
+    param(
+        [switch]$Force
+    )
+
     $codexDir = Join-Path $HOME '.codex'
     $sentinel = Join-Path $codexDir '.config_setup_done'
 
-    if (Test-Path -LiteralPath $sentinel) {
+    if ((Test-Path -LiteralPath $sentinel) -and -not $Force) {
         Write-Host "codex: config setup already done -- skipping"
         return
     }
