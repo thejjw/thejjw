@@ -3298,12 +3298,13 @@ function Install-GlobalClaudeSettings {
             $wrapperPath = Join-Path $claudeBinDir 'statusline.cmd'
             $wrapperContent = "@echo off`r`n`"$bashExe`" `"$targetStatusLine`"`r`n"
             [IO.File]::WriteAllText($wrapperPath, $wrapperContent, [Text.Encoding]::ASCII)
-            $settings | Add-Member -NotePropertyName 'customStatusLineCommand' -NotePropertyValue ($wrapperPath -replace '\\', '/') -Force
+            $statusLineCommand = $wrapperPath -replace '\\', '/'
         } else {
             # No bash found; fall back to raw .sh (may not work on Windows)
-            $settings | Add-Member -NotePropertyName 'customStatusLineCommand' -NotePropertyValue ($targetStatusLine -replace '\\', '/') -Force
+            $statusLineCommand = $targetStatusLine -replace '\\', '/'
             Write-Warning "claude: bash.exe not found; statusline may not work. Install Git for Windows and re-run."
         }
+        $settings | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue ([pscustomobject]@{ type = 'command'; command = $statusLineCommand }) -Force
     }
 
     $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $settingsJson -Encoding UTF8
