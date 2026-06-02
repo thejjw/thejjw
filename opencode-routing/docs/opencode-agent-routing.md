@@ -63,7 +63,7 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 
 | Agent | Model | Purpose |
 | --- | --- | --- |
-| `fast-discovery-m2.7` | `minimax-coding-plan/MiniMax-M2.7` | Fast read-only discovery |
+| `fast-discovery-m3[1m]` | `minimax-coding-plan/MiniMax-M3[1m]` | Fast read-only discovery |
 | `fast-openai-gpt5.4-mini` | `openai/gpt-5.4-mini` | OpenAI read-only discovery |
 | `fast-glm-4.5-air` | `zai-coding-plan/glm-4.5-air` | GLM read-only discovery |
 | `hard-impl-glm51` | `zai-coding-plan/glm-5.1` | Main implementation work |
@@ -75,13 +75,13 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 
 | Head | Allowed Subagents |
 | --- | --- |
-| `head-gpt` | `fast-discovery-m2.7`, `hard-impl-glm51` |
-| `head-glm` | `fast-discovery-m2.7`, `hard-impl-glm47` |
-| `alt_premium` | `fast-discovery-m2.7`, `hard-impl-openai`, `premium-reviewer-gpt-5.5-pro` |
+| `head-gpt` | `fast-discovery-m3[1m]`, `hard-impl-glm51` |
+| `head-glm` | `fast-discovery-m3[1m]`, `hard-impl-glm47` |
+| `alt_premium` | `fast-discovery-m3[1m]`, `hard-impl-openai`, `premium-reviewer-gpt-5.5-pro` |
 | `alt_openai` | `fast-openai-gpt5.4-mini`, `hard-impl-openai`, `premium-reviewer-gpt-5.5-pro` |
 | `alt_glm_stack` | `fast-glm-4.5-air`, `hard-impl-glm47` |
-| `alt_budget` | `fast-discovery-m2.7`, `hard-impl-glm47` |
-| `alt_review_heavy` | `fast-discovery-m2.7`, `hard-impl-glm51`, `premium-reviewer-gpt-5.5-pro` |
+| `alt_budget` | `fast-discovery-m3[1m]`, `hard-impl-glm47` |
+| `alt_review_heavy` | `fast-discovery-m3[1m]`, `hard-impl-glm51`, `premium-reviewer-gpt-5.5-pro` |
 
 ## Validation
 
@@ -91,7 +91,7 @@ After installation:
 opencode debug config
 opencode debug agent head-gpt
 opencode debug agent head-glm
-opencode debug agent fast-discovery-m2.7
+opencode debug agent fast-discovery-m3[1m]
 ```
 
 ## Notes
