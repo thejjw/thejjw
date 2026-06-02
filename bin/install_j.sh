@@ -489,6 +489,7 @@ Use Z.ai MCP servers for:
 - Text extraction
 
 **When using MiniMax models (MiniMax-*):**
+Note: MiniMax-M3 natively supports multimodal input (images and video) in addition to MCP.
 Use MiniMax MCP server for:
 - Web searches (`web_search`)
 - Image understanding (`understand_image`)
@@ -519,6 +520,7 @@ Use Z.ai MCP servers for:
 - Text extraction
 
 **When using MiniMax models (MiniMax-*):**
+Note: MiniMax-M3 natively supports multimodal input (images and video) in addition to MCP.
 Use MiniMax MCP server for:
 - Web searches (`web_search`)
 - Image understanding (`understand_image`)
