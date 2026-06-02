@@ -1044,19 +1044,19 @@ else
 # Custom Claude Code alias with MiniMax endpoint
 alias claudemm='ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY" \
-  ANTHROPIC_MODEL="MiniMax-M2.7" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.7" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.7" \
+  ANTHROPIC_MODEL="MiniMax-M3[1m]" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M3[1m]" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M3[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M3[1m]" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   claude'
 alias claudemmd='ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY" \
-  ANTHROPIC_MODEL="MiniMax-M2.7" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.7" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.7" \
+  ANTHROPIC_MODEL="MiniMax-M3[1m]" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M3[1m]" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M3[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M3[1m]" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   claude --dangerously-skip-permissions'
@@ -1069,10 +1069,10 @@ EOF
       CLAUDEMM_ENV=(
         ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
         ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY"
-        ANTHROPIC_MODEL="MiniMax-M2.7"
-        ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.7"
-        ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7"
-        ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.7"
+        ANTHROPIC_MODEL="MiniMax-M3[1m]"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M3[1m]"
+        ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M3[1m]"
+        ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M3[1m]"
         API_TIMEOUT_MS="3000000"
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
       )
@@ -1136,11 +1136,11 @@ claudemmr() {
 
   remote_claude_base "$host" "$key" "$port" \
     "https://api.minimax.io/anthropic" \
-    "MiniMax-M2.7" \
-    "MiniMax-M2.7" \
-    "MiniMax-M2.7" \
+    "MiniMax-M3[1m]" \
+    "MiniMax-M3[1m]" \
+    "MiniMax-M3[1m]" \
     "3000000" \
-    "1"
+    "0"
 }
 
 CLAUEMMR_EOF

@@ -4380,16 +4380,16 @@ function claudemm {
 
     $env:ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
-    # MiniMax offers a single model (M2.7), so all Anthropic model slots route to it
-    $env:ANTHROPIC_MODEL = "MiniMax-M2.7"
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "MiniMax-M2.7"
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "MiniMax-M2.7"
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "MiniMax-M2.7"
+    # MiniMax offers a single model (M3[1m]), so all Anthropic model slots route to it
+    $env:ANTHROPIC_MODEL = "MiniMax-M3[1m]"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "MiniMax-M3[1m]"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "MiniMax-M3[1m]"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "MiniMax-M3[1m]"
     $env:API_TIMEOUT_MS = "3000000"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = "MiniMax-M2.7"
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "MiniMax-M3[1m]"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
 
     try {
@@ -4483,12 +4483,12 @@ Last Edit: 2026-05
     # All three model tiers map to the same MiniMax model; Claude Code selects
     # the tier internally and MiniMax routes accordingly.
     $BaseUrl = "https://api.minimax.io/anthropic"
-    $HaikuModel = "MiniMax-M2.7"
-    $SonnetModel = "MiniMax-M2.7"
-    $OpusModel = "MiniMax-M2.7"
+    $HaikuModel = "MiniMax-M3[1m]"
+    $SonnetModel = "MiniMax-M3[1m]"
+    $OpusModel = "MiniMax-M3[1m]"
     # 50-minute timeout -- MiniMax inference can be slow for complex agentic loops.
     $TimeoutMs = "3000000"
-    $Disable1M = "1"
+    $Disable1M = "0"
 
     # Build the splat hashtable and optionally attach KeyFile so a single
     # Invoke-RemoteClaudeCodeBase call covers both key-file and API-key modes.
