@@ -7,13 +7,13 @@
       "mode": "primary",
       "model": "openai/gpt-5.5",
       "variant": "high",
-      "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3[1m]. Delegate implementation, hard debugging, and risky code changes to hard-impl-glm51. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
+      "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-glm51. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
         "task": {
           "*": "deny",
-          "fast-discovery-m3[1m]": "allow",
+          "fast-discovery-m3": "allow",
           "hard-impl-glm51": "allow"
         }
       }
@@ -22,13 +22,13 @@
       "description": "Primary GLM orchestration head using GLM 5.1. Use for lower-cost or non-OpenAI main workflows.",
       "mode": "primary",
       "model": "zai-coding-plan/glm-5.1",
-      "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3[1m]. Delegate implementation, hard debugging, and risky code changes to hard-impl-glm47. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
+      "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-glm47. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
         "task": {
           "*": "deny",
-          "fast-discovery-m3[1m]": "allow",
+          "fast-discovery-m3": "allow",
           "hard-impl-glm47": "allow"
         }
       }
@@ -37,13 +37,13 @@
       "description": "Alternate premium routing profile using GPT 5.5 Pro for orchestration and review-heavy work.",
       "mode": "primary",
       "model": "openai/gpt-5.5-pro",
-      "prompt": "You are a premium orchestration head. Use fast-discovery-m3[1m] for quick investigation, hard-impl-openai for implementation, and premium-reviewer-gpt-5.5-pro for final review or high-risk decisions.",
+      "prompt": "You are a premium orchestration head. Use fast-discovery-m3 for quick investigation, hard-impl-openai for implementation, and premium-reviewer-gpt-5.5-pro for final review or high-risk decisions.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
         "task": {
           "*": "deny",
-          "fast-discovery-m3[1m]": "allow",
+          "fast-discovery-m3": "allow",
           "hard-impl-openai": "allow",
           "premium-reviewer-gpt-5.5-pro": "allow"
         }
@@ -85,13 +85,13 @@
       "description": "Alternate budget routing profile for routine edits and quick iteration.",
       "mode": "primary",
       "model": "zai-coding-plan/glm-4.7",
-      "prompt": "You are a budget-conscious orchestration head. Use fast-discovery-m3[1m] for quick investigation and hard-impl-glm47 for implementation. Prefer small, bounded changes and concise verification.",
+      "prompt": "You are a budget-conscious orchestration head. Use fast-discovery-m3 for quick investigation and hard-impl-glm47 for implementation. Prefer small, bounded changes and concise verification.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
         "task": {
           "*": "deny",
-          "fast-discovery-m3[1m]": "allow",
+          "fast-discovery-m3": "allow",
           "hard-impl-glm47": "allow"
         }
       }
@@ -101,22 +101,22 @@
       "mode": "primary",
       "model": "openai/gpt-5.5",
       "variant": "high",
-      "prompt": "You are a review-heavy orchestration head. Use fast-discovery-m3[1m] for investigation, hard-impl-glm51 for implementation, and premium-reviewer-gpt-5.5-pro for final review before summarizing.",
+      "prompt": "You are a review-heavy orchestration head. Use fast-discovery-m3 for investigation, hard-impl-glm51 for implementation, and premium-reviewer-gpt-5.5-pro for final review before summarizing.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
         "task": {
           "*": "deny",
-          "fast-discovery-m3[1m]": "allow",
+          "fast-discovery-m3": "allow",
           "hard-impl-glm51": "allow",
           "premium-reviewer-gpt-5.5-pro": "allow"
         }
       }
     },
-    "fast-discovery-m3[1m]": {
+    "fast-discovery-m3": {
       "description": "Fast read-only codebase discovery, search, file mapping, dependency lookup, and summarization using MiniMax M3.",
       "mode": "subagent",
-      "model": "minimax-coding-plan/MiniMax-M3[1m]",
+      "model": "minimax-coding-plan/MiniMax-M3",
       "steps": 12,
       "prompt": "You are a fast discovery agent. Search, inspect, summarize, and return concise findings with file references. Do not modify files. Prefer targeted searches over exhaustive reading.",
       "permission": {
