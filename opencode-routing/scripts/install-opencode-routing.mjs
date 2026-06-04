@@ -113,7 +113,11 @@ Options:
 
 function readJson(filePath, label) {
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    let content = fs.readFileSync(filePath, "utf8");
+    if (content.startsWith("\ufeff")) {
+      content = content.slice(1);
+    }
+    return JSON.parse(content);
   } catch (error) {
     if (error.code === "ENOENT") {
       throw new Error(`Missing ${label}: ${filePath}`);
