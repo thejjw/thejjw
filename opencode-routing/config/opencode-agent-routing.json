@@ -37,7 +37,7 @@
       "description": "Primary MiniMax orchestration head using MiniMax M3. Use for MiniMax-dedicated workflows.",
       "mode": "primary",
       "model": "minimax-coding-plan/MiniMax-M3",
-      "variant": "max",
+      "variant": "high",
       "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-m3. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
       "permission": {
         "edit": "ask",
