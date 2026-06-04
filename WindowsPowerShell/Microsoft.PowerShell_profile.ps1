@@ -4876,11 +4876,19 @@ function Install-AiTools {
     if ($All) { $setupLabels = @('all') }
     $setupLabel = $setupLabels -join ', '
     Write-Host "The setup will check/install the following items ($setupLabel):" -ForegroundColor Cyan
-    Write-Host "Winget packages:" -ForegroundColor Cyan
-    foreach ($p in $wingetPackages) { Write-Host " - $p" }
+    Write-Host "Winget packages (total: $($wingetPackages.Count)):" -ForegroundColor Cyan
+    $wingetIdx = 0
+    foreach ($p in $wingetPackages) {
+        $wingetIdx++
+        Write-Host " - [$wingetIdx/$($wingetPackages.Count)] $p"
+    }
 
-    Write-Host "NPM global packages (installed via npm -g):" -ForegroundColor Cyan
-    foreach ($np in $npmPackages) { Write-Host " - $np" }
+    Write-Host "NPM global packages (installed via npm -g) (total: $($npmPackages.Count)):" -ForegroundColor Cyan
+    $npmIdx = 0
+    foreach ($np in $npmPackages) {
+        $npmIdx++
+        Write-Host " - [$npmIdx/$($npmPackages.Count)] $np"
+    }
 
     Write-Host "Command-line tools to verify/install:" -ForegroundColor Cyan
     Write-Host " - git (installed via winget if missing)"
@@ -4967,14 +4975,18 @@ function Install-AiTools {
 
     $missing = @()
     $installed = @()
+    $totalWinget = $wingetPackages.Count
+    $wingetCheckIdx = 0
+    # Enumerate and check install status of each winget package, printing progress
     foreach ($pkg in $wingetPackages) {
+        $wingetCheckIdx++
         $isInstalled = Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $pkg
         if ($isInstalled) {
-            Write-Host "installed:   $pkg" -ForegroundColor Green
+            Write-Host "[$wingetCheckIdx/$totalWinget] installed:   $pkg" -ForegroundColor Green
             $installed += $pkg
         }
         else {
-            Write-Host "not installed: $pkg" -ForegroundColor Yellow
+            Write-Host "[$wingetCheckIdx/$totalWinget] not installed: $pkg" -ForegroundColor Yellow
             $missing += $pkg
         }
     }
@@ -4984,8 +4996,12 @@ function Install-AiTools {
         foreach ($m in $missing) { Write-Host " - $m" }
 
         Write-Host "Installing missing packages via winget..." -ForegroundColor Cyan
+        $totalMissing = $missing.Count
+        $wingetInstallIdx = 0
+        # Install each missing winget package, printing progress
         foreach ($m in $missing) {
-            Write-Host "Installing $m..."
+            $wingetInstallIdx++
+            Write-Host "[$wingetInstallIdx/$totalMissing] Installing $m..." -ForegroundColor Cyan
             try {
                 # Start-Process is used instead of direct invocation so winget can
                 # prompt for UAC elevation without deadlocking the parent console.
@@ -5010,8 +5026,12 @@ function Install-AiTools {
 
     if ($Update -and $installed.Count -gt 0) {
         Write-Host "Upgrading existing winget packages..." -ForegroundColor Cyan
+        $totalInstalled = $installed.Count
+        $wingetUpgradeIdx = 0
+        # Upgrade each installed winget package, printing progress
         foreach ($pkg in $installed) {
-            Write-Host "Upgrading $pkg..."
+            $wingetUpgradeIdx++
+            Write-Host "[$wingetUpgradeIdx/$totalInstalled] Upgrading $pkg..." -ForegroundColor Cyan
             try {
                 Start-Process -FilePath 'winget' -ArgumentList "upgrade -s winget -e --id $pkg" -NoNewWindow -Wait
             }
@@ -5036,8 +5056,12 @@ function Install-AiTools {
 
     # Install global npm packages if npm available
     if (Get-Command npm -ErrorAction SilentlyContinue) {
+        $totalNpm = $npmPackages.Count
+        $npmInstallIdx = 0
+        # Install each NPM global package, printing progress
         foreach ($np in $npmPackages) {
-            Write-Host "Installing npm package $np (global)..." -ForegroundColor Cyan
+            $npmInstallIdx++
+            Write-Host "[$npmInstallIdx/$totalNpm] Installing npm package $np (global)..." -ForegroundColor Cyan
             try { & npm install -g $np } catch { Write-Host "npm install failed for $($np): $_" -ForegroundColor Red }
         }
     }
