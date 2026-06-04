@@ -33,6 +33,22 @@
         }
       }
     },
+    "head-minimax": {
+      "description": "Primary MiniMax orchestration head using MiniMax M3. Use for MiniMax-dedicated workflows.",
+      "mode": "primary",
+      "model": "minimax-coding-plan/MiniMax-M3",
+      "variant": "max",
+      "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-m3. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
+      "permission": {
+        "edit": "ask",
+        "bash": "ask",
+        "task": {
+          "*": "deny",
+          "fast-discovery-m3": "allow",
+          "hard-impl-m3": "allow"
+        }
+      }
+    },
     "alt_head-premium": {
       "description": "Alternate premium routing profile using GPT 5.5 Pro for orchestration and review-heavy work.",
       "mode": "primary",
@@ -211,6 +227,23 @@
       "description": "Implementation and hard debugging subagent using GPT 5.3 Codex.",
       "mode": "subagent",
       "model": "openai/gpt-5.3-codex",
+      "steps": 40,
+      "prompt": "You are an implementation agent. Make the smallest correct code changes, preserve existing style, run focused verification when appropriate, and report what changed. Avoid broad discovery unless necessary.",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": "ask",
+        "todowrite": "allow",
+        "task": "deny"
+      }
+    },
+    "hard-impl-m3": {
+      "description": "Implementation and hard debugging subagent using MiniMax M3.",
+      "mode": "subagent",
+      "model": "minimax-coding-plan/MiniMax-M3",
       "steps": 40,
       "prompt": "You are an implementation agent. Make the smallest correct code changes, preserve existing style, run focused verification when appropriate, and report what changed. Avoid broad discovery unless necessary.",
       "permission": {
