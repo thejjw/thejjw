@@ -3283,6 +3283,9 @@ function Install-GlobalClaudeSettings {
 
     $settings | Add-Member -NotePropertyName 'attribution' -NotePropertyValue ([pscustomobject]@{ commit = ''; pr = '' }) -Force
 
+    # Prefer PowerShell tool over Bash on Windows
+    $settings | Add-Member -NotePropertyName 'env' -NotePropertyValue ([pscustomobject]@{ CLAUDE_CODE_USE_POWERSHELL_TOOL = '1' }) -Force
+
     if (Test-Path -LiteralPath $targetStatusLine) {
         # On Windows, .sh files are not directly executable; locate Git bash and
         # write a .cmd wrapper so Claude Code can invoke the script without PATH issues.
