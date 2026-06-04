@@ -4,6 +4,8 @@ Reusable agent skill documentation for AI coding environments.
 
 ## Skills
 
+- `deep-research`: Deep research harness — fan-out web searches, fetch sources, adversarially verify claims, synthesize a cited report.
+  - Intended for OpenCode and Claude Code.
 - `deepseek-usage-query`: Query DeepSeek API balance and estimate token budget from current pricing.
   - Intended for OpenCode and Claude Code.
 - `minimax-usage-query`: Query MiniMax token usage, quota limits, and model-specific allowances.
