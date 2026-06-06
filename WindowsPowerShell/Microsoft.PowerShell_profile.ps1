@@ -5668,6 +5668,42 @@ function Test-OpenAiApi {
     }
 }
 
+function Invoke-AiUpgrade {
+    <#
+.SYNOPSIS
+    Updates all AI CLI tools in one shot.
+.DESCRIPTION
+    Runs the update/upgrade command for agy, claude, codex, and opencode sequentially.
+    Use the alias 'aiu' for convenience.
+.EXAMPLE
+    Invoke-AiUpgrade
+.EXAMPLE
+    aiu
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-06
+#>
+    [CmdletBinding()]
+    param()
+
+    $tools = @(
+        @{ Label = 'agy';      Cmd = 'agy';      Args = @('update') },
+        @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
+        @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
+        @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') }
+    )
+
+    foreach ($tool in $tools) {
+        if (-not (Get-Command $tool.Cmd -ErrorAction SilentlyContinue)) {
+            Write-Warning "$($tool.Label): not found in PATH, skipping."
+            continue
+        }
+        Write-Host ">>> $($tool.Label) $($tool.Args -join ' ')" -ForegroundColor Cyan
+        & $tool.Cmd @($tool.Args)
+    }
+}
+Set-Alias -Name aiu -Value Invoke-AiUpgrade
+
 # Auto-load vault credentials at profile load time so every session starts with
 # keys available. Uses -Quiet to avoid printing key counts in transient shells.
 Load-AiApiKeysFromCS -Quiet
