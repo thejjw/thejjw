@@ -4476,6 +4476,39 @@ function Install-ClaudeCCRSetup {
         [switch]$Force
     )
 
+    # ---- CCR configuration block (top of function for easy retuning) ----
+    # All literal values feeding the generated config.json live here. Edit a value to retune
+    # the endpoint, model list, or routing role without reading the function body.
+    $cfg = @{
+        Host      = '127.0.0.1'
+        Port      = 3456
+        Log       = $true
+        Timeout   = 3000000
+        Threshold = 60000
+        Router = @{
+            default    = 'zai,glm-5-turbo'   # Sonnet (daily work)
+            background = 'zai,glm-4.5-air'   # Haiku (background subagents)
+            think      = 'zai,glm-5.1'       # Opus (Plan Mode / reasoning)
+        }
+        Providers = @{
+            zai = @{
+                base   = 'https://api.z.ai/api/anthropic/v1/messages'
+                key    = '$Z_AI_AUTH_TOKEN'
+                models = @('glm-4.5-air', 'glm-5-turbo', 'glm-5.1', 'glm-4.6v')
+            }
+            minimax = @{
+                base   = 'https://api.minimax.io/anthropic/v1/messages'
+                key    = '$MINIMAX_API_KEY'
+                models = @('MiniMax-M3[1m]')
+            }
+            deepseek = @{
+                base   = 'https://api.deepseek.com/anthropic/v1/messages'
+                key    = '$DEEPSEEK_API_KEY'
+                models = @('deepseek-v4-flash[1m]', 'deepseek-v4-pro[1m]')
+            }
+        }
+    }
+
     if ([string]::IsNullOrWhiteSpace($ZaiToken))    { $ZaiToken    = Get-AiApiKey 'Z_AI_AUTH_TOKEN' }
     if ([string]::IsNullOrWhiteSpace($MiniMaxKey))  { $MiniMaxKey  = Get-AiApiKey 'MINIMAX_API_KEY' }
     if ([string]::IsNullOrWhiteSpace($DeepSeekKey)) { $DeepSeekKey = Get-AiApiKey 'DEEPSEEK_API_KEY' }
@@ -4516,11 +4549,20 @@ function Install-ClaudeCCRSetup {
     }
 
     # Pick the long-context provider. MiniMax is preferred (1M context); otherwise DeepSeek.
-    # If neither is configured, leave the route unset so CCR falls through to `default`.
+    # The model slot is derived from the provider's first model in $cfg so editing the model
+    # list above is enough -- no second place to update.
     $longContextRoute = $null
-    if ($MiniMaxKey)      { $longContextRoute = 'minimax,MiniMax-M3[1m]' }
-    elseif ($DeepSeekKey) { $longContextRoute = 'deepseek,deepseek-v4-pro[1m]' }
-    else                  { Write-Host "cccr: no MiniMax or DeepSeek key -- longContext will fall through to default" -ForegroundColor Yellow }
+    if ($MiniMaxKey) {
+        $longContextRoute = '{0},{1}' -f 'minimax', $cfg.Providers.minimax.models[0]
+    }
+    elseif ($DeepSeekKey) {
+        $proModel = $cfg.Providers.deepseek.models | Where-Object { $_ -like '*pro*' } | Select-Object -First 1
+        if (-not $proModel) { $proModel = $cfg.Providers.deepseek.models[0] }
+        $longContextRoute = '{0},{1}' -f 'deepseek', $proModel
+    }
+    else {
+        Write-Host "cccr: no MiniMax or DeepSeek key -- longContext will fall through to default" -ForegroundColor Yellow
+    }
 
     # Always (re)write the config when sentinel is missing or -Force was passed, OR when the
     # user has never had a config.json. If a stale config.json exists without a sentinel we
@@ -4540,50 +4582,41 @@ function Install-ClaudeCCRSetup {
         }
 
         $router = [ordered]@{
-            default              = 'zai,glm-5-turbo'
-            background           = 'zai,glm-4.5-air'
-            think                = 'zai,glm-5.1'
-            longContextThreshold = 60000
+            default              = $cfg.Router.default
+            background           = $cfg.Router.background
+            think                = $cfg.Router.think
+            longContextThreshold = $cfg.Threshold
         }
         if ($longContextRoute)  { $router['longContext'] = $longContextRoute }
-        if ($MiniMaxKey)        { $router['image']       = 'minimax,MiniMax-M3[1m]' }
+        if ($MiniMaxKey)        { $router['image']       = '{0},{1}' -f 'minimax', $cfg.Providers.minimax.models[0] }
 
-        $providers = @(
+        # Provider order in the generated config. Each entry is included only when the matching
+        # API key is available; zai is always present since the launcher requires it.
+        $providers = foreach ($pName in @('zai', 'minimax', 'deepseek')) {
+            $hasKey = switch ($pName) {
+                'zai'     { $true }
+                'minimax' { [bool]$MiniMaxKey }
+                'deepseek'{ [bool]$DeepSeekKey }
+            }
+            if (-not $hasKey) { continue }
+            $p = $cfg.Providers[$pName]
             [ordered]@{
-                name         = 'zai'
-                # Anthropic transformer passes the request through, so use the FULL endpoint URL
-                # (including /v1/messages). The base URL used by claudez intentionally omits the
-                # path because Claude Code's Anthropic client appends it for you.
-                api_base_url = 'https://api.z.ai/api/anthropic/v1/messages'
-                api_key      = '$Z_AI_AUTH_TOKEN'
-                models       = @('glm-4.5-air', 'glm-5-turbo', 'glm-5.1', 'glm-4.6v')
-                transformer  = [ordered]@{ use = @('Anthropic') }
-            }
-        )
-        if ($MiniMaxKey) {
-            $providers += [ordered]@{
-                name         = 'minimax'
-                api_base_url = 'https://api.minimax.io/anthropic/v1/messages'
-                api_key      = '$MINIMAX_API_KEY'
-                models       = @('MiniMax-M3[1m]')
-                transformer  = [ordered]@{ use = @('Anthropic') }
-            }
-        }
-        if ($DeepSeekKey) {
-            $providers += [ordered]@{
-                name         = 'deepseek'
-                api_base_url = 'https://api.deepseek.com/anthropic/v1/messages'
-                api_key      = '$DEEPSEEK_API_KEY'
-                models       = @('deepseek-v4-flash[1m]', 'deepseek-v4-pro[1m]')
+                name         = $pName
+                # Anthropic transformer passes through, so use the FULL endpoint URL (incl.
+                # /v1/messages). The base URL used by claudez intentionally omits the suffix
+                # because Claude Code's Anthropic client appends it for you.
+                api_base_url = $p.base
+                api_key      = $p.key
+                models       = $p.models
                 transformer  = [ordered]@{ use = @('Anthropic') }
             }
         }
 
         $config = [ordered]@{
-            PORT           = 3456
-            HOST           = '127.0.0.1'
-            LOG            = $true
-            API_TIMEOUT_MS = 3000000
+            PORT           = $cfg.Port
+            HOST           = $cfg.Host
+            LOG            = $cfg.Log
+            API_TIMEOUT_MS = $cfg.Timeout
             Providers      = $providers
             Router         = $router
         }
@@ -4599,9 +4632,9 @@ function Install-ClaudeCCRSetup {
         "user=$env:USERNAME"
         "configJson=$configJson"
         'mode=CCR'
-        'default=zai,glm-5-turbo'
-        'background=zai,glm-4.5-air'
-        'think=zai,glm-5.1'
+        "default=$($cfg.Router.default)"
+        "background=$($cfg.Router.background)"
+        "think=$($cfg.Router.think)"
         "longContext=$(if ($longContextRoute) { $longContextRoute } else { '<unset>' })"
     ) -join "`r`n"
     Set-Content -LiteralPath $setupFlag -Value $flagInfo -Encoding UTF8
