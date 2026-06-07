@@ -5712,10 +5712,6 @@ function Invoke-AiUpgrade {
 }
 Set-Alias -Name aiu -Value Invoke-AiUpgrade
 
-# Auto-load vault credentials at profile load time so every session starts with
-# keys available. Uses -Quiet to avoid printing key counts in transient shells.
-Load-AiApiKeysFromCS -Quiet
-
 # === AI provider usage-query functions ===
 # Inlined from scripts/ai-query-script.ps1. Provides Get-MinimaxUsage,
 # Get-ZaiUsage, Get-DeepseekUsage, and shared formatting helpers. Originally
@@ -6341,3 +6337,7 @@ function Get-DeepseekUsage {
 
     return $resp
 }
+
+# Auto-load vault credentials at profile load time so every session starts with
+# keys available. Uses -Quiet to avoid printing key counts in transient shells.
+Load-AiApiKeysFromCS -Quiet
