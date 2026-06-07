@@ -226,7 +226,7 @@ $_CcrInternal = @{
         zai = @{
             base        = 'https://api.z.ai/api/anthropic/v1/messages'
             key         = '$Z_AI_AUTH_TOKEN'
-            models      = @('glm-4.5-air', 'glm-5-turbo', 'glm-5.1', 'glm-4.6v')
+            models      = @('glm-4.5-air', 'glm-5-turbo', 'glm-5.1', 'glm-4.7', 'glm-4.6v')
             transformer = 'Anthropic'
         }
         minimax = @{
@@ -244,6 +244,12 @@ $_CcrInternal = @{
         gemini = @{
             # Gemini's native API. The CCR gemini transformer appends '{model}:generateContent'
             # to the base URL, so the trailing slash is required.
+            #
+            # Reference:
+            #   https://ai.google.dev/gemini-api/docs              -- API docs
+            #   https://ai.google.dev/gemini-api/docs/pricing     -- per-model pricing
+            #   https://ai.google.dev/gemini-api/docs/rate-limits -- per-tier rate limits
+            #   https://aistudio.google.com/rate-limit            -- AI Studio tier limits dashboard
             base        = 'https://generativelanguage.googleapis.com/v1beta/models/'
             key         = '$GEMINI_API_KEY'
             models      = @('gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro')
