@@ -140,7 +140,6 @@ $_AiToolsInternal = @{
         'Microsoft.VisualStudioCode',
         'GitHub.cli',
         'SST.OpenCodeDesktop',
-        'SST.opencode',
         'Google.Antigravity',
         'Google.AntigravityIDE',
         'marlocarlo.psmux',
@@ -4901,6 +4900,7 @@ function Install-AiTools {
     Write-Host " - agy (Antigravity CLI)"
     Write-Host " - claude (Claude CLI)"
     Write-Host " - codex (Codex CLI)"
+    Write-Host " - opencode (opencode CLI)"
 
     if (-not $Auto) {
         $choice = Read-Host -Prompt "Proceed with automatic installation of missing items? This will run winget/npm/installers. Continue? (Y/n)"
@@ -5077,6 +5077,7 @@ function Install-AiTools {
     Write-Host " - agy (Antigravity CLI)"
     Write-Host " - claude (Claude CLI)"
     Write-Host " - codex (Codex CLI)"
+    Write-Host " - opencode (opencode CLI)"
 
     # Install Antigravity and Claude CLIs using their recommended installers
     Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
@@ -5113,6 +5114,13 @@ function Install-AiTools {
     } else {
         # If codex is present, ensure it's configured with the default settings
         Install-CodexSettings
+    }
+
+    # Install opencode via npm (not winget) so the package is managed by npm
+    # and the native `opencode upgrade` command works as upstream intended.
+    if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
+        Write-Host "opencode CLI not found; installing via 'npm install -g opencode-ai'..." -ForegroundColor Yellow
+        try { & npm install -g opencode-ai } catch { Write-Host "Failed to install opencode: $_" -ForegroundColor Red }
     }
 
     # Create a docker.bat shim so tools that hardcode `docker` commands
