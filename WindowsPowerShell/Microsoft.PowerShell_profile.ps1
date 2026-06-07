@@ -5713,10 +5713,10 @@ function Invoke-AiUpgrade {
 Set-Alias -Name aiu -Value Invoke-AiUpgrade
 
 # === AI provider usage-query functions ===
-# Inlined from scripts/ai-query-script.ps1. Provides Get-MinimaxUsage,
-# Get-ZaiUsage, Get-DeepseekUsage, and shared formatting helpers. Originally
-# sourced separately; pulled into the profile so the functions are available
-# without the repo on disk.
+# Provides Get-MinimaxUsage, Get-ZaiUsage, Get-DeepseekUsage, and shared
+# formatting helpers. Call any of them after the vault credentials load
+# further down (Load-AiApiKeysFromCS) so $env:MINIMAX_API_KEY,
+# $env:Z_AI_AUTH_TOKEN, and $env:DEEPSEEK_API_KEY are populated.
 
 # --- Shared helpers --------------------------------------------------------
 
