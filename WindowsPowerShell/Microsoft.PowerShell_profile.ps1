@@ -188,6 +188,7 @@ $_AiToolsInternal = @{
     }
     NpmPackages            = @(
         '@qwen-code/qwen-code',
+        '@musistudio/claude-code-router',
         'oh-my-free-models'
     )
 }
@@ -4427,6 +4428,330 @@ function claudemmd {
 #>
     $claudeArgs = $args + '--dangerously-skip-permissions'
     claudemm @claudeArgs
+}
+
+function Install-ClaudeCCRSetup {
+    <#
+.SYNOPSIS
+    Configures Claude Code Router for the local multi-provider Claude Code profile.
+
+.DESCRIPTION
+    Creates ~/.claude-code-router/config.json (or rewrites it with -Force) wiring Z.AI, MiniMax,
+    and DeepSeek as providers, and routing default/background/think/longContext/image roles to
+    the user's preferred GLM model tiers. API keys are stored as $ENV references in the config;
+    the launcher exposes the resolved values from the Credential Manager just-in-time.
+
+    This setup also runs the shared Claude Code global setup and the existing Z.AI/MiniMax MCP
+    setup helpers so cccr can use the same MCP servers as claudez and claudemm.
+
+.PARAMETER ZaiToken
+    Z.AI token. Defaults to Get-AiApiKey 'Z_AI_AUTH_TOKEN'.
+
+.PARAMETER MiniMaxKey
+    MiniMax API key. Defaults to Get-AiApiKey 'MINIMAX_API_KEY'. Optional; if missing, MiniMax
+    is omitted from Providers and the longContext route falls back to DeepSeek.
+
+.PARAMETER DeepSeekKey
+    DeepSeek API key. Defaults to Get-AiApiKey 'DEEPSEEK_API_KEY'. Optional; required only if
+    longContext would otherwise have no fallback provider.
+
+.PARAMETER Force
+    Rewrites config.json and re-runs nested setup helpers even when sentinel files exist.
+
+.EXAMPLE
+    Install-ClaudeCCRSetup
+
+.EXAMPLE
+    Install-ClaudeCCRSetup -Force
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-06
+#>
+    [CmdletBinding()]
+    param(
+        [string]$ZaiToken,
+        [string]$MiniMaxKey,
+        [string]$DeepSeekKey,
+        [switch]$Force
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ZaiToken))    { $ZaiToken    = Get-AiApiKey 'Z_AI_AUTH_TOKEN' }
+    if ([string]::IsNullOrWhiteSpace($MiniMaxKey))  { $MiniMaxKey  = Get-AiApiKey 'MINIMAX_API_KEY' }
+    if ([string]::IsNullOrWhiteSpace($DeepSeekKey)) { $DeepSeekKey = Get-AiApiKey 'DEEPSEEK_API_KEY' }
+
+    if (-not $ZaiToken) {
+        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting CCR setup." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
+        return $false
+    }
+
+    $ccrDir     = Join-Path $HOME '.claude-code-router'
+    $configJson = Join-Path $ccrDir 'config.json'
+    $setupFlag  = Join-Path $ccrDir '.cccr_setup_complete'
+
+    if (-not (Test-Path -LiteralPath $ccrDir)) {
+        $null = New-Item -ItemType Directory -Path $ccrDir -Force
+    }
+
+    # Run shared Claude Code global setup + the existing provider MCP setup helpers so cccr
+    # has the same ~/.claude/CLAUDE.md, settings.json, and MCP servers as claudez/claudemm.
+    Install-GlobalClaudeMd
+    Install-GlobalClaudeSettings
+    [void](Install-ClaudezSetup -Token $ZaiToken -Force:$Force)
+
+    if ($MiniMaxKey) {
+        [void](Install-ClaudemmSetup -Token $MiniMaxKey -Force:$Force)
+    }
+    else {
+        Write-Host "cccr: MINIMAX_API_KEY not set -- MiniMax MCP setup skipped" -ForegroundColor Yellow
+    }
+
+    # Skip config rewrite when both the sentinel and config.json exist and -Force was not passed.
+    $alreadyConfigured = (Test-Path -LiteralPath $setupFlag) -and (Test-Path -LiteralPath $configJson) -and -not $Force
+    if ($alreadyConfigured) {
+        Write-Host "cccr: CCR config setup already done -- skipping"
+        return $true
+    }
+
+    # Pick the long-context provider. MiniMax is preferred (1M context); otherwise DeepSeek.
+    # If neither is configured, leave the route unset so CCR falls through to `default`.
+    $longContextRoute = $null
+    if ($MiniMaxKey)      { $longContextRoute = 'minimax,MiniMax-M3[1m]' }
+    elseif ($DeepSeekKey) { $longContextRoute = 'deepseek,deepseek-v4-pro[1m]' }
+    else                  { Write-Host "cccr: no MiniMax or DeepSeek key -- longContext will fall through to default" -ForegroundColor Yellow }
+
+    # Always (re)write the config when sentinel is missing or -Force was passed, OR when the
+    # user has never had a config.json. If a stale config.json exists without a sentinel we
+    # still rewrite it so the env-var interpolation stays in sync with current credentials.
+    $shouldWriteConfig = $Force -or -not (Test-Path -LiteralPath $setupFlag)
+    if ((Test-Path -LiteralPath $configJson) -and -not $shouldWriteConfig) {
+        Write-Host "cccr: existing config.json found -- leaving it unchanged" -ForegroundColor Yellow
+        Write-Host "cccr: use Install-ClaudeCCRSetup -Force to rewrite it" -ForegroundColor DarkGray
+    }
+
+    if ($shouldWriteConfig) {
+        if (Test-Path -LiteralPath $configJson) {
+            # Bump existing config out of the way so a broken rewrite is recoverable.
+            $backupPath = "$configJson.$(Get-Date -Format 'yyyyMMddHHmmss').bak"
+            Copy-Item -LiteralPath $configJson -Destination $backupPath -Force
+            Write-Host "cccr: backed up existing config to $backupPath" -ForegroundColor DarkGray
+        }
+
+        $router = [ordered]@{
+            default              = 'zai,glm-5-turbo'
+            background           = 'zai,glm-4.5-air'
+            think                = 'zai,glm-5.1'
+            longContextThreshold = 60000
+        }
+        if ($longContextRoute)  { $router['longContext'] = $longContextRoute }
+        if ($MiniMaxKey)        { $router['image']       = 'minimax,MiniMax-M3[1m]' }
+
+        $providers = @(
+            [ordered]@{
+                name         = 'zai'
+                # Anthropic transformer passes the request through, so use the FULL endpoint URL
+                # (including /v1/messages). The base URL used by claudez intentionally omits the
+                # path because Claude Code's Anthropic client appends it for you.
+                api_base_url = 'https://api.z.ai/api/anthropic/v1/messages'
+                api_key      = '$Z_AI_AUTH_TOKEN'
+                models       = @('glm-4.5-air', 'glm-5-turbo', 'glm-5.1', 'glm-4.6v')
+                transformer  = [ordered]@{ use = @('Anthropic') }
+            }
+        )
+        if ($MiniMaxKey) {
+            $providers += [ordered]@{
+                name         = 'minimax'
+                api_base_url = 'https://api.minimax.io/anthropic/v1/messages'
+                api_key      = '$MINIMAX_API_KEY'
+                models       = @('MiniMax-M3[1m]')
+                transformer  = [ordered]@{ use = @('Anthropic') }
+            }
+        }
+        if ($DeepSeekKey) {
+            $providers += [ordered]@{
+                name         = 'deepseek'
+                api_base_url = 'https://api.deepseek.com/anthropic/v1/messages'
+                api_key      = '$DEEPSEEK_API_KEY'
+                models       = @('deepseek-v4-flash[1m]', 'deepseek-v4-pro[1m]')
+                transformer  = [ordered]@{ use = @('Anthropic') }
+            }
+        }
+
+        $config = [ordered]@{
+            PORT           = 3456
+            HOST           = '127.0.0.1'
+            LOG            = $true
+            API_TIMEOUT_MS = 3000000
+            Providers      = $providers
+            Router         = $router
+        }
+
+        # No-BOM UTF-8 so the file is valid JSON and CCR's JSON5 reader stays happy.
+        $json = $config | ConvertTo-Json -Depth 20
+        [IO.File]::WriteAllText($configJson, $json, [Text.UTF8Encoding]::new($false))
+        Write-Host "cccr: wrote CCR config to $configJson" -ForegroundColor Green
+    }
+
+    $flagInfo = @(
+        "configuredAt=$(Get-Date -Format o)"
+        "user=$env:USERNAME"
+        "configJson=$configJson"
+        'mode=CCR'
+        'default=zai,glm-5-turbo'
+        'background=zai,glm-4.5-air'
+        'think=zai,glm-5.1'
+        "longContext=$(if ($longContextRoute) { $longContextRoute } else { '<unset>' })"
+    ) -join "`r`n"
+    Set-Content -LiteralPath $setupFlag -Value $flagInfo -Encoding UTF8
+    Write-Host 'cccr: CCR setup complete' -ForegroundColor Green
+    return $true
+}
+
+function cccr {
+    <#
+.SYNOPSIS
+    Launches Claude Code through Claude Code Router (CCR).
+
+.DESCRIPTION
+    Ensures the local CCR config/MCP setup exists, exposes provider API keys to the current
+    process so CCR's $VAR interpolation resolves them, starts/restarts the local CCR service,
+    points Claude Code at http://127.0.0.1:3456, then invokes claude with the supplied arguments.
+
+    Pass -Force or --force-ccr-setup to rewrite the CCR config and re-run nested setup helpers.
+
+.EXAMPLE
+    cccr
+
+.EXAMPLE
+    cccr "Explain the current repository"
+
+.EXAMPLE
+    cccr -Force
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-06
+#>
+    # Strip the CCR-only force flag from the forwarded claude args so /model etc. still work.
+    $forceSetup   = $false
+    $claudeArgArr = @()
+    foreach ($arg in $args) {
+        if ($arg -in @('-Force', '--force-ccr-setup')) { $forceSetup = $true }
+        else                                           { $claudeArgArr += $arg }
+    }
+
+    $zaiToken    = Get-AiApiKey 'Z_AI_AUTH_TOKEN'
+    if (-not $zaiToken) {
+        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
+        return
+    }
+    $miniMaxKey  = Get-AiApiKey 'MINIMAX_API_KEY'
+    $deepSeekKey = Get-AiApiKey 'DEEPSEEK_API_KEY'
+
+    # Snapshot every env var we may transiently mutate so the caller's session is untouched
+    # once claude exits (or this function returns early).
+    $originalEnvVars = Save-ProcessEnvVars @(
+        'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'DEEPSEEK_API_KEY',
+        'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY',
+        'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL', 'API_TIMEOUT_MS', 'NO_PROXY',
+        'DISABLE_TELEMETRY', 'DISABLE_COST_WARNINGS',
+        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_DISABLE_1M_CONTEXT',
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL',
+        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL'
+    )
+
+    try {
+        # CCR reads provider api_key values from the env at startup. The keys normally live in
+        # the Windows Credential Manager; surface them as process env so $Z_AI_AUTH_TOKEN, etc.
+        # resolve inside config.json. They are torn down in the finally block.
+        $env:Z_AI_AUTH_TOKEN = $zaiToken
+        if ($miniMaxKey)  { $env:MINIMAX_API_KEY  = $miniMaxKey }
+        if ($deepSeekKey) { $env:DEEPSEEK_API_KEY = $deepSeekKey }
+
+        if (-not (Install-ClaudeCCRSetup -ZaiToken $zaiToken -MiniMaxKey $miniMaxKey -DeepSeekKey $deepSeekKey -Force:$forceSetup)) {
+            return
+        }
+
+        if (-not (Get-Command ccr -ErrorAction SilentlyContinue)) {
+            Write-Host 'ccr CLI not found.' -ForegroundColor Red
+            Write-Host 'Install via: npm install -g @musistudio/claude-code-router' -ForegroundColor Yellow
+            return
+        }
+        if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+            Write-Host 'claude CLI not found.' -ForegroundColor Red
+            Write-Host 'Install via: irm https://claude.ai/install.ps1 | iex' -ForegroundColor Yellow
+            return
+        }
+
+        # `ccr restart` is the documented way to apply config changes; fall back to `ccr start`
+        # for the first launch (when no process exists yet) since some CCR builds reject restart
+        # in that case.
+        $restartOutput = & ccr restart 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host 'cccr: ccr restart did not complete cleanly; trying ccr start...' -ForegroundColor Yellow
+            $startOutput = & ccr start 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host 'cccr: failed to start Claude Code Router.' -ForegroundColor Red
+                if ($restartOutput) { $restartOutput | ForEach-Object { Write-Host $_ } }
+                if ($startOutput)   { $startOutput   | ForEach-Object { Write-Host $_ } }
+                return
+            }
+        }
+
+        # Point Claude Code at the local CCR proxy. ANTHROPIC_AUTH_TOKEN is a placeholder --
+        # CCR forwards the real provider key, so the value here is never validated. Clearing
+        # ANTHROPIC_API_KEY prevents a User-scope Anthropic key from taking precedence.
+        $env:ANTHROPIC_BASE_URL    = 'http://127.0.0.1:3456'
+        $env:ANTHROPIC_AUTH_TOKEN  = 'ccr-local-router'
+        $env:ANTHROPIC_API_KEY     = ''
+        $env:API_TIMEOUT_MS        = '3000000'
+        $env:DISABLE_TELEMETRY     = '1'
+        $env:DISABLE_COST_WARNINGS = '1'
+        $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
+        # Allow 1M context only when MiniMax is in the longContext route.
+        $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = if ($miniMaxKey) { '0' } else { '1' }
+        $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'
+
+        # Route the local CCR endpoint around any system HTTP proxy to avoid CONNECT failures.
+        $noProxyItems = @()
+        if ($env:NO_PROXY) { $noProxyItems += $env:NO_PROXY -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } }
+        foreach ($hostName in @('127.0.0.1', 'localhost')) {
+            if ($noProxyItems -notcontains $hostName) { $noProxyItems += $hostName }
+        }
+        $env:NO_PROXY = $noProxyItems -join ','
+
+        claude @claudeArgArr
+    }
+    finally {
+        Restore-ProcessEnvVars $originalEnvVars
+    }
+}
+
+function cccrd {
+    <#
+.SYNOPSIS
+    Launches cccr with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to cccr and appends --dangerously-skip-permissions.
+
+.EXAMPLE
+    cccrd
+
+.EXAMPLE
+    cccrd "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-06
+#>
+    $claudeArgs = $args + '--dangerously-skip-permissions'
+    cccr @claudeArgs
 }
 
 function Invoke-RemoteClaudeCodeMM {
