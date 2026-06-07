@@ -3307,7 +3307,7 @@ function Install-GlobalClaudeSettings {
             $statusLineCommand = $targetStatusLine -replace '\\', '/'
             Write-Warning "claude: bash.exe not found; statusline may not work. Install Git for Windows and re-run."
         }
-        $settings | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue ([pscustomobject]@{ type = 'command'; command = $statusLineCommand; refreshInterval = 1 }) -Force
+        $settings | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue ([pscustomobject]@{ type = 'command'; command = $statusLineCommand; refreshInterval = 2 }) -Force
     }
 
     [IO.File]::WriteAllText($settingsJson, ($settings | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))

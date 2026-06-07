@@ -557,7 +557,7 @@ else
   if command -v jq &>/dev/null; then
     [ ! -f "$SETTINGS_JSON" ] && echo "{}" > "$SETTINGS_JSON"
     jq --arg cmd "$CLAUDE_DIR/bin/cc_statusline.sh" \
-       'del(.customStatusLineCommand) | .attribution = false | .statusLine = { type: "command", command: $cmd, refreshInterval: 1 }' \
+       '.attribution = false | .statusLine = { type: "command", command: $cmd, refreshInterval: 2 }' \
        "$SETTINGS_JSON" > "$SETTINGS_JSON.tmp" && mv "$SETTINGS_JSON.tmp" "$SETTINGS_JSON"
     touch "$CC_CONFIG_SENTINEL"
     echo "claude: config setup complete via jq"
