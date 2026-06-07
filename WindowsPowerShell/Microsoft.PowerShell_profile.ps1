@@ -217,25 +217,37 @@ $_CcrInternal = @{
     Timeout   = 3000000
     Threshold = 60000
     Router = @{
-        default    = 'zai,glm-5-turbo'   # Sonnet (daily work)
-        background = 'zai,glm-4.5-air'   # Haiku (background subagents)
-        think      = 'zai,glm-5.1'       # Opus (Plan Mode / reasoning)
+        default    = 'zai,glm-5-turbo'             # Sonnet (daily work)
+        background = 'zai,glm-4.5-air'             # Haiku (background subagents)
+        think      = 'zai,glm-5.1'                 # Opus (Plan Mode / reasoning)
+        webSearch  = 'gemini,gemini-2.5-flash'     # Google search grounding via Gemini Flash
     }
     Providers = @{
         zai = @{
-            base   = 'https://api.z.ai/api/anthropic/v1/messages'
-            key    = '$Z_AI_AUTH_TOKEN'
-            models = @('glm-4.5-air', 'glm-5-turbo', 'glm-5.1', 'glm-4.6v')
+            base        = 'https://api.z.ai/api/anthropic/v1/messages'
+            key         = '$Z_AI_AUTH_TOKEN'
+            models      = @('glm-4.5-air', 'glm-5-turbo', 'glm-5.1', 'glm-4.6v')
+            transformer = 'Anthropic'
         }
         minimax = @{
-            base   = 'https://api.minimax.io/anthropic/v1/messages'
-            key    = '$MINIMAX_API_KEY'
-            models = @('MiniMax-M3[1m]')
+            base        = 'https://api.minimax.io/anthropic/v1/messages'
+            key         = '$MINIMAX_API_KEY'
+            models      = @('MiniMax-M3[1m]')
+            transformer = 'Anthropic'
         }
         deepseek = @{
-            base   = 'https://api.deepseek.com/anthropic/v1/messages'
-            key    = '$DEEPSEEK_API_KEY'
-            models = @('deepseek-v4-flash[1m]', 'deepseek-v4-pro[1m]')
+            base        = 'https://api.deepseek.com/anthropic/v1/messages'
+            key         = '$DEEPSEEK_API_KEY'
+            models      = @('deepseek-v4-flash[1m]', 'deepseek-v4-pro[1m]')
+            transformer = 'Anthropic'
+        }
+        gemini = @{
+            # Gemini's native API. The CCR gemini transformer appends '{model}:generateContent'
+            # to the base URL, so the trailing slash is required.
+            base        = 'https://generativelanguage.googleapis.com/v1beta/models/'
+            key         = '$GEMINI_API_KEY'
+            models      = @('gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro')
+            transformer = 'gemini'
         }
     }
 }
@@ -4471,9 +4483,10 @@ function Install-ClaudeCCRSetup {
 
 .DESCRIPTION
     Creates ~/.claude-code-router/config.json (or rewrites it with -Force) wiring Z.AI, MiniMax,
-    and DeepSeek as providers, and routing default/background/think/longContext/image roles to
-    the user's preferred GLM model tiers. API keys are stored as $ENV references in the config;
-    the launcher exposes the resolved values from the Credential Manager just-in-time.
+    DeepSeek, and Gemini as providers, and routing default/background/think/longContext/image
+    roles to the user's preferred GLM model tiers. webSearch routes to Gemini Flash for Google
+    search grounding. API keys are stored as $ENV references in the config; the launcher
+    exposes the resolved values from the Credential Manager just-in-time.
 
     This setup also runs the shared Claude Code global setup and the existing Z.AI/MiniMax MCP
     setup helpers so cccr can use the same MCP servers as claudez and claudemm.
@@ -4488,6 +4501,10 @@ function Install-ClaudeCCRSetup {
 .PARAMETER DeepSeekKey
     DeepSeek API key. Defaults to Get-AiApiKey 'DEEPSEEK_API_KEY'. Optional; required only if
     longContext would otherwise have no fallback provider.
+
+.PARAMETER GeminiKey
+    Google Gemini API key. Defaults to Get-AiApiKey 'GEMINI_API_KEY'. Optional; if missing, the
+    Gemini provider is omitted (and the webSearch router role becomes a no-op).
 
 .PARAMETER Force
     Rewrites config.json and re-runs nested setup helpers even when sentinel files exist.
@@ -4507,12 +4524,18 @@ function Install-ClaudeCCRSetup {
         [string]$ZaiToken,
         [string]$MiniMaxKey,
         [string]$DeepSeekKey,
+        [string]$GeminiKey,
         [switch]$Force
     )
 
     if ([string]::IsNullOrWhiteSpace($ZaiToken))    { $ZaiToken    = Get-AiApiKey 'Z_AI_AUTH_TOKEN' }
     if ([string]::IsNullOrWhiteSpace($MiniMaxKey))  { $MiniMaxKey  = Get-AiApiKey 'MINIMAX_API_KEY' }
     if ([string]::IsNullOrWhiteSpace($DeepSeekKey)) { $DeepSeekKey = Get-AiApiKey 'DEEPSEEK_API_KEY' }
+    if ([string]::IsNullOrWhiteSpace($GeminiKey))   { $GeminiKey   = Get-AiApiKey 'GEMINI_API_KEY' }
+
+    if (-not $GeminiKey) {
+        Write-Host "cccr: GEMINI_API_KEY not set -- Gemini provider and webSearch route skipped" -ForegroundColor Yellow
+    }
 
     if (-not $ZaiToken) {
         Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting CCR setup." -ForegroundColor Red
@@ -4590,14 +4613,16 @@ function Install-ClaudeCCRSetup {
         }
         if ($longContextRoute)  { $router['longContext'] = $longContextRoute }
         if ($MiniMaxKey)        { $router['image']       = '{0},{1}' -f 'minimax', $_CcrInternal.Providers.minimax.models[0] }
+        if ($GeminiKey)         { $router['webSearch']   = $_CcrInternal.Router.webSearch }
 
         # Provider order in the generated config. Each entry is included only when the matching
         # API key is available; zai is always present since the launcher requires it.
-        $providers = foreach ($pName in @('zai', 'minimax', 'deepseek')) {
+        $providers = foreach ($pName in @('zai', 'minimax', 'deepseek', 'gemini')) {
             $hasKey = switch ($pName) {
                 'zai'     { $true }
                 'minimax' { [bool]$MiniMaxKey }
                 'deepseek'{ [bool]$DeepSeekKey }
+                'gemini'  { [bool]$GeminiKey }
             }
             if (-not $hasKey) { continue }
             $p = $_CcrInternal.Providers[$pName]
@@ -4609,7 +4634,7 @@ function Install-ClaudeCCRSetup {
                 api_base_url = $p.base
                 api_key      = $p.key
                 models       = $p.models
-                transformer  = [ordered]@{ use = @('Anthropic') }
+                transformer  = [ordered]@{ use = @($p.transformer) }
             }
         }
 
@@ -4636,6 +4661,7 @@ function Install-ClaudeCCRSetup {
         "default=$($_CcrInternal.Router.default)"
         "background=$($_CcrInternal.Router.background)"
         "think=$($_CcrInternal.Router.think)"
+        "webSearch=$(if ($GeminiKey) { $_CcrInternal.Router.webSearch } else { '<unset>' })"
         "longContext=$(if ($longContextRoute) { $longContextRoute } else { '<unset>' })"
     ) -join "`r`n"
     Set-Content -LiteralPath $setupFlag -Value $flagInfo -Encoding UTF8
@@ -4685,11 +4711,12 @@ function cccr {
     }
     $miniMaxKey  = Get-AiApiKey 'MINIMAX_API_KEY'
     $deepSeekKey = Get-AiApiKey 'DEEPSEEK_API_KEY'
+    $geminiKey   = Get-AiApiKey 'GEMINI_API_KEY'
 
     # Snapshot every env var we may transiently mutate so the caller's session is untouched
     # once claude exits (or this function returns early).
     $originalEnvVars = Save-ProcessEnvVars @(
-        'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'DEEPSEEK_API_KEY',
+        'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY',
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY',
         'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'API_TIMEOUT_MS', 'NO_PROXY',
@@ -4706,8 +4733,9 @@ function cccr {
         $env:Z_AI_AUTH_TOKEN = $zaiToken
         if ($miniMaxKey)  { $env:MINIMAX_API_KEY  = $miniMaxKey }
         if ($deepSeekKey) { $env:DEEPSEEK_API_KEY = $deepSeekKey }
+        if ($geminiKey)   { $env:GEMINI_API_KEY   = $geminiKey }
 
-        if (-not (Install-ClaudeCCRSetup -ZaiToken $zaiToken -MiniMaxKey $miniMaxKey -DeepSeekKey $deepSeekKey -Force:$forceSetup)) {
+        if (-not (Install-ClaudeCCRSetup -ZaiToken $zaiToken -MiniMaxKey $miniMaxKey -DeepSeekKey $deepSeekKey -GeminiKey $geminiKey -Force:$forceSetup)) {
             return
         }
 
@@ -5660,7 +5688,7 @@ function Set-AiApiKeysCS {
     # Windows PowerShell 5.1 and PowerShell 7+ on Windows.
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     # All keys share a single resource userName so they form a logical group in
     # Credential Manager and can be enumerated/cleared together.
     $userName = 'api-key'
@@ -5760,7 +5788,7 @@ function Load-AiApiKeysFromCS {
     )
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     $userName = 'api-key'
 
     $loadedCount = 0
