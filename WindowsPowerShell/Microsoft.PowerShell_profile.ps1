@@ -206,6 +206,40 @@ $_AiSkillsInternal = @{
     OpenCodeConfigPath    = '.config\opencode\opencode.json'
 }
 
+# Internal configuration for Install-ClaudeCCRSetup (Claude Code Router).
+# Underscore prefix hides it from Get-Variable default scope per PowerShell convention.
+# Endpoint URLs, model lists, and router role mappings are the only literals that need to
+# change when retuning the cccr profile.
+$_CcrInternal = @{
+    Host      = '127.0.0.1'
+    Port      = 3456
+    Log       = $true
+    Timeout   = 3000000
+    Threshold = 60000
+    Router = @{
+        default    = 'zai,glm-5-turbo'   # Sonnet (daily work)
+        background = 'zai,glm-4.5-air'   # Haiku (background subagents)
+        think      = 'zai,glm-5.1'       # Opus (Plan Mode / reasoning)
+    }
+    Providers = @{
+        zai = @{
+            base   = 'https://api.z.ai/api/anthropic/v1/messages'
+            key    = '$Z_AI_AUTH_TOKEN'
+            models = @('glm-4.5-air', 'glm-5-turbo', 'glm-5.1', 'glm-4.6v')
+        }
+        minimax = @{
+            base   = 'https://api.minimax.io/anthropic/v1/messages'
+            key    = '$MINIMAX_API_KEY'
+            models = @('MiniMax-M3[1m]')
+        }
+        deepseek = @{
+            base   = 'https://api.deepseek.com/anthropic/v1/messages'
+            key    = '$DEEPSEEK_API_KEY'
+            models = @('deepseek-v4-flash[1m]', 'deepseek-v4-pro[1m]')
+        }
+    }
+}
+
 function New-RandomPassword {
     <#
 .SYNOPSIS
@@ -4476,39 +4510,6 @@ function Install-ClaudeCCRSetup {
         [switch]$Force
     )
 
-    # ---- CCR configuration block (top of function for easy retuning) ----
-    # All literal values feeding the generated config.json live here. Edit a value to retune
-    # the endpoint, model list, or routing role without reading the function body.
-    $cfg = @{
-        Host      = '127.0.0.1'
-        Port      = 3456
-        Log       = $true
-        Timeout   = 3000000
-        Threshold = 60000
-        Router = @{
-            default    = 'zai,glm-5-turbo'   # Sonnet (daily work)
-            background = 'zai,glm-4.5-air'   # Haiku (background subagents)
-            think      = 'zai,glm-5.1'       # Opus (Plan Mode / reasoning)
-        }
-        Providers = @{
-            zai = @{
-                base   = 'https://api.z.ai/api/anthropic/v1/messages'
-                key    = '$Z_AI_AUTH_TOKEN'
-                models = @('glm-4.5-air', 'glm-5-turbo', 'glm-5.1', 'glm-4.6v')
-            }
-            minimax = @{
-                base   = 'https://api.minimax.io/anthropic/v1/messages'
-                key    = '$MINIMAX_API_KEY'
-                models = @('MiniMax-M3[1m]')
-            }
-            deepseek = @{
-                base   = 'https://api.deepseek.com/anthropic/v1/messages'
-                key    = '$DEEPSEEK_API_KEY'
-                models = @('deepseek-v4-flash[1m]', 'deepseek-v4-pro[1m]')
-            }
-        }
-    }
-
     if ([string]::IsNullOrWhiteSpace($ZaiToken))    { $ZaiToken    = Get-AiApiKey 'Z_AI_AUTH_TOKEN' }
     if ([string]::IsNullOrWhiteSpace($MiniMaxKey))  { $MiniMaxKey  = Get-AiApiKey 'MINIMAX_API_KEY' }
     if ([string]::IsNullOrWhiteSpace($DeepSeekKey)) { $DeepSeekKey = Get-AiApiKey 'DEEPSEEK_API_KEY' }
@@ -4549,15 +4550,15 @@ function Install-ClaudeCCRSetup {
     }
 
     # Pick the long-context provider. MiniMax is preferred (1M context); otherwise DeepSeek.
-    # The model slot is derived from the provider's first model in $cfg so editing the model
+    # The model slot is derived from the provider's first model in $_CcrInternal so editing the model
     # list above is enough -- no second place to update.
     $longContextRoute = $null
     if ($MiniMaxKey) {
-        $longContextRoute = '{0},{1}' -f 'minimax', $cfg.Providers.minimax.models[0]
+        $longContextRoute = '{0},{1}' -f 'minimax', $_CcrInternal.Providers.minimax.models[0]
     }
     elseif ($DeepSeekKey) {
-        $proModel = $cfg.Providers.deepseek.models | Where-Object { $_ -like '*pro*' } | Select-Object -First 1
-        if (-not $proModel) { $proModel = $cfg.Providers.deepseek.models[0] }
+        $proModel = $_CcrInternal.Providers.deepseek.models | Where-Object { $_ -like '*pro*' } | Select-Object -First 1
+        if (-not $proModel) { $proModel = $_CcrInternal.Providers.deepseek.models[0] }
         $longContextRoute = '{0},{1}' -f 'deepseek', $proModel
     }
     else {
@@ -4582,13 +4583,13 @@ function Install-ClaudeCCRSetup {
         }
 
         $router = [ordered]@{
-            default              = $cfg.Router.default
-            background           = $cfg.Router.background
-            think                = $cfg.Router.think
-            longContextThreshold = $cfg.Threshold
+            default              = $_CcrInternal.Router.default
+            background           = $_CcrInternal.Router.background
+            think                = $_CcrInternal.Router.think
+            longContextThreshold = $_CcrInternal.Threshold
         }
         if ($longContextRoute)  { $router['longContext'] = $longContextRoute }
-        if ($MiniMaxKey)        { $router['image']       = '{0},{1}' -f 'minimax', $cfg.Providers.minimax.models[0] }
+        if ($MiniMaxKey)        { $router['image']       = '{0},{1}' -f 'minimax', $_CcrInternal.Providers.minimax.models[0] }
 
         # Provider order in the generated config. Each entry is included only when the matching
         # API key is available; zai is always present since the launcher requires it.
@@ -4599,7 +4600,7 @@ function Install-ClaudeCCRSetup {
                 'deepseek'{ [bool]$DeepSeekKey }
             }
             if (-not $hasKey) { continue }
-            $p = $cfg.Providers[$pName]
+            $p = $_CcrInternal.Providers[$pName]
             [ordered]@{
                 name         = $pName
                 # Anthropic transformer passes through, so use the FULL endpoint URL (incl.
@@ -4613,10 +4614,10 @@ function Install-ClaudeCCRSetup {
         }
 
         $config = [ordered]@{
-            PORT           = $cfg.Port
-            HOST           = $cfg.Host
-            LOG            = $cfg.Log
-            API_TIMEOUT_MS = $cfg.Timeout
+            PORT           = $_CcrInternal.Port
+            HOST           = $_CcrInternal.Host
+            LOG            = $_CcrInternal.Log
+            API_TIMEOUT_MS = $_CcrInternal.Timeout
             Providers      = $providers
             Router         = $router
         }
@@ -4632,9 +4633,9 @@ function Install-ClaudeCCRSetup {
         "user=$env:USERNAME"
         "configJson=$configJson"
         'mode=CCR'
-        "default=$($cfg.Router.default)"
-        "background=$($cfg.Router.background)"
-        "think=$($cfg.Router.think)"
+        "default=$($_CcrInternal.Router.default)"
+        "background=$($_CcrInternal.Router.background)"
+        "think=$($_CcrInternal.Router.think)"
         "longContext=$(if ($longContextRoute) { $longContextRoute } else { '<unset>' })"
     ) -join "`r`n"
     Set-Content -LiteralPath $setupFlag -Value $flagInfo -Encoding UTF8
