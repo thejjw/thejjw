@@ -542,22 +542,23 @@ fi
 CC_CONFIG_SENTINEL="$CLAUDE_DIR/.config_setup_done"
 SETTINGS_JSON="$CLAUDE_DIR/settings.json"
 
-if [[ -f "$CC_CONFIG_SENTINEL" ]]; then
+if [[ -f "$CC_CONFIG_SENTINEL" ]] && ! $FORCE_REINSTALL; then
   echo "claude: global config setup already done -- skipping"
 else
   echo "claude: configuring global settings..."
   mkdir -pv "$CLAUDE_DIR/bin"
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   
+  TARGET_STATUSLINE="$CLAUDE_DIR/bin/cc_statusline.sh"
   if [ -f "$SCRIPT_DIR/cc_statusline.sh" ]; then
-    cp -fv "$SCRIPT_DIR/cc_statusline.sh" "$CLAUDE_DIR/bin/cc_statusline.sh"
-    chmod +x "$CLAUDE_DIR/bin/cc_statusline.sh"
+    cp -fv "$SCRIPT_DIR/cc_statusline.sh" "$TARGET_STATUSLINE"
+    chmod +x "$TARGET_STATUSLINE"
   fi
 
   if command -v jq &>/dev/null; then
     [ ! -f "$SETTINGS_JSON" ] && echo "{}" > "$SETTINGS_JSON"
-    jq --arg cmd "$CLAUDE_DIR/bin/cc_statusline.sh" \
-       '.attribution = false | .statusLine = { type: "command", command: $cmd, refreshInterval: 2 }' \
+    jq --arg cmd "$TARGET_STATUSLINE" \
+       '.attribution = { commit: "", pr: "" } | .statusLine = { type: "command", command: $cmd, refreshInterval: 2 }' \
        "$SETTINGS_JSON" > "$SETTINGS_JSON.tmp" && mv "$SETTINGS_JSON.tmp" "$SETTINGS_JSON"
     touch "$CC_CONFIG_SENTINEL"
     echo "claude: config setup complete via jq"
@@ -571,23 +572,26 @@ fi
 # ---------------------------------------------------------------------------
 AGY_DIR="$HOME/.gemini/antigravity-cli"
 AGY_CONFIG_SENTINEL="$AGY_DIR/.config_setup_done"
-if [[ -f "$AGY_CONFIG_SENTINEL" ]]; then
+if [[ -f "$AGY_CONFIG_SENTINEL" ]] && ! $FORCE_REINSTALL; then
   echo "agy: config setup already done -- skipping"
 else
   echo "agy: configuring settings..."
   mkdir -pv "$AGY_DIR/bin"
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  
+  TARGET_AGY_STATUSLINE="$AGY_DIR/bin/agy_statusline.sh"
   if [ -f "$SCRIPT_DIR/agy_statusline.sh" ]; then
-    cp -fv "$SCRIPT_DIR/agy_statusline.sh" "$AGY_DIR/bin/agy_statusline.sh"
-    chmod +x "$AGY_DIR/bin/agy_statusline.sh"
-    if command -v jq &>/dev/null; then
-      AGY_SETTINGS="$AGY_DIR/settings.json"
-      [ ! -f "$AGY_SETTINGS" ] && echo "{}" > "$AGY_SETTINGS"
-      jq '.statusLine = {"type": "command", "command": "'"$AGY_DIR/bin/agy_statusline.sh"'"}' "$AGY_SETTINGS" > "$AGY_SETTINGS.tmp" && mv "$AGY_SETTINGS.tmp" "$AGY_SETTINGS"
-      echo "agy: statusline configured"
-    else
-      echo "agy: jq not found, skipping statusline config"
-    fi
+    cp -fv "$SCRIPT_DIR/agy_statusline.sh" "$TARGET_AGY_STATUSLINE"
+    chmod +x "$TARGET_AGY_STATUSLINE"
+  fi
+
+  if command -v jq &>/dev/null; then
+    AGY_SETTINGS="$AGY_DIR/settings.json"
+    [ ! -f "$AGY_SETTINGS" ] && echo "{}" > "$AGY_SETTINGS"
+    jq --arg cmd "$TARGET_AGY_STATUSLINE" '.statusLine = {"type": "command", "command": $cmd}' "$AGY_SETTINGS" > "$AGY_SETTINGS.tmp" && mv "$AGY_SETTINGS.tmp" "$AGY_SETTINGS"
+    echo "agy: statusline configured"
+  else
+    echo "agy: jq not found, skipping statusline config"
   fi
   touch "$AGY_CONFIG_SENTINEL"
   echo "agy: config setup complete"
@@ -598,7 +602,7 @@ fi
 # ---------------------------------------------------------------------------
 CODEX_DIR="$HOME/.codex"
 CODEX_CONFIG_SENTINEL="$CODEX_DIR/.config_setup_done"
-if [[ -f "$CODEX_CONFIG_SENTINEL" ]]; then
+if [[ -f "$CODEX_CONFIG_SENTINEL" ]] && ! $FORCE_REINSTALL; then
   echo "codex: config setup already done -- skipping"
 else
   echo "codex: configuring settings..."
