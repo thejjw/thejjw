@@ -3236,6 +3236,435 @@ function Invoke-LoginAudit {
     Write-Host "  notepad `"$reportMd`""
 }
 
+function Invoke-RebootAudit {
+    <#
+.SYNOPSIS
+  Audits recent Windows shutdown/reboot events and writes a Markdown diagnosis.
+
+.DESCRIPTION
+  Reads System event log reboot markers, planned-shutdown records, unexpected
+  shutdown records, Kernel-Power bugcheck fields, and nearby update/service
+  context. Produces a short Markdown report plus raw CSV data, with search
+  hints for bugcheck codes and other evidence that is useful for follow-up
+  diagnosis.
+
+.EXAMPLE
+    Invoke-RebootAudit
+    Invoke-RebootAudit -Hours 336 -ContextMinutes 90 -OutDir C:\audits
+
+.PARAMETER Hours
+  How many hours back to look. Default 168.
+
+.PARAMETER ContextMinutes
+  How many minutes around the current boot time to use for the main diagnosis.
+  Default 60.
+
+.PARAMETER OutDir
+  Where to write the report and CSV. Default: cwd
+
+.PARAMETER IncludeReliability
+  Also query Reliability Monitor WMI records for nearby Windows failures.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-06
+
+    References:
+    - https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-unexpected-reboots-system-event-logs
+    - https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/event-id-41-restart
+    - https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/bug-check-code-reference2
+#>
+    [CmdletBinding()]
+    param(
+        [int]$Hours = 168,
+        [int]$ContextMinutes = 60,
+        [string]$OutDir = (Get-Location).Path,
+        [switch]$IncludeReliability
+    )
+
+    $ErrorActionPreference = 'Stop'
+
+    if (-not (Test-Path -LiteralPath $OutDir)) {
+        New-Item -ItemType Directory -Path $OutDir | Out-Null
+    }
+
+    $since = (Get-Date).AddHours(-$Hours)
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $reportMd = Join-Path $OutDir "reboot-audit-$stamp.md"
+    $eventsCsv = Join-Path $OutDir "reboot-events-$stamp.csv"
+    $reliabilityCsv = Join-Path $OutDir "reboot-reliability-$stamp.csv"
+
+    $eventNames = @{
+        12   = 'OS start'
+        13   = 'OS shutdown'
+        19   = 'Windows Update install'
+        41   = 'Kernel-Power unexpected restart'
+        1001 = 'Bugcheck / WER'
+        1074 = 'Planned restart/shutdown'
+        6005 = 'Event Log service started'
+        6006 = 'Event Log service stopped'
+        6008 = 'Previous shutdown unexpected'
+        6009 = 'OS version at boot'
+        7045 = 'Service installed'
+    }
+
+    $bugcheckNames = @{
+        '0x1A'  = 'MEMORY_MANAGEMENT'
+        '0x3B'  = 'SYSTEM_SERVICE_EXCEPTION'
+        '0x50'  = 'PAGE_FAULT_IN_NONPAGED_AREA'
+        '0x7A'  = 'KERNEL_DATA_INPAGE_ERROR'
+        '0x7B'  = 'INACCESSIBLE_BOOT_DEVICE'
+        '0x7E'  = 'SYSTEM_THREAD_EXCEPTION_NOT_HANDLED'
+        '0x9C'  = 'MACHINE_CHECK_EXCEPTION'
+        '0xA'   = 'IRQL_NOT_LESS_OR_EQUAL'
+        '0xD1'  = 'DRIVER_IRQL_NOT_LESS_OR_EQUAL'
+        '0xEF'  = 'CRITICAL_PROCESS_DIED'
+        '0xF4'  = 'CRITICAL_OBJECT_TERMINATION'
+        '0x101' = 'CLOCK_WATCHDOG_TIMEOUT'
+        '0x116' = 'VIDEO_TDR_FAILURE'
+        '0x124' = 'WHEA_UNCORRECTABLE_ERROR'
+        '0x133' = 'DPC_WATCHDOG_VIOLATION'
+        '0x139' = 'KERNEL_SECURITY_CHECK_FAILURE'
+        '0x154' = 'UNEXPECTED_STORE_EXCEPTION'
+        '0x1E'  = 'KMODE_EXCEPTION_NOT_HANDLED'
+        '0x1F7' = 'KERNEL_MODE_HEAP_CORRUPTION'
+    }
+
+    function Get-RebootEvents {
+        param([int[]]$Ids)
+        try {
+            Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = $Ids; StartTime = $since } -ErrorAction Stop
+        }
+        catch [System.Exception] {
+            if ($_.FullyQualifiedErrorId -match 'NoMatchingEventsFound') { @() } else { throw }
+        }
+    }
+
+    function Get-EventDataMap {
+        param([System.Diagnostics.Eventing.Reader.EventRecord]$Event)
+        $map = @{}
+        try {
+            [xml]$xml = $Event.ToXml()
+            foreach ($data in $xml.Event.EventData.Data) {
+                $name = [string]$data.Name
+                if (-not $name) { continue }
+                $map[$name] = [string]$data.'#text'
+            }
+        }
+        catch {
+            return @{}
+        }
+        return $map
+    }
+
+    function Convert-BugcheckCode {
+        param([object]$Value)
+        if ($null -eq $Value -or [string]$Value -eq '') { return $null }
+
+        $text = [string]$Value
+        try {
+            if ($text.StartsWith('0x', [System.StringComparison]::OrdinalIgnoreCase)) {
+                $decimal = [convert]::ToInt64($text.Substring(2), 16)
+            }
+            else {
+                $decimal = [int64]$text
+            }
+
+            return [pscustomobject]@{
+                Decimal = $decimal
+                Hex     = ('0x{0:X}' -f $decimal)
+                Name    = $bugcheckNames[('0x{0:X}' -f $decimal)]
+            }
+        }
+        catch {
+            return [pscustomobject]@{
+                Decimal = $null
+                Hex     = $text
+                Name    = $null
+            }
+        }
+    }
+
+    function Get-WerDetails {
+        param([System.Diagnostics.Eventing.Reader.EventRecord]$Event)
+
+        $code = $null
+        $dump = $null
+        if ($Event.Message -match '(?i)bugcheck was:\s+(0x[0-9a-f]+)') { $code = $Matches[1].ToUpperInvariant() }
+        if ($Event.Message -match '(?i)dump was saved in:\s+([^\r\n]+)') { $dump = $Matches[1].Trim() }
+
+        return [pscustomobject]@{
+            BugcheckCode = $code
+            DumpPath     = $dump
+        }
+    }
+
+    function Format-SearchHint {
+        param([string]$Query)
+        if (-not $Query) { return $null }
+        return "Search: $Query"
+    }
+
+    function Format-MdTable {
+        param(
+            [object[]]$Rows,
+            [string[]]$Columns
+        )
+        if (-not $Rows -or $Rows.Count -eq 0) { return "_(none)_`n" }
+
+        $sb = [System.Text.StringBuilder]::new()
+        [void]$sb.AppendLine('| ' + ($Columns -join ' | ') + ' |')
+        [void]$sb.AppendLine('|' + (($Columns | ForEach-Object { '---' }) -join '|') + '|')
+        foreach ($row in $Rows) {
+            $cells = $Columns | ForEach-Object {
+                $value = $row.$_
+                if ($null -eq $value -or $value -eq '') { '-' } else { ([string]$value -replace '\|', '\|') }
+            }
+            [void]$sb.AppendLine('| ' + ($cells -join ' | ') + ' |')
+        }
+        return $sb.ToString()
+    }
+
+    Write-Host "Collecting reboot events since $since ..." -ForegroundColor Cyan
+
+    $rawEvents = Get-RebootEvents -Ids ([int[]]$eventNames.Keys)
+    $lastBootSource = 'Win32_OperatingSystem.LastBootUpTime'
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $lastBoot = $os.LastBootUpTime
+    }
+    catch {
+        $lastBootSource = 'latest System boot marker event'
+        $lastBootEvent = $rawEvents |
+            Where-Object { $_.Id -in 12, 6005, 6009 } |
+            Sort-Object TimeCreated -Descending |
+            Select-Object -First 1
+        if (-not $lastBootEvent) {
+            throw "Could not determine last boot time from CIM or System boot marker events: $($_.Exception.Message)"
+        }
+        $lastBoot = $lastBootEvent.TimeCreated
+    }
+    $contextStart = $lastBoot.AddMinutes(-1 * $ContextMinutes)
+    $contextEnd = $lastBoot.AddMinutes($ContextMinutes)
+    $events = $rawEvents | Sort-Object TimeCreated | ForEach-Object {
+        $data = Get-EventDataMap $_
+        $bugcheck = $null
+        $bugcheckName = $null
+        $powerButton = $null
+        $sleepInProgress = $null
+        $dumpPath = $null
+        $hint = $null
+
+        if ($_.Id -eq 41 -and $data.ContainsKey('BugcheckCode')) {
+            $bugcheck = Convert-BugcheckCode $data.BugcheckCode
+            $bugcheckName = $bugcheck.Name
+            $powerButton = $data.PowerButtonTimestamp
+            $sleepInProgress = $data.SleepInProgress
+            if ($bugcheck.Decimal -and $bugcheck.Decimal -ne 0) {
+                $query = if ($bugcheck.Name) { "Windows bugcheck $($bugcheck.Hex) $($bugcheck.Name)" } else { "Windows bugcheck $($bugcheck.Hex)" }
+                $hint = Format-SearchHint $query
+            }
+        }
+        elseif ($_.Id -eq 1001) {
+            $wer = Get-WerDetails $_
+            if ($wer.BugcheckCode) {
+                $bugcheck = Convert-BugcheckCode $wer.BugcheckCode
+                $bugcheckName = $bugcheck.Name
+                $query = if ($bugcheck.Name) { "Windows bugcheck $($bugcheck.Hex) $($bugcheck.Name)" } else { "Windows bugcheck $($bugcheck.Hex)" }
+                $hint = Format-SearchHint $query
+            }
+            $dumpPath = $wer.DumpPath
+        }
+        elseif ($_.Id -eq 1074) {
+            $hint = Format-SearchHint 'Windows Event ID 1074 shutdown reason code process user'
+        }
+        elseif ($_.Id -eq 6008) {
+            $hint = Format-SearchHint 'Windows Event ID 6008 previous shutdown was unexpected'
+        }
+
+        [pscustomobject]@{
+            Time            = $_.TimeCreated
+            Id              = $_.Id
+            Event           = $eventNames[$_.Id]
+            Provider        = $_.ProviderName
+            Level           = $_.LevelDisplayName
+            BugcheckCode    = if ($bugcheck) { $bugcheck.Hex } else { $null }
+            BugcheckName    = $bugcheckName
+            PowerButtonTime = $powerButton
+            SleepInProgress = $sleepInProgress
+            DumpPath        = $dumpPath
+            SearchHint      = $hint
+            Message         = ($_.Message -replace '\s+', ' ').Trim()
+        }
+    }
+
+    if ($events) {
+        $events | Export-Csv -NoTypeInformation -Path $eventsCsv
+    }
+
+    $nearBoot = @($events | Where-Object { $_.Time -ge $contextStart -and $_.Time -le $contextEnd })
+    $planned = @($nearBoot | Where-Object { $_.Id -eq 1074 } | Sort-Object Time -Descending)
+    $unexpected = @($nearBoot | Where-Object { $_.Id -in 41, 6008 } | Sort-Object Time -Descending)
+    $bugchecks = @($nearBoot | Where-Object { $_.BugcheckCode -and $_.BugcheckCode -ne '0x0' } | Sort-Object Time -Descending)
+    $werBugchecks = @($nearBoot | Where-Object { $_.Id -eq 1001 -and $_.BugcheckCode } | Sort-Object Time -Descending)
+    $updateContext = @($events | Where-Object { $_.Id -in 19, 7045 -and $_.Time -ge $lastBoot.AddHours(-6) -and $_.Time -le $lastBoot } | Sort-Object Time -Descending)
+    $lastKernelPower = @($nearBoot | Where-Object { $_.Id -eq 41 } | Sort-Object Time -Descending | Select-Object -First 1)
+    $lastUnexpected = @($nearBoot | Where-Object { $_.Id -eq 6008 } | Sort-Object Time -Descending | Select-Object -First 1)
+
+    $likelyType = 'Inconclusive'
+    $interpretation = 'No planned shutdown, unexpected shutdown, or bugcheck marker was found near the current boot window.'
+    if ($bugchecks -or $werBugchecks) {
+        $likelyType = 'Unexpected reboot with bugcheck / BSOD evidence'
+        $firstBugcheck = @($bugchecks + $werBugchecks | Sort-Object Time -Descending | Select-Object -First 1)[0]
+        $label = if ($firstBugcheck.BugcheckName) { "$($firstBugcheck.BugcheckCode) $($firstBugcheck.BugcheckName)" } else { $firstBugcheck.BugcheckCode }
+        $interpretation = "Windows recorded a non-zero bugcheck code near boot: $label."
+    }
+    elseif ($unexpected) {
+        $likelyType = 'Unexpected reboot without captured bugcheck'
+        $kp = @($lastKernelPower)[0]
+        if ($kp -and $kp.PowerButtonTime -and $kp.PowerButtonTime -ne '0' -and $kp.PowerButtonTime -ne '0x0') {
+            $interpretation = 'Kernel-Power recorded a power-button timestamp, so a long power-button press is plausible.'
+        }
+        else {
+            $interpretation = 'Windows did not record a clean shutdown or a non-zero bugcheck. Suspect power loss, hard hang, reset, firmware, thermal, storage, or PSU causes.'
+        }
+    }
+    elseif ($planned) {
+        $likelyType = 'Planned restart/shutdown'
+        $interpretation = 'A USER32/Event ID 1074 planned shutdown or restart event was found near the current boot.'
+    }
+
+    $reliabilityRows = @()
+    if ($IncludeReliability) {
+        try {
+            $reliabilityRows = @(Get-CimInstance -ClassName Win32_ReliabilityRecords -ErrorAction Stop |
+                ForEach-Object {
+                    $time = [System.Management.ManagementDateTimeConverter]::ToDateTime($_.TimeGenerated)
+                    if ($time -lt $since) { return }
+                    [pscustomobject]@{
+                        Time    = $time
+                        Source  = $_.SourceName
+                        Product = $_.ProductName
+                        EventId = $_.EventIdentifier
+                        Message = ($_.Message -replace '\s+', ' ').Trim()
+                    }
+                } |
+                Sort-Object Time -Descending)
+
+            if ($reliabilityRows) {
+                $reliabilityRows | Export-Csv -NoTypeInformation -Path $reliabilityCsv
+            }
+        }
+        catch {
+            $reliabilityRows = @([pscustomobject]@{
+                    Time    = Get-Date
+                    Source  = 'Invoke-RebootAudit'
+                    Product = 'Reliability Monitor'
+                    EventId = ''
+                    Message = "Reliability records unavailable: $($_.Exception.Message)"
+                })
+        }
+    }
+
+    $computer = $env:COMPUTERNAME
+    $now = Get-Date
+    $windowStart = $since.ToString('yyyy-MM-dd HH:mm:ss')
+    $windowEnd = $now.ToString('yyyy-MM-dd HH:mm:ss')
+
+    $evidence = @()
+    if ($planned) { $evidence += "- Planned shutdown/restart events near boot: $($planned.Count)" }
+    if ($unexpected) { $evidence += "- Unexpected shutdown/restart events near boot: $($unexpected.Count)" }
+    if ($bugchecks -or $werBugchecks) {
+        foreach ($row in @($bugchecks + $werBugchecks | Sort-Object Time -Descending | Select-Object -First 3)) {
+            $codeLabel = if ($row.BugcheckName) { "$($row.BugcheckCode) $($row.BugcheckName)" } else { $row.BugcheckCode }
+            $evidence += "- Bugcheck evidence: $codeLabel at $($row.Time)"
+        }
+    }
+    if ($lastKernelPower) {
+        $kp = @($lastKernelPower)[0]
+        $evidence += "- Kernel-Power 41: BugcheckCode=$($kp.BugcheckCode), PowerButtonTimestamp=$($kp.PowerButtonTime), SleepInProgress=$($kp.SleepInProgress)"
+    }
+    if ($lastUnexpected) { $evidence += "- EventLog 6008 reports the previous shutdown was unexpected." }
+    if (-not $evidence) { $evidence += "_No direct evidence found in the current boot context window._" }
+
+    $hints = @()
+    foreach ($row in @($nearBoot | Where-Object SearchHint | Select-Object -ExpandProperty SearchHint -Unique)) {
+        $hints += "- $row"
+    }
+    foreach ($row in @($bugchecks + $werBugchecks | Where-Object DumpPath | Select-Object -First 3)) {
+        $hints += "- Dump file to inspect with WinDbg: ``$($row.DumpPath)``"
+    }
+    $hints += "- Reference: Microsoft Bug Check Code Reference - https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/bug-check-code-reference2"
+    $hints += "- Reference: Kernel-Power Event ID 41 - https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/event-id-41-restart"
+
+    $md = @()
+    $md += "# Reboot Cause Report - $computer"
+    $md += ""
+    $md += "- **Window:** $windowStart -> $windowEnd  (last $Hours hours)"
+    $md += "- **Generated:** $now"
+    $md += "- **Generated by:** ``Invoke-RebootAudit``"
+    $md += "- **Last boot:** $lastBoot  ($lastBootSource)"
+    $md += "- **Diagnosis context:** $($contextStart.ToString('yyyy-MM-dd HH:mm:ss')) -> $($contextEnd.ToString('yyyy-MM-dd HH:mm:ss'))"
+    if (Test-Path -LiteralPath $eventsCsv) { $md += "- **Raw event CSV:** ``$eventsCsv``" }
+    if (Test-Path -LiteralPath $reliabilityCsv) { $md += "- **Reliability CSV:** ``$reliabilityCsv``" }
+    $md += ""
+    $md += "## Likely cause"
+    $md += ""
+    $md += "- **Type:** $likelyType"
+    $md += "- **Interpretation:** $interpretation"
+    $md += ""
+    $md += "## Evidence"
+    $md += ""
+    $md += $evidence
+    $md += ""
+    $md += "## Search hints"
+    $md += ""
+    $md += ($hints | Select-Object -Unique)
+    $md += ""
+    $md += "## Events around current boot"
+    $md += ""
+    $md += (Format-MdTable ($nearBoot | Sort-Object Time -Descending | Select-Object Time, Id, Event, Provider, BugcheckCode, BugcheckName, PowerButtonTime, SearchHint) @('Time', 'Id', 'Event', 'Provider', 'BugcheckCode', 'BugcheckName', 'PowerButtonTime', 'SearchHint'))
+    $md += "## Planned shutdown/restart records"
+    $md += ""
+    $md += (Format-MdTable ($planned | Select-Object Time, Id, Event, Provider, Message) @('Time', 'Id', 'Event', 'Provider', 'Message'))
+    $md += "## Nearby update/service context"
+    $md += ""
+    $md += (Format-MdTable ($updateContext | Select-Object Time, Id, Event, Provider, Message) @('Time', 'Id', 'Event', 'Provider', 'Message'))
+    if ($IncludeReliability) {
+        $md += "## Reliability Monitor records"
+        $md += ""
+        $md += (Format-MdTable ($reliabilityRows | Select-Object -First 30) @('Time', 'Source', 'Product', 'EventId', 'Message'))
+    }
+    $md += "## What to do next"
+    $md += ""
+    $md += "1. If a bugcheck code is listed, search the exact code plus the bugcheck name and inspect the dump path with WinDbg."
+    $md += "2. If Kernel-Power 41 has BugcheckCode 0 and PowerButtonTimestamp 0, prioritize power loss, hard hang, thermal, firmware, PSU, and storage checks."
+    $md += "3. If Event ID 1074 is present, inspect the process/user in the planned shutdown table to see what initiated the restart."
+    $md += "4. If update or service-install events appear shortly before the reboot, correlate those packages or drivers with the failure time."
+    $md += "5. Run with ``-IncludeReliability`` for Reliability Monitor records, or extend the range with ``-Hours 336``."
+    $md += ""
+
+    $md -join "`r`n" | Set-Content -Encoding UTF8 -Path $reportMd
+
+    Write-Host ""
+    Write-Host "Likely type: $likelyType" -ForegroundColor Yellow
+    Write-Host "Last boot:   $lastBoot"
+    Write-Host "Report:      $reportMd" -ForegroundColor Green
+    if (Test-Path -LiteralPath $eventsCsv) { Write-Host "Events CSV:  $eventsCsv" }
+    if (Test-Path -LiteralPath $reliabilityCsv) { Write-Host "Reliability: $reliabilityCsv" }
+    Write-Host ""
+    Write-Host "Open the report:" -ForegroundColor Cyan
+    Write-Host "  notepad `"$reportMd`""
+
+    [pscustomobject]@{
+        LastBoot       = $lastBoot
+        LikelyType     = $likelyType
+        Interpretation = $interpretation
+        ReportPath     = $reportMd
+        EventsCsv      = if (Test-Path -LiteralPath $eventsCsv) { $eventsCsv } else { $null }
+    }
+}
+
 function Install-GlobalClaudeMd {
     <#
 .SYNOPSIS
