@@ -544,9 +544,15 @@ nrd() {
       host="$(hostname -s 2>/dev/null || hostname)"
       email="${user}@${host}.local"
       $verbose && echo "initializing git"
-      git -C "$dir" init -q
-      git -C "$dir" config --local user.name "$user"
-      git -C "$dir" config --local user.email "$email"
+      if git -C "$dir" init -q &&
+        git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 &&
+        git -C "$dir" config --local user.name "$user" &&
+        git -C "$dir" config --local user.email "$email"; then
+        echo "git identity: $user <$email>"
+      else
+        echo "nrd: git setup failed: $dir" >&2
+        return 1
+      fi
       echo "git identity: $user <$email>"
     fi
   fi

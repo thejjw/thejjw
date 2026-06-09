@@ -2925,9 +2925,25 @@ Last Edit: 2026-04
 
             Write-Verbose "Initializing git repository"
             & git -C $Path init | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "git init failed for: $Path"
+            }
+
+            # Confirm the repository exists before writing repository-local config.
+            & git -C $Path rev-parse --is-inside-work-tree *> $null
+            if ($LASTEXITCODE -ne 0) {
+                throw "git init did not create a repository at: $Path"
+            }
 
             & git -C $Path config --local user.name $user
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to set local git user.name for: $Path"
+            }
+
             & git -C $Path config --local user.email $email
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to set local git user.email for: $Path"
+            }
 
             Write-Host ("Git identity: {0} <{1}>" -f $user, $email)
         }
