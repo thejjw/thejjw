@@ -106,6 +106,7 @@ If an MCP tool is unavailable or underperforming, inform the user and suggest al
 # Internal configuration for Install-AiTools
 $_AiToolsInternal = @{
     WingetPackages         = @(
+        '7zip.7zip',
         'Notepad++.Notepad++',
         'Microsoft.Edit',
         'OpenJS.NodeJS.LTS',
