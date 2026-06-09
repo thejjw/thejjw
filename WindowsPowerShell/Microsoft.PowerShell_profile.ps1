@@ -43,7 +43,7 @@ $_NrdInternal = @{
 
 ## Environment
 
-* Platform: Windows 11, shell: PowerShell.
+* Platform: Windows 11, shell: Windows PowerShell (powershell.exe).
 * Use PowerShell commands and syntax -- not Unix/bash equivalents.
   * ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
   * Redirect to ``$null`` not ``/dev/null``.
