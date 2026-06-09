@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PACKAGES="libjxl-tools tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop bubblewrap socat fd-find fzf"
+PACKAGES="tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop bubblewrap socat fd-find fzf"
 NVM_VERSION="v0.40.4"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 
@@ -56,6 +56,129 @@ remove_profile_section() {
   mv "$tmp_file" "$profile_file"
 }
 
+# Install official libjxl release debs on supported amd64 Debian/Ubuntu systems.
+install_libjxl_release_debs() {
+  local arch os_id os_version os_codename asset_name asset_url tmp_dir archive deb_dir extracted_count
+  local -a installed_libjxl_packages
+  local cjxl_present=false
+
+  echo "libjxl: checking for official GitHub release deb support..."
+
+  arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+  if command -v cjxl &>/dev/null; then
+    cjxl_present=true
+    echo "libjxl: cjxl found at $(command -v cjxl)"
+  else
+    echo "libjxl: cjxl not found"
+  fi
+
+  if [[ "$arch" != "amd64" ]]; then
+    echo "libjxl: unsupported architecture '$arch' for official deb assets"
+    if ! $cjxl_present; then
+      PACKAGES="libjxl-tools $PACKAGES"
+      echo "libjxl: added libjxl-tools back to apt package list"
+    fi
+    return 0
+  fi
+
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+  fi
+
+  os_id="${ID:-unknown}"
+  os_version="${VERSION_ID:-unknown}"
+  os_codename="${VERSION_CODENAME:-unknown}"
+
+  case "${os_id}:${os_version}:${os_codename}" in
+    debian:*:bookworm) asset_name="jxl-debs-amd64-debian-bookworm.zip" ;;
+    debian:*:trixie) asset_name="jxl-debs-amd64-debian-trixie.zip" ;;
+    ubuntu:22.04:*) asset_name="jxl-debs-amd64-ubuntu-22.04.zip" ;;
+    ubuntu:24.04:*) asset_name="jxl-debs-amd64-ubuntu-24.04.zip" ;;
+    *)
+      echo "libjxl: unsupported distribution '${os_id}' version '${os_version}' codename '${os_codename}'"
+      if ! $cjxl_present; then
+        PACKAGES="libjxl-tools $PACKAGES"
+        echo "libjxl: added libjxl-tools back to apt package list"
+      fi
+      return 0
+      ;;
+  esac
+
+  echo "libjxl: supported system detected; using release asset ${asset_name}"
+
+  tmp_dir="$(mktemp -d)"
+  archive="${tmp_dir}/${asset_name}"
+  deb_dir="${tmp_dir}/debs"
+  mkdir -p "$deb_dir"
+
+  asset_url="https://github.com/libjxl/libjxl/releases/latest/download/${asset_name}"
+  echo "libjxl: downloading latest release asset from ${asset_url}"
+  if command -v curl &>/dev/null; then
+    curl -fL --retry 3 -o "$archive" "$asset_url"
+  elif command -v wget &>/dev/null; then
+    wget -O "$archive" "$asset_url"
+  else
+    echo "libjxl: curl/wget missing; installing curl for release download"
+    sudo apt-get install -y curl
+    curl -fL --retry 3 -o "$archive" "$asset_url"
+  fi
+
+  echo "libjxl: extracting only jxl_*.deb and libjxl_*.deb"
+  if command -v python3 &>/dev/null; then
+    extracted_count="$(python3 - "$archive" "$deb_dir" << 'PY'
+import fnmatch
+import os
+import sys
+import zipfile
+
+archive, deb_dir = sys.argv[1], sys.argv[2]
+count = 0
+with zipfile.ZipFile(archive) as zf:
+    for member in zf.infolist():
+        name = os.path.basename(member.filename)
+        if not name:
+            continue
+        if fnmatch.fnmatch(name, "jxl_*.deb") or fnmatch.fnmatch(name, "libjxl_*.deb"):
+            with zf.open(member) as src, open(os.path.join(deb_dir, name), "wb") as dst:
+                dst.write(src.read())
+            count += 1
+print(count)
+PY
+)"
+  else
+    if ! command -v unzip &>/dev/null; then
+      echo "libjxl: python3/unzip missing; installing unzip for release extraction"
+      sudo apt-get install -y unzip
+    fi
+    unzip -j "$archive" 'jxl_*.deb' '*/jxl_*.deb' 'libjxl_*.deb' '*/libjxl_*.deb' -d "$deb_dir"
+    extracted_count="$(find "$deb_dir" -maxdepth 1 -type f -name '*.deb' | wc -l)"
+  fi
+  echo "libjxl: extracted ${extracted_count//[[:space:]]/} matching deb packages"
+
+  if ! compgen -G "${deb_dir}/jxl_*.deb" >/dev/null || ! compgen -G "${deb_dir}/libjxl_*.deb" >/dev/null; then
+    echo "libjxl: expected jxl_*.deb and libjxl_*.deb files were not found in ${asset_name}" >&2
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  # Download/extract first so a transient network failure does not remove a working cjxl.
+  if $cjxl_present; then
+    mapfile -t installed_libjxl_packages < <(dpkg-query -W -f='${binary:Package}\n' 'libjxl-*' 2>/dev/null || true)
+    if (( ${#installed_libjxl_packages[@]} > 0 )); then
+      echo "libjxl: uninstalling installed libjxl-* packages: ${installed_libjxl_packages[*]}"
+      sudo apt-get purge -y "${installed_libjxl_packages[@]}"
+    else
+      echo "libjxl: no installed libjxl-* packages found to uninstall"
+    fi
+  fi
+
+  echo "libjxl: installing official release deb packages"
+  sudo apt-get install -y "${deb_dir}"/jxl_*.deb "${deb_dir}"/libjxl_*.deb
+  rm -rf "$tmp_dir"
+  echo "libjxl: official release deb installation complete"
+}
+
 # Use zsh profile on macOS, bash profile elsewhere.
 if [[ "$(uname -s)" == "Darwin" ]]; then
   PROFILE="${HOME}/.zshrc"
@@ -67,7 +190,9 @@ else
     exit 1
   fi
 
-  sudo apt-get update && sudo apt-get install -y $PACKAGES
+  sudo apt-get update
+  install_libjxl_release_debs
+  sudo apt-get install -y $PACKAGES
 fi
 
 # ---------------------------------------------------------------------------
