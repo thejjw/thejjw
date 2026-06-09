@@ -106,6 +106,9 @@ If an MCP tool is unavailable or underperforming, inform the user and suggest al
 # Internal configuration for Install-AiTools
 $_AiToolsInternal = @{
     WingetPackages         = @(
+        'Microsoft.Coreutils',
+        'Microsoft.VCRedist.2015+.x64',
+        'Microsoft.VCRedist.2015+.x86',
         '7zip.7zip',
         'Notepad++.Notepad++',
         'Microsoft.Edit',
@@ -128,7 +131,6 @@ $_AiToolsInternal = @{
         'medialab.xan',
         'oschwartz10612.Poppler',
         'uutils.diffutils',
-        'Microsoft.Coreutils',
         'EliFulkerson.tcping',
         'FujiApple.Trippy',
         'natesales.q',
