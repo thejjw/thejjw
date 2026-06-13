@@ -221,16 +221,16 @@ $_CcrInternal = @{
     Timeout   = 3000000
     Threshold = 60000
     Router = @{
-        default    = 'zai,glm-5-turbo'             # Sonnet (daily work)
+        default    = 'zai,glm-5.2[1m]'             # Sonnet (daily work)
         background = 'zai,glm-4.5-air'             # Haiku (background subagents)
-        think      = 'zai,glm-5.1'                 # Opus (Plan Mode / reasoning)
+        think      = 'zai,glm-5.2[1m]'             # Opus (Plan Mode / reasoning)
         webSearch  = 'gemini,gemini-2.5-flash'     # Google search grounding via Gemini Flash
     }
     Providers = @{
         zai = @{
             base        = 'https://api.z.ai/api/anthropic/v1/messages'
             key         = '$Z_AI_AUTH_TOKEN'
-            models      = @('glm-4.5-air', 'glm-5-turbo', 'glm-5.1', 'glm-4.7', 'glm-4.6v')
+            models      = @('glm-4.5-air', 'glm-5.2[1m]', 'glm-4.7', 'glm-4.6v')
             transformer = 'Anthropic'
         }
         minimax = @{
