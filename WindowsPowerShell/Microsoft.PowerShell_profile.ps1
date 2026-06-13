@@ -5446,15 +5446,25 @@ function Update-Profile {
     }
 
     Write-Host "Updating profile from $_ProfileUpdateUrl..." -ForegroundColor Cyan
+    $tempFile = $null
     try {
         # Download to a temp file first; only overwrite $PROFILE on success to avoid corruption
         $tempFile = [System.IO.Path]::GetTempFileName()
         Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $tempFile -Verbose
-        Move-Item -Path $tempFile -Destination $PROFILE -Force
+        # .NET Copy with overwrite is more reliable than Move-Item -Force in PS 5.1,
+        # which can throw IndexOutOfRangeException when replacing a larger file
+        # (and hides the real error inside a broken Out-LineOutput formatter).
+        [System.IO.File]::Copy($tempFile, $PROFILE, $true)
         Write-Host "Profile updated successfully! Restart your shell or run '. `$PROFILE' to apply changes." -ForegroundColor Green
     }
     catch {
-        Write-Error "Failed to update profile: $_"
+        $msg = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" }
+        Write-Error "Failed to update profile: $msg"
+    }
+    finally {
+        if ($tempFile -and (Test-Path $tempFile)) {
+            Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
