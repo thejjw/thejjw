@@ -844,10 +844,12 @@ else
     echo "claudez: token is empty, skipping alias and MCP setup"
   else
     # Add the claudez alias
-    # about supported model: "All plans support GLM-5.1, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
-    # about "CLAUDE_CODE_DISABLE_1M_CONTEXT": 
-    #   GLM-5.1, GLM-5, GLM-5-Turbo Context Length = 200K (https://docs.z.ai/guides/llm/glm-5.1)
-    #   GLM-4.5(GLM-4.5-Air) Context Length = 128K (https://docs.z.ai/guides/llm/glm-4.5)
+    # about supported models: "All plans support GLM-5.2, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
+    #   See https://docs.z.ai/devpack/latest-model for the current lineup.
+    # about 1M context:
+    #   GLM-5.2 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.2[1m]).
+    #   Z.AI also requires CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000 to actually exercise the 1M window
+    #   (this profile sets it for you). Other GLM models cap at 200K (GLM-5, GLM-5-Turbo) or 128K (GLM-4.5-Air).
     cat >> "$PROFILE" << EOF
 
 # >>> claudez >>>
@@ -856,37 +858,45 @@ alias claudez='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.7" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.1" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2[1m]" \
+  CLAUDE_CODE_SUBAGENT_MODEL="glm-4.7" \
+  CLAUDE_CODE_EFFORT_LEVEL="high" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
-  CLAUDE_CODE_DISABLE_1M_CONTEXT="1" \
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
   claude'
 alias claudezd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.7" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.1" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2[1m]" \
+  CLAUDE_CODE_SUBAGENT_MODEL="glm-4.7" \
+  CLAUDE_CODE_EFFORT_LEVEL="high" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
-  CLAUDE_CODE_DISABLE_1M_CONTEXT="1" \
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
   claude --dangerously-skip-permissions'
 alias claudezm='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5-turbo" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.1" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.2[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2[1m]" \
+  CLAUDE_CODE_SUBAGENT_MODEL="glm-5.2[1m]" \
+  CLAUDE_CODE_EFFORT_LEVEL="max" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
-  CLAUDE_CODE_DISABLE_1M_CONTEXT="1" \
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
   claude'
 alias claudezmd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5-turbo" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.1" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.2[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2[1m]" \
+  CLAUDE_CODE_SUBAGENT_MODEL="glm-5.2[1m]" \
+  CLAUDE_CODE_EFFORT_LEVEL="max" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
-  CLAUDE_CODE_DISABLE_1M_CONTEXT="1" \
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
   claude --dangerously-skip-permissions'
 # <<< claudez <<<
 EOF
@@ -898,7 +908,6 @@ EOF
         ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN"
         API_TIMEOUT_MS="3000000"
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
-        CLAUDE_CODE_DISABLE_1M_CONTEXT="1"
       )
 
       echo "claudez: configuring MCP servers..."
@@ -1063,11 +1072,13 @@ _claude_sq() {
 #   Base64-encodes a bash launcher so stdin stays free for the interactive TUI.
 #
 #   Usage: remote_claude_base <user@host> <api_key> [port] [base_url] \
-#          [haiku] [sonnet] [opus] [timeout_ms] [disable_1m]
+#          [haiku] [sonnet] [opus] [timeout_ms] [disable_1m] \
+#          [subagent] [effort] [auto_compact_window]
 remote_claude_base() {
   local host="$1" key="$2" port="${3:-22}"
   local base_url="${4:-}" haiku="$5" sonnet="$6" opus="$7"
   local timeout="$8" disable_1m="$9"
+  local subagent="${10:-}" effort="${11:-}" auto_compact="${12:-}"
 
   [[ -z "$host" ]] && { echo "remote_claude_base: host is required" >&2; return 1; }
   [[ -z "$key"  ]] && { echo "remote_claude_base: api_key is required" >&2; return 1; }
@@ -1083,6 +1094,9 @@ export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?not set}"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-}"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-}"
+export CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-}"
+export CLAUDE_CODE_EFFORT_LEVEL="${CLAUDE_CODE_EFFORT_LEVEL:-}"
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-}"
 export API_TIMEOUT_MS="${API_TIMEOUT_MS:-300000}"
 export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
@@ -1107,6 +1121,9 @@ REMOTE_SCRIPT
   env+=" ANTHROPIC_DEFAULT_HAIKU_MODEL=$(_claude_sq "$haiku")"
   env+=" ANTHROPIC_DEFAULT_SONNET_MODEL=$(_claude_sq "$sonnet")"
   env+=" ANTHROPIC_DEFAULT_OPUS_MODEL=$(_claude_sq "$opus")"
+  env+=" CLAUDE_CODE_SUBAGENT_MODEL=$(_claude_sq "$subagent")"
+  env+=" CLAUDE_CODE_EFFORT_LEVEL=$(_claude_sq "$effort")"
+  env+=" CLAUDE_CODE_AUTO_COMPACT_WINDOW=$(_claude_sq "$auto_compact")"
   env+=" API_TIMEOUT_MS=$(_claude_sq "$timeout")"
   env+=" CLAUDE_CODE_DISABLE_1M_CONTEXT=$(_claude_sq "$disable_1m")"
   [[ -n "$base_url" ]] && env+=" ANTHROPIC_BASE_URL=$(_claude_sq "$base_url")"
@@ -1131,13 +1148,18 @@ claudezr() {
     return 1
   fi
 
+  # Matches the local claudezm profile: glm-5.2[1m] for Sonnet/Opus/Subagent,
+  # effort=max, 1M context enabled via CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
   remote_claude_base "$host" "$key" "$port" \
     "https://api.z.ai/api/anthropic" \
     "glm-4.5-air" \
-    "glm-5-turbo" \
-    "glm-5.1" \
+    "glm-5.2[1m]" \
+    "glm-5.2[1m]" \
     "3000000" \
-    "1"
+    "0" \
+    "glm-5.2[1m]" \
+    "max" \
+    "1000000"
 }
 
 CLAUDERZR_EOF
