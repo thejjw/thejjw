@@ -4263,10 +4263,10 @@ function claudezm {
 
     # Max plan compatibility mode uses different default model routing.
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5-turbo"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5.2[1m]"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.2[1m]"
 
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-5-turbo"
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-5.2[1m]"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
 
     try {
