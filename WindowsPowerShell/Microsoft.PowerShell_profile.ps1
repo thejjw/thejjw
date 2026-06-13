@@ -4147,11 +4147,12 @@ function claudez {
     (current session first, then User scope), runs one-time claudez setup,
     configures runtime environment, then invokes claude with the supplied arguments.
     If Z_AI_AUTH_TOKEN is not set, the function aborts and prints setup guidance.
-    about supported model: 
-        "All plans support GLM-5.1, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
-    about "CLAUDE_CODE_DISABLE_1M_CONTEXT": 
-        GLM-5.1, GLM-5, GLM-5-Turbo Context Length = 200K (https://docs.z.ai/guides/llm/glm-5.1)
-        GLM-4.5(GLM-4.5-Air) Context Length = 128K (https://docs.z.ai/guides/llm/glm-4.5)
+    about supported models:
+        "All plans support GLM-5.2, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
+        See https://docs.z.ai/devpack/latest-model for the current lineup.
+    about 1M context:
+        GLM-5.2 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.2[1m]).
+        Other GLM models cap at 200K (GLM-5, GLM-5-Turbo) or 128K (GLM-4.5-Air).
 
 .EXAMPLE
     claudez
@@ -4166,7 +4167,7 @@ function claudez {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-04
+    Last Edit: 2026-06
 #>
     # Read token using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
     $token = Get-AiApiKey 'Z_AI_AUTH_TOKEN'
@@ -4180,24 +4181,23 @@ function claudez {
 
     $originalEnvVars = Save-ProcessEnvVars @(
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'API_TIMEOUT_MS',
-        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_DISABLE_1M_CONTEXT',
-        'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-        'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
-        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL'
+        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_USE_POWERSHELL_TOOL',
+        'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
+        'CLAUDE_CODE_EFFORT_LEVEL'
     )
 
     $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $token
     $env:API_TIMEOUT_MS = "3000000"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
-    # Z.AI models have <200K context, so disable Claude's 1M context window to avoid truncation
-    $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"
+    # GLM-5.2 supports 1M context (suffix [1m] on the model name); see https://docs.z.ai/devpack/latest-model
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     # Map Anthropic model slots to Z.AI equivalents; remove once Claude Code auto-detects these
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-4.7"
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.2[1m]"
 
     $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-4.7"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "high"
@@ -4231,7 +4231,7 @@ function claudezm {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-04
+    Last Edit: 2026-06
 #>
     # Read token using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
     $token = Get-AiApiKey 'Z_AI_AUTH_TOKEN'
@@ -4245,23 +4245,23 @@ function claudezm {
 
     $originalEnvVars = Save-ProcessEnvVars @(
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'API_TIMEOUT_MS',
-        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_DISABLE_1M_CONTEXT',
-        'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-        'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
-        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL'
+        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_USE_POWERSHELL_TOOL',
+        'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
+        'CLAUDE_CODE_EFFORT_LEVEL'
     )
 
     $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $token
     $env:API_TIMEOUT_MS = "3000000"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
-    $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"
+    # GLM-5.2 supports 1M context (suffix [1m] on the model name); see https://docs.z.ai/devpack/latest-model
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     # Max plan compatibility mode uses different default model routing.
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.5-air"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5-turbo"
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.1"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.2[1m]"
 
     $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-5-turbo"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
