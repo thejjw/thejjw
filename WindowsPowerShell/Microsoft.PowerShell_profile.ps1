@@ -4546,15 +4546,37 @@ API timeout in milliseconds.
 .PARAMETER Disable1M
 Sets CLAUDE_CODE_DISABLE_1M_CONTEXT on the remote host.
 
+.PARAMETER SubagentModel
+Optional subagent model name (CLAUDE_CODE_SUBAGENT_MODEL). Default: empty.
+Pass the same value the local claudez/claudezm profile uses so remote subagent
+routing matches the local one.
+
+.PARAMETER EffortLevel
+Optional effort level (CLAUDE_CODE_EFFORT_LEVEL), e.g. "high" or "max".
+Default: empty.
+
+.PARAMETER AutoCompactWindow
+Optional 1M-context auto-compact window (CLAUDE_CODE_AUTO_COMPACT_WINDOW).
+Z.AI's glm-5.2[1m] requires "1000000" to actually exercise the 1M context window.
+Default: empty.
+
 .EXAMPLE
 Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:ANTHROPIC_API_KEY
 
 .EXAMPLE
 Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN -BaseUrl "https://api.z.ai/api/anthropic"
 
+.EXAMPLE
+# Match local claudezm routing for Z.AI:
+Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN `
+    -BaseUrl "https://api.z.ai/api/anthropic" `
+    -HaikuModel "glm-4.5-air" -SonnetModel "glm-5.2[1m]" -OpusModel "glm-5.2[1m]" `
+    -SubagentModel "glm-5.2[1m]" -EffortLevel "max" -AutoCompactWindow "1000000" `
+    -Disable1M "0"
+
 .NOTES
 Author: jjw(@thejjw)
-Last Edit: 2026-04
+Last Edit: 2026-06
 #>
     [CmdletBinding()]
     param(
@@ -4586,7 +4608,17 @@ Last Edit: 2026-04
         [string]$TimeoutMs,
 
         [Parameter(Mandatory = $true)]
-        [string]$Disable1M
+        [string]$Disable1M,
+
+        # Optional: subagent model (CLAUDE_CODE_SUBAGENT_MODEL). Empty leaves it unset on the remote.
+        [string]$SubagentModel = "",
+
+        # Optional: effort level (CLAUDE_CODE_EFFORT_LEVEL). Empty leaves it unset.
+        [string]$EffortLevel = "",
+
+        # Optional: 1M-context auto-compact window (CLAUDE_CODE_AUTO_COMPACT_WINDOW).
+        # Z.AI's glm-5.2[1m] requires "1000000" to actually exercise 1M context.
+        [string]$AutoCompactWindow = ""
     )
 
     # Bash single-quote escaping: end quote, insert a literal quote, reopen quote
@@ -4618,6 +4650,9 @@ export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?not set}"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-}"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-}"
+export CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-}"
+export CLAUDE_CODE_EFFORT_LEVEL="${CLAUDE_CODE_EFFORT_LEVEL:-}"
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-}"
 export API_TIMEOUT_MS="${API_TIMEOUT_MS:-300000}"
 export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
@@ -4651,6 +4686,9 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
         "ANTHROPIC_DEFAULT_HAIKU_MODEL=$(Escape-BashSingleQuotedValue $HaikuModel)"
         "ANTHROPIC_DEFAULT_SONNET_MODEL=$(Escape-BashSingleQuotedValue $SonnetModel)"
         "ANTHROPIC_DEFAULT_OPUS_MODEL=$(Escape-BashSingleQuotedValue $OpusModel)"
+        "CLAUDE_CODE_SUBAGENT_MODEL=$(Escape-BashSingleQuotedValue $SubagentModel)"
+        "CLAUDE_CODE_EFFORT_LEVEL=$(Escape-BashSingleQuotedValue $EffortLevel)"
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW=$(Escape-BashSingleQuotedValue $AutoCompactWindow)"
         "API_TIMEOUT_MS=$(Escape-BashSingleQuotedValue $TimeoutMs)"
         "CLAUDE_CODE_DISABLE_1M_CONTEXT=$(Escape-BashSingleQuotedValue $Disable1M)"
     )
@@ -4705,7 +4743,7 @@ Invoke-RemoteClaudeCodeZ -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOK
 
 .NOTES
 Author: jjw(@thejjw)
-Last Edit: 2026-04
+Last Edit: 2026-06
 #>
     [CmdletBinding()]
     param(
@@ -4732,23 +4770,31 @@ Last Edit: 2026-04
     }
 
     # Keep the editable remote defaults here so they are easy to tweak later.
+    # Matches the local claudezm profile: glm-5.2[1m] for Sonnet/Opus/Subagent,
+    # effort=max, 1M context enabled via CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
     $BaseUrl = "https://api.z.ai/api/anthropic"
     $HaikuModel = "glm-4.5-air"
-    $SonnetModel = "glm-5-turbo"
-    $OpusModel = "glm-5.1"
+    $SonnetModel = "glm-5.2[1m]"
+    $OpusModel = "glm-5.2[1m]"
+    $SubagentModel = "glm-5.2[1m]"
+    $EffortLevel = "max"
+    $AutoCompactWindow = "1000000"
     $TimeoutMs = "3000000"
-    $Disable1M = "1"
+    $Disable1M = "0"
 
     $baseParams = @{
-        RemoteHost  = $RemoteHost
-        ApiKey      = $ApiKey
-        Port        = $Port
-        BaseUrl     = $BaseUrl
-        HaikuModel  = $HaikuModel
-        SonnetModel = $SonnetModel
-        OpusModel   = $OpusModel
-        TimeoutMs   = $TimeoutMs
-        Disable1M   = $Disable1M
+        RemoteHost        = $RemoteHost
+        ApiKey            = $ApiKey
+        Port              = $Port
+        BaseUrl           = $BaseUrl
+        HaikuModel        = $HaikuModel
+        SonnetModel       = $SonnetModel
+        OpusModel         = $OpusModel
+        SubagentModel     = $SubagentModel
+        EffortLevel       = $EffortLevel
+        AutoCompactWindow = $AutoCompactWindow
+        TimeoutMs         = $TimeoutMs
+        Disable1M         = $Disable1M
     }
     if (-not [string]::IsNullOrWhiteSpace($KeyFile)) { $baseParams['KeyFile'] = $KeyFile }
     Invoke-RemoteClaudeCodeBase @baseParams
