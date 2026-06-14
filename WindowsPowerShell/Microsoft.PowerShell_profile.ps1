@@ -49,7 +49,7 @@ $_NrdInternal = @{
   * Redirect to ``$null`` not ``/dev/null``.
   * Use semicolons or separate statements -- not ``&&`` to chain commands.
   * Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
-* When useful and already available, use fast CLI tools such as `rg`, `fd`, `fzf`, or comparable installed tools; otherwise use PowerShell-native commands.
+* When useful and already available, use fast CLI tools such as ``rg``, ``fd``, ``fzf``, or comparable installed tools; otherwise use PowerShell-native commands.
 * If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
 
 ## Code Style
@@ -60,18 +60,18 @@ $_NrdInternal = @{
 
 ## Git Discipline
 
-* If the requested work is inside a cloned Git repository nested under this directory, treat that nested repository as the project root. Verify with `git rev-parse --show-toplevel`, then stage and commit only within that repository; do not stage or commit in any containing parent repository unless explicitly directed.
+* If the requested work is inside a cloned Git repository nested under this directory, treat that nested repository as the project root. Verify with ``git rev-parse --show-toplevel``, then stage and commit only within that repository; do not stage or commit in any containing parent repository unless explicitly directed.
 * Always commit after each logical change with a descriptive commit message; never bundle unrelated changes.
-* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
-* This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
-* Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
-* Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
+* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes ``AGENTS.md``, ``CLAUDE.md``, ``QWEN.md``, and similar local ``.md`` files used to guide agents.
+* This restriction does not apply to normal project documentation such as ``README.md``, ``CHANGELOG.md``, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
+* Use Conventional Commits: ``feat:``, ``fix:``, ``refactor:``, ``docs:``, ``chore:``, ``test:``, etc.
+* Write short, imperative descriptions (e.g. ``feat: add input validation``, ``fix: off-by-one in retry loop``).
 * Never append Co-Authored-By trailers to commit messages.
 
 ## Dependencies
 
 * Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
-* Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, prefer a non-deprecated alternative when practical; otherwise warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
+* Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as ``deprecated``, yanked releases, or archived repositories, on the chosen package and version. If any are found, prefer a non-deprecated alternative when practical; otherwise warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
 
 ## Subagents
 
@@ -81,7 +81,7 @@ $_NrdInternal = @{
   sub-tasks that can run in parallel. The subagent absorbs the noisy tool
   calls and returns only a summary.
 * Do not wrap trivial or single tool calls in a subagent. A one-file read or a
-  quick `rg`/`fd` search is cheaper run directly than paying the spawn and
+  quick ``rg``/``fd`` search is cheaper run directly than paying the spawn and
   round-trip overhead.
 * Keep tightly-coupled work in the main context. Do not delegate edits that
   depend on each other's output, and never have two subagents edit the same
