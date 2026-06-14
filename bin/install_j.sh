@@ -186,13 +186,12 @@ else
   PROFILE="${HOME}/.bashrc"
 
   if ! which apt >/dev/null; then
-    echo "apt not found."
-    exit 1
+    echo "apt not found, skipping apt-based package installation."
+  else
+    sudo apt-get update
+    install_libjxl_release_debs
+    sudo apt-get install -y $PACKAGES
   fi
-
-  sudo apt-get update
-  install_libjxl_release_debs
-  sudo apt-get install -y $PACKAGES
 fi
 
 # ---------------------------------------------------------------------------
