@@ -34,6 +34,8 @@ $_NrdInternal = @{
         'sky', 'star', 'stone', 'sun', 'thicket', 'trail', 'tree', 'valley', 'wave', 'wind',
         'wolf', 'wood', 'workshop'
     )
+
+    # heredoc requires two `` to escape a single literal backtick in the content; this is used for file paths and command examples in the agent guidance
     AgentsMarkdown = @"
 # AGENTS.md
 
