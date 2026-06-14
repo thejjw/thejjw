@@ -72,6 +72,28 @@ $_NrdInternal = @{
 
 * Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
 * Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, prefer a non-deprecated alternative when practical; otherwise warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
+
+## Subagents
+
+* Default to delegating context-heavy work to subagents so the main session
+  accumulates conclusions, not raw process. Strong candidates: codebase
+  exploration/research, reading or summarizing many files, and independent
+  sub-tasks that can run in parallel. The subagent absorbs the noisy tool
+  calls and returns only a summary.
+* Do not wrap trivial or single tool calls in a subagent. A one-file read or a
+  quick `rg`/`fd` search is cheaper run directly than paying the spawn and
+  round-trip overhead.
+* Keep tightly-coupled work in the main context. Do not delegate edits that
+  depend on each other's output, and never have two subagents edit the same
+  file -- they share the working directory and will clobber each other.
+* Subagents start with a fresh context and the task prompt is the only input
+  channel. Pass every needed file path, error message, and decision explicitly;
+  they cannot see the main conversation.
+* Give each subagent explicit success criteria and a structured return format
+  so it reports cleanly instead of exploring open-endedly.
+* Where it cuts cost without hurting quality, route exploration/search
+  subagents to a smaller/faster model and reserve the main session for
+  synthesis and architectural judgment.
 "@
 }
 
