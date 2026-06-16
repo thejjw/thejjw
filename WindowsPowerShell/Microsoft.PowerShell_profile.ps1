@@ -6353,6 +6353,32 @@ function Load-AiApiKeysFromCS {
     }
 }
 
+# https://code.claude.com/docs/en/model-config#special-model-behavior
+# default model setting
+# The behavior of default depends on your account type:
+# Max, Team Premium, Enterprise pay-as-you-go, and Anthropic API: defaults to Opus 4.8
+# Pro, Team Standard, and Enterprise subscription seats: defaults to Sonnet 4.6
+# opusplan model setting
+# The opusplan model alias provides an automated hybrid approach:
+# In plan mode - Uses opus for complex reasoning and architecture decisions
+# In execution mode - Automatically switches to sonnet for code generation and implementation
+# This gives you the best of both worlds: Opus’s superior reasoning for planning, and Sonnet’s efficiency for execution.
+# The plan-mode Opus phase uses the same context window as the opus model setting. 
+# On subscription tiers where Opus is automatically upgraded to 1M context, opusplan receives the upgrade in plan mode as well. 
+# To force 1M context for both phases when you are not on an auto-upgrade tier, set the model to opusplan[1m].
+# For a hybrid approach where Claude decides mid-task when to consult a second model rather than switching at the plan boundary, see the advisor tool.
+# https://code.claude.com/docs/en/advisor
+# The advisor tool lets Claude consult a second, typically stronger model at key moments during a task, such as before committing to an approach, when stuck on a recurring error, 
+# or before declaring a task complete. The advisor receives the full conversation, including every tool call and result, and returns guidance that Claude applies before continuing.
+# Pairing	When to use
+# Sonnet main + Opus advisor	Sonnet handles routine work and escalates planning, ambiguous failures, and completion checks to Opus
+# Sonnet main + Fable advisor	Fable 5 guidance at decision points without running Fable 5 throughout. Requires v2.1.170 or later and Fable 5 access
+# Haiku main + Opus advisor	Lowest-cost main model with strong planning. Expect higher cost than Haiku alone but lower than switching the main model to Sonnet or Opus
+# Opus main + Opus advisor	A second Opus reviews the first. Useful for high-stakes tasks where an independent check matters more than cost
+# Fable main + Fable advisor	Highest-capability pairing when Fable 5 is available (v2.1.170+). Fable is a higher tier than Opus and Sonnet, so it is the only accepted advisor for a Fable main model
+# Sonnet main + Sonnet advisor	A lower-cost second opinion for catching routine oversights
+# Claude decides when to call the advisor. It tends to consult before committing to an approach, when an error keeps recurring, and before declaring a task done, but the timing is model-driven rather than rule-based.
+# Claude calls the advisor at decision points rather than on every turn, so pairing a faster main model with a stronger advisor typically costs less than running the stronger model throughout. Advisor usage counts toward the session totals shown by /usage.
 
 function ccd {
     <#
