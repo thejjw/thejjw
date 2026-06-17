@@ -212,7 +212,7 @@ $_AiToolsInternal = @{
         ClaudeCli     = 'https://claude.ai/install.ps1'
         CodexCli      = 'https://chatgpt.com/codex/install.ps1'
         CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
-        AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/agy_statusline.sh'
+        AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
     }
     NpmPackages            = @(
         '@qwen-code/qwen-code',
@@ -3867,7 +3867,7 @@ function Install-AgySettings {
         $null = New-Item -ItemType Directory -Path $agyBinDir -Force
     }
 
-    $targetStatusLine = Join-Path $agyBinDir 'agy_statusline.sh'
+    $targetStatusLine = Join-Path $agyBinDir 'agy_statusline.ps1'
 
     try {
         Invoke-RestMethod -Uri $_AiToolsInternal.Urls.AgyStatusline -OutFile $targetStatusLine
@@ -3876,7 +3876,7 @@ function Install-AgySettings {
             Write-Warning "agy: download failure caused setup to stop ($($_)). Please check internet availability and run the command again."
             return
         }
-        Write-Warning "agy: unable to update agy_statusline.sh script ($($_)), using existing file."
+        Write-Warning "agy: unable to update agy_statusline.ps1 script ($($_)), using existing file."
     }
 
     $settingsJson = Join-Path $agyDir 'settings.json'
@@ -3889,38 +3889,8 @@ function Install-AgySettings {
     }
 
     if (Test-Path -LiteralPath $targetStatusLine) {
-        # agy is written in Go and executes the statusline command using "sh" under the hood.
-        # Since Windows does not have a native "sh" in the PATH by default, we detect Git's sh.exe
-        # and create a sh.cmd wrapper both in the folder of agy.exe and the agy bin directory.
-        $gitShExe = $null
-        foreach ($candidate in @('C:\Program Files\Git\bin\sh.exe', 'C:\Program Files\Git\usr\bin\sh.exe')) {
-            if (Test-Path $candidate) { $gitShExe = $candidate; break }
-        }
-        if (-not $gitShExe) {
-            $shCmd = Get-Command sh.exe -ErrorAction SilentlyContinue
-            if ($shCmd) { $gitShExe = $shCmd.Source }
-        }
-
-        if ($gitShExe) {
-            $shWrapperContent = "@echo off`r`n`"$gitShExe`" %*`r`n"
-            
-            # 1. Write wrapper to agy.exe directory if resolved (ensures immediate PATH discovery)
-            $agyExe = Get-Command agy -ErrorAction SilentlyContinue
-            if ($agyExe) {
-                $agyExeDir = Split-Path $agyExe.Source -Parent
-                $shWrapperPath = Join-Path $agyExeDir 'sh.cmd'
-                [IO.File]::WriteAllText($shWrapperPath, $shWrapperContent, [Text.Encoding]::ASCII)
-            }
-            
-            # 2. Write wrapper to the agy bin directory as a secondary fallback
-            $shBinWrapperPath = Join-Path $agyBinDir 'sh.cmd'
-            [IO.File]::WriteAllText($shBinWrapperPath, $shWrapperContent, [Text.Encoding]::ASCII)
-        } else {
-            Write-Warning "agy: Git sh.exe not found. Please install Git for Windows."
-        }
-
-        $targetStatusLineBash = $targetStatusLine -replace '\\', '/'
-        $settings | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue ([pscustomobject]@{ type = 'command'; command = $targetStatusLineBash }) -Force
+        $statusLineCommand = "powershell -ExecutionPolicy Bypass -File `"$targetStatusLine`""
+        $settings | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue ([pscustomobject]@{ type = 'command'; command = $statusLineCommand }) -Force
     }
 
     # Set-Content -Encoding UTF8 writes a BOM in WinPS 5.1; use WriteAllText
