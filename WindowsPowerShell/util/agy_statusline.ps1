@@ -53,6 +53,16 @@ if ($inputJson) {
         $gray = "$esc[90m"
         $white = "$esc[37m"
         
+        # Unicode characters constructed safely via ASCII/Hex escaping
+        $emojiBrain  = [char]0xD83E + [char]0xDDE0
+        $emojiRotate = [char]0xD83D + [char]0xDD04
+        $emojiChart  = [char]0xD83D + [char]0xDCCA
+        $emojiFolder = [char]0xD83D + [char]0xDCC1
+        $emojiLeaf   = [char]0xD83C + [char]0xDF3F
+        $emojiUser   = [char]0xD83D + [char]0xDC64
+        $emojiLock   = [char]0xD83D + [char]0xDD12
+        $ellipsis    = [char]0x2026
+        
         # Format percentage and tokens
         $usedPctFmt = "{0:N1}" -f $usedPct
         $ctxInFmt = "{0:N0}K" -f ($tokensIn / 1000)
@@ -79,11 +89,11 @@ if ($inputJson) {
                 if ($branch) {
                     $branch = $branch.Trim()
                     if ($branch.Length -gt 15) {
-                        $branch = $branch.Substring(0, 14) + "…"
+                        $branch = $branch.Substring(0, 14) + $ellipsis
                     }
-                    $gitInfo = " | 🌿 ${green}${branch}${reset}"
+                    $gitInfo = " | " + $emojiLeaf + " " + $green + $branch + $reset
                 } else {
-                    $gitInfo = " | 🌿 ${green}detached${reset}"
+                    $gitInfo = " | " + $emojiLeaf + " " + $green + "detached" + $reset
                 }
             }
         }
@@ -91,11 +101,11 @@ if ($inputJson) {
         # Format Sandbox Warning
         $sandboxWarn = ""
         if ($sandbox) {
-            $sandboxWarn = " | 🔒 ${red}SANDBOXED${reset}"
+            $sandboxWarn = " | " + $emojiLock + " " + $red + "SANDBOXED" + $reset
         }
         
         # Write Output
-        $outputStr = "🧠 ${magenta}${model}${reset} | 🔄 ${cyan}${agentState}${reset} | 📊 ${yellow}${usedPctFmt}%${reset} ${blue}r${yellow}${ctxInFmt}${reset}+${red}w${yellow}${ctxOutFmt}${reset}/${gray}T${yellow}${ctxMaxFmt}${reset} | 📁 ${blue}${cwdShort}${reset}${gitInfo} | 👤 ${white}${plan} (${email})${reset}${sandboxWarn}"
+        $outputStr = $emojiBrain + " " + $magenta + $model + $reset + " | " + $emojiRotate + " " + $cyan + $agentState + $reset + " | " + $emojiChart + " " + $yellow + $usedPctFmt + "%" + $reset + " " + $blue + "r" + $yellow + $ctxInFmt + $reset + "+" + $red + "w" + $yellow + $ctxOutFmt + $reset + "/" + $gray + "T" + $yellow + $ctxMaxFmt + $reset + " | " + $emojiFolder + " " + $blue + $cwdShort + $reset + $gitInfo + " | " + $emojiUser + " " + $white + $plan + " (" + $email + ")" + $reset + $sandboxWarn
         Write-Output $outputStr
         
     } catch {

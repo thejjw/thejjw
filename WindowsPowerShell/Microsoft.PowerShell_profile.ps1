@@ -3889,7 +3889,12 @@ function Install-AgySettings {
     }
 
     if (Test-Path -LiteralPath $targetStatusLine) {
-        $statusLineCommand = "powershell -ExecutionPolicy Bypass -File `"$targetStatusLine`""
+        # Create a .cmd wrapper to bypass Go's space-tokenization/quoting bugs on Windows
+        $cmdWrapperPath = Join-Path $agyBinDir 'agy_statusline.cmd'
+        $cmdWrapperContent = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0agy_statusline.ps1`"`r`n"
+        [IO.File]::WriteAllText($cmdWrapperPath, $cmdWrapperContent, [Text.Encoding]::ASCII)
+
+        $statusLineCommand = $cmdWrapperPath -replace '\\', '/'
         $settings | Add-Member -NotePropertyName 'statusLine' -NotePropertyValue ([pscustomobject]@{ type = 'command'; command = $statusLineCommand }) -Force
     }
 
