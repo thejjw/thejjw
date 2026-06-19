@@ -133,6 +133,7 @@ $_AiToolsInternal = @{
         'Microsoft.Coreutils',
         'Microsoft.VCRedist.2015+.x64',
         'Microsoft.VCRedist.2015+.x86',
+        'Microsoft.IntelligentTerminal',
         'OpenJS.NodeJS.LTS',
         '7zip.7zip',
         'GitHub.cli',
