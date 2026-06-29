@@ -3922,13 +3922,14 @@ function Install-CodexSettings {
     $codexDir = Join-Path $HOME '.codex'
     $sentinel = Join-Path $codexDir '.config_setup_done'
 
-    if ((Test-Path -LiteralPath $sentinel) -and -not $Force) {
-        Write-Host "codex: config setup already done -- skipping"
-        return
-    }
-
     if (-not (Test-Path -LiteralPath $codexDir)) {
         $null = New-Item -ItemType Directory -Path $codexDir -Force
+    }
+
+    $sentinelExists = Test-Path -LiteralPath $sentinel
+    if ($sentinelExists -and -not $Force) {
+        Write-Host "codex: config setup already done -- skipping"
+        return
     }
 
     $configToml = Join-Path $codexDir 'config.toml'
@@ -3937,29 +3938,93 @@ function Install-CodexSettings {
     }
 
     $content = Get-Content -LiteralPath $configToml -Raw
-    if ($content -match '\[tui\]') {
-        Write-Host "codex: [tui] block already present -- skipping statusline preset"
+    $newline = if ($content -match "`r`n") { "`r`n" } else { "`n" }
+    $lines = if ([string]::IsNullOrEmpty($content)) {
+        [string[]]@()
     }
     else {
-        $preset = @"
-
-commit_attribution = ""
-
-[tui]
-status_line = [
-    "model-with-reasoning",
-    "git-branch",
-    "current-dir",
-    "context-used",
-    "total-output-tokens",
-    "five-hour-limit",
-    "weekly-limit",
-    "fast-mode"
-]
-"@
-        Add-Content -LiteralPath $configToml -Value $preset -Encoding UTF8
-        Write-Host "codex: statusline preset configured"
+        [string[]]($content -split "`r?`n")
     }
+
+    $statusLineBlock = [string[]]@(
+        'status_line = ['
+        '    "model-with-reasoning",'
+        '    "git-branch",'
+        '    "current-dir",'
+        '    "context-used",'
+        '    "total-output-tokens",'
+        '    "five-hour-limit",'
+        '    "weekly-limit",'
+        '    "fast-mode"'
+        ']'
+    )
+
+    $updated = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in $lines) {
+        if ($line -notmatch '^\s*commit_attribution\s*=') {
+            $updated.Add($line)
+        }
+    }
+
+    while ($updated.Count -gt 0 -and [string]::IsNullOrWhiteSpace($updated[0])) {
+        $updated.RemoveAt(0)
+    }
+    $updated.Insert(0, '')
+    $updated.Insert(0, 'commit_attribution = ""')
+
+    $tuiStart = -1
+    for ($i = 0; $i -lt $updated.Count; $i++) {
+        if ($updated[$i] -match '^\s*\[tui\]\s*(?:#.*)?$') {
+            $tuiStart = $i
+            break
+        }
+    }
+
+    if ($tuiStart -lt 0) {
+        while ($updated.Count -gt 0 -and [string]::IsNullOrWhiteSpace($updated[$updated.Count - 1])) {
+            $updated.RemoveAt($updated.Count - 1)
+        }
+        if ($updated.Count -gt 0) {
+            $updated.Add('')
+        }
+        $updated.Add('[tui]')
+        foreach ($line in $statusLineBlock) {
+            $updated.Add($line)
+        }
+    }
+    else {
+        $tuiEnd = $updated.Count
+        for ($i = $tuiStart + 1; $i -lt $updated.Count; $i++) {
+            if ($updated[$i] -match '^\s*\[') {
+                $tuiEnd = $i
+                break
+            }
+        }
+
+        for ($i = $tuiStart + 1; $i -lt $tuiEnd; $i++) {
+            if ($updated[$i] -match '^\s*status_line\s*=') {
+                $arrayDepth = 0
+                $removeEnd = $i
+                do {
+                    $arrayDepth += ([regex]::Matches($updated[$removeEnd], '\[')).Count
+                    $arrayDepth -= ([regex]::Matches($updated[$removeEnd], '\]')).Count
+                    $removeEnd++
+                } while ($removeEnd -lt $tuiEnd -and $arrayDepth -gt 0)
+
+                $updated.RemoveRange($i, $removeEnd - $i)
+                $tuiEnd -= ($removeEnd - $i)
+                break
+            }
+        }
+
+        $updated.InsertRange($tuiStart + 1, $statusLineBlock)
+    }
+
+    [IO.File]::WriteAllText($configToml, (($updated -join $newline).TrimEnd() + $newline), [Text.UTF8Encoding]::new($false))
+    if ($sentinelExists -and $Force) {
+        Write-Host "codex: config setup sentinel exists -- reapplied due to -Force" -ForegroundColor Yellow
+    }
+    Write-Host "codex: statusline preset configured"
 
     $null = New-Item -ItemType File -Path $sentinel -Force
     Write-Host "codex: config setup complete" -ForegroundColor Green
