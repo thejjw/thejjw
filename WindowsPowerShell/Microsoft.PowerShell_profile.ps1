@@ -171,6 +171,8 @@ $_AiToolsInternal = @{
         'SST.OpenCodeDesktop',
         'Google.Antigravity',
         'Google.AntigravityIDE',
+        'ZhipuAI.ZCode',
+        'MiniMax.MiniMaxCode',
         'marlocarlo.psmux',
         'marlocarlo.pstop',
         'marlocarlo.psnet'
@@ -217,6 +219,7 @@ $_AiToolsInternal = @{
     }
     NpmPackages            = @(
         '@qwen-code/qwen-code',
+        '@mimo-ai/cli',
         '@musistudio/claude-code-router',
         'oh-my-free-models'
     )
