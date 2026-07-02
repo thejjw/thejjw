@@ -221,10 +221,12 @@ $_AiToolsInternal = @{
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
     }
     NpmPackages            = @(
-        '@qwen-code/qwen-code',
-        '@mimo-ai/cli',
         '@musistudio/claude-code-router',
         'oh-my-free-models'
+    )
+    MoreAiNpmPackages      = @(
+        '@qwen-code/qwen-code',
+        '@mimo-ai/cli'
     )
 }
 
@@ -5786,7 +5788,8 @@ function Install-AiTools {
 
 .PARAMETER MoreAi
     When supplied, also installs extra AI developer tools (SST.OpenCodeDesktop, Google.Antigravity,
-    Google.AntigravityIDE, ZhipuAI.ZCode, MiniMax.MiniMaxCode) via winget, and Kimi Code if not present.
+    Google.AntigravityIDE, ZhipuAI.ZCode, MiniMax.MiniMaxCode) via winget, extra global npm packages
+    (@qwen-code/qwen-code, @mimo-ai/cli), and Kimi Code if not present.
 
 .PARAMETER All
     When supplied, enables all optional package groups: extended tools, SDK runtimes, .NET SDK,
@@ -5849,6 +5852,10 @@ function Install-AiTools {
     }
 
     $npmPackages = $_AiToolsInternal.NpmPackages
+    # Add extra global npm packages if MoreAi is requested
+    if ($MoreAi) {
+        $npmPackages += $_AiToolsInternal.MoreAiNpmPackages
+    }
 
     $setupLabels = @('standard')
     if ($ExtendedSetup) { $setupLabels += 'extended' }
