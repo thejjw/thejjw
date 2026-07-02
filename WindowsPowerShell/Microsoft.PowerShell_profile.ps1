@@ -6119,6 +6119,8 @@ function Install-AiTools {
             $kimiVersion = & kimi --version 2>$null
             if ($null -ne $kimiVersion -and $LASTEXITCODE -eq 0) {
                 $kimiInstalled = $true
+                $versionStr = ($kimiVersion -join ' ').Trim()
+                Write-Host "kimi CLI is already installed ($versionStr)." -ForegroundColor Green
             }
         } catch {
             # Catch when command is missing or execution fails
