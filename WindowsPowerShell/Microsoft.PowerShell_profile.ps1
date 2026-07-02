@@ -168,14 +168,16 @@ $_AiToolsInternal = @{
         'SQLite.SQLite',
         'koalaman.shellcheck',
         'Microsoft.VisualStudioCode',
+        'marlocarlo.psmux',
+        'marlocarlo.pstop',
+        'marlocarlo.psnet'
+    )
+    MoreAiWingetPackages   = @(
         'SST.OpenCodeDesktop',
         'Google.Antigravity',
         'Google.AntigravityIDE',
         'ZhipuAI.ZCode',
-        'MiniMax.MiniMaxCode',
-        'marlocarlo.psmux',
-        'marlocarlo.pstop',
-        'marlocarlo.psnet'
+        'MiniMax.MiniMaxCode'
     )
     ExtendedWingetPackages = @(
         'Insecure.Nmap',
@@ -214,6 +216,7 @@ $_AiToolsInternal = @{
         AgyCli        = 'https://antigravity.google/cli/install.ps1'
         ClaudeCli     = 'https://claude.ai/install.ps1'
         CodexCli      = 'https://chatgpt.com/codex/install.ps1'
+        KimiCodeCli   = 'https://code.kimi.com/kimi-code/install.ps1'
         CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
     }
@@ -5781,14 +5784,18 @@ function Install-AiTools {
 .PARAMETER Database
     When supplied, installs database client tools.
 
+.PARAMETER MoreAi
+    When supplied, also installs extra AI developer tools (SST.OpenCodeDesktop, Google.Antigravity,
+    Google.AntigravityIDE, ZhipuAI.ZCode, MiniMax.MiniMaxCode) via winget, and Kimi Code if not present.
+
 .PARAMETER All
     When supplied, enables all optional package groups: extended tools, SDK runtimes, .NET SDK,
-    Docker Desktop, and database clients. Equivalent to -ExtendedSetup -Sdk -Docker -Database.
+    Docker Desktop, database clients, and extra AI developer tools. Equivalent to -ExtendedSetup -Sdk -Docker -Database -MoreAi.
     Since Docker and Podman are alternatives, -All selects Docker; use -Podman explicitly if preferred.
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-05
+    Last Edit: 2026-07
 #>
     [CmdletBinding()]
     param(
@@ -5800,6 +5807,7 @@ function Install-AiTools {
         [switch]$Docker,
         [switch]$Podman,
         [switch]$Database,
+        [switch]$MoreAi,
         [switch]$All
     )
 
@@ -5814,6 +5822,7 @@ function Install-AiTools {
         $Sdk = $true
         if (-not $Podman) { $Docker = $true }
         $Database = $true
+        $MoreAi = $true
     }
 
     $wingetPackages = $_AiToolsInternal.WingetPackages
@@ -5834,6 +5843,10 @@ function Install-AiTools {
     if ($Database) {
         $wingetPackages += $_AiToolsInternal.DbWingetPackages
     }
+    # Add extra AI tools if MoreAi is requested
+    if ($MoreAi) {
+        $wingetPackages += $_AiToolsInternal.MoreAiWingetPackages
+    }
 
     $npmPackages = $_AiToolsInternal.NpmPackages
 
@@ -5844,6 +5857,7 @@ function Install-AiTools {
     if ($Docker) { $setupLabels += 'docker' }
     if ($Podman) { $setupLabels += 'podman' }
     if ($Database) { $setupLabels += 'db' }
+    if ($MoreAi) { $setupLabels += 'moreai' }
     if ($All) { $setupLabels = @('all') }
     $setupLabel = $setupLabels -join ', '
     Write-Host "The setup will check/install the following items ($setupLabel):" -ForegroundColor Cyan
@@ -5870,6 +5884,9 @@ function Install-AiTools {
     Write-Host " - claude (Claude CLI)"
     Write-Host " - codex (Codex CLI)"
     Write-Host " - opencode (opencode CLI)"
+    if ($MoreAi) {
+        Write-Host " - kimi (Kimi Code CLI)"
+    }
 
     if (-not $Auto) {
         $choice = Read-Host -Prompt "Proceed with automatic installation of missing items? This will run winget/npm/installers. Continue? (Y/n)"
@@ -6047,6 +6064,9 @@ function Install-AiTools {
     Write-Host " - claude (Claude CLI)"
     Write-Host " - codex (Codex CLI)"
     Write-Host " - opencode (opencode CLI)"
+    if ($MoreAi) {
+        Write-Host " - kimi (Kimi Code CLI)"
+    }
 
     # Install Antigravity and Claude CLIs using their recommended installers
     Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
@@ -6090,6 +6110,28 @@ function Install-AiTools {
     if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
         Write-Host "opencode CLI not found; installing via 'npm install -g opencode-ai'..." -ForegroundColor Yellow
         try { & npm install -g opencode-ai } catch { Write-Host "Failed to install opencode: $_" -ForegroundColor Red }
+    }
+
+    # Verify and install Kimi Code CLI if MoreAi is requested
+    if ($MoreAi) {
+        $kimiInstalled = $false
+        try {
+            $kimiVersion = & kimi --version 2>$null
+            if ($null -ne $kimiVersion -and $LASTEXITCODE -eq 0) {
+                $kimiInstalled = $true
+            }
+        } catch {
+            # Catch when command is missing or execution fails
+        }
+
+        if (-not $kimiInstalled) {
+            Write-Host "kimi CLI not found or not responding to version check; installing via $($_AiToolsInternal.Urls.KimiCodeCli)..." -ForegroundColor Yellow
+            try {
+                & powershell -NoProfile -ExecutionPolicy ByPass -Command "iex (irm '$($_AiToolsInternal.Urls.KimiCodeCli)')"
+            } catch {
+                Write-Host "Failed to install kimi: $_" -ForegroundColor Red
+            }
+        }
     }
 
     # Create a docker.bat shim so tools that hardcode `docker` commands
