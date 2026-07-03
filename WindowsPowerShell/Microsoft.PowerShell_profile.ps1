@@ -5474,6 +5474,118 @@ Last Edit: 2026-05
     Invoke-RemoteClaudeCodeBase @baseParams
 }
 
+function Get-ScriptFunction {
+    <#
+.SYNOPSIS
+    Lists top-level functions defined by a PowerShell script.
+.DESCRIPTION
+    Parses the script with the PowerShell AST and returns function/filter names
+    declared in the script's root script block with a short Get-Help synopsis
+    when that function is already loaded in the current session. The script is
+    not executed, so dynamic definitions made through aliases, variables,
+    Invoke-Expression, or imported files are not reported.
+.PARAMETER Path
+    One or more PowerShell script paths to inspect.
+.PARAMETER DescriptionLength
+    Maximum number of characters to show from each Get-Help synopsis.
+.PARAMETER NameOnly
+    Returns only function names without Get-Help descriptions.
+.EXAMPLE
+    PS C:\> Get-ScriptFunction $PROFILE
+    Lists functions callable after the current profile is loaded.
+.EXAMPLE
+    PS C:\> Get-ScriptFunction $PROFILE -NameOnly
+    Lists only the function names.
+.OUTPUTS
+    System.String. Top-level function names, optionally with help synopsis text.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias('FullName')]
+        [string[]]$Path,
+
+        [ValidateRange(0, 500)]
+        [int]$DescriptionLength = 80,
+
+        [switch]$NameOnly
+    )
+
+    process {
+        foreach ($inputPath in $Path) {
+            $resolvedPath = (Resolve-Path -LiteralPath $inputPath -ErrorAction Stop).ProviderPath
+            $tokens = $null
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($resolvedPath, [ref]$tokens, [ref]$errors)
+
+            if ($errors) {
+                $message = ($errors | ForEach-Object {
+                    '{0}:{1}: {2}' -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message
+                }) -join [Environment]::NewLine
+                Write-Error "Failed to parse '$resolvedPath': $message"
+                continue
+            }
+
+            $functionNames = @($ast.FindAll({
+                param($node)
+
+                if ($node -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) {
+                    return $false
+                }
+
+                # Nested functions belong to another ScriptBlockAst, so exclude them.
+                $parent = $node.Parent
+                while ($parent -and ($parent -isnot [System.Management.Automation.Language.ScriptBlockAst])) {
+                    $parent = $parent.Parent
+                }
+
+                return [object]::ReferenceEquals($parent, $ast)
+            }, $true) |
+                ForEach-Object {
+                    ([string]$_.Name) -replace '^(global|local|private|script):', ''
+                } |
+                Sort-Object -Unique)
+
+            if ($NameOnly) {
+                $functionNames
+                continue
+            }
+
+            $nameWidth = ($functionNames | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+            if (-not $nameWidth) { continue }
+            $lineFormat = '{0,-' + $nameWidth + '} - {1}'
+
+            foreach ($functionName in $functionNames) {
+                $description = ''
+                if (Get-Command -Name $functionName -CommandType Function -ErrorAction SilentlyContinue) {
+                    $help = Get-Help -Name $functionName -ErrorAction SilentlyContinue
+                    if ($help) {
+                        $synopsis = ([string]$help.Synopsis -replace '\s+', ' ').Trim()
+                        $syntaxPattern = '^{0}(\s|\[|$)' -f [regex]::Escape($functionName)
+                        if ($synopsis -and ($synopsis -notmatch $syntaxPattern)) {
+                            $description = $synopsis
+                        }
+                    }
+                }
+
+                if ($DescriptionLength -gt 0 -and $description.Length -gt $DescriptionLength) {
+                    $clipLength = [Math]::Max(0, $DescriptionLength - 3)
+                    $description = $description.Substring(0, $clipLength) + '...'
+                }
+
+                if ($description) {
+                    $lineFormat -f $functionName, $description
+                } else {
+                    $functionName
+                }
+            }
+        }
+    }
+}
+
 function Update-Profile {
     <#
 .SYNOPSIS
