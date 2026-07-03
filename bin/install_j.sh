@@ -325,8 +325,10 @@ configure_zswap() {
     setup_swap || return 1
 
     if grep -q '^N$' /sys/module/zswap/parameters/enabled; then
+        # Use lzo: the kernel's default zswap compressor (ZSWAP_COMPRESSOR_DEFAULT_LZO
+        # in mm/Kconfig -- https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/mm/Kconfig).
         sudo sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/{
-            /zswap.enabled/! s/"$/ zswap.enabled=1 zswap.compressor=zstd"/
+            /zswap.enabled/! s/"$/ zswap.enabled=1 zswap.compressor=lzo"/
         }; s/=" /="/' /etc/default/grub
         sudo update-grub
         echo "zswap configured. Reboot to take effect."
