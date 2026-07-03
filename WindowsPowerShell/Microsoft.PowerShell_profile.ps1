@@ -5480,10 +5480,10 @@ function Get-ScriptFunction {
     Lists top-level functions defined by a PowerShell script.
 .DESCRIPTION
     Parses the script with the PowerShell AST and returns function/filter names
-    declared in the script's root script block with a short Get-Help synopsis
-    when that function is already loaded in the current session. The script is
-    not executed, so dynamic definitions made through aliases, variables,
-    Invoke-Expression, or imported files are not reported.
+    declared in the script's root script block as a numbered table, with a
+    short Get-Help synopsis when that function is already loaded in the current
+    session. The script is not executed, so dynamic definitions made through
+    aliases, variables, Invoke-Expression, or imported files are not reported.
 .PARAMETER Path
     One or more PowerShell script paths to inspect.
 .PARAMETER DescriptionLength
@@ -5492,12 +5492,13 @@ function Get-ScriptFunction {
     Returns only function names without Get-Help descriptions.
 .EXAMPLE
     PS C:\> Get-ScriptFunction $PROFILE
-    Lists functions callable after the current profile is loaded.
+    Lists functions callable after the current profile is loaded as a table.
 .EXAMPLE
     PS C:\> Get-ScriptFunction $PROFILE -NameOnly
     Lists only the function names.
 .OUTPUTS
-    System.String. Top-level function names, optionally with help synopsis text.
+    System.Management.Automation.PSCustomObject. Function rows with count,
+    name, and help synopsis text. System.String when -NameOnly is used.
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-07
@@ -5554,11 +5555,12 @@ function Get-ScriptFunction {
                 continue
             }
 
-            $nameWidth = ($functionNames | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
-            if (-not $nameWidth) { continue }
-            $lineFormat = '{0,-' + $nameWidth + '} - {1}'
+            $functionCount = $functionNames.Count
+            if ($functionCount -eq 0) { continue }
+            $functionIndex = 0
 
             foreach ($functionName in $functionNames) {
+                $functionIndex++
                 $description = ''
                 if (Get-Command -Name $functionName -CommandType Function -ErrorAction SilentlyContinue) {
                     $help = Get-Help -Name $functionName -ErrorAction SilentlyContinue
@@ -5576,10 +5578,10 @@ function Get-ScriptFunction {
                     $description = $description.Substring(0, $clipLength) + '...'
                 }
 
-                if ($description) {
-                    $lineFormat -f $functionName, $description
-                } else {
-                    $functionName
+                [pscustomobject]@{
+                    No          = '{0}/{1}' -f $functionIndex, $functionCount
+                    Name        = $functionName
+                    Description = $description
                 }
             }
         }
