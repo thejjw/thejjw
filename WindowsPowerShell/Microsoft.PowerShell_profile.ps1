@@ -6538,7 +6538,7 @@ function Load-AiApiKeysFromCS {
         without saving them as plaintext in registry variables.
 
     .PARAMETER Quiet
-        When supplied, skips detailed output and only prints an ambiguous completion message.
+        When supplied, skips detailed output and only prints a short status message.
 
     .NOTES
         Author: jjw(@thejjw)
@@ -6574,6 +6574,8 @@ function Load-AiApiKeysFromCS {
         } else {
             Write-Host "Loaded $loadedCount API key(s) from Windows Credential Manager into session environment." -ForegroundColor Green
         }
+    } else {
+        Write-Host "No saved API keys found in Windows Credential Manager." -ForegroundColor DarkGray
     }
 }
 
