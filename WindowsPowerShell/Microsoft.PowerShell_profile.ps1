@@ -5481,9 +5481,10 @@ function Get-ScriptFunction {
 .DESCRIPTION
     Parses the script with the PowerShell AST and returns function/filter names
     declared in the script's root script block as a numbered table, with a
-    short Get-Help synopsis when that function is already loaded in the current
-    session. The script is not executed, so dynamic definitions made through
-    aliases, variables, Invoke-Expression, or imported files are not reported.
+    single total count line and a short Get-Help synopsis when that function is
+    already loaded in the current session. The script is not executed, so dynamic
+    definitions made through aliases, variables, Invoke-Expression, or imported
+    files are not reported.
 .PARAMETER Path
     One or more PowerShell script paths to inspect.
 .PARAMETER DescriptionLength
@@ -5497,7 +5498,7 @@ function Get-ScriptFunction {
     PS C:\> Get-ScriptFunction $PROFILE -NameOnly
     Lists only the function names.
 .OUTPUTS
-    System.Management.Automation.PSCustomObject. Function rows with count,
+    System.Management.Automation.PSCustomObject. Function rows with number,
     name, and help synopsis text. System.String when -NameOnly is used.
 .NOTES
     Author: jjw(@thejjw)
@@ -5558,6 +5559,7 @@ function Get-ScriptFunction {
             $functionCount = $functionNames.Count
             if ($functionCount -eq 0) { continue }
             $functionIndex = 0
+            Write-Host ('Total functions: {0}' -f $functionCount) -ForegroundColor DarkGray
 
             foreach ($functionName in $functionNames) {
                 $functionIndex++
@@ -5579,7 +5581,7 @@ function Get-ScriptFunction {
                 }
 
                 [pscustomobject]@{
-                    No          = '{0}/{1}' -f $functionIndex, $functionCount
+                    No          = $functionIndex
                     Name        = $functionName
                     Description = $description
                 }
