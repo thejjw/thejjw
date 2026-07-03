@@ -6962,7 +6962,17 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         return $Response
     }
 
-    Export-ModuleMember -Function FormatDuration, WriteSection, FromEpochMs, FormatTokens, FormatPrice, GetSeriesStats, GetSpikes, UnwrapZaiData
+    $profileHelperFunctions = @(
+        'FormatDuration',
+        'WriteSection',
+        'FromEpochMs',
+        'FormatTokens',
+        'FormatPrice',
+        'GetSeriesStats',
+        'GetSpikes',
+        'UnwrapZaiData'
+    )
+    Export-ModuleMember -Function $profileHelperFunctions
 }
 
 # --- Get-MinimaxUsage ------------------------------------------------------
