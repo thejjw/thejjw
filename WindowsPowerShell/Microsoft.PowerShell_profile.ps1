@@ -603,7 +603,7 @@ function Get-WhoisInfo {
 }
 
 function Get-NewPassword {
-    <#!
+    <#
 .SYNOPSIS
     Generates a random password with customizable options.
 .DESCRIPTION
