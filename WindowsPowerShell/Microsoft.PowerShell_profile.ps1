@@ -6875,92 +6875,94 @@ function Invoke-AiUpgrade {
 Set-Alias -Name aiu -Value Invoke-AiUpgrade
 
 # === AI provider usage-query functions ===
-# Provides Get-MinimaxUsage, Get-ZaiUsage, Get-DeepseekUsage, and shared
-# formatting helpers. Call any of them after the vault credentials load
-# further down (Load-AiApiKeysFromCS) so $env:MINIMAX_API_KEY,
-# $env:Z_AI_AUTH_TOKEN, and $env:DEEPSEEK_API_KEY are populated.
+# Provides Get-MinimaxUsage, Get-ZaiUsage, and Get-DeepseekUsage. Call any of
+# them after the vault credentials load further down (Load-AiApiKeysFromCS) so
+# $env:MINIMAX_API_KEY, $env:Z_AI_AUTH_TOKEN, and $env:DEEPSEEK_API_KEY are populated.
 
 # --- Shared helpers --------------------------------------------------------
 
-# Render a TimeSpan as a compact human-readable string.
-function Format-Duration {
-    param([TimeSpan]$ts)
-    if ($ts.TotalDays -ge 1)  { return ('{0:N1} d ({1:N0} h)' -f $ts.TotalDays,  $ts.TotalHours) }
-    if ($ts.TotalHours -ge 1) { return ('{0:N1} h ({1:N0} m)'  -f $ts.TotalHours, $ts.TotalMinutes) }
-    return ('{0:N0} m ({1:N0} s)' -f $ts.TotalMinutes, $ts.TotalSeconds)
-}
-
-# Print a section banner.
-function Write-Section {
-    param([string]$title)
-    Write-Host ''
-    Write-Host ('== {0} ==' -f $title) -ForegroundColor Cyan
-}
-
-# Convert epoch milliseconds to a local DateTime.
-function From-EpochMs {
-    param([long]$ms)
-    return [DateTimeOffset]::FromUnixTimeMilliseconds($ms).LocalDateTime
-}
-
-# Format a token count as a compact human-readable string.
-function Format-Tokens {
-    param([double]$n)
-    if ($n -le 0) { return '0' }
-    if ($n -ge 1e9) { return ('{0:N2}B' -f ($n / 1e9)) }
-    if ($n -ge 1e6) { return ('{0:N2}M' -f ($n / 1e6)) }
-    if ($n -ge 1e3) { return ('{0:N2}K' -f ($n / 1e3)) }
-    return ('{0:N0}' -f $n)
-}
-
-# Format a cost value as a compact decimal, stripping trailing zeros.
-function Format-Price {
-    param([double]$n)
-    $s = ('{0:N6}' -f $n).TrimEnd('0')
-    if ($s.EndsWith('.')) { $s = $s.Substring(0, $s.Length - 1) }
-    return $s
-}
-
-# Compute total/avg/peak for a numeric series aligned to xTime.
-function Get-SeriesStats {
-    param([object[]]$xTime, [object[]]$series)
-    if (-not $series -or $series.Count -eq 0) {
-        return [pscustomobject]@{ Total = 0; Avg = 0; Peak = 0; PeakHour = $null }
+$_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
+    # Render a TimeSpan as a compact human-readable string.
+    function FormatDuration {
+        param([TimeSpan]$Value)
+        if ($Value.TotalDays -ge 1)  { return ('{0:N1} d ({1:N0} h)' -f $Value.TotalDays,  $Value.TotalHours) }
+        if ($Value.TotalHours -ge 1) { return ('{0:N1} h ({1:N0} m)'  -f $Value.TotalHours, $Value.TotalMinutes) }
+        return ('{0:N0} m ({1:N0} s)' -f $Value.TotalMinutes, $Value.TotalSeconds)
     }
-    $total = 0; $peak = 0; $peakIdx = -1
-    for ($i = 0; $i -lt $series.Count; $i++) {
-        $v = [int]$series[$i]
-        $total += $v
-        if ($v -gt $peak) { $peak = $v; $peakIdx = $i }
-    }
-    $avg = if ($series.Count -gt 0) { [double]$total / $series.Count } else { 0 }
-    $peakHour = if ($peakIdx -ge 0 -and $xTime -and $peakIdx -lt $xTime.Count) { [string]$xTime[$peakIdx] } else { $null }
-    return [pscustomobject]@{ Total = $total; Avg = $avg; Peak = $peak; PeakHour = $peakHour }
-}
 
-# Detect spikes: indexes where value > SpikeRatio * avg. Returns array
-# of @{ Hour; Value } records (or empty array).
-function Get-Spikes {
-    param([object[]]$xTime, [object[]]$series, [double]$avg, [double]$SpikeRatio = 3.0)
-    $out = @()
-    if (-not $series -or $avg -le 0) { return $out }
-    $threshold = $SpikeRatio * $avg
-    for ($i = 0; $i -lt $series.Count; $i++) {
-        $v = [int]$series[$i]
-        if ($v -gt $threshold) {
-            $hour = if ($xTime -and $i -lt $xTime.Count) { [string]$xTime[$i] } else { "idx $i" }
-            $out += [pscustomobject]@{ Hour = $hour; Value = $v }
+    # Print a section banner.
+    function WriteSection {
+        param([string]$Title)
+        Write-Host ''
+        Write-Host ('== {0} ==' -f $Title) -ForegroundColor Cyan
+    }
+
+    # Convert epoch milliseconds to a local DateTime.
+    function FromEpochMs {
+        param([long]$Value)
+        return [DateTimeOffset]::FromUnixTimeMilliseconds($Value).LocalDateTime
+    }
+
+    # Format a token count as a compact human-readable string.
+    function FormatTokens {
+        param([double]$Value)
+        if ($Value -le 0) { return '0' }
+        if ($Value -ge 1e9) { return ('{0:N2}B' -f ($Value / 1e9)) }
+        if ($Value -ge 1e6) { return ('{0:N2}M' -f ($Value / 1e6)) }
+        if ($Value -ge 1e3) { return ('{0:N2}K' -f ($Value / 1e3)) }
+        return ('{0:N0}' -f $Value)
+    }
+
+    # Format a cost value as a compact decimal, stripping trailing zeros.
+    function FormatPrice {
+        param([double]$Value)
+        $s = ('{0:N6}' -f $Value).TrimEnd('0')
+        if ($s.EndsWith('.')) { $s = $s.Substring(0, $s.Length - 1) }
+        return $s
+    }
+
+    # Compute total/avg/peak for a numeric series aligned to xTime.
+    function GetSeriesStats {
+        param([object[]]$XTime, [object[]]$Series)
+        if (-not $Series -or $Series.Count -eq 0) {
+            return [pscustomobject]@{ Total = 0; Avg = 0; Peak = 0; PeakHour = $null }
         }
+        $total = 0; $peak = 0; $peakIdx = -1
+        for ($i = 0; $i -lt $Series.Count; $i++) {
+            $v = [int]$Series[$i]
+            $total += $v
+            if ($v -gt $peak) { $peak = $v; $peakIdx = $i }
+        }
+        $avg = if ($Series.Count -gt 0) { [double]$total / $Series.Count } else { 0 }
+        $peakHour = if ($peakIdx -ge 0 -and $XTime -and $peakIdx -lt $XTime.Count) { [string]$XTime[$peakIdx] } else { $null }
+        return [pscustomobject]@{ Total = $total; Avg = $avg; Peak = $peak; PeakHour = $peakHour }
     }
-    return $out
-}
 
-# Z.AI's quota endpoint wraps payload under .data; pull that out.
-function Unwrap-ZaiData {
-    param([object]$resp)
-    if ($null -eq $resp) { return $null }
-    if ($resp.PSObject.Properties['data'] -and $null -ne $resp.data) { return $resp.data }
-    return $resp
+    # Detect spikes: indexes where value > SpikeRatio * avg.
+    function GetSpikes {
+        param([object[]]$XTime, [object[]]$Series, [double]$Avg, [double]$SpikeRatio = 3.0)
+        $out = @()
+        if (-not $Series -or $Avg -le 0) { return $out }
+        $threshold = $SpikeRatio * $Avg
+        for ($i = 0; $i -lt $Series.Count; $i++) {
+            $v = [int]$Series[$i]
+            if ($v -gt $threshold) {
+                $hour = if ($XTime -and $i -lt $XTime.Count) { [string]$XTime[$i] } else { "idx $i" }
+                $out += [pscustomobject]@{ Hour = $hour; Value = $v }
+            }
+        }
+        return $out
+    }
+
+    # Z.AI's quota endpoint wraps payload under .data; pull that out.
+    function UnwrapZaiData {
+        param([object]$Response)
+        if ($null -eq $Response) { return $null }
+        if ($Response.PSObject.Properties['data'] -and $null -ne $Response.data) { return $Response.data }
+        return $Response
+    }
+
+    Export-ModuleMember -Function FormatDuration, WriteSection, FromEpochMs, FormatTokens, FormatPrice, GetSeriesStats, GetSpikes, UnwrapZaiData
 }
 
 # --- Get-MinimaxUsage ------------------------------------------------------
@@ -7026,23 +7028,23 @@ function Get-MinimaxUsage {
 
     $Global:minimaxLastQuery = $resp
 
-    Write-Section 'Raw API response (MiniMax)'
+    $_ProfileHelpers.WriteSection('Raw API response (MiniMax)')
     if ($All) { $resp | ConvertTo-Json -Depth 8 | Out-Host }
     else      { Write-Host '  (suppressed; stored in $Global:minimaxLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
 
     $now = Get-Date
-    Write-Section 'Per-model insights (MiniMax)'
+    $_ProfileHelpers.WriteSection('Per-model insights (MiniMax)')
     $rows = New-Object System.Collections.Generic.List[object]
     foreach ($m in $resp.model_remains) {
-        $intervalStart   = From-EpochMs ([long]$m.start_time)
-        $intervalEnd     = From-EpochMs ([long]$m.end_time)
+        $intervalStart   = $_ProfileHelpers.FromEpochMs([long]$m.start_time)
+        $intervalEnd     = $_ProfileHelpers.FromEpochMs([long]$m.end_time)
         $intervalTotal   = $intervalEnd - $intervalStart
         $intervalElapsed = $now - $intervalStart
         if ($intervalElapsed.TotalSeconds -lt 0) { $intervalElapsed = [TimeSpan]::Zero }
         if ($intervalElapsed -gt $intervalTotal)  { $intervalElapsed = $intervalTotal }
 
-        $weeklyStart   = From-EpochMs ([long]$m.weekly_start_time)
-        $weeklyEnd     = From-EpochMs ([long]$m.weekly_end_time)
+        $weeklyStart   = $_ProfileHelpers.FromEpochMs([long]$m.weekly_start_time)
+        $weeklyEnd     = $_ProfileHelpers.FromEpochMs([long]$m.weekly_end_time)
         $weeklyTotal   = $weeklyEnd - $weeklyStart
         $weeklyElapsed = $now - $weeklyStart
         if ($weeklyElapsed.TotalSeconds -lt 0) { $weeklyElapsed = [TimeSpan]::Zero }
@@ -7088,17 +7090,17 @@ function Get-MinimaxUsage {
         $rows.Add([pscustomobject]@{
             Model              = $m.model_name
             Interval_Remaining = ('{0}%' -f $iRemain)
-            Interval_Reset     = (Format-Duration $iReset)
+            Interval_Reset     = ($_ProfileHelpers.FormatDuration($iReset))
             Interval_Used      = $iUsedStr
             Weekly_Remaining   = ('{0}%' -f $wRemain)
-            Weekly_Reset       = (Format-Duration $wReset)
+            Weekly_Reset       = ($_ProfileHelpers.FormatDuration($wReset))
             Weekly_Used        = $wUsedStr
             Alerts             = ($flags -join ', ')
         })
     }
     $rows | Format-Table -AutoSize -Wrap | Out-Host
 
-    Write-Section 'Concerns (MiniMax)'
+    $_ProfileHelpers.WriteSection('Concerns (MiniMax)')
     $concerns = New-Object System.Collections.Generic.List[string]
     foreach ($m in $resp.model_remains) {
         $name    = [string]$m.model_name
@@ -7116,7 +7118,7 @@ function Get-MinimaxUsage {
             $concerns.Add(('[LOW]      {0}: {1}% left this week' -f $name, $wRemain))
         }
         if ($iReset.TotalSeconds -gt 0 -and $iReset.TotalHours -le $ResetWarnHours) {
-            $concerns.Add(('[INFO]     {0}: interval resets in {1}' -f $name, (Format-Duration $iReset)))
+            $concerns.Add(('[INFO]     {0}: interval resets in {1}' -f $name, ($_ProfileHelpers.FormatDuration($iReset))))
         }
     }
     if ($concerns.Count -eq 0) {
@@ -7206,7 +7208,7 @@ function Get-ZaiUsage {
         Quota = $quotaResp
     }
 
-    Write-Section 'Raw API responses (Z.AI)'
+    $_ProfileHelpers.WriteSection('Raw API responses (Z.AI)')
     if ($All) {
         Write-Host '--- model-usage ---'
         if ($modelResp) { $modelResp | ConvertTo-Json -Depth 8 | Out-Host } else { Write-Host '(no response)' }
@@ -7221,14 +7223,14 @@ function Get-ZaiUsage {
         Write-Host '   Use -All to display inline.)' -ForegroundColor DarkGray
     }
 
-    $modelData = Unwrap-ZaiData $modelResp
-    $toolData  = Unwrap-ZaiData $toolResp
-    $quotaData = Unwrap-ZaiData $quotaResp
+    $modelData = $_ProfileHelpers.UnwrapZaiData($modelResp)
+    $toolData  = $_ProfileHelpers.UnwrapZaiData($toolResp)
+    $quotaData = $_ProfileHelpers.UnwrapZaiData($quotaResp)
 
-    Write-Section 'Model usage summary (Z.AI, last 24h)'
+    $_ProfileHelpers.WriteSection('Model usage summary (Z.AI, last 24h)')
     if ($modelData) {
-        $callStats = Get-SeriesStats $modelData.x_time $modelData.modelCallCount
-        $tokStats  = Get-SeriesStats $modelData.x_time $modelData.tokensUsage
+        $callStats = $_ProfileHelpers.GetSeriesStats($modelData.x_time, $modelData.modelCallCount)
+        $tokStats  = $_ProfileHelpers.GetSeriesStats($modelData.x_time, $modelData.tokensUsage)
         [pscustomobject]@{
             Total_Calls    = $callStats.Total
             Hourly_Avg     = ('{0:N2}' -f $callStats.Avg)
@@ -7241,11 +7243,11 @@ function Get-ZaiUsage {
         Write-Host '  (no data)' -ForegroundColor DarkGray
     }
 
-    Write-Section 'Tool usage summary (Z.AI, last 24h)'
+    $_ProfileHelpers.WriteSection('Tool usage summary (Z.AI, last 24h)')
     if ($toolData) {
-        $netStats = Get-SeriesStats $toolData.x_time $toolData.networkSearchCount
-        $webStats = Get-SeriesStats $toolData.x_time $toolData.webReadMcpCount
-        $zreStats = Get-SeriesStats $toolData.x_time $toolData.zreadMcpCount
+        $netStats = $_ProfileHelpers.GetSeriesStats($toolData.x_time, $toolData.networkSearchCount)
+        $webStats = $_ProfileHelpers.GetSeriesStats($toolData.x_time, $toolData.webReadMcpCount)
+        $zreStats = $_ProfileHelpers.GetSeriesStats($toolData.x_time, $toolData.zreadMcpCount)
         [pscustomobject]@{
             Tool       = 'network-search (search-prime)'
             Total      = $netStats.Total
@@ -7266,9 +7268,9 @@ function Get-ZaiUsage {
         } | Format-Table -AutoSize | Out-Host
 
         $spikes = @()
-        $spikes += Get-Spikes $toolData.x_time $toolData.networkSearchCount $netStats.Avg $SpikeRatio
-        $spikes += Get-Spikes $toolData.x_time $toolData.webReadMcpCount   $webStats.Avg $SpikeRatio
-        $spikes += Get-Spikes $toolData.x_time $toolData.zreadMcpCount     $zreStats.Avg $SpikeRatio
+        $spikes += $_ProfileHelpers.GetSpikes($toolData.x_time, $toolData.networkSearchCount, $netStats.Avg, $SpikeRatio)
+        $spikes += $_ProfileHelpers.GetSpikes($toolData.x_time, $toolData.webReadMcpCount, $webStats.Avg, $SpikeRatio)
+        $spikes += $_ProfileHelpers.GetSpikes($toolData.x_time, $toolData.zreadMcpCount, $zreStats.Avg, $SpikeRatio)
         if ($spikes.Count -gt 0) {
             Write-Host ''
             Write-Host ('  Spikes (> {0:N1}x hourly avg):' -f $SpikeRatio)
@@ -7281,7 +7283,7 @@ function Get-ZaiUsage {
         Write-Host '  (no data)' -ForegroundColor DarkGray
     }
 
-    Write-Section 'Quota summary (Z.AI)'
+    $_ProfileHelpers.WriteSection('Quota summary (Z.AI)')
     if ($quotaData -and $quotaData.limits) {
         # Use the API's nextResetTime when present, else fall back to a
         # label derived from the (unit, number) pair. unit codes
@@ -7298,7 +7300,7 @@ function Get-ZaiUsage {
             if ($lim.PSObject.Properties['nextResetTime'] -and $null -ne $lim.nextResetTime) {
                 $resetDt = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$lim.nextResetTime).LocalDateTime
                 $delta   = $resetDt - (Get-Date)
-                $reset   = ('{0} ({1} from now)' -f $resetDt.ToString('yyyy-MM-dd HH:mm'), (Format-Duration $delta))
+                $reset   = ('{0} ({1} from now)' -f $resetDt.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($delta)))
             } elseif ($lim.PSObject.Properties['unit'] -and $lim.PSObject.Properties['number']) {
                 $unitName = switch ([int]$lim.unit) {
                     3 { 'h' }
@@ -7320,7 +7322,7 @@ function Get-ZaiUsage {
         Write-Host '  (no data)' -ForegroundColor DarkGray
     }
 
-    Write-Section 'Concerns (Z.AI)'
+    $_ProfileHelpers.WriteSection('Concerns (Z.AI)')
     $concerns = New-Object System.Collections.Generic.List[string]
     if ($quotaData -and $quotaData.limits) {
         foreach ($lim in $quotaData.limits) {
@@ -7336,8 +7338,8 @@ function Get-ZaiUsage {
     }
     if ($toolData) {
         foreach ($seriesName in @('networkSearchCount', 'webReadMcpCount', 'zreadMcpCount')) {
-            $stats = Get-SeriesStats $toolData.x_time $toolData.$seriesName
-            $spikes = Get-Spikes $toolData.x_time $toolData.$seriesName $stats.Avg $SpikeRatio
+            $stats = $_ProfileHelpers.GetSeriesStats($toolData.x_time, $toolData.$seriesName)
+            $spikes = $_ProfileHelpers.GetSpikes($toolData.x_time, $toolData.$seriesName, $stats.Avg, $SpikeRatio)
             if ($spikes.Count -gt 0) {
                 $concerns.Add(('[SPIKE] {0}: {1} hour(s) above {2:N1}x hourly avg' -f $seriesName, $spikes.Count, $SpikeRatio))
             }
@@ -7424,7 +7426,7 @@ function Get-DeepseekUsage {
 
     $Global:deepseekLastQuery = $resp
 
-    Write-Section 'Raw API response (DeepSeek)'
+    $_ProfileHelpers.WriteSection('Raw API response (DeepSeek)')
     if ($All) { $resp | ConvertTo-Json -Depth 8 | Out-Host }
     else      { Write-Host '  (suppressed; stored in $Global:deepseekLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
 
@@ -7433,7 +7435,7 @@ function Get-DeepseekUsage {
         $balances[[string]$b.currency] = [double]$b.total_balance
     }
 
-    Write-Section 'Balance summary (DeepSeek)'
+    $_ProfileHelpers.WriteSection('Balance summary (DeepSeek)')
     $balanceRows = foreach ($b in $resp.balance_infos) {
         [pscustomobject]@{
             Currency     = [string]$b.currency
@@ -7459,22 +7461,22 @@ function Get-DeepseekUsage {
             $rows.Add([pscustomobject]@{
                 Model            = $p.Model
                 Scenario         = $p.Scenario
-                Cost_per_1M      = ('{0} {1}' -f $cur, (Format-Price $cost))
-                Available_Tokens = (Format-Tokens $tokens)
+                Cost_per_1M      = ('{0} {1}' -f $cur, ($_ProfileHelpers.FormatPrice($cost)))
+                Available_Tokens = ($_ProfileHelpers.FormatTokens($tokens))
             })
         }
         $title = if ($cur -eq 'USD') { 'Estimated USD token budget (DeepSeek)' } else { 'Estimated CNY token budget (DeepSeek)' }
-        Write-Section $title
+        $_ProfileHelpers.WriteSection($title)
         $rows | Format-Table -AutoSize -Wrap | Out-Host
     }
     if (-not $hasAny) {
-        Write-Section 'Estimated token budget (DeepSeek)'
+        $_ProfileHelpers.WriteSection('Estimated token budget (DeepSeek)')
         Write-Host '  (no USD or CNY balance > 0 reported)' -ForegroundColor DarkGray
     }
     Write-Host ('  Estimate formula: tokens = balance / cost_per_1M * 1,000,000.') -ForegroundColor DarkGray
     Write-Host ('  Actual spend depends on cache-hit ratio, prompt size, output length, and model mix.') -ForegroundColor DarkGray
 
-    Write-Section 'Concerns (DeepSeek)'
+    $_ProfileHelpers.WriteSection('Concerns (DeepSeek)')
     $concerns = New-Object System.Collections.Generic.List[string]
     if (-not [bool]$resp.is_available) {
         $concerns.Add('[CRITICAL] is_available=false: account cannot make API calls')
