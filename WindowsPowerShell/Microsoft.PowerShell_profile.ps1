@@ -1,5 +1,18 @@
 # OSC 9;9 hyperlink lets Windows Terminal / VS Code detect and click the working directory
 function prompt {
+    <#
+.SYNOPSIS
+    Renders the interactive PowerShell prompt.
+.DESCRIPTION
+    Overrides PowerShell's built-in prompt function to return the standard
+    "PS <location>" prompt prefixed with an OSC 9;9 working-directory escape
+    sequence for terminals that support clickable or detectable paths.
+.OUTPUTS
+    System.String. The prompt text returned to the PowerShell host.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
     $loc = $executionContext.SessionState.Path.CurrentLocation
     $out = "PS $loc$('>' * ($nestedPromptLevel + 1)) "
     "$([char]27)]9;9;`"$loc`"$([char]27)\" + $out
