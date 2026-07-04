@@ -4271,13 +4271,16 @@ function claudez {
         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
         'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
         'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
-        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL'
+        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
+        'ENABLE_PROMPT_CACHING_1H'
     )
 
     $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $token
     $env:API_TIMEOUT_MS = "3000000"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
+    $env:ENABLE_PROMPT_CACHING_1H = "1"
     # GLM-5.2 supports 1M context (suffix [1m] on the model name); see https://docs.z.ai/devpack/latest-model
     $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = "1000000"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
@@ -4336,13 +4339,16 @@ function claudezm {
         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
         'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
         'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
-        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL'
+        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
+        'ENABLE_PROMPT_CACHING_1H'
     )
 
     $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $token
     $env:API_TIMEOUT_MS = "3000000"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
+    $env:ENABLE_PROMPT_CACHING_1H = "1"
     # GLM-5.2 supports 1M context (suffix [1m] on the model name); see https://docs.z.ai/devpack/latest-model
     $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = "1000000"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
@@ -4452,7 +4458,7 @@ function claudeds {
         'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
         'CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
-        'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ENABLE_PROMPT_CACHING_1H'
     )
 
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
@@ -4466,6 +4472,8 @@ function claudeds {
     $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash[1m]"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
+    $env:ENABLE_PROMPT_CACHING_1H = "1"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     try {
@@ -4540,7 +4548,7 @@ function claudeds2 {
         'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
         'CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
-        'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ENABLE_PROMPT_CACHING_1H'
     )
 
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
@@ -4553,6 +4561,8 @@ function claudeds2 {
     $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash[1m]"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "high"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
+    $env:ENABLE_PROMPT_CACHING_1H = "1"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     try {
@@ -4742,6 +4752,7 @@ export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-}"
 export API_TIMEOUT_MS="${API_TIMEOUT_MS:-300000}"
 export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export ENABLE_PROMPT_CACHING_1H=1
 export DISABLE_AUTOUPDATER=1
 if ! command -v node &>/dev/null; then
     export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
@@ -5015,7 +5026,8 @@ function claudemm {
         'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'API_TIMEOUT_MS',
         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_USE_POWERSHELL_TOOL',
-        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL'
+        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
+        'ENABLE_PROMPT_CACHING_1H'
     )
 
     $env:ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic"
@@ -5027,6 +5039,8 @@ function claudemm {
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "MiniMax-M3[1m]"
     $env:API_TIMEOUT_MS = "3000000"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
+    $env:ENABLE_PROMPT_CACHING_1H = "1"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     $env:CLAUDE_CODE_SUBAGENT_MODEL = "MiniMax-M3[1m]"
@@ -5313,7 +5327,8 @@ function cccr {
         'DISABLE_TELEMETRY', 'DISABLE_COST_WARNINGS',
         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_DISABLE_1M_CONTEXT',
         'CLAUDE_CODE_USE_POWERSHELL_TOOL',
-        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL'
+        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
+        'ENABLE_PROMPT_CACHING_1H'
     )
 
     try {
@@ -5365,6 +5380,8 @@ function cccr {
         $env:DISABLE_TELEMETRY     = '1'
         $env:DISABLE_COST_WARNINGS = '1'
         $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
+        # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
+        $env:ENABLE_PROMPT_CACHING_1H = '1'
         # Allow 1M context only when MiniMax is in the longContext route.
         $env:CLAUDE_CODE_DISABLE_1M_CONTEXT = if ($miniMaxKey) { '0' } else { '1' }
         $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'

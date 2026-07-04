@@ -887,6 +887,7 @@ alias claudez='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
+  ENABLE_PROMPT_CACHING_1H="1" \
   claude'
 alias claudezd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
@@ -898,6 +899,7 @@ alias claudezd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
+  ENABLE_PROMPT_CACHING_1H="1" \
   claude --dangerously-skip-permissions'
 alias claudezm='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
@@ -909,6 +911,7 @@ alias claudezm='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
+  ENABLE_PROMPT_CACHING_1H="1" \
   claude'
 alias claudezmd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
@@ -920,6 +923,7 @@ alias claudezmd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
+  ENABLE_PROMPT_CACHING_1H="1" \
   claude --dangerously-skip-permissions'
 # <<< claudez <<<
 EOF
@@ -1027,6 +1031,7 @@ alias claudeds='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash[1m]" \
   CLAUDE_CODE_EFFORT_LEVEL="max" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  ENABLE_PROMPT_CACHING_1H="1" \
   claude'
 alias claudedsd='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
@@ -1037,6 +1042,7 @@ alias claudedsd='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash[1m]" \
   CLAUDE_CODE_EFFORT_LEVEL="max" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  ENABLE_PROMPT_CACHING_1H="1" \
   claude --dangerously-skip-permissions'
 alias claudeds2='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
@@ -1047,6 +1053,7 @@ alias claudeds2='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash[1m]" \
   CLAUDE_CODE_EFFORT_LEVEL="high" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  ENABLE_PROMPT_CACHING_1H="1" \
   claude'
 alias claudeds2d='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
@@ -1057,6 +1064,7 @@ alias claudeds2d='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash[1m]" \
   CLAUDE_CODE_EFFORT_LEVEL="high" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  ENABLE_PROMPT_CACHING_1H="1" \
   claude --dangerously-skip-permissions'
 export DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
 # <<< claudeds <<<
@@ -1123,6 +1131,7 @@ export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-}"
 export API_TIMEOUT_MS="${API_TIMEOUT_MS:-300000}"
 export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export ENABLE_PROMPT_CACHING_1H=1
 export DISABLE_AUTOUPDATER=1
 if ! command -v node &>/dev/null; then
     export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
@@ -1235,6 +1244,7 @@ alias claudemm='ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M3[1m]" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  ENABLE_PROMPT_CACHING_1H="1" \
   claude'
 alias claudemmd='ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY" \
@@ -1244,6 +1254,7 @@ alias claudemmd='ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M3[1m]" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
+  ENABLE_PROMPT_CACHING_1H="1" \
   claude --dangerously-skip-permissions'
 export MINIMAX_API_KEY="$MINIMAX_API_KEY"
 # <<< claudemm <<<
