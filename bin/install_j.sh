@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PACKAGES="tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils webp btop bubblewrap socat fd-find fzf"
+PACKAGES="tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
 NVM_VERSION="v0.40.4"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 
@@ -56,127 +56,83 @@ remove_profile_section() {
   mv "$tmp_file" "$profile_file"
 }
 
-# Install official libjxl release debs on supported amd64 Debian/Ubuntu systems.
-install_libjxl_release_debs() {
-  local arch os_id os_version os_codename asset_name asset_url tmp_dir archive deb_dir extracted_count
-  local -a installed_libjxl_packages
-  local cjxl_present=false
+# Install libjxl CLI tools (cjxl/djxl/jxlinfo) from the official statically
+# linked x86_64 release tarball. The published binaries are fully static (no
+# dynamic loader, no glibc version dependency), so they run on any amd64 Linux
+# without distro detection. Falls back to the libjxl-tools apt package on
+# non-amd64 systems or if download/extraction/exec fails.
+install_libjxl_static_tools() {
+  local arch tmp_dir archive tools url b rc
+  local -a want=(cjxl djxl jxlinfo)
 
-  echo "libjxl: checking for official GitHub release deb support..."
+  echo "libjxl: checking for official static release tools..."
 
-  arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
   if command -v cjxl &>/dev/null; then
-    cjxl_present=true
-    echo "libjxl: cjxl found at $(command -v cjxl)"
-  else
-    echo "libjxl: cjxl not found"
-  fi
-
-  if [[ "$arch" != "amd64" ]]; then
-    echo "libjxl: unsupported architecture '$arch' for official deb assets"
-    if ! $cjxl_present; then
-      PACKAGES="libjxl-tools $PACKAGES"
-      echo "libjxl: added libjxl-tools back to apt package list"
-    fi
+    echo "libjxl: cjxl already present at $(command -v cjxl) -- skipping"
     return 0
   fi
 
-  if [[ -r /etc/os-release ]]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
+  # The static tarball is x86_64/amd64 only; anything else uses the apt package.
+  arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+  if [[ "$arch" != "amd64" ]]; then
+    echo "libjxl: architecture '$arch' has no static tarball; using libjxl-tools apt package"
+    PACKAGES="libjxl-tools $PACKAGES"
+    return 0
   fi
 
-  os_id="${ID:-unknown}"
-  os_version="${VERSION_ID:-unknown}"
-  os_codename="${VERSION_CODENAME:-unknown}"
-
-  case "${os_id}:${os_version}:${os_codename}" in
-    debian:*:bookworm) asset_name="jxl-debs-amd64-debian-bookworm.zip" ;;
-    debian:*:trixie) asset_name="jxl-debs-amd64-debian-trixie.zip" ;;
-    ubuntu:22.04:*) asset_name="jxl-debs-amd64-ubuntu-22.04.zip" ;;
-    ubuntu:24.04:*) asset_name="jxl-debs-amd64-ubuntu-24.04.zip" ;;
-    *)
-      echo "libjxl: unsupported distribution '${os_id}' version '${os_version}' codename '${os_codename}'"
-      if ! $cjxl_present; then
-        PACKAGES="libjxl-tools $PACKAGES"
-        echo "libjxl: added libjxl-tools back to apt package list"
-      fi
-      return 0
-      ;;
-  esac
-
-  echo "libjxl: supported system detected; using release asset ${asset_name}"
+  # The asset is lzip-compressed (.tar.lz); GNU tar shells out to the lzip binary.
+  if ! command -v lzip &>/dev/null; then
+    echo "libjxl: lzip missing; installing it for release extraction"
+    sudo apt-get install -y lzip
+  fi
 
   tmp_dir="$(mktemp -d)"
-  archive="${tmp_dir}/${asset_name}"
-  deb_dir="${tmp_dir}/debs"
-  mkdir -p "$deb_dir"
+  archive="${tmp_dir}/jxl-linux-x86_64-static.tar.lz"
+  tools="${tmp_dir}/tools"
+  url="https://github.com/libjxl/libjxl/releases/latest/download/jxl-linux-x86_64-static.tar.lz"
 
-  asset_url="https://github.com/libjxl/libjxl/releases/latest/download/${asset_name}"
-  echo "libjxl: downloading latest release asset from ${asset_url}"
+  echo "libjxl: downloading static release tarball from ${url}"
   if command -v curl &>/dev/null; then
-    curl -fL --retry 3 -o "$archive" "$asset_url"
+    curl -fL --retry 3 -o "$archive" "$url"
   elif command -v wget &>/dev/null; then
-    wget -O "$archive" "$asset_url"
+    wget -O "$archive" "$url"
   else
     echo "libjxl: curl/wget missing; installing curl for release download"
     sudo apt-get install -y curl
-    curl -fL --retry 3 -o "$archive" "$asset_url"
+    curl -fL --retry 3 -o "$archive" "$url"
   fi
 
-  echo "libjxl: extracting only jxl_*.deb and libjxl_*.deb"
-  if command -v python3 &>/dev/null; then
-    extracted_count="$(python3 - "$archive" "$deb_dir" << 'PY'
-import fnmatch
-import os
-import sys
-import zipfile
-
-archive, deb_dir = sys.argv[1], sys.argv[2]
-count = 0
-with zipfile.ZipFile(archive) as zf:
-    for member in zf.infolist():
-        name = os.path.basename(member.filename)
-        if not name:
-            continue
-        if fnmatch.fnmatch(name, "jxl_*.deb") or fnmatch.fnmatch(name, "libjxl_*.deb"):
-            with zf.open(member) as src, open(os.path.join(deb_dir, name), "wb") as dst:
-                dst.write(src.read())
-            count += 1
-print(count)
-PY
-)"
-  else
-    if ! command -v unzip &>/dev/null; then
-      echo "libjxl: python3/unzip missing; installing unzip for release extraction"
-      sudo apt-get install -y unzip
-    fi
-    unzip -j "$archive" 'jxl_*.deb' '*/jxl_*.deb' 'libjxl_*.deb' '*/libjxl_*.deb' -d "$deb_dir"
-    extracted_count="$(find "$deb_dir" -maxdepth 1 -type f -name '*.deb' | wc -l)"
-  fi
-  echo "libjxl: extracted ${extracted_count//[[:space:]]/} matching deb packages"
-
-  if ! compgen -G "${deb_dir}/jxl_*.deb" >/dev/null || ! compgen -G "${deb_dir}/libjxl_*.deb" >/dev/null; then
-    echo "libjxl: expected jxl_*.deb and libjxl_*.deb files were not found in ${asset_name}" >&2
+  # Archive layout (verified against v0.12.0): LICENSE* at root, binaries under tools/.
+  echo "libjxl: extracting static tools"
+  if ! lzip -dc "$archive" | tar -x -C "$tmp_dir"; then
+    echo "libjxl: extraction failed; falling back to libjxl-tools apt package" >&2
     rm -rf "$tmp_dir"
-    return 1
+    PACKAGES="libjxl-tools $PACKAGES"
+    return 0
   fi
 
-  # Download/extract first so a transient network failure does not remove a working cjxl.
-  if $cjxl_present; then
-    mapfile -t installed_libjxl_packages < <(dpkg-query -W -f='${binary:Package}\n' 'libjxl-*' 2>/dev/null || true)
-    if (( ${#installed_libjxl_packages[@]} > 0 )); then
-      echo "libjxl: uninstalling installed libjxl-* packages: ${installed_libjxl_packages[*]}"
-      sudo apt-get purge -y "${installed_libjxl_packages[@]}"
+  echo "libjxl: installing ${want[*]} into /usr/local/bin"
+  for b in "${want[@]}"; do
+    if [[ -f "${tools}/${b}" ]]; then
+      sudo install -m 0755 "${tools}/${b}" /usr/local/bin/
     else
-      echo "libjxl: no installed libjxl-* packages found to uninstall"
+      echo "libjxl: warning -- ${b} not found in tarball" >&2
     fi
-  fi
-
-  echo "libjxl: installing official release deb packages"
-  sudo apt-get install -y "${deb_dir}"/jxl_*.deb "${deb_dir}"/libjxl_*.deb
+  done
   rm -rf "$tmp_dir"
-  echo "libjxl: official release deb installation complete"
+
+  # Sanity-check that the installed binary actually executes on this system.
+  # rc 126 (exec format) / 127 (not found) mean it cannot run; any other code
+  # means the program ran (a usage/help exit is fine). --help is a supported flag.
+  rc=0
+  /usr/local/bin/cjxl --help &>/dev/null || rc=$?
+  if [[ -x /usr/local/bin/cjxl && "$rc" -ne 126 && "$rc" -ne 127 ]]; then
+    echo "libjxl: static tools installed to /usr/local/bin (${want[*]})"
+  else
+    echo "libjxl: installed cjxl failed to run (rc=${rc}); falling back to libjxl-tools apt package" >&2
+    sudo rm -f /usr/local/bin/cjxl /usr/local/bin/djxl /usr/local/bin/jxlinfo
+    PACKAGES="libjxl-tools $PACKAGES"
+  fi
 }
 
 # Use zsh profile on macOS, bash profile elsewhere.
@@ -189,7 +145,7 @@ else
     echo "apt not found, skipping apt-based package installation."
   else
     sudo apt-get update
-    install_libjxl_release_debs
+    install_libjxl_static_tools
     sudo apt-get install -y $PACKAGES
   fi
 fi
