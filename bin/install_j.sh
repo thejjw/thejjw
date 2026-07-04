@@ -67,9 +67,12 @@ install_libjxl_static_tools() {
 
   echo "libjxl: checking for official static release tools..."
 
-  if command -v cjxl &>/dev/null; then
-    echo "libjxl: cjxl already present at $(command -v cjxl) -- skipping"
+  if command -v cjxl &>/dev/null && ! $FORCE_REINSTALL; then
+    echo "libjxl: cjxl already present at $(command -v cjxl) -- skipping (use --force to reinstall)"
     return 0
+  fi
+  if command -v cjxl &>/dev/null && $FORCE_REINSTALL; then
+    echo "libjxl: --force set; reinstalling from latest release over existing $(command -v cjxl)"
   fi
 
   # The static tarball is x86_64/amd64 only; anything else uses the apt package.
