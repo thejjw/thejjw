@@ -44,9 +44,9 @@ OPTIONS
   --quality <low|1gb|2gb|4gb>
                         Quality preset:
                           * low  → h264 target = 60% (40% less), hevc target = 70% (30% less)
-                          * 1gb  → compute video bitrate to target ~1 GiB total size
-                          * 2gb  → compute video bitrate to target ~2 GiB total size
-                          * 4gb  → compute video bitrate to target ~4 GiB total size
+                          * 1gb  → target ~1 GiB size limit (uses default bitrate if smaller)
+                          * 2gb  → target ~2 GiB size limit (uses default bitrate if smaller)
+                          * 4gb  → target ~4 GiB size limit (uses default bitrate if smaller)
                         All presets use 2-pass SVT-AV1.
                         Default (no --quality): h264 target = 70% (30% less), hevc target = 80% (20% less).
   --try-crf-first       Try 1-pass CRF first (complexity-derived CRF), then fallback to 2-pass ABR
@@ -757,11 +757,11 @@ if [[ "$QUALITY_MODE" == "low" ]]; then
   log "  h264 target   : 60% of detected bitrate (40% less)"
   log "  hevc target   : 70% of detected bitrate (30% less)"
 elif [[ "$QUALITY_MODE" == "size" ]]; then
-  # For size-targeted mode, factors not used; bitrate derived from duration & audio.
+  # For size-targeted mode, normal default rule is preferred if it yields a smaller size.
   H264_FACTOR="0.00"
   HEVC_FACTOR="0.00"
   log "Bitrate rule    : SIZE-TARGET (~$(fmt_bytes "$TARGET_SIZE_BYTES"))"
-  log "  video target  : computed to fit total size minus audio"
+  log "  video target  : default normal rule if default size <= limit, else computed to fit limit"
 else
   H264_FACTOR="0.70"
   HEVC_FACTOR="0.80"
@@ -847,17 +847,34 @@ for FILE in "${CANDIDATES[@]}"; do
 
   ORIG_BYTES="$(stat -c%s -- "$FILE")"
   if [[ "$QUALITY_MODE" == "size" ]]; then
-    # Derive target video kbps from desired total size and duration, subtracting audio bps.
-    DUR="$(get_format_duration "$FILE")"
-    AUDIO_BPS="$(get_audio_bitrate_sum_bps "$FILE")"
-    # total bps to meet size (bytes*8/duration):
-    TOTAL_BPS=$(awk -v bytes="$TARGET_SIZE_BYTES" -v dur="$DUR" 'BEGIN{ if(dur<=0){print 0} else { printf "%.0f", (bytes*8)/dur } }')
-    VIDEO_BPS=$(( TOTAL_BPS - AUDIO_BPS ))
-    if (( VIDEO_BPS <= 0 )); then
-      VIDEO_BPS=250000
+    # 1. Compute Default (no --quality) bitrate and estimated size for comparison
+    local DEFAULT_FACTOR="0.70"
+    case "$CODEC" in
+      hevc|h265) DEFAULT_FACTOR="0.80" ;;
+      *) DEFAULT_FACTOR="0.70" ;;
+    esac
+
+    DEFAULT_TARGET_KBPS="$(compute_target_kbps "$SRC_BPS" "$DEFAULT_FACTOR")"
+    DEFAULT_EST_TGT_BYTES="$(estimate_target_bytes_from_ratio "$ORIG_BYTES" "$SRC_BPS" "$DEFAULT_TARGET_KBPS")"
+
+    # 2. Use default if it is already smaller than the specified target size limit; otherwise, scale to fit limit.
+    if awk -v def_est="$DEFAULT_EST_TGT_BYTES" -v limit="$TARGET_SIZE_BYTES" 'BEGIN { exit !(def_est <= limit) }'; then
+      TARGET_KBPS="$DEFAULT_TARGET_KBPS"
+      EST_TGT_BYTES="$DEFAULT_EST_TGT_BYTES"
+      log "File: $(basename "$FILE") - Default target size (~$(fmt_bytes "$DEFAULT_EST_TGT_BYTES")) <= limit ($(fmt_bytes "$TARGET_SIZE_BYTES")). Using default normal bitrate (${TARGET_KBPS} kbps)."
+    else
+      DUR="$(get_format_duration "$FILE")"
+      AUDIO_BPS="$(get_audio_bitrate_sum_bps "$FILE")"
+      # total bps to meet size (bytes*8/duration):
+      TOTAL_BPS=$(awk -v bytes="$TARGET_SIZE_BYTES" -v dur="$DUR" 'BEGIN{ if(dur<=0){print 0} else { printf "%.0f", (bytes*8)/dur } }')
+      VIDEO_BPS=$(( TOTAL_BPS - AUDIO_BPS ))
+      if (( VIDEO_BPS <= 0 )); then
+        VIDEO_BPS=250000
+      fi
+      TARGET_KBPS=$(( (VIDEO_BPS + 500) / 1000 ))
+      EST_TGT_BYTES="$TARGET_SIZE_BYTES"
+      log "File: $(basename "$FILE") - Default target size (~$(fmt_bytes "$DEFAULT_EST_TGT_BYTES")) > limit ($(fmt_bytes "$TARGET_SIZE_BYTES")). Applying size-constrained bitrate (${TARGET_KBPS} kbps)."
     fi
-    TARGET_KBPS=$(( (VIDEO_BPS + 500) / 1000 ))
-    EST_TGT_BYTES="$TARGET_SIZE_BYTES"
   else
     TARGET_KBPS="$(compute_target_kbps "$SRC_BPS" "$FACTOR")"
     EST_TGT_BYTES="$(estimate_target_bytes_from_ratio "$ORIG_BYTES" "$SRC_BPS" "$TARGET_KBPS")"
