@@ -3,7 +3,7 @@
 # One-shot environment bootstrap
 # Installs packages, nvm/node, and embeds functions into ~/.bashrc.
 # ---------------------------------------------------------------------------
-# 2026.4-2026.5 @thejjw
+# 2026.4-2026.7 @thejjw
 
 set -e
 
@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 PACKAGES="tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
-NVM_VERSION="v0.40.4"
+NVM_VERSION="v0.40.5"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 
 remove_profile_section() {
