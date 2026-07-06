@@ -672,7 +672,7 @@ else
   if command -v jq &>/dev/null; then
     [ ! -f "$SETTINGS_JSON" ] && echo "{}" > "$SETTINGS_JSON"
     jq --arg cmd "$TARGET_STATUSLINE" \
-       '.attribution = { commit: "", pr: "" } | .statusLine = { type: "command", command: $cmd, refreshInterval: 2 }' \
+       '.attribution = { commit: "", pr: "" } | .statusLine = { type: "command", command: $cmd, refreshInterval: 2 } | .sessionUrl = false' \
        "$SETTINGS_JSON" > "$SETTINGS_JSON.tmp" && mv "$SETTINGS_JSON.tmp" "$SETTINGS_JSON"
     touch "$CC_CONFIG_SENTINEL"
     echo "claude: config setup complete via jq"
