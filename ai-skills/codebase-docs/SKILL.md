@@ -79,7 +79,7 @@ When analyzing large or multi-domain repositories, delegate domain exploration t
 
 1. **Research-Only Constraint**: Subagents must only read and summarize. They must never write, edit, or delete any files in `/docs` or the workspace to avoid write collisions.
 2. **Model Selection & Routing**: If the harness supports routing different tasks to different models:
-   - **Main Agent (Synthesis & Writing)**: Use a high-reasoning, premium model (e.g., Gemini Pro, Claude Sonnet, or equivalent).
+   - **Main Agent (Synthesis & Writing)**: Use a high-reasoning, premium model (e.g., Gemini Pro, Claude Sonnet/Opus, or equivalent).
    - **Subagents (Research & Extraction)**: Use a fast, large-context, cost-effective model (e.g., Gemini Flash, Claude Haiku, or equivalent).
    - If the exact models are not available, map the task to the closest available tiers in your model pool (premium reasoning for the main agent, fast/cheap/large-context for the subagents).
 3. **Narrow Briefs**: Give each subagent a specific codebase subset to audit (e.g., "Analyze the database schema and summarize the data model relations").
