@@ -3830,6 +3830,9 @@ function Install-GlobalClaudeSettings {
 
     $settings | Add-Member -NotePropertyName 'attribution' -NotePropertyValue ([pscustomobject]@{ commit = ''; pr = '' }) -Force
 
+    # Disable Claude Code session URL sharing
+    $settings | Add-Member -NotePropertyName 'sessionUrl' -NotePropertyValue $false -Force
+
     # Prefer PowerShell tool over Bash on Windows
     $settings | Add-Member -NotePropertyName 'env' -NotePropertyValue ([pscustomobject]@{ CLAUDE_CODE_USE_POWERSHELL_TOOL = '1' }) -Force
 
