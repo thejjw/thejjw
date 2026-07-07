@@ -8086,6 +8086,13 @@ function Install-Fonts {
 
     if ($ListOnly) { return }
 
+    # Short confirmation before doing any network/disk work (Enter defaults to Yes).
+    $choice = Read-Host -Prompt ("Proceed with downloading and installing {0} font pack(s)? (Y/n)" -f $packs.Count)
+    if ($choice -in @('n', 'N')) {
+        Write-Host "Aborting. Nothing was downloaded or installed." -ForegroundColor Yellow
+        return
+    }
+
     # Ensure the target folder and registry key exist before installing.
     if (-not (Test-Path -LiteralPath $fontsDir)) {
         New-Item -ItemType Directory -Path $fontsDir -Force | Out-Null
@@ -8149,6 +8156,7 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
             }
 
             $dl = Join-Path $work ([System.IO.Path]::GetFileName(([Uri]$p.Url).AbsolutePath))
+            Write-Host ("      source: {0}" -f $p.Url) -ForegroundColor DarkGray
             Write-Host "      downloading..." -ForegroundColor DarkGray
             try {
                 # Chunked concurrent download; several times faster than a single
