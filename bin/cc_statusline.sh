@@ -125,6 +125,30 @@ elif [ -n "$effort_level" ]; then
   think_tag="${DIM}${effort_short}${RESET}"
 fi
 
+# --- Advisor config: resolve effective advisorModel across the settings layers ---
+# Claude Code deep-merges settings; the value that "matters" is the one from the
+# highest-precedence layer that sets it. Order (low -> high): user, project,
+# project-local, enterprise managed. Not exposed in the statusline JSON, so read
+# the files directly. read_adv() echoes a non-empty advisorModel if the file sets one.
+config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+case "$(uname -s)" in
+  Darwin) managed_settings="/Library/Application Support/ClaudeCode/managed-settings.json" ;;
+  Linux)  managed_settings="/etc/claude-code/managed-settings.json" ;;
+  *)      managed_settings="${PROGRAMDATA:-C:/ProgramData}/ClaudeCode/managed-settings.json"
+          managed_settings="${managed_settings//\\//}" ;;  # backslashes -> forward for Git Bash
+esac
+read_adv() { [ -f "$1" ] && jq -r '.advisorModel // empty' "$1" 2>/dev/null; }
+advisor_model=""
+for f in \
+  "$config_dir/settings.json" \
+  "$ws_project/.claude/settings.json" \
+  "$ws_project/.claude/settings.local.json" \
+  "$managed_settings"; do
+  v=$(read_adv "$f"); [ -n "$v" ] && advisor_model="$v"  # last defining layer wins
+done
+adv_tag=""
+[ -n "$advisor_model" ] && adv_tag="${GREEN}adv:${advisor_model}${RESET}"  # show only when set
+
 # --- Helpers ---
 fmt_tokens() {
   local t=$1
@@ -276,6 +300,7 @@ fi
 if [ -n "$worktree_name" ]; then
   line3_parts+=("${CYAN}wt:${worktree_name}${RESET}")
 fi
+[ -n "$adv_tag" ] && line3_parts+=("$adv_tag")
 if [ -n "$session_name" ]; then
   line3_parts+=("${DIM}\"${session_name}\"${RESET}")
 fi
