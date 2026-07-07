@@ -243,6 +243,65 @@ $_AiToolsInternal = @{
     )
 }
 
+# Internal configuration for Install-Fonts.
+#
+# Each pack is pinned to a specific upstream release. When bumping a version,
+# update Url, Bytes, and (if the archive layout changed) Include/Probe together.
+#
+# Fields:
+#   Name     Human-readable pack name; also the token matched by -Name filtering.
+#   Url      Direct download URL (GitHub release asset or CDN). Warned on failure.
+#   Bytes    Download size measured at authoring time; used for the pre-run size
+#            report so the user sees the transfer cost before anything downloads.
+#   Fonts    Approx. count of font files this pack installs after Include filtering
+#            (from archive inspection); used only for the pre-run summary total.
+#   Kind     'Zip' = archive to open and extract selectively; 'File' = the URL is
+#            itself a single font file (no archive).
+#   Include  Regex (case-insensitive) matched against each zip entry's relative
+#            path. Only matching entries are extracted+installed. Chosen per pack
+#            to install ONE clean set and skip redundant format folders (otf vs
+#            ttf vs variable of the same family) plus __MACOSX/AppleDouble junk.
+#            Ignored for Kind='File'.
+#   Probe    A representative installed font filename. If it already exists in the
+#            target Fonts folder, the whole pack is skipped (no download) unless
+#            -Force is passed. This is the cheap pre-download idempotency check.
+#   Enabled  $false packs are skipped unless -IncludeDisabled is passed. The three
+#            Adobe Source Han CJK families are off by default: each archive must be
+#            downloaded whole (Sans ~848 MB, Serif ~716 MB, Mono ~116 MB) even to
+#            install a single collection file, so ~1.68 GB total is opt-in.
+#   Note     Optional freeform note shown in -ListOnly output.
+$_FontInstallInternal = @{
+    # Per-user (no admin) install target and its font-registration registry key.
+    UserFontsDir = (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts')
+    UserRegPath  = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+    # All-users (-AllUsers, requires admin) install target and its registry key.
+    MachineFontsDir = (Join-Path $env:WINDIR 'Fonts')
+    MachineRegPath  = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
+
+    Packs = @(
+        [pscustomobject]@{ Name = 'GoormSansCode';       Url = 'https://statics.goorm.io/fonts/GoormSansCode/v1.0.1/goorm-sans-code-1.0.1.zip'; Bytes = 4528715;   Fonts = 1;  Kind = 'Zip';  Include = '(?i)^goorm sans code 2/Public/[^/]+\.ttf$'; Probe = 'goorm_Sans_Code_400.ttf';                 Enabled = $true;  Note = 'Coding sans (single weight).' }
+        [pscustomobject]@{ Name = 'Jetendard';           Url = 'https://github.com/kuskhan/jetendard/releases/download/v0.1.0/Jetendard-TTF.zip'; Bytes = 37427141; Fonts = 16; Kind = 'Zip';  Include = '(?i)^ttf/[^/]+\.ttf$';                     Probe = 'Jetendard-Regular.ttf';                  Enabled = $true;  Note = 'Static TTF weights.' }
+        [pscustomobject]@{ Name = 'YeomilMono';          Url = 'https://github.com/taevel02/yeomil-mono/releases/download/v1.1.1/YeomilMono-TTF.zip'; Bytes = 3055540; Fonts = 3; Kind = 'Zip';  Include = '(?i)^[^/]+\.ttf$';                         Probe = 'YeomilMono-Regular.ttf';                 Enabled = $true;  Note = 'Monospace, 3 weights.' }
+        [pscustomobject]@{ Name = 'Pretendard';          Url = 'https://github.com/orioncactus/pretendard/releases/download/v1.3.9/Pretendard-1.3.9.zip'; Bytes = 47304526; Fonts = 9; Kind = 'Zip'; Include = '(?i)^public/static/alternative/[^/]+\.ttf$'; Probe = 'Pretendard-Regular.ttf';                Enabled = $true;  Note = 'Static TTF (alternative/) chosen over OTF/variable to avoid duplicate family entries.' }
+        [pscustomobject]@{ Name = 'WantedSans';          Url = 'https://github.com/wanteddev/wanted-sans/releases/download/v1.0.3/WantedSans-1.0.3.zip'; Bytes = 21656532; Fonts = 7; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$';                     Probe = 'WantedSans-Regular.ttf';                 Enabled = $true;  Note = 'Static TTF; skips otf/ and variable/ duplicates.' }
+        [pscustomobject]@{ Name = 'Galmuri';             Url = 'https://github.com/quiple/galmuri/releases/download/v2.40.3/Galmuri-v2.40.3.zip'; Bytes = 19936233; Fonts = 20; Kind = 'Zip'; Include = '(?i)^[^/]+\.(ttf|ttc)$';                   Probe = 'Galmuri11.ttf';                          Enabled = $true;  Note = 'Pixel font family; all root-level ttf/ttc.' }
+        [pscustomobject]@{ Name = 'OpenDyslexic';        Url = 'https://github.com/antijingoist/opendyslexic/releases/download/v0.91.12/opendyslexic-0.910.12-rc2-2019.10.17.zip'; Bytes = 3627458; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';               Probe = 'OpenDyslexic-Regular.otf';               Enabled = $true;  Note = 'OTF; skips eot/woff web formats.' }
+        [pscustomobject]@{ Name = 'FiraCode';            Url = 'https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip'; Bytes = 2462987; Fonts = 6; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$';                          Probe = 'FiraCode-Regular.ttf';                   Enabled = $true;  Note = 'Static TTF; skips variable_ttf/ duplicate.' }
+        [pscustomobject]@{ Name = 'SourceHanSans';       Url = 'https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/02_SourceHanSans-VF.zip'; Bytes = 888816761; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSans-VF\.ttf\.ttc$'; Probe = 'SourceHanSans-VF.ttf.ttc';       Enabled = $false; Note = 'LARGE ~848 MB. Installs only the pan-CJK OTC variable collection.' }
+        [pscustomobject]@{ Name = 'SourceHanSerif';      Url = 'https://github.com/adobe-fonts/source-han-serif/releases/download/2.003R/02_SourceHanSerif-VF.zip'; Bytes = 750817685; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSerif-VF\.ttf\.ttc$'; Probe = 'SourceHanSerif-VF.ttf.ttc';   Enabled = $false; Note = 'LARGE ~716 MB. Installs only the pan-CJK OTC variable collection.' }
+        [pscustomobject]@{ Name = 'SourceHanMono';       Url = 'https://github.com/adobe-fonts/source-han-mono/releases/download/1.002/SourceHanMono.ttc'; Bytes = 122117628; Fonts = 1; Kind = 'File'; Include = $null;                              Probe = 'SourceHanMono.ttc';                      Enabled = $false; Note = 'LARGE ~116 MB. Direct .ttc download (no archive).' }
+        [pscustomobject]@{ Name = 'JetBrainsMono';       Url = 'https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip'; Bytes = 5622857; Fonts = 32; Kind = 'Zip'; Include = '(?i)^fonts/ttf/[^/]+\.ttf$';             Probe = 'JetBrainsMono-Regular.ttf';              Enabled = $true;  Note = 'Static TTF (incl. NL no-ligature family); skips variable/.' }
+        [pscustomobject]@{ Name = 'IBMPlexSans';         Url = 'https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-sans%401.1.0/ibm-plex-sans.zip'; Bytes = 9921777; Fonts = 16; Kind = 'Zip'; Include = '(?i)^ibm-plex-sans/fonts/complete/ttf/[^/]+\.ttf$'; Probe = 'IBMPlexSans-Regular.ttf';        Enabled = $true;  Note = 'Complete static TTF; skips otf/ duplicate.' }
+        [pscustomobject]@{ Name = 'MonaSans';            Url = 'https://github.com/github/mona-sans/releases/download/v2.0.27/mona-sans-variable-v2.0.27.zip'; Bytes = 2674251; Fonts = 11; Kind = 'Zip'; Include = '(?i)^fonts/variable/[^/]+\.ttf$';          Probe = 'MonaSansVF[opsz,wght].ttf';              Enabled = $true;  Note = 'Variable-only distribution (multiple width/optical axes).' }
+        [pscustomobject]@{ Name = 'SUIT';                Url = 'https://github.com/sun-typeface/SUIT/releases/download/v2.0.5/SUIT-Variable-ttf.zip'; Bytes = 812043; Fonts = 1; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                            Probe = 'SUIT-Variable.ttf';                      Enabled = $true;  Note = 'Single variable TTF.' }
+        [pscustomobject]@{ Name = 'MonoplexKR';          Url = 'https://github.com/y-kim/monoplex/releases/download/v0.0.2/MonoplexKR-v0.0.2.zip'; Bytes = 74226250; Fonts = 64; Kind = 'Zip'; Include = '(?i)^[^/]+/[^/]+\.ttf$';                      Probe = 'MonoplexKR-Regular.ttf';                 Enabled = $true;  Note = 'LARGE ~74 MB. Four families (base/Nerd/Wide/WideNerd), 16 weights each.' }
+        [pscustomobject]@{ Name = 'MinSans';             Url = 'https://github.com/poposnail61/min-sans/releases/download/v1.4.2/fonts.zip'; Bytes = 31533194; Fonts = 10; Kind = 'Zip'; Include = '(?i)^fonts/static/[^/]+\.otf$';              Probe = 'MinSans-Regular.otf';                    Enabled = $true;  Note = 'Static OTF; skips variable/ and __MACOSX.' }
+        [pscustomobject]@{ Name = 'Dalmoori';            Url = 'https://github.com/RanolP/dalmoori-font/releases/download/v0.200/dalmoori-font.zip'; Bytes = 775035; Fonts = 1; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                            Probe = 'dalmoori.ttf';                           Enabled = $true;  Note = 'Single pixel TTF.' }
+        [pscustomobject]@{ Name = 'NanumGothicCoding';   Url = 'https://github.com/naver/nanumfont/releases/download/VER2.5/NanumGothicCoding-2.5.zip'; Bytes = 1707449; Fonts = 2; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                       Probe = 'NanumGothicCoding.ttf';                  Enabled = $true;  Note = 'Regular + Bold; skips __MACOSX.' }
+        [pscustomobject]@{ Name = 'D2Coding';            Url = 'https://github.com/naver/d2codingfont/releases/download/VER1.3.2/D2Coding-Ver1.3.2-20180524.zip'; Bytes = 21256997; Fonts = 1; Kind = 'Zip'; Include = '(?i)^D2CodingAll/[^/]+\.ttc$';           Probe = 'D2Coding-Ver1.3.2-20180524-all.ttc';     Enabled = $true;  Note = 'Installs the D2CodingAll .ttc (regular+bold+ligature in one collection).' }
+    )
+}
+
 # Internal configuration for Install-AiSkills
 $_AiSkillsInternal = @{
     RepoUrl               = 'https://github.com/thejjw/thejjw.git'
@@ -7542,6 +7601,272 @@ function Get-DeepseekUsage {
     }
 
     return $resp
+}
+
+function Install-Fonts {
+    <#
+.SYNOPSIS
+    Downloads and installs a curated catalog of fonts into Windows.
+.DESCRIPTION
+    Iterates the pinned font catalog in $_FontInstallInternal.Packs. For each
+    enabled pack it processes one item fully before moving on -- download ->
+    selective extract -> install -> delete temporary files -- so peak disk usage
+    stays close to a single archive rather than the whole catalog.
+
+    Installs per-user by default (%LOCALAPPDATA%\Microsoft\Windows\Fonts plus the
+    HKCU Fonts registry key), which needs no administrator rights. Pass -AllUsers
+    to install machine-wide (C:\Windows\Fonts + HKLM), which requires an elevated
+    session.
+
+    Idempotency is filename-based and works at two levels: a cheap pre-download
+    probe skips a whole pack when its representative font is already present, and
+    each individual font already in the target folder is skipped at install time.
+    Pass -Force to re-download and overwrite regardless.
+
+    Extraction uses .NET's System.IO.Compression (native to PowerShell); every
+    archive in the catalog is a standard .zip, so 7-Zip is not required.
+
+    Failed downloads are warned (with the URL) and collected into a summary at the
+    end so a broken/moved release can be spotted and its Url updated.
+.PARAMETER Name
+    One or more pack names (see the Name column of -ListOnly) to limit the run to.
+    Matching is case-insensitive and substring-based. Omit to process all packs.
+.PARAMETER Force
+    Reinstall even when the font already appears installed (re-downloads and
+    overwrites both the file and its registry entry).
+.PARAMETER AllUsers
+    Install machine-wide instead of per-user. Requires an elevated (admin) shell.
+.PARAMETER IncludeDisabled
+    Also process packs marked Enabled=$false in the catalog. These are the large
+    Adobe Source Han CJK families (~1.68 GB combined) that are opt-in by default.
+.PARAMETER ListOnly
+    Print the catalog (names, sizes, enabled state, notes) and the estimated
+    download total, then exit without downloading or installing anything.
+.EXAMPLE
+    Install-Fonts -ListOnly
+    # Review the catalog and total download size before committing to a run.
+.EXAMPLE
+    Install-Fonts
+    # Install every enabled pack per-user (skips the Source Han giants).
+.EXAMPLE
+    Install-Fonts -Name Pretendard,FiraCode,D2Coding
+    # Install just the named packs.
+.EXAMPLE
+    Install-Fonts -IncludeDisabled -Name SourceHanMono
+    # Opt into one of the large CJK packs.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param(
+        [string[]] $Name,
+        [switch]   $Force,
+        [switch]   $AllUsers,
+        [switch]   $IncludeDisabled,
+        [switch]   $ListOnly
+    )
+
+    $cfg = $_FontInstallInternal
+
+    # Windows PowerShell 5.1 does not load the ZipFile assembly by default
+    # (PowerShell 7+ does); load it so selective extraction works on both.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+
+    # Resolve install target (per-user vs machine-wide) up front.
+    if ($AllUsers) {
+        if (-not (Test-IsAdministrator)) {
+            Write-Host "Install-Fonts -AllUsers requires an elevated (Administrator) session." -ForegroundColor Red
+            return
+        }
+        $fontsDir = $cfg.MachineFontsDir
+        $regPath  = $cfg.MachineRegPath
+        $machine  = $true
+    } else {
+        $fontsDir = $cfg.UserFontsDir
+        $regPath  = $cfg.UserRegPath
+        $machine  = $false
+    }
+
+    # Select packs: enabled unless -IncludeDisabled, then optional -Name filter.
+    $packs = $cfg.Packs | Where-Object { $_.Enabled -or $IncludeDisabled }
+    if ($Name) {
+        $packs = $packs | Where-Object {
+            $p = $_
+            $Name | Where-Object { $p.Name -like "*$_*" }
+        }
+    }
+    $packs = @($packs)
+
+    # Human-readable byte formatter for the size report.
+    $fmtSize = {
+        param([long]$b)
+        if ($b -ge 1GB) { return ('{0:N2} GB' -f ($b / 1GB)) }
+        if ($b -ge 1MB) { return ('{0:N1} MB' -f ($b / 1MB)) }
+        if ($b -ge 1KB) { return ('{0:N0} KB' -f ($b / 1KB)) }
+        return ('{0} B' -f $b)
+    }
+
+    if ($packs.Count -eq 0) {
+        Write-Host "No matching font packs to install." -ForegroundColor Yellow
+        return
+    }
+
+    # Pre-run summary: number of packs, per-pack size, and estimated totals.
+    $totalBytes = ($packs | Measure-Object -Property Bytes -Sum).Sum
+    $totalFonts = ($packs | Measure-Object -Property Fonts -Sum).Sum
+    Write-Host ''
+    Write-Host ("== Install-Fonts: {0} pack(s), ~{1} font file(s), ~{2} to download ==" -f `
+        $packs.Count, $totalFonts, (& $fmtSize $totalBytes)) -ForegroundColor Cyan
+    Write-Host ("   Target: {0} ({1})" -f $fontsDir, ($(if ($machine) { 'all users' } else { 'current user' }))) -ForegroundColor DarkGray
+    $i = 0
+    foreach ($p in $packs) {
+        $i++
+        $tag = if (-not $p.Enabled) { ' [disabled]' } elseif ($p.Bytes -ge 50MB) { ' [LARGE]' } else { '' }
+        Write-Host ("   {0,2}. {1,-20} {2,10}  ~{3} fonts{4}" -f $i, $p.Name, (& $fmtSize $p.Bytes), $p.Fonts, $tag)
+        if ($ListOnly -and $p.Note) { Write-Host ("       {0}" -f $p.Note) -ForegroundColor DarkGray }
+    }
+
+    if ($ListOnly) { return }
+
+    # Ensure the target folder and registry key exist before installing.
+    if (-not (Test-Path -LiteralPath $fontsDir)) {
+        New-Item -ItemType Directory -Path $fontsDir -Force | Out-Null
+    }
+    if (-not (Test-Path -LiteralPath $regPath)) {
+        New-Item -Path $regPath -Force | Out-Null
+    }
+
+    # P/Invoke for live font registration + notifying running apps of the change.
+    if (-not ('FontInstaller.NativeMethods' -as [type])) {
+        Add-Type -Namespace FontInstaller -Name NativeMethods -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("gdi32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern int AddFontResource(string lpFilename);
+
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint Msg, System.IntPtr wParam, System.IntPtr lParam, uint fuFlags, uint uTimeout, out System.IntPtr lpdwResult);
+'@
+    }
+
+    # Copy a single font file to the target folder and register it. Returns
+    # 'installed' or 'skipped' (already present and -Force not set).
+    $installOne = {
+        param([string]$SrcPath)
+        $leaf = Split-Path -Path $SrcPath -Leaf
+        $dest = Join-Path $fontsDir $leaf
+        if ((Test-Path -LiteralPath $dest) -and -not $Force) { return 'skipped' }
+        Copy-Item -LiteralPath $SrcPath -Destination $dest -Force
+        $ext    = [System.IO.Path]::GetExtension($leaf).ToLowerInvariant()
+        $suffix = if ($ext -eq '.otf') { '(OpenType)' } else { '(TrueType)' }
+        # Registry value NAME must be unique per file; the font's own name table
+        # supplies the family shown in apps, so a filename-based label is safe.
+        $valueName = ('{0} {1}' -f [System.IO.Path]::GetFileNameWithoutExtension($leaf), $suffix)
+        # Machine scope stores the bare filename (relative to Windows\Fonts);
+        # per-user scope requires the full path.
+        $regData = if ($machine) { $leaf } else { $dest }
+        New-ItemProperty -Path $regPath -Name $valueName -Value $regData -PropertyType String -Force | Out-Null
+        [void][FontInstaller.NativeMethods]::AddFontResource($dest)
+        return 'installed'
+    }
+
+    # Temp working directory (single archive at a time; cleaned per pack).
+    $work = Join-Path ([System.IO.Path]::GetTempPath()) ('fonts_' + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $work -Force | Out-Null
+
+    $totalInstalled = 0
+    $totalSkipped   = 0
+    $failed         = @()
+
+    # Suppress the progress bar during downloads (dramatically faster IWR).
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+
+    try {
+        $i = 0
+        foreach ($p in $packs) {
+            $i++
+            Write-Host ''
+            Write-Host ("[{0}/{1}] {2} ({3})" -f $i, $packs.Count, $p.Name, (& $fmtSize $p.Bytes)) -ForegroundColor White
+
+            # Cheap pre-download skip: representative font already installed?
+            $probePath = Join-Path $fontsDir $p.Probe
+            if ((Test-Path -LiteralPath $probePath) -and -not $Force) {
+                Write-Host ("      already installed ({0}); skipping download." -f $p.Probe) -ForegroundColor DarkGray
+                continue
+            }
+
+            $dl = Join-Path $work ([System.IO.Path]::GetFileName(([Uri]$p.Url).AbsolutePath))
+            Write-Host "      downloading..." -ForegroundColor DarkGray
+            try {
+                Invoke-WebRequest -Uri $p.Url -OutFile $dl -UseBasicParsing -TimeoutSec 1800
+            } catch {
+                Write-Warning ("Download FAILED for '{0}': {1}" -f $p.Name, $_.Exception.Message)
+                Write-Warning ("  URL: {0}  -- verify/update this Url in `$_FontInstallInternal.Packs" -f $p.Url)
+                $failed += $p
+                if (Test-Path -LiteralPath $dl) { Remove-Item -LiteralPath $dl -Force -ErrorAction SilentlyContinue }
+                continue
+            }
+
+            $packInstalled = 0
+            $packSkipped   = 0
+            try {
+                if ($p.Kind -eq 'File') {
+                    # URL is itself a font file: install it directly.
+                    $r = & $installOne $dl
+                    if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
+                } else {
+                    # Open the archive and extract ONLY the entries we want, one at
+                    # a time, so we never expand the full archive to disk.
+                    $zip = [System.IO.Compression.ZipFile]::OpenRead($dl)
+                    try {
+                        foreach ($entry in $zip.Entries) {
+                            if ([string]::IsNullOrEmpty($entry.Name)) { continue }   # directory
+                            $rel = $entry.FullName
+                            # Guard against macOS archive cruft regardless of Include.
+                            if ($rel -like '*__MACOSX*' -or $entry.Name -like '._*') { continue }
+                            if ($rel -notmatch $p.Include) { continue }
+                            $tmp = Join-Path $work $entry.Name
+                            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $tmp, $true)
+                            $r = & $installOne $tmp
+                            if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
+                            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+                        }
+                    } finally {
+                        $zip.Dispose()
+                    }
+                }
+            } catch {
+                Write-Warning ("Install FAILED for '{0}': {1}" -f $p.Name, $_.Exception.Message)
+                $failed += $p
+            } finally {
+                if (Test-Path -LiteralPath $dl) { Remove-Item -LiteralPath $dl -Force -ErrorAction SilentlyContinue }
+            }
+
+            $totalInstalled += $packInstalled
+            $totalSkipped   += $packSkipped
+            Write-Host ("      installed {0}, skipped {1} (running total installed: {2})" -f `
+                $packInstalled, $packSkipped, $totalInstalled) -ForegroundColor Green
+        }
+    } finally {
+        $ProgressPreference = $prevProgress
+        if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    # Notify running applications that the font set changed (WM_FONTCHANGE to
+    # HWND_BROADCAST) so new fonts appear without a sign-out.
+    if ($totalInstalled -gt 0) {
+        $result = [System.IntPtr]::Zero
+        [void][FontInstaller.NativeMethods]::SendMessageTimeout(
+            [System.IntPtr]0xffff, 0x001D, [System.IntPtr]::Zero, [System.IntPtr]::Zero, 2, 1000, [ref]$result)
+    }
+
+    Write-Host ''
+    Write-Host ("== Done: {0} installed, {1} skipped, {2} download failure(s). ==" -f `
+        $totalInstalled, $totalSkipped, $failed.Count) -ForegroundColor Cyan
+    if ($failed.Count -gt 0) {
+        Write-Host "   Failed packs (check/update their Url):" -ForegroundColor Yellow
+        foreach ($f in $failed) { Write-Host ("     - {0}: {1}" -f $f.Name, $f.Url) -ForegroundColor Yellow }
+    }
 }
 
 # Auto-load vault credentials at profile load time so every session starts with
