@@ -6984,7 +6984,13 @@ Set-Alias -Name aiu -Value Invoke-AiUpgrade
 # them after the vault credentials load further down (Load-AiApiKeysFromCS) so
 # $env:MINIMAX_API_KEY, $env:Z_AI_AUTH_TOKEN, and $env:DEEPSEEK_API_KEY are populated.
 
-# --- Shared helpers --------------------------------------------------------
+# --- $_ProfileHelpers: shared helper object for the whole profile ----------
+# General-purpose helpers exposed as methods on $_ProfileHelpers (e.g.
+# $_ProfileHelpers.WriteSection('x')). This started as shared plumbing for the
+# AI usage-query functions below, but it is the home for ANY cross-cutting
+# helper -- extend it here rather than adding another standalone function.
+# Module methods resolve global profile commands via the global-scope fallback,
+# so a helper may call functions defined later in the file (e.g. Save-WebFile).
 
 $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
     # Render a TimeSpan as a compact human-readable string.
@@ -7067,6 +7073,142 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         return $Response
     }
 
+    # Big-endian readers for OpenType tables (all multi-byte fields are BE).
+    function _U16 { param([byte[]]$d, [int]$o) return ([int]$d[$o] -shl 8) -bor $d[$o + 1] }
+    function _U32 {
+        param([byte[]]$d, [int]$o)
+        return ([long]([uint32]$d[$o] -shl 24) -bor ([uint32]$d[$o + 1] -shl 16) -bor ([uint32]$d[$o + 2] -shl 8) -bor $d[$o + 3])
+    }
+
+    # Read typographic family/subfamily from a font byte[]. Handles single fonts
+    # and .ttc/.otc collections (reports the first face). Returns $null on failure.
+    function _ReadFontNames {
+        param([byte[]]$b)
+        if ($b.Length -lt 16) { return $null }
+        $base = 0
+        # A collection begins with the 'ttcf' tag; jump to the first face's dir.
+        if ([System.Text.Encoding]::ASCII.GetString($b, 0, 4) -eq 'ttcf') { $base = [int](_U32 $b 12) }
+        if (($base + 12) -gt $b.Length) { return $null }
+        $num = _U16 $b ($base + 4)
+        $nameOff = -1
+        for ($i = 0; $i -lt $num; $i++) {
+            $o = $base + 12 + $i * 16
+            if (($o + 12) -gt $b.Length) { break }
+            if ([System.Text.Encoding]::ASCII.GetString($b, $o, 4) -eq 'name') { $nameOff = [int](_U32 $b ($o + 8)); break }
+        }
+        if ($nameOff -lt 0 -or ($nameOff + 6) -gt $b.Length) { return $null }
+        $count = _U16 $b ($nameOff + 2)
+        $strOff = $nameOff + (_U16 $b ($nameOff + 4))
+        $vals = @{}       # nameID -> value
+        $score = @{}      # nameID -> priority of the value currently kept
+        for ($i = 0; $i -lt $count; $i++) {
+            $r = $nameOff + 6 + $i * 12
+            if (($r + 12) -gt $b.Length) { break }
+            $plat = _U16 $b $r; $lang = _U16 $b ($r + 4); $nameID = _U16 $b ($r + 6); $len = _U16 $b ($r + 8); $off = _U16 $b ($r + 10)
+            if ($nameID -notin 1, 2, 16, 17) { continue }
+            $s = $strOff + $off
+            if (($s + $len) -gt $b.Length) { continue }
+            if ($plat -eq 3 -or $plat -eq 0) { $v = [System.Text.Encoding]::BigEndianUnicode.GetString($b, $s, $len) }
+            elseif ($plat -eq 1) { $v = [System.Text.Encoding]::ASCII.GetString($b, $s, $len) }
+            else { continue }
+            # Prefer Windows English (plat 3 / lang 0x0409), then any Windows
+            # record, then Unicode, then Mac -- so a multilingual font shows its
+            # English family name rather than whichever localized record is last.
+            $pri = if ($plat -eq 3 -and $lang -eq 0x0409) { 4 } elseif ($plat -eq 3) { 3 } elseif ($plat -eq 0) { 2 } else { 1 }
+            if (-not $vals.ContainsKey($nameID) -or $pri -gt $score[$nameID]) { $vals[$nameID] = $v; $score[$nameID] = $pri }
+        }
+        $fam = if ($vals.ContainsKey(16)) { $vals[16] } elseif ($vals.ContainsKey(1)) { $vals[1] } else { '(no family)' }
+        $sub = if ($vals.ContainsKey(17)) { $vals[17] } elseif ($vals.ContainsKey(2)) { $vals[2] } else { '' }
+        return [pscustomobject]@{ Family = $fam; Sub = $sub }
+    }
+
+    # Inspect a font archive (zip) for Install-Fonts catalog authoring. Prints
+    # every entry with its size and, for font files (.ttf/.otf/.ttc/.otc), the
+    # registered family/subfamily read from the OpenType 'name' table -- which is
+    # what decides TTF vs OTF vs variable when a font ships several formats (some
+    # distributions rename the family with an "OTF"/"variable" suffix, so the
+    # clean name lives in only one of them). Also tallies formats and, given an
+    # Include regex, previews exactly which entries the catalog line would
+    # extract. $Path is a URL (downloaded via Save-WebFile to a temp file, then
+    # removed) or a local .zip path; pass a truthy $NoNames to skip name reading.
+    # Usage: $_ProfileHelpers.ShowFontArchive('https://.../f.zip')
+    #        $_ProfileHelpers.ShowFontArchive($url, '(?i)^ttf/[^/]+\.ttf$')
+    function ShowFontArchive {
+        param($Path, $Include, $NoNames)
+
+        if ([string]::IsNullOrWhiteSpace($Path)) { Write-Error 'ShowFontArchive: -Path is required.'; return }
+        # Windows PowerShell 5.1 does not load the ZipFile assembly by default.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+
+        # Resolve the archive to a local file (download URLs to a temp path).
+        $temp = $null
+        if ($Path -match '^https?://') {
+            $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('fontarch_' + [System.Guid]::NewGuid().ToString('N') + '.zip')
+            Write-Host ("Downloading {0}" -f $Path) -ForegroundColor DarkGray
+            # Prefer the chunked Save-WebFile when it is resolvable, but fall back
+            # to Invoke-WebRequest so the helper works in any load scope.
+            $swf = Get-Command Save-WebFile -ErrorAction SilentlyContinue
+            try {
+                if ($swf) {
+                    & $swf -Uri $Path -OutFile $temp -Force -Quiet -ErrorAction Stop | Out-Null
+                } else {
+                    $pp = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
+                    try { Invoke-WebRequest -Uri $Path -OutFile $temp -UseBasicParsing } finally { $ProgressPreference = $pp }
+                }
+            } catch { Write-Error ("Download failed: {0}" -f $_.Exception.Message); return }
+            $zipPath = $temp
+        } else {
+            $zipPath = [System.IO.Path]::GetFullPath($Path)
+            if (-not (Test-Path -LiteralPath $zipPath)) { Write-Error "Archive not found: $zipPath"; return }
+        }
+
+        $fontExt = '.ttf', '.otf', '.ttc', '.otc'
+        # URL- and path-safe leaf for the header (Split-Path chokes on 'https://').
+        $leaf = ($Path -split '[\\/]')[-1]
+        try {
+            $archLen = (Get-Item -LiteralPath $zipPath).Length
+            $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+            try {
+                $entries = @($zip.Entries | Where-Object { $_.Name })   # skip directory entries
+                Write-Host ''
+                Write-Host ("== {0}" -f $leaf) -ForegroundColor Cyan
+                Write-Host ("   archive: {0:N0} bytes, {1} file entr{2}" -f $archLen, $entries.Count, $(if ($entries.Count -eq 1) { 'y' } else { 'ies' })) -ForegroundColor DarkGray
+
+                # Format tally by extension.
+                $tally = @{}
+                foreach ($e in $entries) { $x = [System.IO.Path]::GetExtension($e.Name).ToLowerInvariant(); if (-not $x) { $x = '(none)' }; $tally[$x] = 1 + ($tally[$x]) }
+                Write-Host ("   formats: {0}" -f (($tally.GetEnumerator() | Sort-Object Name | ForEach-Object { '{0}={1}' -f $_.Name, $_.Value }) -join '  ')) -ForegroundColor DarkGray
+
+                # Optional Include preview: restrict the listing to matching entries.
+                $shown = $entries
+                if ($Include) {
+                    $shown = @($entries | Where-Object { $_.FullName -match $Include })
+                    Write-Host ("   Include '{0}' -> {1} of {2} entries match" -f $Include, $shown.Count, $entries.Count) -ForegroundColor Yellow
+                }
+
+                Write-Host ''
+                foreach ($e in ($shown | Sort-Object FullName)) {
+                    $isFont = ([System.IO.Path]::GetExtension($e.Name).ToLowerInvariant() -in $fontExt)
+                    $nameInfo = ''
+                    if ($isFont -and -not $NoNames) {
+                        try {
+                            $ms = New-Object System.IO.MemoryStream
+                            $s = $e.Open(); $s.CopyTo($ms); $s.Close()
+                            $n = _ReadFontNames $ms.ToArray()
+                            $ms.Dispose()
+                            if ($n) { $nameInfo = ('  family="{0}"{1}' -f $n.Family, $(if ($n.Sub) { ' sub="' + $n.Sub + '"' } else { '' })) }
+                            else { $nameInfo = '  (name read failed)' }
+                        } catch { $nameInfo = '  (name read failed)' }
+                    }
+                    Write-Host ("  {0,10:N0}  {1}{2}" -f $e.Length, $e.FullName, $nameInfo)
+                }
+                Write-Host ''
+            } finally { $zip.Dispose() }
+        } finally {
+            if ($temp -and (Test-Path -LiteralPath $temp)) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
     $profileHelperFunctions = @(
         'FormatDuration',
         'WriteSection',
@@ -7075,7 +7217,8 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         'FormatPrice',
         'GetSeriesStats',
         'GetSpikes',
-        'UnwrapZaiData'
+        'UnwrapZaiData',
+        'ShowFontArchive'
     )
     Export-ModuleMember -Function $profileHelperFunctions
 }
@@ -8024,6 +8167,15 @@ function Install-Fonts {
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-07
+
+    Adding a new pack? Inspect the archive first with the helper:
+        $_ProfileHelpers.ShowFontArchive('<zip-url-or-path>')
+        $_ProfileHelpers.ShowFontArchive($url, '<candidate-Include-regex>')
+    It lists every entry with its size, reads each font's registered family
+    name (to pick TTF vs OTF vs variable -- some builds rename the family with
+    an "OTF"/"variable" suffix), and, given an Include regex, previews exactly
+    which entries would be extracted -- i.e. the Include, Probe, Bytes and Fonts
+    values a new Packs entry needs.
 #>
     [CmdletBinding()]
     param(
