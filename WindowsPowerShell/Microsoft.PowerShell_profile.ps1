@@ -8152,6 +8152,13 @@ function Install-Fonts {
 .PARAMETER ListOnly
     Print the catalog (names, sizes, extended state, notes) and the estimated
     download total, then exit without downloading or installing anything.
+.PARAMETER Retries
+    How many extra times to re-download and re-extract a pack after a transient
+    failure (default 2, so up to 3 attempts total). Only transient errors are
+    retried -- corrupt-archive/truncated-zip signatures and common network hiccups
+    (e.g. the intermittent "A local file header is corrupt" seen on large chunked
+    GitHub downloads). Genuine failures (bad URL, 404) are reported immediately
+    without wasting retries. Set 0 to disable retrying.
 .EXAMPLE
     Install-Fonts -ListOnly
     # Review the catalog and total download size before committing to a run.
@@ -8183,7 +8190,9 @@ function Install-Fonts {
         [switch]   $Force,
         [switch]   $AllUsers,
         [switch]   $Extended,
-        [switch]   $ListOnly
+        [switch]   $ListOnly,
+        [ValidateRange(0, 10)]
+        [int]      $Retries = 2
     )
 
     $cfg = $_FontInstallInternal
@@ -8295,6 +8304,17 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
         return 'installed'
     }
 
+    # Classify a download/extract error as transient (worth re-downloading) vs
+    # permanent (bad URL, 404 -- reported immediately, no retry). The dominant
+    # transient case is a chunked download that lands a byte-corrupt archive, which
+    # surfaces only at extract time as ".ExtractToFile ... A local file header is
+    # corrupt" or a truncated central directory; network stalls are covered too.
+    $isTransientError = {
+        param([string]$Message)
+        if ([string]::IsNullOrEmpty($Message)) { return $false }
+        return ($Message -match '(?i)(local file header is corrupt|central directory|end of (the )?stream|unexpected end|corrupt|crc|block length|compressed data|number of entries|timed out|timeout|connection|transport|prematurely|reset by|unable to read data|actively refused)')
+    }
+
     # Temp working directory (single archive at a time; cleaned per pack).
     $work = Join-Path ([System.IO.Path]::GetTempPath()) ('fonts_' + [System.Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $work -Force | Out-Null
@@ -8319,60 +8339,85 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
 
             $dl = Join-Path $work ([System.IO.Path]::GetFileName(([Uri]$p.Url).AbsolutePath))
             Write-Host ("      source: {0}" -f $p.Url) -ForegroundColor DarkGray
-            Write-Host "      downloading..." -ForegroundColor DarkGray
-            try {
-                # Chunked concurrent download; several times faster than a single
-                # connection on GitHub's throttled CDN for the larger packs, with a
-                # transparent single-stream fallback. -ErrorAction Stop routes any
-                # failure into the catch below so the pack is recorded as failed.
-                Save-WebFile -Uri $p.Url -OutFile $dl -Force -TimeoutSec 1800 -ErrorAction Stop | Out-Null
-            } catch {
-                Write-Warning ("Download FAILED for '{0}': {1}" -f $p.Name, $_.Exception.Message)
-                Write-Warning ("  URL: {0}  -- verify/update this Url in `$_FontInstallInternal.Packs" -f $p.Url)
-                $failed += $p
-                if (Test-Path -LiteralPath $dl) { Remove-Item -LiteralPath $dl -Force -ErrorAction SilentlyContinue }
-                continue
-            }
 
+            # Download AND extract are retried as one unit: the intermittent
+            # "local file header is corrupt" is a byte-corrupt chunked download that
+            # only shows up at extract time, so re-extracting the same file cannot
+            # help -- only a fresh download can. Each attempt starts its counters
+            # from zero and, on the winning attempt, already-installed fonts from a
+            # partial earlier attempt are simply skipped (idempotent by filename).
+            $maxAttempts   = 1 + $Retries
             $packInstalled = 0
             $packSkipped   = 0
-            try {
-                if ($p.Kind -eq 'File') {
-                    # URL is itself a font file: install it directly.
-                    $r = & $installOne $dl
-                    if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
-                } else {
-                    # Open the archive and extract ONLY the entries we want, one at
-                    # a time, so we never expand the full archive to disk.
-                    $zip = [System.IO.Compression.ZipFile]::OpenRead($dl)
-                    try {
-                        foreach ($entry in $zip.Entries) {
-                            if ([string]::IsNullOrEmpty($entry.Name)) { continue }   # directory
-                            $rel = $entry.FullName
-                            # Guard against macOS archive cruft regardless of Include.
-                            if ($rel -like '*__MACOSX*' -or $entry.Name -like '._*') { continue }
-                            if ($rel -notmatch $p.Include) { continue }
-                            $tmp = Join-Path $work $entry.Name
-                            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $tmp, $true)
-                            $r = & $installOne $tmp
-                            if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
-                            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-                        }
-                    } finally {
-                        $zip.Dispose()
-                    }
+            $packOk        = $false
+            $lastError     = $null
+            for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+                if ($attempt -gt 1) {
+                    Write-Host ("      retry {0}/{1} (transient error: {2})" -f `
+                        ($attempt - 1), ($maxAttempts - 1), $lastError) -ForegroundColor Yellow
+                    Start-Sleep -Seconds ([math]::Min(10, 2 * ($attempt - 1)))
                 }
-            } catch {
-                Write-Warning ("Install FAILED for '{0}': {1}" -f $p.Name, $_.Exception.Message)
-                $failed += $p
-            } finally {
-                if (Test-Path -LiteralPath $dl) { Remove-Item -LiteralPath $dl -Force -ErrorAction SilentlyContinue }
+                $packInstalled = 0
+                $packSkipped   = 0
+                try {
+                    Write-Host "      downloading..." -ForegroundColor DarkGray
+                    # Chunked concurrent download; several times faster than a single
+                    # connection on GitHub's throttled CDN for the larger packs, with
+                    # a transparent single-stream fallback. -ErrorAction Stop routes
+                    # any failure into the catch below.
+                    Save-WebFile -Uri $p.Url -OutFile $dl -Force -TimeoutSec 1800 -ErrorAction Stop | Out-Null
+
+                    if ($p.Kind -eq 'File') {
+                        # URL is itself a font file: install it directly.
+                        $r = & $installOne $dl
+                        if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
+                    } else {
+                        # Open the archive and extract ONLY the entries we want, one
+                        # at a time, so we never expand the full archive to disk.
+                        $zip = [System.IO.Compression.ZipFile]::OpenRead($dl)
+                        try {
+                            foreach ($entry in $zip.Entries) {
+                                if ([string]::IsNullOrEmpty($entry.Name)) { continue }   # directory
+                                $rel = $entry.FullName
+                                # Guard against macOS archive cruft regardless of Include.
+                                if ($rel -like '*__MACOSX*' -or $entry.Name -like '._*') { continue }
+                                if ($rel -notmatch $p.Include) { continue }
+                                $tmp = Join-Path $work $entry.Name
+                                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $tmp, $true)
+                                $r = & $installOne $tmp
+                                if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
+                                Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+                            }
+                        } finally {
+                            $zip.Dispose()
+                        }
+                    }
+                    $packOk = $true
+                    break
+                } catch {
+                    $lastError = $_.Exception.Message
+                    $canRetry  = ($attempt -lt $maxAttempts) -and (& $isTransientError $lastError)
+                    if ($canRetry) {
+                        Write-Warning ("Attempt {0}/{1} FAILED for '{2}': {3}" -f $attempt, $maxAttempts, $p.Name, $lastError)
+                    } else {
+                        $suffix = if ($attempt -gt 1) { (" after {0} attempts" -f $attempt) } else { '' }
+                        Write-Warning ("Install FAILED for '{0}'{1}: {2}" -f $p.Name, $suffix, $lastError)
+                        Write-Warning ("  URL: {0}  -- verify/update this Url in `$_FontInstallInternal.Packs" -f $p.Url)
+                        $failed += $p
+                        break
+                    }
+                } finally {
+                    # Always drop the (possibly corrupt) archive so a retry re-downloads.
+                    if (Test-Path -LiteralPath $dl) { Remove-Item -LiteralPath $dl -Force -ErrorAction SilentlyContinue }
+                }
             }
 
-            $totalInstalled += $packInstalled
-            $totalSkipped   += $packSkipped
-            Write-Host ("      installed {0}, skipped {1} (running total installed: {2})" -f `
-                $packInstalled, $packSkipped, $totalInstalled) -ForegroundColor Green
+            if ($packOk) {
+                $totalInstalled += $packInstalled
+                $totalSkipped   += $packSkipped
+                Write-Host ("      installed {0}, skipped {1} (running total installed: {2})" -f `
+                    $packInstalled, $packSkipped, $totalInstalled) -ForegroundColor Green
+            }
         }
     } finally {
         if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
