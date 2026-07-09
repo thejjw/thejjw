@@ -7210,14 +7210,15 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
             $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('fontarch_' + [System.Guid]::NewGuid().ToString('N') + '.zip')
             Write-Host ("Downloading {0}" -f $Path) -ForegroundColor DarkGray
             # Prefer the chunked Save-WebFile when it is resolvable, but fall back
-            # to Invoke-WebRequest2 so fallback downloads still use compression.
+            # to Invoke-WebRequest for zip archives that do not benefit from
+            # additional HTTP response compression.
             $swf = Get-Command Save-WebFile -ErrorAction SilentlyContinue
             try {
                 if ($swf) {
                     & $swf -Uri $Path -OutFile $temp -Force -Quiet -ErrorAction Stop | Out-Null
                 } else {
                     $pp = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
-                    try { Invoke-WebRequest2 -Uri $Path -OutFile $temp -UseBasicParsing } finally { $ProgressPreference = $pp }
+                    try { Invoke-WebRequest -Uri $Path -OutFile $temp -UseBasicParsing } finally { $ProgressPreference = $pp }
                 }
             } catch { Write-Error ("Download failed: {0}" -f $_.Exception.Message); return }
             $zipPath = $temp
