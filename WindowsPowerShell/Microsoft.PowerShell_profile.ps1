@@ -21,6 +21,61 @@ function prompt {
 # Raw content URL used by Update-Profile to self-update; keep in sync with repo path
 $_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
 
+function Invoke-WebRequest2 {
+    <#
+.SYNOPSIS
+    Invokes a web request with response compression enabled by default.
+.DESCRIPTION
+    Wraps Invoke-WebRequest and adds an Accept-Encoding header that prefers gzip
+    over deflate unless the caller already supplied Accept-Encoding.
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [uri] $Uri,
+
+        [Microsoft.PowerShell.Commands.WebRequestMethod] $Method,
+
+        [System.Collections.IDictionary] $Headers,
+
+        [object] $Body,
+
+        [string] $ContentType,
+
+        [string] $InFile,
+
+        [string] $OutFile,
+
+        [int] $TimeoutSec,
+
+        [string] $UserAgent,
+
+        [switch] $UseBasicParsing,
+
+        [switch] $PassThru
+    )
+
+    $requestHeaders = @{}
+    if ($Headers) {
+        foreach ($key in $Headers.Keys) {
+            $requestHeaders[$key] = $Headers[$key]
+        }
+    }
+
+    if (-not ($requestHeaders.Keys | Where-Object { $_ -ieq 'Accept-Encoding' })) {
+        $requestHeaders['Accept-Encoding'] = 'gzip, deflate;q=0.5'
+    }
+
+    $invokeParams = @{ Uri = $Uri; Headers = $requestHeaders }
+    foreach ($key in @('Method', 'Body', 'ContentType', 'InFile', 'OutFile', 'TimeoutSec', 'UserAgent', 'UseBasicParsing', 'PassThru')) {
+        if ($PSBoundParameters.ContainsKey($key)) {
+            $invokeParams[$key] = $PSBoundParameters[$key]
+        }
+    }
+
+    Invoke-WebRequest @invokeParams
+}
+
 # Internal configuration group for New-RandomDir to keep global namespace clean
 $_NrdInternal = @{
     Colors         = @(
@@ -5742,7 +5797,7 @@ function Update-Profile {
     try {
         # Download to a temp file first; only overwrite $PROFILE on success to avoid corruption
         $tempFile = [System.IO.Path]::GetTempFileName()
-        $downloadResponse = Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $tempFile -UseBasicParsing -Headers @{ 'Accept-Encoding' = 'gzip, deflate;q=0.5' } -PassThru
+        $downloadResponse = Invoke-WebRequest2 -Uri $_ProfileUpdateUrl -OutFile $tempFile -UseBasicParsing -PassThru
         $contentEncoding = $downloadResponse.Headers['Content-Encoding']
         if (-not $contentEncoding) { $contentEncoding = 'identity' }
         $wireBytes = $downloadResponse.Headers['Content-Length']
