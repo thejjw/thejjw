@@ -638,8 +638,8 @@ function Get-AAA {
     try {
         if ($null -eq $Global:getAAA) {
             $Global:getAAA = @{
-                ganm = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/animals -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content).Trim() -split "`n"
-                gadj = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/adjectives -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content).Trim() -split "`n"
+                ganm = (Invoke-WebRequest2 https://raw.githubusercontent.com/thejjw/thejjw/main/animals -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content).Trim() -split "`n"
+                gadj = (Invoke-WebRequest2 https://raw.githubusercontent.com/thejjw/thejjw/main/adjectives -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content).Trim() -split "`n"
             }
         }
     } catch {
@@ -727,7 +727,7 @@ function Get-WhoisInfo {
     }
     $DomainOrIp = $DomainOrIp.Trim();
     Set-Variable -Name queryurl -Value "http://whois.kisa.or.kr/openapi/whois.jsp?query=$DomainOrIp&key=$WhoisKisaApiKey&answer=json" -Option Constant;
-    return (Invoke-WebRequest -Uri $queryurl -UseBasicParsing | Select-Object -ExpandProperty Content | ConvertFrom-Json | Select-Object -ExpandProperty whois);
+    return (Invoke-WebRequest2 -Uri $queryurl -UseBasicParsing | Select-Object -ExpandProperty Content | ConvertFrom-Json | Select-Object -ExpandProperty whois);
 }
 
 function Get-NewPassword {
@@ -1147,10 +1147,10 @@ function Save-Download {
         Given a the result of WebResponseObject, will download the file to disk without having to specify a name.
         original reference https://hodgkins.io/download-file-with-powershell-without-renaming
     .PARAMETER WebResponse
-        A WebResponseObject from running an Invoke-WebRequest on a file to download
+        A WebResponseObject from running Invoke-WebRequest2 on a file to download
     .EXAMPLE
         # Download Microsoft Edge
-        $download = Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2109047&Channel=Stable&language=en&consent=1"
+        $download = Invoke-WebRequest2 -Uri "https://go.microsoft.com/fwlink/?linkid=2109047&Channel=Stable&language=en&consent=1"
         $download | Save-Download 
     #>
     [CmdletBinding()]
@@ -6886,7 +6886,7 @@ function Test-AnthropicApi {
     } | ConvertTo-Json -Depth 10
 
     try {
-        $response = Invoke-WebRequest -Uri "$ApiUrl/v1/messages" `
+        $response = Invoke-WebRequest2 -Uri "$ApiUrl/v1/messages" `
             -Method POST `
             -Headers $headers `
             -Body $body `
@@ -6979,7 +6979,7 @@ function Test-OpenAiApi {
     } | ConvertTo-Json -Depth 10
 
     try {
-        $response = Invoke-WebRequest -Uri "$ApiUrl/chat/completions" `
+        $response = Invoke-WebRequest2 -Uri "$ApiUrl/chat/completions" `
             -Method POST `
             -Headers $headers `
             -Body $body `
@@ -7210,14 +7210,14 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
             $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('fontarch_' + [System.Guid]::NewGuid().ToString('N') + '.zip')
             Write-Host ("Downloading {0}" -f $Path) -ForegroundColor DarkGray
             # Prefer the chunked Save-WebFile when it is resolvable, but fall back
-            # to Invoke-WebRequest so the helper works in any load scope.
+            # to Invoke-WebRequest2 so fallback downloads still use compression.
             $swf = Get-Command Save-WebFile -ErrorAction SilentlyContinue
             try {
                 if ($swf) {
                     & $swf -Uri $Path -OutFile $temp -Force -Quiet -ErrorAction Stop | Out-Null
                 } else {
                     $pp = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
-                    try { Invoke-WebRequest -Uri $Path -OutFile $temp -UseBasicParsing } finally { $ProgressPreference = $pp }
+                    try { Invoke-WebRequest2 -Uri $Path -OutFile $temp -UseBasicParsing } finally { $ProgressPreference = $pp }
                 }
             } catch { Write-Error ("Download failed: {0}" -f $_.Exception.Message); return }
             $zipPath = $temp
