@@ -5742,7 +5742,16 @@ function Update-Profile {
     try {
         # Download to a temp file first; only overwrite $PROFILE on success to avoid corruption
         $tempFile = [System.IO.Path]::GetTempFileName()
-        Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $tempFile -UseBasicParsing -Headers @{ 'Accept-Encoding' = 'gzip, deflate;q=0.5' } -Verbose
+        $downloadResponse = Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $tempFile -UseBasicParsing -Headers @{ 'Accept-Encoding' = 'gzip, deflate;q=0.5' } -PassThru
+        $contentEncoding = $downloadResponse.Headers['Content-Encoding']
+        if (-not $contentEncoding) { $contentEncoding = 'identity' }
+        $wireBytes = $downloadResponse.Headers['Content-Length']
+        $decodedBytes = (Get-Item -LiteralPath $tempFile).Length
+        if ($wireBytes) {
+            Write-Host ("Downloaded {0} bytes over the wire using {1} ({2} bytes after decoding)." -f $wireBytes, $contentEncoding, $decodedBytes) -ForegroundColor DarkGray
+        } else {
+            Write-Host ("Downloaded profile using {0} ({1} bytes after decoding)." -f $contentEncoding, $decodedBytes) -ForegroundColor DarkGray
+        }
         # .NET Copy with overwrite is more reliable than Move-Item -Force in PS 5.1,
         # which can throw IndexOutOfRangeException when replacing a larger file
         # (and hides the real error inside a broken Out-LineOutput formatter).
