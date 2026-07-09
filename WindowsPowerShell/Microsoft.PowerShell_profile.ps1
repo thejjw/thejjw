@@ -5742,7 +5742,7 @@ function Update-Profile {
     try {
         # Download to a temp file first; only overwrite $PROFILE on success to avoid corruption
         $tempFile = [System.IO.Path]::GetTempFileName()
-        Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $tempFile -Verbose
+        Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $tempFile -UseBasicParsing -Headers @{ 'Accept-Encoding' = 'gzip, deflate;q=0.5' } -Verbose
         # .NET Copy with overwrite is more reliable than Move-Item -Force in PS 5.1,
         # which can throw IndexOutOfRangeException when replacing a larger file
         # (and hides the real error inside a broken Out-LineOutput formatter).
