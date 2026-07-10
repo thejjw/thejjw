@@ -21,6 +21,11 @@ function prompt {
 # Raw content URL used by Update-Profile to self-update; keep in sync with repo path
 $_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
 
+# Generic browser-like User-Agent for outbound HTTP (used by the Save-* chunked downloader).
+# Kept here so it can be updated in one place; bump the Chrome major version periodically to
+# stay current (latest stable: https://chromereleases.googleblog.com/).
+$_DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+
 function Invoke-WebRequest2 {
     <#
 .SYNOPSIS
@@ -8039,7 +8044,7 @@ namespace ChunkDownload
             HttpWebRequest r = (HttpWebRequest)WebRequest.Create(url);
             r.Method = "GET";
             r.AllowAutoRedirect = true;
-            r.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+            r.UserAgent = "$_DefaultUserAgent";
             r.Timeout = 60000;
             r.ReadWriteTimeout = timeoutMs;
             r.KeepAlive = true;
