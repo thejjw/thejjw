@@ -1918,6 +1918,86 @@ Last Edit: Aug 2025
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-DeviceIdentity {
+    <#
+.SYNOPSIS
+Retrieves per-Windows-install identifiers: the Microsoft GDID and the crypto MachineGuid.
+
+.DESCRIPTION
+Reads two identifiers that persist across OS updates but change on a clean Windows
+reinstall, so they identify an installation rather than the hardware:
+
+- GDID: derived from the per-user Microsoft identity LID at
+  HKCU\SOFTWARE\Microsoft\IdentityCRL\ExtendedProperties. The LID is a 64-bit hex
+  value; the GDID is 'g:' + its decimal form (the format seen in Microsoft's device
+  graph / court filings). Absent when no Microsoft Account has provisioned the profile.
+- MachineGuid: the documented, always-present installation GUID at
+  HKLM\SOFTWARE\Microsoft\Cryptography. Used as the fallback when GDID is absent.
+
+Both registry values are readable with normal user rights; no elevation is required.
+
+.PARAMETER AsString
+Returns a single string (the GDID if present, otherwise the MachineGuid) instead of an
+object. Convenient when you just want one stable ID for the current install.
+
+.EXAMPLE
+Get-DeviceIdentity
+# Returns an object with Gdid, LidHex, MachineGuid, and Primary.
+
+.EXAMPLE
+Get-DeviceIdentity -AsString
+# g:6755494590140176   (falls back to the MachineGuid if no GDID exists)
+
+.OUTPUTS
+PSCustomObject (default) or String (with -AsString).
+
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: Jul 2026
+#>
+    [CmdletBinding()]
+    [OutputType([PSCustomObject], [string])]
+    param(
+        [switch] $AsString
+    )
+
+    # GDID: read the per-user LID (hex) and convert to the 'g:<decimal>' form.
+    # Missing key/value or an unparseable LID all collapse to $null (GDID simply absent).
+    $gdid = $null
+    $lidHex = $null
+    try {
+        $lid = (Get-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\IdentityCRL\ExtendedProperties' -ErrorAction Stop).LID
+        if (-not [string]::IsNullOrWhiteSpace($lid)) {
+            $lidHex = $lid
+            $gdid = 'g:' + [System.Convert]::ToUInt64($lid, 16)
+        }
+    } catch {
+        Write-Verbose "GDID unavailable: $($_.Exception.Message)"
+    }
+
+    # MachineGuid: documented installation GUID, present on every Windows install.
+    $machineGuid = $null
+    try {
+        $machineGuid = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Cryptography' -ErrorAction Stop).MachineGuid
+    } catch {
+        Write-Verbose "MachineGuid unavailable: $($_.Exception.Message)"
+    }
+
+    # Primary = GDID when present, else fall back to MachineGuid.
+    $primary = if ($gdid) { $gdid } else { $machineGuid }
+
+    if ($AsString) {
+        return $primary
+    }
+
+    return [PSCustomObject]@{
+        Gdid        = $gdid
+        LidHex      = $lidHex
+        MachineGuid = $machineGuid
+        Primary     = $primary
+    }
+}
+
 function New-SafeFileNameFromCertificateName {
     <#
 .SYNOPSIS
