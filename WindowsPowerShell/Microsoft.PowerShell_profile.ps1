@@ -21,6 +21,61 @@ function prompt {
 # Raw content URL used by Update-Profile to self-update; keep in sync with repo path
 $_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
 
+function Invoke-WebRequest2 {
+    <#
+.SYNOPSIS
+    Invokes a web request with response compression enabled by default.
+.DESCRIPTION
+    Wraps Invoke-WebRequest and adds an Accept-Encoding header that prefers gzip
+    over deflate unless the caller already supplied Accept-Encoding.
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [uri] $Uri,
+
+        [Microsoft.PowerShell.Commands.WebRequestMethod] $Method,
+
+        [System.Collections.IDictionary] $Headers,
+
+        [object] $Body,
+
+        [string] $ContentType,
+
+        [string] $InFile,
+
+        [string] $OutFile,
+
+        [int] $TimeoutSec,
+
+        [string] $UserAgent,
+
+        [switch] $UseBasicParsing,
+
+        [switch] $PassThru
+    )
+
+    $requestHeaders = @{}
+    if ($Headers) {
+        foreach ($key in $Headers.Keys) {
+            $requestHeaders[$key] = $Headers[$key]
+        }
+    }
+
+    if (-not ($requestHeaders.Keys | Where-Object { $_ -ieq 'Accept-Encoding' })) {
+        $requestHeaders['Accept-Encoding'] = 'gzip, deflate;q=0.5'
+    }
+
+    $invokeParams = @{ Uri = $Uri; Headers = $requestHeaders }
+    foreach ($key in @('Method', 'Body', 'ContentType', 'InFile', 'OutFile', 'TimeoutSec', 'UserAgent', 'UseBasicParsing', 'PassThru')) {
+        if ($PSBoundParameters.ContainsKey($key)) {
+            $invokeParams[$key] = $PSBoundParameters[$key]
+        }
+    }
+
+    Invoke-WebRequest @invokeParams
+}
+
 # Internal configuration group for New-RandomDir to keep global namespace clean
 $_NrdInternal = @{
     Colors         = @(
@@ -584,8 +639,8 @@ function Get-AAA {
     try {
         if ($null -eq $Global:getAAA) {
             $Global:getAAA = @{
-                ganm = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/animals -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content).Trim() -split "`n"
-                gadj = (Invoke-WebRequest https://raw.githubusercontent.com/thejjw/thejjw/main/adjectives -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content).Trim() -split "`n"
+                ganm = (Invoke-WebRequest2 https://raw.githubusercontent.com/thejjw/thejjw/main/animals -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content).Trim() -split "`n"
+                gadj = (Invoke-WebRequest2 https://raw.githubusercontent.com/thejjw/thejjw/main/adjectives -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content).Trim() -split "`n"
             }
         }
     } catch {
@@ -673,7 +728,7 @@ function Get-WhoisInfo {
     }
     $DomainOrIp = $DomainOrIp.Trim();
     Set-Variable -Name queryurl -Value "http://whois.kisa.or.kr/openapi/whois.jsp?query=$DomainOrIp&key=$WhoisKisaApiKey&answer=json" -Option Constant;
-    return (Invoke-WebRequest -Uri $queryurl -UseBasicParsing | Select-Object -ExpandProperty Content | ConvertFrom-Json | Select-Object -ExpandProperty whois);
+    return (Invoke-WebRequest2 -Uri $queryurl -UseBasicParsing | Select-Object -ExpandProperty Content | ConvertFrom-Json | Select-Object -ExpandProperty whois);
 }
 
 function Get-NewPassword {
@@ -1093,10 +1148,10 @@ function Save-Download {
         Given a the result of WebResponseObject, will download the file to disk without having to specify a name.
         original reference https://hodgkins.io/download-file-with-powershell-without-renaming
     .PARAMETER WebResponse
-        A WebResponseObject from running an Invoke-WebRequest on a file to download
+        A WebResponseObject from running Invoke-WebRequest2 on a file to download
     .EXAMPLE
         # Download Microsoft Edge
-        $download = Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2109047&Channel=Stable&language=en&consent=1"
+        $download = Invoke-WebRequest2 -Uri "https://go.microsoft.com/fwlink/?linkid=2109047&Channel=Stable&language=en&consent=1"
         $download | Save-Download 
     #>
     [CmdletBinding()]
@@ -5743,7 +5798,16 @@ function Update-Profile {
     try {
         # Download to a temp file first; only overwrite $PROFILE on success to avoid corruption
         $tempFile = [System.IO.Path]::GetTempFileName()
-        Invoke-WebRequest -Uri $_ProfileUpdateUrl -OutFile $tempFile -Verbose
+        $downloadResponse = Invoke-WebRequest2 -Uri $_ProfileUpdateUrl -OutFile $tempFile -UseBasicParsing -PassThru
+        $contentEncoding = $downloadResponse.Headers['Content-Encoding']
+        if (-not $contentEncoding) { $contentEncoding = 'identity' }
+        $wireBytes = $downloadResponse.Headers['Content-Length']
+        $decodedBytes = (Get-Item -LiteralPath $tempFile).Length
+        if ($wireBytes) {
+            Write-Host ("Downloaded {0} bytes over the wire using {1} ({2} bytes after decoding)." -f $wireBytes, $contentEncoding, $decodedBytes) -ForegroundColor DarkGray
+        } else {
+            Write-Host ("Downloaded profile using {0} ({1} bytes after decoding)." -f $contentEncoding, $decodedBytes) -ForegroundColor DarkGray
+        }
         # .NET Copy with overwrite is more reliable than Move-Item -Force in PS 5.1,
         # which can throw IndexOutOfRangeException when replacing a larger file
         # (and hides the real error inside a broken Out-LineOutput formatter).
@@ -6841,7 +6905,7 @@ function Test-AnthropicApi {
     } | ConvertTo-Json -Depth 10
 
     try {
-        $response = Invoke-WebRequest -Uri "$ApiUrl/v1/messages" `
+        $response = Invoke-WebRequest2 -Uri "$ApiUrl/v1/messages" `
             -Method POST `
             -Headers $headers `
             -Body $body `
@@ -6934,7 +6998,7 @@ function Test-OpenAiApi {
     } | ConvertTo-Json -Depth 10
 
     try {
-        $response = Invoke-WebRequest -Uri "$ApiUrl/chat/completions" `
+        $response = Invoke-WebRequest2 -Uri "$ApiUrl/chat/completions" `
             -Method POST `
             -Headers $headers `
             -Body $body `
@@ -7165,7 +7229,8 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
             $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('fontarch_' + [System.Guid]::NewGuid().ToString('N') + '.zip')
             Write-Host ("Downloading {0}" -f $Path) -ForegroundColor DarkGray
             # Prefer the chunked Save-WebFile when it is resolvable, but fall back
-            # to Invoke-WebRequest so the helper works in any load scope.
+            # to Invoke-WebRequest for zip archives that do not benefit from
+            # additional HTTP response compression.
             $swf = Get-Command Save-WebFile -ErrorAction SilentlyContinue
             try {
                 if ($swf) {
