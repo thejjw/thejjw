@@ -8039,7 +8039,7 @@ namespace ChunkDownload
             HttpWebRequest r = (HttpWebRequest)WebRequest.Create(url);
             r.Method = "GET";
             r.AllowAutoRedirect = true;
-            r.UserAgent = "Save-WebFile/1.0";
+            r.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
             r.Timeout = 60000;
             r.ReadWriteTimeout = timeoutMs;
             r.KeepAlive = true;
