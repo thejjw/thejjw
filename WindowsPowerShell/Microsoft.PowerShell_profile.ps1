@@ -230,6 +230,7 @@ $_AiToolsInternal = @{
         ClaudeCli     = 'https://claude.ai/install.ps1'
         CodexCli      = 'https://chatgpt.com/codex/install.ps1'
         KimiCodeCli   = 'https://code.kimi.com/kimi-code/install.ps1'
+        GrokCli       = 'https://x.ai/cli/install.ps1'
         CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
     }
@@ -6008,7 +6009,7 @@ function Install-AiTools {
 .PARAMETER MoreAi
     When supplied, also installs extra AI developer tools (SST.OpenCodeDesktop, Google.Antigravity,
     Google.AntigravityIDE, ZhipuAI.ZCode, MiniMax.MiniMaxCode) via winget, extra global npm packages
-    (@qwen-code/qwen-code, @mimo-ai/cli), and Kimi Code if not present.
+    (@qwen-code/qwen-code, @mimo-ai/cli), and the Kimi Code and Grok CLIs if not present.
 
 .PARAMETER All
     When supplied, enables all optional package groups: extended tools, SDK runtimes, .NET SDK,
@@ -6112,6 +6113,7 @@ function Install-AiTools {
     Write-Host " - opencode (opencode CLI)"
     if ($MoreAi) {
         Write-Host " - kimi (Kimi Code CLI)"
+        Write-Host " - grok (Grok CLI)"
     }
 
     if (-not $Auto) {
@@ -6292,6 +6294,7 @@ function Install-AiTools {
     Write-Host " - opencode (opencode CLI)"
     if ($MoreAi) {
         Write-Host " - kimi (Kimi Code CLI)"
+        Write-Host " - grok (Grok CLI)"
     }
 
     # Install Antigravity and Claude CLIs using their recommended installers
@@ -6359,6 +6362,22 @@ function Install-AiTools {
             } catch {
                 Write-Host "Failed to install kimi: $_" -ForegroundColor Red
             }
+        }
+    }
+
+    # Verify and install Grok CLI if MoreAi is requested. Probe on the grok binary
+    # (installed as grok.exe under ~/.grok/bin); the upstream installer adds that
+    # directory to the user PATH itself, so no manual PATH handling is needed here.
+    if ($MoreAi) {
+        if (-not (Get-Command grok -ErrorAction SilentlyContinue)) {
+            Write-Host "grok CLI not found; installing via $($_AiToolsInternal.Urls.GrokCli)..." -ForegroundColor Yellow
+            try {
+                & powershell -NoProfile -ExecutionPolicy ByPass -Command "iex (irm '$($_AiToolsInternal.Urls.GrokCli)')"
+            } catch {
+                Write-Host "Failed to install grok: $_" -ForegroundColor Red
+            }
+        } else {
+            Write-Host "grok CLI is already installed." -ForegroundColor Green
         }
     }
 
