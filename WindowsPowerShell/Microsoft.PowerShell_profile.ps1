@@ -5910,6 +5910,8 @@ function Update-Profile {
     }
 }
 
+Set-Alias -Name updp -Value Update-Profile
+
 function Install-AiSkills {
     <#
 .SYNOPSIS
