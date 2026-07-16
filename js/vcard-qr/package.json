@@ -1,0 +1,17 @@
+{
+  "name": "bilingual-vcard-qr",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generate reusable vCard QR images for an email signature.",
+  "scripts": {
+    "generate": "node generate-vcard-qr.js",
+    "test": "node test-vcard-qr.js"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0"
+  }
+}

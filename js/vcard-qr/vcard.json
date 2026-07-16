@@ -1,0 +1,13 @@
+{
+  "name": {
+    "family": "Hong",
+    "given": "Gildong",
+    "display": "홍길동/Gildong Hong"
+  },
+  "title": "담당자/Representative",
+  "company": "Example Corp",
+  "email": "gildong.hong@example.com",
+  "officePhone": "+82 2-0000-0000",
+  "mobilePhone": "+82 10-0000-0000",
+  "outputBaseName": "contact-vCard-QR"
+}
