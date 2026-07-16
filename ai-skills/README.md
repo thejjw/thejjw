@@ -10,6 +10,8 @@ Reusable agent skill documentation for AI coding environments.
   - Intended for OpenCode and Claude Code.
 - `deepseek-usage-query`: Query DeepSeek API balance and estimate token budget from current pricing.
   - Intended for OpenCode and Claude Code.
+- `export-chat-codex`: Export a Codex conversation and its execution trace to a chronological Markdown transcript.
+  - Intended for Codex only.
 - `minimax-usage-query`: Query MiniMax token usage, quota limits, and model-specific allowances.
   - Intended for OpenCode and Claude Code.
 - `session-exporter`: Export the current session conversation history to Markdown.
@@ -36,5 +38,6 @@ For manual installs, copy a skill directory into its intended tool's skill direc
 - OpenCode: `%USERPROFILE%\.agents\skills\<skill-name>\SKILL.md`
 - Claude Code: `%USERPROFILE%\.claude\skills\<skill-name>\SKILL.md`
 - Antigravity CLI: `%USERPROFILE%\.gemini\antigravity-cli\skills\<skill-name>\SKILL.md`
+- Codex: `%CODEX_HOME%\skills\<skill-name>\SKILL.md` (defaults to `%USERPROFILE%\.codex\skills`)
 
 Some skills require credentials. Provide those through local environment variables or the PowerShell profile's `Set-AiApiKeysCS` / `Load-AiApiKeysFromCS` helpers; do not commit secrets to this repository.

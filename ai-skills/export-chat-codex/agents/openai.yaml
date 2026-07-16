@@ -1,0 +1,4 @@
+interface:
+  display_name: "Export Codex Chat"
+  short_description: "Export a complete Codex session transcript"
+  default_prompt: "Use $export-chat-codex to export this Codex session with tool activity and a short descriptive filename."

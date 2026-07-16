@@ -384,9 +384,11 @@ $_AiSkillsInternal = @{
     SparsePath            = 'ai-skills'
     OpenCodeClaudeSkills  = @('codebase-docs', 'web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query')
     AntigravitySkills     = @('codebase-docs', 'session-exporter')
+    CodexSkills           = @('export-chat-codex')
     OpenCodeSkillsPath    = '.agents\skills'
     ClaudeSkillsPath      = '.claude\skills'
     AntigravitySkillsPath = '.gemini\antigravity-cli\skills'
+    CodexSkillsPath       = 'skills'
     OpenCodeConfigPath    = '.config\opencode\opencode.json'
 }
 
@@ -5918,9 +5920,9 @@ function Install-AiSkills {
     Installs public AI skills from the thejjw repository.
 .DESCRIPTION
     Uses a shallow, blobless, sparse Git clone to fetch only the ai-skills directory,
-    then overwrites the configured skill directories for OpenCode, Claude Code, and
-    Antigravity CLI. Existing named skill directories are replaced so repeat manual
-    runs refresh changed files and remove stale files.
+    then overwrites the configured skill directories for OpenCode, Claude Code,
+    Antigravity CLI, and Codex. Existing named skill directories are replaced so
+    repeat manual runs refresh changed files and remove stale files.
 .PARAMETER RepoUrl
     Git repository URL that contains the ai-skills directory.
 .PARAMETER Branch
@@ -5946,10 +5948,13 @@ function Install-AiSkills {
 
     $openCodeClaudeSkills = $_AiSkillsInternal.OpenCodeClaudeSkills
     $antigravitySkills = $_AiSkillsInternal.AntigravitySkills
+    $codexSkills = $_AiSkillsInternal.CodexSkills
 
     $openCodeSkillsDir = Join-Path $env:USERPROFILE $_AiSkillsInternal.OpenCodeSkillsPath
     $claudeSkillsDir = Join-Path $env:USERPROFILE $_AiSkillsInternal.ClaudeSkillsPath
     $antigravitySkillsDir = Join-Path $env:USERPROFILE $_AiSkillsInternal.AntigravitySkillsPath
+    $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+    $codexSkillsDir = Join-Path $codexHome $_AiSkillsInternal.CodexSkillsPath
     $openCodeConfigFile = Join-Path $env:USERPROFILE $_AiSkillsInternal.OpenCodeConfigPath
     $openCodeConfigDir = Split-Path -Parent $openCodeConfigFile
 
@@ -6089,10 +6094,15 @@ function Install-AiSkills {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $antigravitySkillsDir -ToolName 'Antigravity CLI'
         }
 
+        foreach ($skill in $codexSkills) {
+            Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $codexSkillsDir -ToolName 'Codex'
+        }
+
         Write-Host ""
         Write-Host "[done] Installed AI skills:" -ForegroundColor Green
         Write-Host "  OpenCode and Claude Code: $($openCodeClaudeSkills -join ', ')"
         Write-Host "  Antigravity CLI: $($antigravitySkills -join ', ')"
+        Write-Host "  Codex: $($codexSkills -join ', ')"
     }
     catch {
         Write-Error "Install-AiSkills failed: $_"
