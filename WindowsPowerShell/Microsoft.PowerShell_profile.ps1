@@ -207,6 +207,7 @@ $_AiToolsInternal = @{
         'Microsoft.VCRedist.2015+.x64',
         'Microsoft.VCRedist.2015+.x86',
         'Microsoft.IntelligentTerminal',
+        'TwibrightLabs.Links',
         'OpenJS.NodeJS.LTS',
         '7zip.7zip',
         'GitHub.cli',
@@ -271,7 +272,8 @@ $_AiToolsInternal = @{
         'HeidiSQL.HeidiSQL',
         'TheDocumentFoundation.LibreOffice',
         'OlegShparber.Zeal',
-        'Mozilla.SeaMonkey'
+        'Mozilla.SeaMonkey',
+        'Microsoft.Sysinternals.Suite'
     )
     DbWingetPackages       = @(
         'Oracle.MySQLShell',
