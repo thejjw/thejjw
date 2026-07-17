@@ -291,7 +291,6 @@ $_AiToolsInternal = @{
         AgyCli        = 'https://antigravity.google/cli/install.ps1'
         ClaudeCli     = 'https://claude.ai/install.ps1'
         CodexCli      = 'https://chatgpt.com/codex/install.ps1'
-        KimiCodeCli   = 'https://code.kimi.com/kimi-code/install.ps1'
         GrokCli       = 'https://x.ai/cli/install.ps1'
         CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
@@ -4269,6 +4268,23 @@ function Install-CodexSettings {
     Write-Host "codex: config setup complete" -ForegroundColor Green
 }
 
+function Install-KimiSettings {
+    <#
+.SYNOPSIS
+    Configures user-level defaults for Kimi Code CLI.
+
+.DESCRIPTION
+    Disables anonymous telemetry persistently for the current user and immediately
+    for the current PowerShell process.
+#>
+    [CmdletBinding()]
+    param()
+
+    [Environment]::SetEnvironmentVariable('KIMI_DISABLE_TELEMETRY', '1', 'User')
+    $env:KIMI_DISABLE_TELEMETRY = '1'
+    Write-Host "kimi: telemetry disabled for the current user" -ForegroundColor Green
+}
+
 function Install-ClaudezSetup {
     <#
 .SYNOPSIS
@@ -6519,13 +6535,15 @@ function Install-AiTools {
         }
 
         if (-not $kimiInstalled) {
-            Write-Host "kimi CLI not found or not responding to version check; installing via $($_AiToolsInternal.Urls.KimiCodeCli)..." -ForegroundColor Yellow
+            Write-Host "kimi CLI not found or not responding to version check; installing via 'npm install -g @moonshot-ai/kimi-code@latest'..." -ForegroundColor Yellow
             try {
-                & powershell -NoProfile -ExecutionPolicy ByPass -Command "iex (irm '$($_AiToolsInternal.Urls.KimiCodeCli)')"
+                & npm install -g '@moonshot-ai/kimi-code@latest'
             } catch {
                 Write-Host "Failed to install kimi: $_" -ForegroundColor Red
             }
         }
+
+        Install-KimiSettings
     }
 
     # Verify and install Grok CLI if MoreAi is requested. Probe on the grok binary
