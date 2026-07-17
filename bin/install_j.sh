@@ -1034,6 +1034,65 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
+# claudek / claudekd - Kimi Claude Code functions
+# ---------------------------------------------------------------------------
+CLAUDEK_MARKER="# >>> claudek >>>"
+
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudek >>>" "# <<< claudek <<<"
+fi
+
+if grep -qF "$CLAUDEK_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudek: already in $PROFILE -- skipping"
+else
+  # Use existing env var if set, otherwise prompt.
+  if [[ -z "${KIMI_API_KEY:-}" ]]; then
+    read -r -p "Enter your Kimi API key for claudek setup: " KIMI_API_KEY
+  else
+    echo "claudek: detected KIMI_API_KEY from environment"
+  fi
+
+  if [[ -z "$KIMI_API_KEY" ]]; then
+    echo "claudek: key is empty, skipping function setup"
+  else
+    cat >> "$PROFILE" << EOF
+
+# >>> claudek >>>
+# Custom Claude Code functions with Kimi endpoint
+claudek() {
+  if [[ -z "\${KIMI_API_KEY:-}" ]]; then
+    echo "claudek: KIMI_API_KEY is not set. Aborting." >&2
+    return 1
+  fi
+
+  env -u ANTHROPIC_AUTH_TOKEN \
+    ANTHROPIC_BASE_URL="https://api.kimi.com/coding/" \
+    ANTHROPIC_API_KEY="\$KIMI_API_KEY" \
+    ANTHROPIC_MODEL="k3[1m]" \
+    ANTHROPIC_DEFAULT_FABLE_MODEL="k3[1m]" \
+    ANTHROPIC_DEFAULT_OPUS_MODEL="k3[1m]" \
+    ANTHROPIC_DEFAULT_SONNET_MODEL="k3[1m]" \
+    ANTHROPIC_DEFAULT_HAIKU_MODEL="k3[1m]" \
+    CLAUDE_CODE_SUBAGENT_MODEL="k3[1m]" \
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW="1048576" \
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS="1048576" \
+    CLAUDE_CODE_EFFORT_LEVEL="max" \
+    claude "\$@"
+}
+
+claudekd() {
+  claudek "\$@" --dangerously-skip-permissions
+}
+
+export KIMI_API_KEY="$KIMI_API_KEY"
+# <<< claudek <<<
+EOF
+
+    echo "claudek: added to $PROFILE"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # claudez-remote (claudezr) - remote Claude Code via Z.AI
 # ---------------------------------------------------------------------------
 CLAUDEZR_MARKER="# >>> claudez-remote >>>"
