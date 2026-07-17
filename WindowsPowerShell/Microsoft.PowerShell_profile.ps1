@@ -7248,9 +7248,10 @@ function Invoke-AiUpgrade {
 Set-Alias -Name aiu -Value Invoke-AiUpgrade
 
 # === AI provider usage-query functions ===
-# Provides Get-MinimaxUsage, Get-ZaiUsage, and Get-DeepseekUsage. Call any of
+# Provides Get-MinimaxUsage, Get-ZaiUsage, Get-DeepseekUsage, and Get-KimiUsage. Call any of
 # them after the vault credentials load further down (Load-AiApiKeysFromCS) so
-# $env:MINIMAX_API_KEY, $env:Z_AI_AUTH_TOKEN, and $env:DEEPSEEK_API_KEY are populated.
+# $env:MINIMAX_API_KEY, $env:Z_AI_AUTH_TOKEN, $env:DEEPSEEK_API_KEY, and
+# $env:KIMI_API_KEY are populated.
 
 # --- $_ProfileHelpers: shared helper object for the whole profile ----------
 # General-purpose helpers exposed as methods on $_ProfileHelpers (e.g.
@@ -8024,6 +8025,270 @@ function Get-DeepseekUsage {
         Write-Host '  No concerns flagged.' -ForegroundColor Green
     } else {
         foreach ($c in $concerns) { Write-Host ('  - ' + $c) -ForegroundColor Yellow }
+    }
+
+    return $resp
+}
+
+# --- Get-KimiUsage ---------------------------------------------------------
+# Queries Kimi Code's private membership-usage endpoint. The schema is
+# observed rather than a documented public contract, so all fields are handled
+# defensively. Stashes the parsed response in $Global:kimiLastQuery and returns it.
+
+function Get-KimiUsage {
+<#
+.SYNOPSIS
+    Queries Kimi Code membership quota, rolling limits, and Extra Usage status.
+.DESCRIPTION
+    Calls the private https://api.kimi.com/coding/v1/usages endpoint with the
+    Kimi Code API key in $env:KIMI_API_KEY. Reports membership details, weekly
+    quota, rolling rate windows, local reset times, concurrent-session limit,
+    aggregate quota, and optional Extra Usage wallet fields. Stores the parsed
+    response in $Global:kimiLastQuery and returns it.
+.PARAMETER ApiKey
+    Kimi Code API key. Defaults to $env:KIMI_API_KEY.
+.PARAMETER BaseUrl
+    Kimi Code OpenAI-compatible base URL. Defaults to KIMI_CODE_BASE_URL, then
+    https://api.kimi.com/coding/v1. The function appends /usages.
+.PARAMETER TimeoutSec
+    HTTP request timeout in seconds. Defaults to the upstream client's 8 seconds.
+.PARAMETER LowPercent
+    Remaining-percent threshold at or below which a quota is reported as LOW.
+.PARAMETER CriticalPercent
+    Remaining-percent threshold at or below which a quota is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Report an informational concern when a quota resets within this many hours.
+.PARAMETER All
+    When supplied, prints the raw API response inline. Otherwise the raw
+    response stays in $Global:kimiLastQuery.
+.EXAMPLE
+    Get-KimiUsage
+.EXAMPLE
+    Get-KimiUsage -LowPercent 25 -CriticalPercent 10 -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param(
+        [string]$ApiKey = $env:KIMI_API_KEY,
+        [string]$BaseUrl = $env:KIMI_CODE_BASE_URL,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 8,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 30,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 10,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$All
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        Write-Error 'KIMI_API_KEY not set (env var or -ApiKey).'
+        return
+    }
+    if ($CriticalPercent -gt $LowPercent) {
+        Write-Error 'CriticalPercent must be less than or equal to LowPercent.'
+        return
+    }
+
+    $headers = @{
+        Accept        = 'application/json'
+        Authorization = "Bearer $ApiKey"
+    }
+    if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $BaseUrl = 'https://api.kimi.com/coding/v1' }
+    $usageUrl = $BaseUrl.TrimEnd('/') + '/usages'
+    try {
+        $resp = Invoke-RestMethod -Uri $usageUrl -Headers $headers -Method GET -TimeoutSec $TimeoutSec -ErrorAction Stop
+    } catch {
+        Write-Error "Kimi API call failed: $($_.Exception.Message)"
+        Write-Host "  Fallback: run '/usage' in Kimi Code CLI or check the Kimi Code Console." -ForegroundColor DarkGray
+        return
+    }
+
+    $Global:kimiLastQuery = $resp
+
+    $_ProfileHelpers.WriteSection('Raw API response (Kimi Code)')
+    if ($All) { $resp | ConvertTo-Json -Depth 8 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:kimiLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $_ProfileHelpers.WriteSection('Membership summary (Kimi Code)')
+    [pscustomobject]@{
+        Membership       = if ($resp.user -and $resp.user.membership) { $resp.user.membership.level } else { 'n/a' }
+        Subscription     = if ($resp.PSObject.Properties['subType']) { $resp.subType } else { 'n/a' }
+        Authentication   = if ($resp.authentication) { $resp.authentication.method } else { 'n/a' }
+        Parallel_Limit   = if ($resp.parallel) { $resp.parallel.limit } else { 'n/a' }
+    } | Format-Table -AutoSize | Out-Host
+
+    # Normalize weekly and rolling quota objects before formatting them together.
+    $quotaItems = New-Object System.Collections.Generic.List[object]
+    if ($resp.usage) {
+        $weeklyLabel = if ($resp.usage.name) { $resp.usage.name } elseif ($resp.usage.title) { $resp.usage.title } else { 'Weekly limit' }
+        $quotaItems.Add([pscustomobject]@{ Label = $weeklyLabel; Detail = $resp.usage })
+    }
+    $limitIndex = 0
+    foreach ($limitItem in @($resp.limits)) {
+        if (-not $limitItem) { continue }
+        $limitIndex++
+        $detail = if ($limitItem.detail) { $limitItem.detail } else { $limitItem }
+        $duration = if ($limitItem.window -and $null -ne $limitItem.window.duration) {
+            $limitItem.window.duration
+        } elseif ($null -ne $limitItem.duration) {
+            $limitItem.duration
+        } else {
+            $detail.duration
+        }
+        $unit = if ($limitItem.window -and $limitItem.window.timeUnit) {
+            [string]$limitItem.window.timeUnit
+        } elseif ($limitItem.timeUnit) {
+            [string]$limitItem.timeUnit
+        } else {
+            [string]$detail.timeUnit
+        }
+        $unitLabel = switch ($unit) {
+            'TIME_UNIT_MINUTE' { 'min' }
+            'TIME_UNIT_HOUR'   { 'h' }
+            'TIME_UNIT_DAY'    { 'd' }
+            default            { if ($unit) { $unit } else { 'window' } }
+        }
+        $label = if ($limitItem.name) {
+            [string]$limitItem.name
+        } elseif ($limitItem.title) {
+            [string]$limitItem.title
+        } elseif ($limitItem.scope) {
+            [string]$limitItem.scope
+        } elseif ($detail.name) {
+            [string]$detail.name
+        } elseif ($detail.title) {
+            [string]$detail.title
+        } elseif ($detail.scope) {
+            [string]$detail.scope
+        } elseif ($null -ne $duration) {
+            if ($unit -like '*MINUTE*' -and [double]$duration -ge 60 -and ([double]$duration % 60) -eq 0) {
+                '{0:N0}h limit' -f ([double]$duration / 60)
+            } else {
+                "$duration$unitLabel limit"
+            }
+        } else {
+            "Limit #$limitIndex"
+        }
+        $quotaItems.Add([pscustomobject]@{ Label = $label; Detail = $detail })
+    }
+
+    $_ProfileHelpers.WriteSection('Quota summary (Kimi Code)')
+    $rows = New-Object System.Collections.Generic.List[object]
+    $concerns = New-Object System.Collections.Generic.List[string]
+    foreach ($item in $quotaItems) {
+        $detail = $item.Detail
+        $limit = if ($detail -and $null -ne $detail.limit) { [double]$detail.limit } else { $null }
+        $used = if ($detail -and $null -ne $detail.used) { [double]$detail.used } else { $null }
+        $remaining = if ($detail -and $null -ne $detail.remaining) { [double]$detail.remaining } else { $null }
+        if ($null -eq $used -and $null -ne $limit -and $null -ne $remaining) { $used = $limit - $remaining }
+        if ($null -eq $remaining -and $null -ne $limit -and $null -ne $used) { $remaining = $limit - $used }
+        $remainingPercent = if ($null -ne $limit -and $limit -gt 0 -and $null -ne $remaining) { 100 * $remaining / $limit } else { $null }
+
+        $resetText = 'n/a'
+        $resetDelta = $null
+        $resetValue = $null
+        foreach ($resetKey in @('reset_at', 'resetAt', 'reset_time', 'resetTime')) {
+            if ($detail -and $detail.PSObject.Properties[$resetKey] -and $detail.$resetKey) {
+                $resetValue = [string]$detail.$resetKey
+                break
+            }
+        }
+        if ($resetValue) {
+            $resetDto = [DateTimeOffset]::MinValue
+            if ([DateTimeOffset]::TryParse($resetValue, [ref]$resetDto)) {
+                $resetLocal = $resetDto.ToLocalTime().LocalDateTime
+                $resetDelta = $resetLocal - (Get-Date)
+                if ($resetDelta.TotalSeconds -gt 0) {
+                    $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
+                } else {
+                    $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+                }
+            }
+        } else {
+            foreach ($relativeKey in @('reset_in', 'resetIn', 'ttl', 'window')) {
+                if ($detail -and $detail.PSObject.Properties[$relativeKey] -and $null -ne $detail.$relativeKey) {
+                    $relativeSeconds = 0L
+                    if ([long]::TryParse([string]$detail.$relativeKey, [ref]$relativeSeconds) -and $relativeSeconds -gt 0) {
+                        $resetDelta = [TimeSpan]::FromSeconds($relativeSeconds)
+                        $resetText = 'in {0}' -f ($_ProfileHelpers.FormatDuration($resetDelta))
+                        break
+                    }
+                }
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Window            = $item.Label
+            Used              = if ($null -ne $used) { $used } else { 'n/a' }
+            Limit             = if ($null -ne $limit) { $limit } else { 'n/a' }
+            Remaining         = if ($null -ne $remaining) { $remaining } else { 'n/a' }
+            Remaining_Percent = if ($null -ne $remainingPercent) { '{0:N1}%' -f $remainingPercent } else { 'n/a' }
+            Reset             = $resetText
+        })
+
+        if ($null -ne $remainingPercent) {
+            if ($remainingPercent -le $CriticalPercent) {
+                $concerns.Add(('[CRITICAL] {0}: only {1:N1}% remaining' -f $item.Label, $remainingPercent))
+            } elseif ($remainingPercent -le $LowPercent) {
+                $concerns.Add(('[LOW]      {0}: {1:N1}% remaining' -f $item.Label, $remainingPercent))
+            }
+        }
+        if ($null -ne $resetDelta -and $resetDelta.TotalSeconds -gt 0 -and $resetDelta.TotalHours -le $ResetWarnHours) {
+            $concerns.Add(('[INFO]     {0}: resets in {1}' -f $item.Label, ($_ProfileHelpers.FormatDuration($resetDelta))))
+        }
+    }
+    if ($rows.Count -gt 0) { $rows | Format-Table -AutoSize -Wrap | Out-Host }
+    else { Write-Host '  (no weekly or rolling quota data returned)' -ForegroundColor DarkGray }
+
+    if ($resp.totalQuota) {
+        $_ProfileHelpers.WriteSection('Aggregate quota (Kimi Code)')
+        [pscustomobject]@{
+            Limit     = if ($null -ne $resp.totalQuota.limit) { $resp.totalQuota.limit } else { 'n/a' }
+            Remaining = if ($null -ne $resp.totalQuota.remaining) { $resp.totalQuota.remaining } else { 'n/a' }
+        } | Format-Table -AutoSize | Out-Host
+    }
+
+    $_ProfileHelpers.WriteSection('Extra Usage (Kimi Code)')
+    $wallet = $resp.boosterWallet
+    if ($wallet -and $wallet.balance -and $wallet.balance.type -eq 'BOOSTER' -and [double]$wallet.balance.amount -gt 0) {
+        # Upstream stores balance amounts as fixed-point cents (1,000,000 units per cent).
+        $totalCentsRaw = [double]$wallet.balance.amount / 1000000
+        $leftCentsRaw = if ($null -ne $wallet.balance.amountLeft) { [double]$wallet.balance.amountLeft / 1000000 } else { 0 }
+        $totalCents = if ($totalCentsRaw -gt 0 -and $totalCentsRaw -lt 1) { 1 } else { [Math]::Round($totalCentsRaw) }
+        $leftCents = if ($leftCentsRaw -gt 0 -and $leftCentsRaw -lt 1) { 1 } else { [Math]::Round($leftCentsRaw) }
+        $monthlyLimitCents = if ($wallet.monthlyChargeLimit -and $null -ne $wallet.monthlyChargeLimit.priceInCents) { [double]$wallet.monthlyChargeLimit.priceInCents } else { 0 }
+        $monthlyUsedCents = if ($wallet.monthlyUsed -and $null -ne $wallet.monthlyUsed.priceInCents) { [double]$wallet.monthlyUsed.priceInCents } else { 0 }
+        $currency = if ($wallet.monthlyChargeLimit -and $wallet.monthlyChargeLimit.currency) {
+            [string]$wallet.monthlyChargeLimit.currency
+        } elseif ($wallet.monthlyUsed -and $wallet.monthlyUsed.currency) {
+            [string]$wallet.monthlyUsed.currency
+        } else {
+            'USD'
+        }
+        [pscustomobject]@{
+            Currency              = $currency
+            Balance               = '{0:N2}' -f ($leftCents / 100)
+            Total                 = '{0:N2}' -f ($totalCents / 100)
+            Monthly_Limit_Enabled = [bool]$wallet.monthlyChargeLimitEnabled
+            Monthly_Limit         = if ($monthlyLimitCents -gt 0) { '{0:N2}' -f ($monthlyLimitCents / 100) } else { 'unlimited' }
+            Monthly_Used          = '{0:N2}' -f ($monthlyUsedCents / 100)
+        } | Format-Table -AutoSize | Out-Host
+    } else {
+        Write-Host '  No Extra Usage wallet reported.' -ForegroundColor DarkGray
+    }
+
+    $_ProfileHelpers.WriteSection('Concerns (Kimi Code)')
+    if (-not $resp.usage) {
+        $concerns.Add('[WARN] No weekly quota data returned')
+    }
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) { Write-Host ('  - ' + $concern) -ForegroundColor Yellow }
     }
 
     return $resp
