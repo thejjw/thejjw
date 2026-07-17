@@ -12,6 +12,8 @@ Reusable agent skill documentation for AI coding environments.
   - Intended for OpenCode and Claude Code.
 - `export-chat-codex`: Export a Codex conversation and its execution trace to a chronological Markdown transcript.
   - Intended for Codex only.
+- `kimi-usage-query`: Check Kimi Code membership usage, quota limits, concurrency, and Extra Usage balance.
+  - Intended for OpenCode and Claude Code.
 - `minimax-usage-query`: Query MiniMax token usage, quota limits, and model-specific allowances.
   - Intended for OpenCode and Claude Code.
 - `session-exporter`: Export the current session conversation history to Markdown.
