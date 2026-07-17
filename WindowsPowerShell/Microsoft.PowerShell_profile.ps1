@@ -6721,7 +6721,7 @@ function Set-AiApiKeysCS {
     # Windows PowerShell 5.1 and PowerShell 7+ on Windows.
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     # All keys share a single resource userName so they form a logical group in
     # Credential Manager and can be enumerated/cleared together.
     $userName = 'api-key'
