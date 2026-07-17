@@ -5315,6 +5315,93 @@ function claudemmd {
     claudemm @claudeArgs
 }
 
+function claudek {
+    <#
+.SYNOPSIS
+    Launches Claude Code through the Kimi Code endpoint.
+
+.DESCRIPTION
+    Reads KIMI_API_KEY from the current process, Windows Credential Manager, or
+    legacy User environment, then temporarily configures Claude Code to use Kimi
+    K3 with a 1M context window. Restores the previous environment after Claude exits.
+
+.EXAMPLE
+    claudek
+
+.EXAMPLE
+    claudek "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    $key = Get-AiApiKey 'KIMI_API_KEY'
+
+    if (-not $key) {
+        Write-Host "KIMI_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
+        return
+    }
+
+    $originalEnvVars = Save-ProcessEnvVars @(
+        'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
+        'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
+        'CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
+        'CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+    )
+
+    $env:ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/'
+    $env:ANTHROPIC_API_KEY = $key
+    Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
+
+    # Kimi K3 uses one model for every Claude Code routing slot.
+    $env:ANTHROPIC_MODEL = 'k3[1m]'
+    $env:ANTHROPIC_DEFAULT_FABLE_MODEL = $env:ANTHROPIC_MODEL
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = $env:ANTHROPIC_MODEL
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = $env:ANTHROPIC_MODEL
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = $env:ANTHROPIC_MODEL
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = $env:ANTHROPIC_MODEL
+
+    $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = '1048576'
+    $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = '1048576'
+    $env:CLAUDE_CODE_EFFORT_LEVEL = 'max'
+    $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'
+
+    try {
+        Install-GlobalClaudeMd
+        Install-GlobalClaudeSettings
+        claude @args
+    }
+    finally {
+        Restore-ProcessEnvVars $originalEnvVars
+    }
+}
+
+function claudekd {
+    <#
+.SYNOPSIS
+    Launches claudek with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to claudek and appends --dangerously-skip-permissions.
+
+.EXAMPLE
+    claudekd
+
+.EXAMPLE
+    claudekd "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    $claudeArgs = $args + '--dangerously-skip-permissions'
+    claudek @claudeArgs
+}
+
 function Install-ClaudeCCRSetup {
     <#
 .SYNOPSIS
