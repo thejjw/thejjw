@@ -384,7 +384,7 @@ $_AiSkillsInternal = @{
     RepoUrl               = 'https://github.com/thejjw/thejjw.git'
     Branch                = 'main'
     SparsePath            = 'ai-skills'
-    OpenCodeClaudeSkills  = @('codebase-docs', 'web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query')
+    OpenCodeClaudeSkills  = @('codebase-docs', 'web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query', 'kimi-usage-query')
     AntigravitySkills     = @('codebase-docs', 'session-exporter')
     CodexSkills           = @('export-chat-codex')
     OpenCodeSkillsPath    = '.agents\skills'
@@ -6039,7 +6039,7 @@ function Install-AiSkills {
     Install-AiSkills
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-05
+    Last Edit: 2026-07
 #>
     [CmdletBinding()]
     param(
