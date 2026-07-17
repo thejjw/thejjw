@@ -301,7 +301,8 @@ $_AiToolsInternal = @{
     )
     MoreAiNpmPackages      = @(
         '@qwen-code/qwen-code',
-        '@mimo-ai/cli'
+        '@mimo-ai/cli',
+        '@moonshot-ai/kimi-code'
     )
 }
 
@@ -6520,29 +6521,9 @@ function Install-AiTools {
         try { & npm install -g opencode-ai } catch { Write-Host "Failed to install opencode: $_" -ForegroundColor Red }
     }
 
-    # Verify and install Kimi Code CLI if MoreAi is requested
+    # Configure Kimi Code CLI if MoreAi is requested. Its npm package is managed
+    # through MoreAiNpmPackages with the other optional AI tools.
     if ($MoreAi) {
-        $kimiInstalled = $false
-        try {
-            $kimiVersion = & kimi --version 2>$null
-            if ($null -ne $kimiVersion -and $LASTEXITCODE -eq 0) {
-                $kimiInstalled = $true
-                $versionStr = ($kimiVersion -join ' ').Trim()
-                Write-Host "kimi CLI is already installed ($versionStr)." -ForegroundColor Green
-            }
-        } catch {
-            # Catch when command is missing or execution fails
-        }
-
-        if (-not $kimiInstalled) {
-            Write-Host "kimi CLI not found or not responding to version check; installing via 'npm install -g @moonshot-ai/kimi-code@latest'..." -ForegroundColor Yellow
-            try {
-                & npm install -g '@moonshot-ai/kimi-code@latest'
-            } catch {
-                Write-Host "Failed to install kimi: $_" -ForegroundColor Red
-            }
-        }
-
         Install-KimiSettings
     }
 
