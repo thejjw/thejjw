@@ -946,6 +946,7 @@ else
 # >>> claudez >>>
 # Custom Claude Code functions with Z.AI endpoint
 # _zai_peak_warning - Briefly warn when Z.AI's UTC+8 peak window is active.
+# Peak-hours and quota policy: https://docs.z.ai/devpack/overview
 _zai_peak_warning() {
   local utc hour minute second minutes_left
   utc="$(date -u +%H:%M:%S)" || return 0

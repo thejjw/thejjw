@@ -4581,6 +4581,7 @@ function Restore-ProcessEnvVars {
 }
 
 # Briefly warn when Z.AI's UTC+8 peak window is active.
+# Peak-hours and quota policy: https://docs.z.ai/devpack/overview
 function Show-ZaiPeakWarning {
     param(
         [DateTime]$UtcNow = [DateTime]::UtcNow,
