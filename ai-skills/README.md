@@ -4,6 +4,8 @@ Reusable agent skill documentation for AI coding environments.
 
 ## Skills
 
+- `agy-usage-query`: Query Antigravity CLI usage quotas (Gemini Flash/Pro models) from the private Cloud Code Assist endpoint.
+  - Intended for Antigravity CLI only.
 - `codebase-docs`: Maintain codebase documentation in the `docs/` folder using surgical git-based updates.
   - Intended for OpenCode, Claude Code, and Antigravity.
 - `deep-research`: Deep research harness — fan-out web searches, fetch sources, adversarially verify claims, synthesize a cited report.
