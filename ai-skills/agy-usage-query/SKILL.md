@@ -142,6 +142,7 @@ curl -s -X POST \
 
 ### Linux (Bash / Zsh)
 
+#### Desktop / GUI Environments
 Extracts the credentials using the native `secret-tool` (requires `libsecret-tools` package) and queries the quota:
 
 ```bash
@@ -149,6 +150,34 @@ Extracts the credentials using the native `secret-tool` (requires `libsecret-too
 secret_json=$(secret-tool lookup service gemini user antigravity)
 if [ -z "$secret_json" ]; then
   echo "Error: Failed to retrieve Antigravity credentials from Linux Keyring."
+  exit 1
+fi
+
+access_token=$(echo "$secret_json" | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', {}).get('access_token', ''))")
+
+# 2. Read default project ID from config cache
+project_file="$HOME/.gemini/antigravity-cli/cache/default_project_id.txt"
+project="default-cli-project"
+if [ -f "$project_file" ]; then
+  project=$(cat "$project_file" | xargs)
+fi
+
+# 3. Call the retrieveUserQuota endpoint
+curl -s -X POST \
+  -H "Authorization: Bearer $access_token" \
+  -H "Content-Type: application/json" \
+  -d "{\"project\": \"$project\"}" \
+  https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota | python3 -m json.tool
+```
+
+#### Headless / Terminal-Only Environments (WSL, Docker, SSH)
+If no graphical keyring daemon (GNOME Keyring / KWallet) is active, the CLI falls back to the standard Unix password manager `pass` (which stores GPG-encrypted credentials). Query the credentials using:
+
+```bash
+# 1. Fetch access token from pass backend
+secret_json=$(pass show gemini/antigravity)
+if [ -z "$secret_json" ]; then
+  echo "Error: Failed to retrieve Antigravity credentials from pass."
   exit 1
 fi
 
