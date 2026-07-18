@@ -8418,6 +8418,182 @@ function Get-KimiUsage {
     return $resp
 }
 
+# --- Get-AgyUsage ----------------------------------------------------------
+# Queries Antigravity's private cloudcode-pa retrieveUserQuota API endpoint.
+# Extracts generic credentials from Windows Credential Manager under 'gemini:antigravity'.
+# Stashes the parsed response in $Global:agyLastQuery and returns it.
+
+function Get-AgyUsage {
+<#
+.SYNOPSIS
+    Queries Google Antigravity CLI model quotas and remaining requests.
+.DESCRIPTION
+    Retrieves the active Google OAuth token for "gemini:antigravity" from the Windows
+    Credential Manager using Win32 CredRead, reads the active project from the Antigravity cache,
+    and calls the private cloudcode-pa retrieveUserQuota API endpoint. Reports remaining fraction,
+    limit status, and reset times for each Gemini model.
+.PARAMETER Project
+    Google Cloud Project ID. Defaults to the value cached in ~/.gemini/antigravity-cli/cache/default_project_id.txt.
+.PARAMETER TimeoutSec
+    HTTP request timeout in seconds. Defaults to 8.
+.PARAMETER All
+    When supplied, prints the raw API response inline. Otherwise, the raw response is stored in $Global:agyLastQuery.
+.EXAMPLE
+    Get-AgyUsage
+.EXAMPLE
+    Get-AgyUsage -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param(
+        [string]$Project,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 8,
+        [switch]$All
+    )
+
+    # 1. Define C# type for CredRead if not already loaded in the session
+    if (-not ([System.Management.Automation.PSTypeName]'AgyCredentialHelper').Type) {
+        $code = @"
+        using System;
+        using System.Runtime.InteropServices;
+        using System.Text;
+
+        public class AgyCredentialHelper {
+            [DllImport("advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
+            public static extern bool CredRead(string target, uint type, int reserved, out IntPtr credentialPtr);
+            
+            [DllImport("advapi32.dll", EntryPoint = "CredFree", SetLastError = true)]
+            public static extern void CredFree(IntPtr credentialPtr);
+            
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+            public struct CREDENTIAL {
+                public uint Flags;
+                public uint Type;
+                public string TargetName;
+                public string Comment;
+                public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+                public uint CredentialBlobSize;
+                public IntPtr CredentialBlob;
+                public uint Persist;
+                public uint AttributeCount;
+                public IntPtr Attributes;
+                public string TargetAlias;
+                public string UserName;
+            }
+            
+            public static string GetSecret(string target) {
+                IntPtr credPtr;
+                if (CredRead(target, 1, 0, out credPtr)) {
+                    try {
+                        CREDENTIAL cred = (CREDENTIAL)Marshal.PtrToStructure(credPtr, typeof(CREDENTIAL));
+                        if (cred.CredentialBlobSize > 0) {
+                            byte[] blob = new byte[cred.CredentialBlobSize];
+                            Marshal.Copy(cred.CredentialBlob, blob, 0, (int)cred.CredentialBlobSize);
+                            return Encoding.UTF8.GetString(blob);
+                        }
+                    } finally {
+                        CredFree(credPtr);
+                    }
+                }
+                return null;
+            }
+        }
+"@
+        Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
+    }
+
+    # 2. Extract token from the Windows Credential Manager keyring
+    $secretRaw = [AgyCredentialHelper]::GetSecret("gemini:antigravity")
+    if (-not $secretRaw) {
+        Write-Error "Failed to retrieve Antigravity credentials from Windows Credential Manager."
+        Write-Host "Ensure that agy is logged in and active." -ForegroundColor Yellow
+        return
+    }
+
+    $secretJson = $null
+    try {
+        $secretJson = ConvertFrom-Json $secretRaw
+    } catch {
+        Write-Error "Failed to parse keyring secret JSON."
+        return
+    }
+
+    $accessToken = $secretJson.token.access_token
+    if (-not $accessToken) {
+        Write-Error "No access_token found in Antigravity credentials."
+        return
+    }
+
+    # 3. Resolve Project ID
+    if ([string]::IsNullOrWhiteSpace($Project)) {
+        $projectFile = "$env:USERPROFILE\.gemini\antigravity-cli\cache\default_project_id.txt"
+        if (Test-Path $projectFile) {
+            $Project = (Get-Content $projectFile).Trim()
+        } else {
+            $Project = "default-cli-project"
+        }
+    }
+
+    # 4. Invoke Quota endpoint
+    $headers = @{
+        "Authorization" = "Bearer $accessToken"
+        "Content-Type"  = "application/json"
+    }
+    $body = @{ "project" = $Project } | ConvertTo-Json
+
+    $resp = $null
+    try {
+        $resp = Invoke-RestMethod -Uri "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota" -Method Post -Headers $headers -Body $body -TimeoutSec $TimeoutSec -ErrorAction Stop
+    } catch {
+        Write-Error "Antigravity retrieveUserQuota API call failed: $($_.Exception.Message)"
+        return
+    }
+
+    $Global:agyLastQuery = $resp
+
+    $_ProfileHelpers.WriteSection('Raw API response (Antigravity)')
+    if ($All) { 
+        $resp | ConvertTo-Json -Depth 8 | Out-Host 
+    } else { 
+        Write-Host '  (suppressed; stored in $Global:agyLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray 
+    }
+
+    $_ProfileHelpers.WriteSection('Antigravity Model Quota Status')
+    
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($bucket in $resp.buckets) {
+        $percent = [int]($bucket.remainingFraction * 100)
+        
+        $resetText = 'n/a'
+        if ($bucket.resetTime) {
+            $resetDto = [DateTimeOffset]::MinValue
+            if ([DateTimeOffset]::TryParse($bucket.resetTime, [ref]$resetDto)) {
+                $resetLocal = $resetDto.ToLocalTime().LocalDateTime
+                $resetDelta = $resetLocal - (Get-Date)
+                if ($resetDelta.TotalSeconds -gt 0) {
+                    $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
+                } else {
+                    $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+                }
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Model              = $bucket.modelId
+            TokenType          = $bucket.tokenType
+            Remaining_Percent  = "$percent%"
+            Reset_Time         = $resetText
+        })
+    }
+
+    $rows | Format-Table -AutoSize | Out-Host
+
+    return $resp
+}
+
 function Save-WebFile {
     <#
 .SYNOPSIS
