@@ -4580,6 +4580,25 @@ function Restore-ProcessEnvVars {
     }
 }
 
+# Briefly warn when Z.AI's UTC+8 peak window is active.
+function Show-ZaiPeakWarning {
+    param(
+        [DateTime]$UtcNow = [DateTime]::UtcNow,
+        [int]$DelaySeconds = 3
+    )
+
+    $peakStart = $UtcNow.Date.AddHours(6)
+    $peakEnd = $UtcNow.Date.AddHours(10)
+    if ($UtcNow -lt $peakStart -or $UtcNow -ge $peakEnd) {
+        return
+    }
+
+    # Ceiling preserves a visible final minute until the peak window ends.
+    $minutesLeft = [int][Math]::Ceiling(($peakEnd - $UtcNow).TotalMinutes)
+    Write-Host ("Z.AI peak hours are active (14:00-18:00 UTC+8); ends in {0}h {1}m. Launching in 3 seconds..." -f [int][Math]::Floor($minutesLeft / 60), ($minutesLeft % 60)) -ForegroundColor Yellow
+    Start-Sleep -Seconds $DelaySeconds
+}
+
 function claudez {
     <#
 .SYNOPSIS
@@ -4655,6 +4674,7 @@ function claudez {
         Install-GlobalClaudeSettings
         [void](Install-ClaudezSetup -Token $token)
 
+        Show-ZaiPeakWarning
         claude @args
     }
     finally {
@@ -4723,6 +4743,7 @@ function claudezm {
         Install-GlobalClaudeSettings
         [void](Install-ClaudezSetup -Token $token)
 
+        Show-ZaiPeakWarning
         claude @args
     }
     finally {
