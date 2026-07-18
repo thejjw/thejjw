@@ -6740,16 +6740,11 @@ function Install-AiTools {
     # (installed as grok.exe under ~/.grok/bin); the upstream installer adds that
     # directory to the user PATH itself, so no manual PATH handling is needed here.
     if ($MoreAi) {
-        $grokPath = Join-Path $HOME '.grok\bin\grok.exe'
-        $grokPresent = (Get-Command grok -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $grokPath)
-        if (-not $grokPresent) {
+        if (-not (Get-Command grok -ErrorAction SilentlyContinue)) {
             Write-Host "grok CLI not found; installing via $($_AiToolsInternal.Urls.GrokCli)..." -ForegroundColor Yellow
             try {
                 & powershell -NoProfile -ExecutionPolicy ByPass -Command "iex (irm '$($_AiToolsInternal.Urls.GrokCli)')"
-                # Verify installation succeeded before running configuration
-                if ((Get-Command grok -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $grokPath)) {
-                    Install-GrokSettings
-                }
+                Install-GrokSettings
             } catch {
                 Write-Host "Failed to install grok: $_" -ForegroundColor Red
             }
