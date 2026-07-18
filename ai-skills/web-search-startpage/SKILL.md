@@ -1,6 +1,6 @@
 ---
 name: web-search-startpage
-description: Search the internet for real-time information using Startpage with no API key required. Use for current news, recent updates, live data, prices, weather, or any information not available locally.
+description: Fallback-only public web search through Startpage. Use this skill only when the agent has no usable built-in web search or relevant MCP tool, or after those preferred tools were attempted and failed. Do not select it merely because information is current, unavailable locally, or the user asks to search the web. Select it directly when the user explicitly requests Startpage or names web-search-startpage.
 metadata:
   audience: agents
   auth: none
@@ -164,11 +164,11 @@ Return results as a JSON array:
 
 ## When to use me
 
-- The user asks about current events, recent changes, or live data
-- Information is needed that would not exist in local code or docs
-- Any web search is requested
+- Prefer the agent's built-in web search or a relevant MCP tool.
+- Use this skill only when those preferred options are unavailable or have failed.
+- Use this skill directly when the user explicitly requests Startpage or names `web-search-startpage`.
 
-Do not use me for information already available in the local codebase or conversation context.
+Do not use this skill merely because information is current, unavailable locally, or the user asks to search the web. Do not use it for information already available in the local codebase or conversation context.
 
 ## Limitations
 
