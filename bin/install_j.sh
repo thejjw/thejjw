@@ -56,6 +56,64 @@ remove_profile_section() {
   mv "$tmp_file" "$profile_file"
 }
 
+SECRET_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/jjw/s"
+
+# Read a credential file after enforcing its expected owner-only permissions.
+read_secret() {
+  local name="$1" file mode value
+  file="${SECRET_DIR}/${name}"
+
+  if [[ ! -f "$file" || -L "$file" ]]; then
+    echo "secret: missing regular file: $file" >&2
+    return 1
+  fi
+
+  mode="$(stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file" 2>/dev/null)" || {
+    echo "secret: cannot inspect permissions: $file" >&2
+    return 1
+  }
+  if [[ "$mode" != "600" ]]; then
+    echo "secret: insecure permissions on $file (expected 600, found $mode)" >&2
+    return 1
+  fi
+
+  IFS= read -r value < "$file" || true
+  if [[ -z "$value" ]]; then
+    echo "secret: empty credential file: $file" >&2
+    return 1
+  fi
+  printf '%s' "$value"
+}
+
+# Prompt for and atomically create a missing credential file.
+ensure_secret() {
+  local name="$1" label="$2" file tmp old_umask value
+  file="${SECRET_DIR}/${name}"
+
+  if [[ -e "$file" ]]; then
+    read_secret "$name" >/dev/null
+    return
+  fi
+
+  read -r -s -p "Enter ${label}: " value
+  echo
+  if [[ -z "$value" ]]; then
+    echo "secret: ${label} cannot be empty" >&2
+    return 1
+  fi
+
+  mkdir -p "$SECRET_DIR"
+  chmod 700 "$SECRET_DIR"
+  old_umask="$(umask)"
+  umask 077
+  tmp="$(mktemp "${SECRET_DIR}/.${name}.XXXXXX")"
+  printf '%s\n' "$value" > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$file"
+  umask "$old_umask"
+  echo "secret: stored ${label} in $file"
+}
+
 # Install libjxl CLI tools (cjxl/djxl/jxlinfo) from the official statically
 # linked x86_64 release tarball. The published binaries are fully static (no
 # dynamic loader, no glibc version dependency), so they run on any amd64 Linux
@@ -376,10 +434,10 @@ install_dotnet() {
     curl -fsSL https://dot.net/v1/dotnet-install.sh | bash
     export DOTNET_ROOT="$HOME/.dotnet"
     export PATH="$DOTNET_ROOT:$DOTNET_ROOT/tools:$PATH"
-    
+
     local profile_file="${HOME}/.bashrc"
     [[ "$(uname -s)" == "Darwin" ]] && profile_file="${HOME}/.zshrc"
-    
+
     if ! grep -q "DOTNET_ROOT" "$profile_file" 2>/dev/null; then
         echo "" >> "$profile_file"
         echo '# .NET Core' >> "$profile_file"
@@ -387,7 +445,7 @@ install_dotnet() {
         echo 'export PATH="$DOTNET_ROOT:$DOTNET_ROOT/tools:$PATH"' >> "$profile_file"
         echo "install_dotnet: added DOTNET_ROOT to $profile_file"
     fi
-    
+
     echo "install_dotnet: done"
 }
 
@@ -662,7 +720,7 @@ else
   echo "claude: configuring global settings..."
   mkdir -pv "$CLAUDE_DIR/bin"
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  
+
   TARGET_STATUSLINE="$CLAUDE_DIR/bin/cc_statusline.sh"
   if [ -f "$SCRIPT_DIR/cc_statusline.sh" ]; then
     cp -fv "$SCRIPT_DIR/cc_statusline.sh" "$TARGET_STATUSLINE"
@@ -692,7 +750,7 @@ else
   echo "agy: configuring settings..."
   mkdir -pv "$AGY_DIR/bin"
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  
+
   TARGET_AGY_STATUSLINE="$AGY_DIR/bin/agy_statusline.sh"
   if [ -f "$SCRIPT_DIR/agy_statusline.sh" ]; then
     cp -fv "$SCRIPT_DIR/agy_statusline.sh" "$TARGET_AGY_STATUSLINE"
@@ -722,11 +780,11 @@ else
   echo "codex: configuring settings..."
   mkdir -p "$CODEX_DIR"
   CODEX_CONFIG="$CODEX_DIR/config.toml"
-  
+
   if [ ! -f "$CODEX_CONFIG" ]; then
     touch "$CODEX_CONFIG"
   fi
-  
+
   if grep -q "\[tui\]" "$CODEX_CONFIG"; then
     echo "codex: [tui] block already present -- skipping statusline preset"
   else
@@ -748,7 +806,7 @@ status_line = [
 EOF
     echo "codex: statusline preset configured"
   fi
-  
+
   touch "$CODEX_CONFIG_SENTINEL"
   echo "codex: config setup complete"
 fi
@@ -804,7 +862,65 @@ AGYD_EOF
 fi
 
 # ---------------------------------------------------------------------------
-# claudez alias + MCP servers setup - embed into shell profile if not present
+# jjw credential reader - embed into shell profile if not already present
+# ---------------------------------------------------------------------------
+JJW_SECRETS_MARKER="# >>> jjw-secrets >>>"
+
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> jjw-secrets >>>" "# <<< jjw-secrets <<<"
+fi
+
+if grep -qF "$JJW_SECRETS_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "jjw-secrets: already in $PROFILE -- skipping"
+else
+  cat >> "$PROFILE" << 'JJW_SECRETS_EOF'
+
+# >>> jjw-secrets >>>
+# _jjw_secret - Read one owner-only credential from ~/.config/jjw/s.
+_jjw_secret() {
+  local name="$1" dir file dir_mode mode
+  dir="${XDG_CONFIG_HOME:-${HOME}/.config}/jjw/s"
+  file="${dir}/${name}"
+
+  dir_mode="$(stat -c '%a' "$dir" 2>/dev/null || stat -f '%Lp' "$dir" 2>/dev/null)" || {
+    echo "secret: cannot inspect directory permissions: $dir" >&2
+    return 1
+  }
+  if [[ "$dir_mode" != "700" ]]; then
+    echo "secret: insecure permissions on $dir (expected 700, found $dir_mode)" >&2
+    return 1
+  fi
+
+  if [[ ! -f "$file" || -L "$file" ]]; then
+    echo "secret: missing regular file: $file" >&2
+    return 1
+  fi
+
+  mode="$(stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file" 2>/dev/null)" || {
+    echo "secret: cannot inspect permissions: $file" >&2
+    return 1
+  }
+  if [[ "$mode" != "600" ]]; then
+    echo "secret: insecure permissions on $file (expected 600, found $mode)" >&2
+    return 1
+  fi
+
+  local value
+  IFS= read -r value < "$file" || true
+  if [[ -z "$value" ]]; then
+    echo "secret: empty credential file: $file" >&2
+    return 1
+  fi
+  printf '%s' "$value"
+}
+# <<< jjw-secrets <<<
+JJW_SECRETS_EOF
+
+  echo "jjw-secrets: added to $PROFILE"
+fi
+
+# ---------------------------------------------------------------------------
+# claudez functions + MCP servers setup - embed into shell profile if absent
 # ---------------------------------------------------------------------------
 CLAUDEZ_MARKER="# >>> claudez >>>"
 
@@ -815,29 +931,27 @@ fi
 if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez: already in $PROFILE -- skipping"
 else
-  # Use existing env var if set, otherwise prompt
-  if [[ -z "${Z_AI_AUTH_TOKEN:-}" ]]; then
-    read -r -p "Enter your Z.AI API token for claudez alias + MCP servers: " Z_AI_AUTH_TOKEN
-  else
-    echo "claudez: detected Z_AI_AUTH_TOKEN from environment"
-  fi
+  ensure_secret z "Z.AI API token"
+  Z_AI_AUTH_TOKEN="$(read_secret z)"
 
-  if [[ -z "$Z_AI_AUTH_TOKEN" ]]; then
-    echo "claudez: token is empty, skipping alias and MCP setup"
-  else
-    # Add the claudez alias
+    # Add the claudez functions
     # about supported models: "All plans support GLM-5.2, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
     #   See https://docs.z.ai/devpack/latest-model for the current lineup.
     # about 1M context:
     #   GLM-5.2 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.2[1m]).
     #   Z.AI also requires CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000 to actually exercise the 1M window
     #   (this profile sets it for you). Other GLM models cap at 200K (GLM-5, GLM-5-Turbo) or 128K (GLM-4.5-Air).
-    cat >> "$PROFILE" << EOF
+    cat >> "$PROFILE" << 'EOF'
 
 # >>> claudez >>>
-# Custom Claude Code alias with Z.AI endpoint
-alias claudez='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
+# Custom Claude Code functions with Z.AI endpoint
+# claudez - Launch the high-effort Z.AI profile.
+claudez() {
+  local key
+  key="$(_jjw_secret z)" || return 1
+  Z_AI_AUTH_TOKEN="$key" \
+  ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$key" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.7" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2[1m]" \
@@ -847,21 +961,19 @@ alias claudez='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
   ENABLE_PROMPT_CACHING_1H="1" \
-  claude'
-alias claudezd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.7" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2[1m]" \
-  CLAUDE_CODE_SUBAGENT_MODEL="glm-4.7" \
-  CLAUDE_CODE_EFFORT_LEVEL="high" \
-  API_TIMEOUT_MS="3000000" \
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
-  CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
-  ENABLE_PROMPT_CACHING_1H="1" \
-  claude --dangerously-skip-permissions'
-alias claudezm='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
+  claude "$@"
+}
+# claudezd - Launch claudez without permission prompts.
+claudezd() {
+  claudez --dangerously-skip-permissions "$@"
+}
+# claudezm - Launch the maximum-effort Z.AI profile.
+claudezm() {
+  local key
+  key="$(_jjw_secret z)" || return 1
+  Z_AI_AUTH_TOKEN="$key" \
+  ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$key" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.2[1m]" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2[1m]" \
@@ -871,25 +983,19 @@ alias claudezm='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
   ENABLE_PROMPT_CACHING_1H="1" \
-  claude'
-alias claudezmd='ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.2[1m]" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2[1m]" \
-  CLAUDE_CODE_SUBAGENT_MODEL="glm-5.2[1m]" \
-  CLAUDE_CODE_EFFORT_LEVEL="max" \
-  API_TIMEOUT_MS="3000000" \
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
-  CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
-  ENABLE_PROMPT_CACHING_1H="1" \
-  claude --dangerously-skip-permissions'
+  claude "$@"
+}
+# claudezmd - Launch claudezm without permission prompts.
+claudezmd() {
+  claudezm --dangerously-skip-permissions "$@"
+}
 # <<< claudez <<<
 EOF
 
     # Configure MCP servers via Claude CLI (preferred over direct JSON edits)
     if command -v claude &>/dev/null; then
       CLAUDEZ_ENV=(
+        Z_AI_AUTH_TOKEN="$Z_AI_AUTH_TOKEN"
         ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
         ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN"
         API_TIMEOUT_MS="3000000"
@@ -903,7 +1009,9 @@ EOF
       if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "web-search-prime"; then
         echo "claudez: web-search-prime already exists -- skipping"
       else
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-search-prime https://api.z.ai/api/mcp/web_search_prime/mcp --header "Authorization: Bearer $Z_AI_AUTH_TOKEN" >/dev/null 2>&1; then
+        # Keep the placeholder literal for Claude Code to expand at runtime.
+        # shellcheck disable=SC2016
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-search-prime https://api.z.ai/api/mcp/web_search_prime/mcp --header 'Authorization: Bearer ${Z_AI_AUTH_TOKEN}' >/dev/null 2>&1; then
           echo "claudez: added web-search-prime"
         else
           echo "claudez: failed to add web-search-prime" >&2
@@ -915,7 +1023,8 @@ EOF
       if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "web-reader"; then
         echo "claudez: web-reader already exists -- skipping"
       else
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-reader https://api.z.ai/api/mcp/web_reader/mcp --header "Authorization: Bearer $Z_AI_AUTH_TOKEN" >/dev/null 2>&1; then
+        # shellcheck disable=SC2016
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-reader https://api.z.ai/api/mcp/web_reader/mcp --header 'Authorization: Bearer ${Z_AI_AUTH_TOKEN}' >/dev/null 2>&1; then
           echo "claudez: added web-reader"
         else
           echo "claudez: failed to add web-reader" >&2
@@ -927,7 +1036,8 @@ EOF
       if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "zread"; then
         echo "claudez: zread already exists -- skipping"
       else
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http zread https://api.z.ai/api/mcp/zread/mcp --header "Authorization: Bearer $Z_AI_AUTH_TOKEN" >/dev/null 2>&1; then
+        # shellcheck disable=SC2016
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http zread https://api.z.ai/api/mcp/zread/mcp --header 'Authorization: Bearer ${Z_AI_AUTH_TOKEN}' >/dev/null 2>&1; then
           echo "claudez: added zread"
         else
           echo "claudez: failed to add zread" >&2
@@ -939,20 +1049,20 @@ EOF
       if env "${CLAUDEZ_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "zai-mcp-server"; then
         echo "claudez: zai-mcp-server already exists -- skipping"
       else
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user zai-mcp-server --env Z_AI_API_KEY=$Z_AI_AUTH_TOKEN Z_AI_MODE=ZAI -- npx -y @z_ai/mcp-server >/dev/null 2>&1; then
+        # shellcheck disable=SC2016
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user zai-mcp-server --env 'Z_AI_API_KEY=${Z_AI_AUTH_TOKEN}' Z_AI_MODE=ZAI -- npx -y @z_ai/mcp-server >/dev/null 2>&1; then
           echo "claudez: added zai-mcp-server"
         else
           echo "claudez: failed to add zai-mcp-server" >&2
         fi
       fi
 
-      echo "claudez: alias added to $PROFILE"
+      echo "claudez: functions added to $PROFILE"
       echo "claudez: MCP setup complete"
     else
-      echo "claudez: alias added to $PROFILE"
+      echo "claudez: functions added to $PROFILE"
       echo "WARNING: claude CLI not found, skipping MCP server configuration"
     fi
-  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -967,22 +1077,18 @@ fi
 if grep -qF "$CLAUDEDS_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudeds: already in $PROFILE -- skipping"
 else
-  # Use existing env var if set, otherwise prompt
-  if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
-    read -r -p "Enter your DeepSeek API key for claudeds alias setup: " DEEPSEEK_API_KEY
-  else
-    echo "claudeds: detected DEEPSEEK_API_KEY from environment"
-  fi
-
-  if [[ -z "$DEEPSEEK_API_KEY" ]]; then
-    echo "claudeds: key is empty, skipping alias setup"
-  else
-    cat >> "$PROFILE" << EOF
+  ensure_secret ds "DeepSeek API key"
+  cat >> "$PROFILE" << 'EOF'
 
 # >>> claudeds >>>
-# Custom Claude Code alias with DeepSeek endpoint
-alias claudeds='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
+# Custom Claude Code functions with DeepSeek endpoint
+# claudeds - Launch the maximum-effort DeepSeek profile.
+claudeds() {
+  local key
+  key="$(_jjw_secret ds)" || return 1
+  DEEPSEEK_API_KEY="$key" \
+  ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$key" \
   ANTHROPIC_MODEL="deepseek-v4-pro[1m]" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash[1m]" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]" \
@@ -991,20 +1097,19 @@ alias claudeds='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   CLAUDE_CODE_EFFORT_LEVEL="max" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   ENABLE_PROMPT_CACHING_1H="1" \
-  claude'
-alias claudedsd='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
-  ANTHROPIC_MODEL="deepseek-v4-pro[1m]" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash[1m]" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]" \
-  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash[1m]" \
-  CLAUDE_CODE_EFFORT_LEVEL="max" \
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
-  ENABLE_PROMPT_CACHING_1H="1" \
-  claude --dangerously-skip-permissions'
-alias claudeds2='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
+  claude "$@"
+}
+# claudedsd - Launch claudeds without permission prompts.
+claudedsd() {
+  claudeds --dangerously-skip-permissions "$@"
+}
+# claudeds2 - Launch the high-effort DeepSeek Flash profile.
+claudeds2() {
+  local key
+  key="$(_jjw_secret ds)" || return 1
+  DEEPSEEK_API_KEY="$key" \
+  ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$key" \
   ANTHROPIC_MODEL="deepseek-v4-flash[1m]" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash[1m]" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-flash[1m]" \
@@ -1013,24 +1118,16 @@ alias claudeds2='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   CLAUDE_CODE_EFFORT_LEVEL="high" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   ENABLE_PROMPT_CACHING_1H="1" \
-  claude'
-alias claudeds2d='ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$DEEPSEEK_API_KEY" \
-  ANTHROPIC_MODEL="deepseek-v4-flash[1m]" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash[1m]" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-flash[1m]" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]" \
-  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash[1m]" \
-  CLAUDE_CODE_EFFORT_LEVEL="high" \
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
-  ENABLE_PROMPT_CACHING_1H="1" \
-  claude --dangerously-skip-permissions'
-export DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
+  claude "$@"
+}
+# claudeds2d - Launch claudeds2 without permission prompts.
+claudeds2d() {
+  claudeds2 --dangerously-skip-permissions "$@"
+}
 # <<< claudeds <<<
 EOF
 
-    echo "claudeds: added to $PROFILE"
-  fi
+  echo "claudeds: added to $PROFILE"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1045,29 +1142,20 @@ fi
 if grep -qF "$CLAUDEK_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudek: already in $PROFILE -- skipping"
 else
-  # Use existing env var if set, otherwise prompt.
-  if [[ -z "${KIMI_API_KEY:-}" ]]; then
-    read -r -p "Enter your Kimi API key for claudek setup: " KIMI_API_KEY
-  else
-    echo "claudek: detected KIMI_API_KEY from environment"
-  fi
-
-  if [[ -z "$KIMI_API_KEY" ]]; then
-    echo "claudek: key is empty, skipping function setup"
-  else
-    cat >> "$PROFILE" << EOF
+  ensure_secret k "Kimi API key"
+  cat >> "$PROFILE" << 'EOF'
 
 # >>> claudek >>>
 # Custom Claude Code functions with Kimi endpoint
+# claudek - Launch the maximum-effort Kimi profile.
 claudek() {
-  if [[ -z "\${KIMI_API_KEY:-}" ]]; then
-    echo "claudek: KIMI_API_KEY is not set. Aborting." >&2
-    return 1
-  fi
+  local key
+  key="$(_jjw_secret k)" || return 1
 
   env -u ANTHROPIC_AUTH_TOKEN \
+    KIMI_API_KEY="$key" \
     ANTHROPIC_BASE_URL="https://api.kimi.com/coding/" \
-    ANTHROPIC_API_KEY="\$KIMI_API_KEY" \
+    ANTHROPIC_API_KEY="$key" \
     ANTHROPIC_MODEL="k3[1m]" \
     ANTHROPIC_DEFAULT_FABLE_MODEL="k3[1m]" \
     ANTHROPIC_DEFAULT_OPUS_MODEL="k3[1m]" \
@@ -1077,19 +1165,18 @@ claudek() {
     CLAUDE_CODE_AUTO_COMPACT_WINDOW="1048576" \
     CLAUDE_CODE_MAX_CONTEXT_TOKENS="1048576" \
     CLAUDE_CODE_EFFORT_LEVEL="max" \
-    claude "\$@"
+    claude "$@"
 }
 
+# claudekd - Launch claudek without permission prompts.
 claudekd() {
-  claudek "\$@" --dangerously-skip-permissions
+  claudek --dangerously-skip-permissions "$@"
 }
 
-export KIMI_API_KEY="$KIMI_API_KEY"
 # <<< claudek <<<
 EOF
 
-    echo "claudek: added to $PROFILE"
-  fi
+  echo "claudek: added to $PROFILE"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1104,10 +1191,8 @@ fi
 if grep -qF "$CLAUDEZR_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez-remote: already in $PROFILE -- skipping"
 else
-  if [[ -n "${Z_AI_AUTH_TOKEN:-}" ]]; then
-    # Quoted heredoc — no variable expansion, so $ signs in function bodies
-    # are written verbatim to the profile.
-    cat >> "$PROFILE" << 'CLAUDERZR_EOF'
+  # Quoted heredoc -- write function variables verbatim to the profile.
+  cat >> "$PROFILE" << 'CLAUDERZR_EOF'
 # >>> claudez-remote >>>
 
 # _claude_sq - single-quote escape a value for safe bash embedding.
@@ -1189,14 +1274,8 @@ claudezr() {
 
   [[ -z "$host" ]] && { echo "claudezr: host is required" >&2; echo "  Usage: claudezr <user@host> [port]" >&2; return 1; }
 
-  local key="${Z_AI_AUTH_TOKEN:-}"
-  if [[ -z "$key" ]]; then
-    echo "claudezr: Z_AI_AUTH_TOKEN is not set. Aborting." >&2
-    echo "" >&2
-    echo "Set it in your shell profile then reload:" >&2
-    echo "  export Z_AI_AUTH_TOKEN='<your_token>'" >&2
-    return 1
-  fi
+  local key
+  key="$(_jjw_secret z)" || return 1
 
   # Matches the local claudezm profile: glm-5.2[1m] for Sonnet/Opus/Subagent,
   # effort=max, 1M context enabled via CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
@@ -1214,16 +1293,9 @@ claudezr() {
 
 CLAUDERZR_EOF
 
-    # Token export : separate from the quoted heredoc so $Z_AI_AUTH_TOKEN expands.
-    {
-      echo "export Z_AI_AUTH_TOKEN=\"$Z_AI_AUTH_TOKEN\""
-      echo "# <<< claudez-remote <<<"
-    } >> "$PROFILE"
+  echo "# <<< claudez-remote <<<" >> "$PROFILE"
 
-    echo "claudez-remote: added to $PROFILE"
-  else
-    echo "claudez-remote: Z_AI_AUTH_TOKEN not set, skipping (run claudez setup first)"
-  fi
+  echo "claudez-remote: added to $PROFILE"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1238,24 +1310,22 @@ fi
 if grep -qF "$CLAUDEMM_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudemm: already in $PROFILE -- skipping"
 else
-  # Use existing env var if set, otherwise prompt
-  if [[ -z "${MINIMAX_API_KEY:-}" ]]; then
-    read -r -p "Enter your MiniMax API key for claudemm alias + MCP server: " MINIMAX_API_KEY
-  else
-    echo "claudemm: detected MINIMAX_API_KEY from environment"
-  fi
+  ensure_secret mm "MiniMax API key"
+  MINIMAX_API_KEY="$(read_secret mm)"
 
-  if [[ -z "$MINIMAX_API_KEY" ]]; then
-    echo "claudemm: key is empty, skipping alias and MCP setup"
-  else
-    # Add the claudemm aliases
+    # Add the claudemm functions
     # https://platform.minimax.io/docs/token-plan/claude-code
-    cat >> "$PROFILE" << EOF
+    cat >> "$PROFILE" << 'EOF'
 
 # >>> claudemm >>>
-# Custom Claude Code alias with MiniMax endpoint
-alias claudemm='ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY" \
+# Custom Claude Code functions with MiniMax endpoint
+# claudemm - Launch the MiniMax profile.
+claudemm() {
+  local key
+  key="$(_jjw_secret mm)" || return 1
+  MINIMAX_API_KEY="$key" \
+  ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
+  ANTHROPIC_AUTH_TOKEN="$key" \
   ANTHROPIC_MODEL="MiniMax-M3[1m]" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M3[1m]" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M3[1m]" \
@@ -1263,24 +1333,19 @@ alias claudemm='ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   ENABLE_PROMPT_CACHING_1H="1" \
-  claude'
-alias claudemmd='ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
-  ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY" \
-  ANTHROPIC_MODEL="MiniMax-M3[1m]" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M3[1m]" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M3[1m]" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M3[1m]" \
-  API_TIMEOUT_MS="3000000" \
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
-  ENABLE_PROMPT_CACHING_1H="1" \
-  claude --dangerously-skip-permissions'
-export MINIMAX_API_KEY="$MINIMAX_API_KEY"
+  claude "$@"
+}
+# claudemmd - Launch claudemm without permission prompts.
+claudemmd() {
+  claudemm --dangerously-skip-permissions "$@"
+}
 # <<< claudemm <<<
 EOF
 
     # Configure MiniMax MCP server via Claude CLI
     if command -v claude &>/dev/null; then
       CLAUDEMM_ENV=(
+        MINIMAX_API_KEY="$MINIMAX_API_KEY"
         ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
         ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY"
         ANTHROPIC_MODEL="MiniMax-M3[1m]"
@@ -1298,20 +1363,21 @@ EOF
       if env "${CLAUDEMM_ENV[@]}" claude mcp list 2>/dev/null | grep -Fqi "minimax"; then
         echo "claudemm: MiniMax MCP server already exists -- skipping"
       else
-        if env "${CLAUDEMM_ENV[@]}" claude mcp add -s user MiniMax --env MINIMAX_API_KEY="$MINIMAX_API_KEY" --env MINIMAX_API_HOST=https://api.minimax.io -- uvx minimax-coding-plan-mcp -y >/dev/null 2>&1; then
+        # Keep the placeholder literal for Claude Code to expand at runtime.
+        # shellcheck disable=SC2016
+        if env "${CLAUDEMM_ENV[@]}" claude mcp add -s user MiniMax --env 'MINIMAX_API_KEY=${MINIMAX_API_KEY}' --env MINIMAX_API_HOST=https://api.minimax.io -- uvx minimax-coding-plan-mcp -y >/dev/null 2>&1; then
           echo "claudemm: added MiniMax MCP server"
         else
           echo "claudemm: failed to add MiniMax MCP server" >&2
         fi
       fi
 
-      echo "claudemm: alias added to $PROFILE"
+      echo "claudemm: functions added to $PROFILE"
       echo "claudemm: MCP setup complete"
     else
-      echo "claudemm: alias added to $PROFILE"
+      echo "claudemm: functions added to $PROFILE"
       echo "WARNING: claude CLI not found, skipping MCP server configuration"
     fi
-  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -1326,10 +1392,8 @@ fi
 if grep -qF "$CLAUDEMMR_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudemm-remote: already in $PROFILE -- skipping"
 else
-  if [[ -n "${MINIMAX_API_KEY:-}" ]]; then
-    # Quoted heredoc — no variable expansion, so $ signs in function bodies
-    # are written verbatim to the profile.
-    cat >> "$PROFILE" << 'CLAUEMMR_EOF'
+  # Quoted heredoc -- write function variables verbatim to the profile.
+  cat >> "$PROFILE" << 'CLAUEMMR_EOF'
 # >>> claudemm-remote >>>
 
 # claudemmr - One-shot remote Claude Code via MiniMax.
@@ -1339,14 +1403,8 @@ claudemmr() {
 
   [[ -z "$host" ]] && { echo "claudemmr: host is required" >&2; echo "  Usage: claudemmr <user@host> [port]" >&2; return 1; }
 
-  local key="${MINIMAX_API_KEY:-}"
-  if [[ -z "$key" ]]; then
-    echo "claudemmr: MINIMAX_API_KEY is not set. Aborting." >&2
-    echo "" >&2
-    echo "Set it in your shell profile then reload:" >&2
-    echo "  export MINIMAX_API_KEY='<your_key>'" >&2
-    return 1
-  fi
+  local key
+  key="$(_jjw_secret mm)" || return 1
 
   remote_claude_base "$host" "$key" "$port" \
     "https://api.minimax.io/anthropic" \
@@ -1359,18 +1417,9 @@ claudemmr() {
 
 CLAUEMMR_EOF
 
-    # Key export : separate from the quoted heredoc so $MINIMAX_API_KEY expands.
-    # (Already exported above in the claudemm section, but re-export for safety
-    #  if claudemm was skipped but claudemm-remote runs standalone.)
-    {
-      echo "export MINIMAX_API_KEY=\"$MINIMAX_API_KEY\""
-      echo "# <<< claudemm-remote <<<"
-    } >> "$PROFILE"
+  echo "# <<< claudemm-remote <<<" >> "$PROFILE"
 
-    echo "claudemm-remote: added to $PROFILE"
-  else
-    echo "claudemm-remote: MINIMAX_API_KEY not set, skipping (run claudemm setup first)"
-  fi
+  echo "claudemm-remote: added to $PROFILE"
 fi
 
 if $FORCE_REINSTALL; then
