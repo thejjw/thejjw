@@ -107,7 +107,12 @@ try {
             $percent = [int]($bucket.remainingFraction * 100)
             $color = if ($percent -gt 50) { "Green" } elseif ($percent -gt 20) { "Yellow" } else { "Red" }
             Write-Host "    - $($bucket.displayName) ($($bucket.window)) : " -NoNewline
-            Write-Host "$($percent)%" -ForegroundColor $color
+            Write-Host "$($percent)% remaining" -ForegroundColor $color -NoNewline
+            if ($bucket.description) {
+                Write-Host " ($($bucket.description))" -ForegroundColor DarkGray
+            } else {
+                Write-Host " (Quota available)" -ForegroundColor DarkGray
+            }
         }
     }
 } catch {
