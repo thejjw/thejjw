@@ -945,10 +945,28 @@ else
 
 # >>> claudez >>>
 # Custom Claude Code functions with Z.AI endpoint
+# _zai_peak_warning - Briefly warn when Z.AI's UTC+8 peak window is active.
+_zai_peak_warning() {
+  local utc hour minute second minutes_left
+  utc="$(date -u +%H:%M:%S)" || return 0
+  IFS=: read -r hour minute second <<< "$utc"
+  hour="${hour#0}"; minute="${minute#0}"; second="${second#0}"
+  hour="${hour:-0}"; minute="${minute:-0}"; second="${second:-0}"
+
+  # 14:00-18:00 UTC+8 is 06:00-10:00 UTC.
+  if (( hour >= 6 && hour < 10 )); then
+    minutes_left=$(( (10 * 3600 - hour * 3600 - minute * 60 - second + 59) / 60 ))
+    printf 'Z.AI peak hours are active (14:00-18:00 UTC+8); ends in %dh %dm. Launching in 3 seconds...\n' \
+      "$((minutes_left / 60))" "$((minutes_left % 60))" >&2
+    sleep 3
+  fi
+}
+
 # claudez - Launch the high-effort Z.AI profile.
 claudez() {
   local key
   key="$(_jjw_secret z)" || return 1
+  _zai_peak_warning
   Z_AI_AUTH_TOKEN="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
@@ -971,6 +989,7 @@ claudezd() {
 claudezm() {
   local key
   key="$(_jjw_secret z)" || return 1
+  _zai_peak_warning
   Z_AI_AUTH_TOKEN="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
