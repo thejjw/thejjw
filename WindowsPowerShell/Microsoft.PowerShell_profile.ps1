@@ -191,6 +191,7 @@ Use MiniMax MCP server for:
 - Image understanding (``understand_image``)
 
 **When using DeepSeek models (deepseek-*):**
+Use Claude Code's built-in Web Search tool for web searches; DeepSeek supports it natively through its API. Web Search incurs additional model token costs because DeepSeek makes extra LLM API requests to summarize retrieved content. Reference: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
 Use MiniMax MCP and Z.ai MCP servers, if available, for image analysis because DeepSeek models are text-only. Fall back to other available means if those MCP tools are unavailable or underperforming.
 
 **When using genuine Anthropic account (Claude Code with native models):**
