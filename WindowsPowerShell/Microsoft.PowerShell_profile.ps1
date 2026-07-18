@@ -6748,10 +6748,9 @@ function Install-AiTools {
                 Write-Host "Failed to install grok: $_" -ForegroundColor Red
             }
         } else {
-            Write-Host "grok CLI is already installed." -ForegroundColor Green
+            # If grok is present, ensure it's configured with the default settings
+            Install-GrokSettings
         }
-        # Always run Grok settings configuration when MoreAi is enabled
-        Install-GrokSettings
     }
 
     # Create a docker.bat shim so tools that hardcode `docker` commands
