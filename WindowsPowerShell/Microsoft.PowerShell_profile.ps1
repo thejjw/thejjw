@@ -8451,8 +8451,19 @@ function Get-AgyUsage {
         [string]$Project,
         [ValidateRange(1, 300)]
         [int]$TimeoutSec = 8,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 30,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 10,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
         [switch]$All
     )
+
+    if ($CriticalPercent -gt $LowPercent) {
+        Write-Error 'CriticalPercent must be less than or equal to LowPercent.'
+        return
+    }
 
     # 1. Define C# type for CredRead if not already loaded in the session
     if (-not ([System.Management.Automation.PSTypeName]'AgyCredentialHelper').Type) {
@@ -8578,6 +8589,8 @@ function Get-AgyUsage {
 
     $_ProfileHelpers.WriteSection('Antigravity Grouped Quota Status')
 
+    $concerns = New-Object System.Collections.Generic.List[string]
+
     foreach ($group in $resp.groups) {
         $groupDesc = if ($group.description) { " ($($group.description))" } else { "" }
         Write-Host "  * Group: $($group.displayName)$groupDesc" -ForegroundColor Cyan
@@ -8619,8 +8632,42 @@ function Get-AgyUsage {
                 Status      = $statusText
                 Reset_Local = $resetLocalStr
             })
+
+            # Check concerns thresholds
+            if ($percentVal -le $CriticalPercent) {
+                $concerns.Add(("[CRITICAL] {0} ({1}): only {2:N2}% remaining" -f $group.displayName, $bucket.displayName, $percentVal))
+            } elseif ($percentVal -le $LowPercent) {
+                $concerns.Add(("[LOW]      {0} ({1}): {2:N2}% remaining" -f $group.displayName, $bucket.displayName, $percentVal))
+            }
+
+            # Check reset time proximity warnings
+            if ($bucket.resetTime) {
+                $resetDto = [DateTimeOffset]::MinValue
+                if ([DateTimeOffset]::TryParse($bucket.resetTime, [ref]$resetDto)) {
+                    $resetLocal = $resetDto.ToLocalTime().LocalDateTime
+                    $resetDelta = $resetLocal - (Get-Date)
+                    if ($resetDelta.TotalSeconds -gt 0 -and $resetDelta.TotalHours -le $ResetWarnHours) {
+                        $concerns.Add(("[INFO]     {0} ({1}): resets in {2}" -f $group.displayName, $bucket.displayName, ($_ProfileHelpers.FormatDuration($resetDelta))))
+                    }
+                }
+            }
         }
         $rows | Format-Table -AutoSize | Out-Host
+    }
+
+    $_ProfileHelpers.WriteSection('Concerns (Antigravity)')
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) {
+            if ($concern -like '*CRITICAL*') {
+                Write-Host ('  - ' + $concern) -ForegroundColor Red
+            } elseif ($concern -like '*LOW*') {
+                Write-Host ('  - ' + $concern) -ForegroundColor Yellow
+            } else {
+                Write-Host ('  - ' + $concern) -ForegroundColor Gray
+            }
+        }
     }
 
     return $resp
