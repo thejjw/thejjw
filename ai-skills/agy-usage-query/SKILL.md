@@ -1,6 +1,6 @@
 ---
 name: agy-usage-query
-description: Query Antigravity CLI usage quotas (Gemini Flash/Pro models) from the private Cloud Code Assist endpoint
+description: Query Antigravity CLI usage quotas (Gemini, Claude, GPT models) from the private Cloud Code Assist endpoint
 metadata:
   audience: developers
   workflow: agy-monitoring
@@ -89,22 +89,26 @@ if (Test-Path $projectFile) {
     $project = (Get-Content $projectFile).Trim()
 }
 
-# 3. Call the retrieveUserQuota endpoint
+# 3. Call the retrieveUserQuotaSummary endpoint
 $headers = @{
     "Authorization" = "Bearer $accessToken"
     "Content-Type"  = "application/json"
+    "User-Agent"    = "vscode/1.X.X (Antigravity/4.3.0)"
 }
 $body = @{ "project" = $project } | ConvertTo-Json
 
 try {
-    $response = Invoke-RestMethod -Uri "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota" -Method Post -Headers $headers -Body $body
+    $response = Invoke-RestMethod -Uri "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary" -Method Post -Headers $headers -Body $body
     
-    Write-Host "Antigravity Model Quota Status:" -ForegroundColor Cyan
-    foreach ($bucket in $response.buckets) {
-        $percent = [int]($bucket.remainingFraction * 100)
-        $color = if ($percent -gt 50) { "Green" } elseif ($percent -gt 20) { "Yellow" } else { "Red" }
-        Write-Host " - $($bucket.modelId) : " -NoNewline
-        Write-Host "$($percent)%" -ForegroundColor $color
+    Write-Host "Antigravity Grouped Quota Status:" -ForegroundColor Cyan
+    foreach ($group in $response.groups) {
+        Write-Host "  * Group: $($group.displayName)" -ForegroundColor Cyan
+        foreach ($bucket in $group.buckets) {
+            $percent = [int]($bucket.remainingFraction * 100)
+            $color = if ($percent -gt 50) { "Green" } elseif ($percent -gt 20) { "Yellow" } else { "Red" }
+            Write-Host "    - $($bucket.displayName) ($($bucket.window)) : " -NoNewline
+            Write-Host "$($percent)%" -ForegroundColor $color
+        }
     }
 } catch {
     Write-Error "Failed to retrieve quota: $_"
@@ -132,12 +136,13 @@ if [ -f "$project_file" ]; then
   project=$(cat "$project_file" | xargs)
 fi
 
-# 3. Call the retrieveUserQuota endpoint
+# 3. Call the retrieveUserQuotaSummary endpoint
 curl -s -X POST \
   -H "Authorization: Bearer $access_token" \
   -H "Content-Type: application/json" \
+  -H "User-Agent: vscode/1.X.X (Antigravity/4.3.0)" \
   -d "{\"project\": \"$project\"}" \
-  https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota | python3 -m json.tool
+  https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary | python3 -m json.tool
 ```
 
 ### Linux (Bash / Zsh)
@@ -162,12 +167,13 @@ if [ -f "$project_file" ]; then
   project=$(cat "$project_file" | xargs)
 fi
 
-# 3. Call the retrieveUserQuota endpoint
+# 3. Call the retrieveUserQuotaSummary endpoint
 curl -s -X POST \
   -H "Authorization: Bearer $access_token" \
   -H "Content-Type: application/json" \
+  -H "User-Agent: vscode/1.X.X (Antigravity/4.3.0)" \
   -d "{\"project\": \"$project\"}" \
-  https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota | python3 -m json.tool
+  https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary | python3 -m json.tool
 ```
 
 #### Headless / Terminal-Only Environments (WSL, Docker, SSH)
@@ -190,31 +196,50 @@ if [ -f "$project_file" ]; then
   project=$(cat "$project_file" | xargs)
 fi
 
-# 3. Call the retrieveUserQuota endpoint
+# 3. Call the retrieveUserQuotaSummary endpoint
 curl -s -X POST \
   -H "Authorization: Bearer $access_token" \
   -H "Content-Type: application/json" \
+  -H "User-Agent: vscode/1.X.X (Antigravity/4.3.0)" \
   -d "{\"project\": \"$project\"}" \
-  https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota | python3 -m json.tool
+  https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary | python3 -m json.tool
 ```
 
 ## Response format
 
-The private API response contains an array of quota buckets:
+The private API response contains an array of quota groups:
 
 ```json
 {
-  "buckets": [
+  "groups": [
     {
-      "modelId": "gemini-3.1-pro-preview",
-      "tokenType": "REQUESTS",
-      "remainingFraction": 1.0,
-      "resetTime": "2026-07-19T03:32:08Z"
+      "buckets": [
+        {
+          "bucketId": "gemini-weekly",
+          "displayName": "Weekly Limit",
+          "window": "weekly",
+          "resetTime": "2026-07-25T01:43:09Z",
+          "description": "You have used some of your weekly limit, it will fully refresh in 6 days, 21 hours.",
+          "remainingFraction": 0.9634628
+        },
+        {
+          "bucketId": "gemini-5h",
+          "displayName": "Five Hour Limit",
+          "window": "5h",
+          "resetTime": "2026-07-18T06:43:09Z",
+          "description": "You have used some of your 5-hour limit, it will fully refresh in 2 hours, 43 minutes.",
+          "remainingFraction": 0.6678439
+        }
+      ],
+      "displayName": "Gemini Models",
+      "description": "Models within this group: Gemini Flash, Gemini Pro"
     }
   ]
 }
 ```
 
-- **`modelId`**: The specific model identifier.
+- **`groups`**: Array of model grouping categories (e.g., Gemini Models, Claude/GPT Models).
+- **`displayName`**: Human-readable name of the limit window or group.
 - **`remainingFraction`**: A value from `0.0` to `1.0` representing the portion of remaining quota.
-- **`resetTime`**: ISO timestamp when the quota bucket refreshes.
+- **`resetTime`**: ISO timestamp when the quota window refreshes.
+- **`window`**: Duration type (`weekly` or `5h`).
