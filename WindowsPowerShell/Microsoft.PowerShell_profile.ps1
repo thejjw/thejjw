@@ -8586,26 +8586,38 @@ function Get-AgyUsage {
         foreach ($bucket in $group.buckets) {
             $percentVal = [double]($bucket.remainingFraction * 100)
             
-            $resetText = 'n/a'
-            if ($bucket.resetTime) {
-                $resetDto = [DateTimeOffset]::MinValue
-                if ([DateTimeOffset]::TryParse($bucket.resetTime, [ref]$resetDto)) {
-                    $resetLocal = $resetDto.ToLocalTime().LocalDateTime
-                    $resetDelta = $resetLocal - (Get-Date)
-                    if ($resetDelta.TotalSeconds -gt 0) {
-                        $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
-                    } else {
-                        $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+            $statusText = 'Quota available'
+            if ($percentVal -lt 100.0) {
+                if ($bucket.resetTime) {
+                    $resetDto = [DateTimeOffset]::MinValue
+                    if ([DateTimeOffset]::TryParse($bucket.resetTime, [ref]$resetDto)) {
+                        $resetLocal = $resetDto.ToLocalTime().LocalDateTime
+                        $resetDelta = $resetLocal - (Get-Date)
+                        if ($resetDelta.TotalSeconds -gt 0) {
+                            $h = [math]::Floor($resetDelta.TotalHours)
+                            $m = $resetDelta.Minutes
+                            $statusText = 'Refreshes in {0}h {1}m' -f $h, $m
+                        } else {
+                            $statusText = 'Reset due'
+                        }
                     }
                 }
             }
 
+            $resetLocalStr = 'n/a'
+            if ($bucket.resetTime) {
+                $resetDto = [DateTimeOffset]::MinValue
+                if ([DateTimeOffset]::TryParse($bucket.resetTime, [ref]$resetDto)) {
+                    $resetLocalStr = $resetDto.ToLocalTime().LocalDateTime.ToString('yyyy-MM-dd HH:mm')
+                }
+            }
+
             $rows.Add([pscustomobject]@{
-                Window            = $bucket.window
-                Limit_Name        = $bucket.displayName
-                Remaining_Percent = '{0:N2}%' -f $percentVal
-                Reset_Time        = $resetText
-                Description       = $bucket.description
+                Window      = $bucket.window
+                Limit_Name  = $bucket.displayName
+                Remaining   = '{0:N2}%' -f $percentVal
+                Status      = $statusText
+                Reset_Local = $resetLocalStr
             })
         }
         $rows | Format-Table -AutoSize | Out-Host
