@@ -8419,7 +8419,7 @@ function Get-KimiUsage {
 }
 
 # --- Get-AgyUsage ----------------------------------------------------------
-# Queries Antigravity's private cloudcode-pa retrieveUserQuota API endpoint.
+# Queries Antigravity's private cloudcode-pa retrieveUserQuotaSummary API endpoint.
 # Extracts generic credentials from Windows Credential Manager under 'gemini:antigravity'.
 # Stashes the parsed response in $Global:agyLastQuery and returns it.
 
@@ -8430,7 +8430,7 @@ function Get-AgyUsage {
 .DESCRIPTION
     Retrieves the active Google OAuth token for "gemini:antigravity" from the Windows
     Credential Manager using Win32 CredRead, reads the active project from the Antigravity cache,
-    and calls the private cloudcode-pa retrieveUserQuota API endpoint. Reports remaining fraction,
+    and calls the private cloudcode-pa retrieveUserQuotaSummary API endpoint. Reports remaining fraction,
     limit status, and reset times for each Gemini model.
 .PARAMETER Project
     Google Cloud Project ID. Defaults to the value cached in ~/.gemini/antigravity-cli/cache/default_project_id.txt.
@@ -8537,18 +8537,33 @@ function Get-AgyUsage {
         }
     }
 
-    # 4. Invoke Quota endpoint
+    # 4. Invoke Quota Summary endpoints with fallback
     $headers = @{
         "Authorization" = "Bearer $accessToken"
         "Content-Type"  = "application/json"
+        "User-Agent"    = "vscode/1.X.X (Antigravity/4.3.0)"
     }
     $body = @{ "project" = $Project } | ConvertTo-Json
 
+    $endpoints = @(
+        "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+        "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
+    )
+
     $resp = $null
-    try {
-        $resp = Invoke-RestMethod -Uri "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota" -Method Post -Headers $headers -Body $body -TimeoutSec $TimeoutSec -ErrorAction Stop
-    } catch {
-        Write-Error "Antigravity retrieveUserQuota API call failed: $($_.Exception.Message)"
+    $success = $false
+    foreach ($url in $endpoints) {
+        try {
+            $resp = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -TimeoutSec $TimeoutSec -ErrorAction Stop
+            $success = $true
+            break
+        } catch {
+            # Fallback to the next endpoint
+        }
+    }
+
+    if (-not $success) {
+        Write-Error "Antigravity retrieveUserQuotaSummary API call failed on all endpoints."
         return
     }
 
@@ -8561,35 +8576,40 @@ function Get-AgyUsage {
         Write-Host '  (suppressed; stored in $Global:agyLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray 
     }
 
-    $_ProfileHelpers.WriteSection('Antigravity Model Quota Status')
-    
-    $rows = New-Object System.Collections.Generic.List[object]
-    foreach ($bucket in $resp.buckets) {
-        $percent = [int]($bucket.remainingFraction * 100)
+    $_ProfileHelpers.WriteSection('Antigravity Grouped Quota Status')
+
+    foreach ($group in $resp.groups) {
+        $groupDesc = if ($group.description) { " ($($group.description))" } else { "" }
+        Write-Host "  * Group: $($group.displayName)$groupDesc" -ForegroundColor Cyan
         
-        $resetText = 'n/a'
-        if ($bucket.resetTime) {
-            $resetDto = [DateTimeOffset]::MinValue
-            if ([DateTimeOffset]::TryParse($bucket.resetTime, [ref]$resetDto)) {
-                $resetLocal = $resetDto.ToLocalTime().LocalDateTime
-                $resetDelta = $resetLocal - (Get-Date)
-                if ($resetDelta.TotalSeconds -gt 0) {
-                    $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
-                } else {
-                    $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+        $rows = New-Object System.Collections.Generic.List[object]
+        foreach ($bucket in $group.buckets) {
+            $percentVal = [double]($bucket.remainingFraction * 100)
+            
+            $resetText = 'n/a'
+            if ($bucket.resetTime) {
+                $resetDto = [DateTimeOffset]::MinValue
+                if ([DateTimeOffset]::TryParse($bucket.resetTime, [ref]$resetDto)) {
+                    $resetLocal = $resetDto.ToLocalTime().LocalDateTime
+                    $resetDelta = $resetLocal - (Get-Date)
+                    if ($resetDelta.TotalSeconds -gt 0) {
+                        $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
+                    } else {
+                        $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+                    }
                 }
             }
+
+            $rows.Add([pscustomobject]@{
+                Window            = $bucket.window
+                Limit_Name        = $bucket.displayName
+                Remaining_Percent = '{0:N2}%' -f $percentVal
+                Reset_Time        = $resetText
+                Description       = $bucket.description
+            })
         }
-
-        $rows.Add([pscustomobject]@{
-            Model              = $bucket.modelId
-            TokenType          = $bucket.tokenType
-            Remaining_Percent  = "$percent%"
-            Reset_Time         = $resetText
-        })
+        $rows | Format-Table -AutoSize | Out-Host
     }
-
-    $rows | Format-Table -AutoSize | Out-Host
 
     return $resp
 }
