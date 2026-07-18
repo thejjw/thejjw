@@ -248,3 +248,11 @@ The private API response contains an array of quota groups:
 - **`remainingFraction`**: A value from `0.0` to `1.0` representing the portion of remaining quota.
 - **`resetTime`**: ISO timestamp when the quota window refreshes.
 - **`window`**: Duration type (`weekly` or `5h`).
+
+## Profile Integration (`Get-AgyUsage`)
+
+For interactive monitoring, the `Get-AgyUsage` helper integrated in the Windows PowerShell profile wraps this query skill with proactive threshold monitoring and flags warnings under a `Concerns (Antigravity)` section:
+- **`-LowPercent`** (default `30`): Flags a `[LOW]` warning if remaining quota drops below this threshold.
+- **`-CriticalPercent`** (default `10`): Flags a `[CRITICAL]` error warning if remaining quota drops below this threshold.
+- **`-ResetWarnHours`** (default `1`): Flags an `[INFO]` concern if a quota window resets within this many hours.
+
