@@ -4286,6 +4286,128 @@ function Install-KimiSettings {
     Write-Host "kimi: telemetry disabled for the current user" -ForegroundColor Green
 }
 
+function Install-GrokSettings {
+    <#
+.SYNOPSIS
+    Configures Grok CLI settings, disabling telemetry, feedback, and trace uploads.
+
+.PARAMETER Force
+    Bypass the sentinel check and reapply settings even if setup was previously completed.
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Force
+    )
+
+    $grokDir = Join-Path $HOME '.grok'
+    $sentinel = Join-Path $grokDir '.config_setup_done'
+
+    if (-not (Test-Path -LiteralPath $grokDir)) {
+        $null = New-Item -ItemType Directory -Path $grokDir -Force
+    }
+
+    $sentinelExists = Test-Path -LiteralPath $sentinel
+    if ($sentinelExists -and -not $Force) {
+        Write-Host "grok: config setup already done -- skipping"
+        return
+    }
+
+    # Set user environment variables persistently
+    $envVars = @{
+        'GROK_TELEMETRY_ENABLED' = 'false'
+        'GROK_FEEDBACK_ENABLED'  = 'false'
+        'GROK_TRACE_UPLOAD'      = 'false'
+    }
+
+    foreach ($key in $envVars.Keys) {
+        $val = $envVars[$key]
+        [Environment]::SetEnvironmentVariable($key, $val, 'Process')
+        [Environment]::SetEnvironmentVariable($key, $val, 'User')
+        Write-Host "grok: env var $key set to $val" -ForegroundColor Gray
+    }
+
+    # Configure ~/.grok/config.toml
+    $configToml = Join-Path $grokDir 'config.toml'
+    if (-not (Test-Path -LiteralPath $configToml)) {
+        New-Item -ItemType File -Path $configToml -Force | Out-Null
+    }
+
+    $content = Get-Content -LiteralPath $configToml -Raw
+    $newline = if ($content -match "`r`n") { "`r`n" } else { "`n" }
+    
+    $lines = if ([string]::IsNullOrEmpty($content)) {
+        [string[]]@()
+    } else {
+        [string[]]($content -split "`r?`n")
+    }
+
+    $updated = [System.Collections.Generic.List[string]]::new()
+    $hasFeaturesSection = $false
+    $hasTelemetrySection = $false
+
+    $currentSection = ""
+    foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\[\s*([a-zA-Z0-9_\.-]+)\s*\]$') {
+            $currentSection = $Matches[1]
+            $updated.Add($line)
+            if ($currentSection -eq 'features') { $hasFeaturesSection = $true }
+            if ($currentSection -eq 'telemetry') { $hasTelemetrySection = $true }
+        }
+        else {
+            if ($currentSection -eq 'features' -and $trimmed -match '^(telemetry|feedback)\s*=') {
+                continue
+            }
+            if ($currentSection -eq 'telemetry' -and $trimmed -match '^trace_upload\s*=') {
+                continue
+            }
+            $updated.Add($line)
+        }
+    }
+
+    if ($hasFeaturesSection) {
+        $idx = -1
+        for ($i = 0; $i -lt $updated.Count; $i++) {
+            if ($updated[$i].Trim() -match '^\[\s*features\s*\]$') {
+                $idx = $i
+                break
+            }
+        }
+        $updated.Insert($idx + 1, 'feedback = false')
+        $updated.Insert($idx + 1, 'telemetry = false')
+    } else {
+        if ($updated.Count -gt 0 -and $updated[$updated.Count - 1].Trim() -ne "") {
+            $updated.Add("")
+        }
+        $updated.Add("[features]")
+        $updated.Add("telemetry = false")
+        $updated.Add("feedback = false")
+    }
+
+    if ($hasTelemetrySection) {
+        $idx = -1
+        for ($i = 0; $i -lt $updated.Count; $i++) {
+            if ($updated[$i].Trim() -match '^\[\s*telemetry\s*\]$') {
+                $idx = $i
+                break
+            }
+        }
+        $updated.Insert($idx + 1, 'trace_upload = false')
+    } else {
+        if ($updated.Count -gt 0 -and $updated[$updated.Count - 1].Trim() -ne "") {
+            $updated.Add("")
+        }
+        $updated.Add("[telemetry]")
+        $updated.Add("trace_upload = false")
+    }
+
+    [IO.File]::WriteAllText($configToml, (($updated -join $newline).TrimEnd() + $newline), [Text.UTF8Encoding]::new($false))
+    Write-Host "grok: configuration file ($configToml) updated" -ForegroundColor Green
+
+    $null = New-Item -ItemType File -Path $sentinel -Force
+    Write-Host "grok: config setup complete" -ForegroundColor Green
+}
+
 function Install-ClaudezSetup {
     <#
 .SYNOPSIS
@@ -6628,6 +6750,8 @@ function Install-AiTools {
         } else {
             Write-Host "grok CLI is already installed." -ForegroundColor Green
         }
+        # Always run Grok settings configuration when MoreAi is enabled
+        Install-GrokSettings
     }
 
     # Create a docker.bat shim so tools that hardcode `docker` commands
