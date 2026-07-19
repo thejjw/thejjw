@@ -5585,7 +5585,8 @@ function Show-QwenPeakWarning {
 
     # Ceiling preserves a visible final minute until the night window begins.
     $minutesLeft = [int][Math]::Ceiling(($discountStart - $UtcNow).TotalMinutes)
-    Write-Host ("Qwen Token Plan night discount is inactive (22:00-08:00 UTC+8); starts in {0}h {1}m. Current offers include qwen3.8-max-preview Credits as low as 10% of standard and night Credits as low as 20%. Launching in 3 seconds..." -f [int][Math]::Floor($minutesLeft / 60), ($minutesLeft % 60)) -ForegroundColor Yellow
+    Write-Host "Qwen3.8-max-preview limited-time offer: Credits as low as 10% of standard." -ForegroundColor Cyan
+    Write-Host ("Qwen Token Plan night discount is inactive (22:00-08:00 UTC+8; night Credits as low as 20% of standard); starts in {0}h {1}m. Launching in 3 seconds..." -f [int][Math]::Floor($minutesLeft / 60), ($minutesLeft % 60)) -ForegroundColor Yellow
     Start-Sleep -Seconds $DelaySeconds
 }
 
