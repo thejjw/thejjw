@@ -5548,6 +5548,10 @@ function claudekd {
     claudek @claudeArgs
 }
 
+# Bailian Token Plan endpoints for configuring other agents:
+#   Anthropic base: https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic
+#   Anthropic messages: https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/v1/messages
+#   OpenAI-compatible base: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
 function claudeq {
     <#
 .SYNOPSIS
