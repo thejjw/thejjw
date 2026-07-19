@@ -5631,7 +5631,7 @@ function claudeq {
     $env:ANTHROPIC_MODEL = 'qwen3.7-max'
     $env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3.8-max-preview'
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3.6-flash'
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.7-max'
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.7-plus'
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3.7-max'
     $env:CLAUDE_CODE_SUBAGENT_MODEL = 'qwen3.7-max'
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
