@@ -5552,6 +5552,40 @@ function claudekd {
 #   Anthropic base: https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic
 #   Anthropic messages: https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/v1/messages
 #   OpenAI-compatible base: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+# Current promotions and supported models:
+#   https://www.alibabacloud.com/help/en/model-studio/token-plan-personal-overview
+function Show-QwenPeakWarning {
+    <#
+.SYNOPSIS
+    Warns when the Bailian Token Plan night discount is inactive.
+
+.DESCRIPTION
+    During the current 08:00-22:00 UTC+8 daytime window, reports the time until
+    the night discount begins and briefly delays launch. Current promotions also
+    include qwen3.8-max-preview usage as low as 10% of standard Credits and night
+    usage as low as 20%; Alibaba Cloud may change or end these offers at any time.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    param(
+        [DateTime]$UtcNow = [DateTime]::UtcNow,
+        [int]$DelaySeconds = 3
+    )
+
+    # The UTC+8 daytime window maps directly to 00:00-14:00 UTC.
+    $discountStart = $UtcNow.Date.AddHours(14)
+    if ($UtcNow -ge $discountStart) {
+        return
+    }
+
+    # Ceiling preserves a visible final minute until the night window begins.
+    $minutesLeft = [int][Math]::Ceiling(($discountStart - $UtcNow).TotalMinutes)
+    Write-Host ("Qwen Token Plan night discount is inactive (22:00-08:00 UTC+8); starts in {0}h {1}m. Current offers include qwen3.8-max-preview Credits as low as 10% of standard and night Credits as low as 20%. Launching in 3 seconds..." -f [int][Math]::Floor($minutesLeft / 60), ($minutesLeft % 60)) -ForegroundColor Yellow
+    Start-Sleep -Seconds $DelaySeconds
+}
+
 function claudeq {
     <#
 .SYNOPSIS
@@ -5605,6 +5639,7 @@ function claudeq {
     try {
         Install-GlobalClaudeMd
         Install-GlobalClaudeSettings
+        Show-QwenPeakWarning
         claude @args
     }
     finally {
@@ -5687,6 +5722,7 @@ function claudeq2 {
     try {
         Install-GlobalClaudeMd
         Install-GlobalClaudeSettings
+        Show-QwenPeakWarning
         claude @args
     }
     finally {
