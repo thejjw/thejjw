@@ -5548,16 +5548,19 @@ function claudekd {
     claudek @claudeArgs
 }
 
-# Bailian Token Plan endpoints for configuring other agents:
+# Qwen Cloud Token Plan (Bailian Token Plan) endpoints for configuring other agents:
 #   Anthropic base: https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic
 #   Anthropic messages: https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/v1/messages
 #   OpenAI-compatible base: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
 # Current promotions and supported models:
 #   https://www.alibabacloud.com/help/en/model-studio/token-plan-personal-overview
+# References:
+#   https://www.alibabacloud.com/help/en/model-studio/claude-code
+#   https://docs.qwencloud.com/developer-guides/clients-and-developer-tools/claude-code
 function Show-QwenPeakWarning {
     <#
 .SYNOPSIS
-    Warns when the Bailian Token Plan night discount is inactive.
+    Warns when the Qwen Cloud Token Plan night discount is inactive.
 
 .DESCRIPTION
     During the current 08:00-22:00 UTC+8 daytime window, reports the time until
@@ -5589,7 +5592,7 @@ function Show-QwenPeakWarning {
 function claudeq {
     <#
 .SYNOPSIS
-    Launches Claude Code through the Bailian Token Plan endpoint.
+    Launches Claude Code through the Qwen Cloud Token Plan endpoint.
 
 .DESCRIPTION
     Reads BAILIAN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
@@ -5674,7 +5677,7 @@ function claudeqd {
 function claudeq2 {
     <#
 .SYNOPSIS
-    Launches Claude Code through the Bailian Token Plan preview profile.
+    Launches Claude Code through the Qwen Cloud Token Plan preview profile.
 
 .DESCRIPTION
     Reads BAILIAN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
