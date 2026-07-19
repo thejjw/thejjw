@@ -5548,6 +5548,170 @@ function claudekd {
     claudek @claudeArgs
 }
 
+function claudeq {
+    <#
+.SYNOPSIS
+    Launches Claude Code through the Bailian Token Plan endpoint.
+
+.DESCRIPTION
+    Reads BAILIAN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
+    Manager, or legacy User environment, then temporarily configures Claude Code
+    to use the Qwen 3.7 model profile. Restores the previous environment after
+    Claude exits.
+
+.EXAMPLE
+    claudeq
+
+.EXAMPLE
+    claudeq "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    $key = Get-AiApiKey 'BAILIAN_TOKEN_PLAN_API_KEY'
+
+    if (-not $key) {
+        Write-Host "BAILIAN_TOKEN_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
+        return
+    }
+
+    $originalEnvVars = Save-ProcessEnvVars @(
+        'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
+        'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+    )
+
+    $env:ANTHROPIC_BASE_URL = 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic'
+    $env:ANTHROPIC_AUTH_TOKEN = $key
+    Remove-Item Env:\ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
+
+    $env:ANTHROPIC_MODEL = 'qwen3.7-max'
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3.6-flash'
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.7-max'
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3.7-max'
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = 'qwen3.7-max'
+    $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
+    $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'
+
+    try {
+        Install-GlobalClaudeMd
+        Install-GlobalClaudeSettings
+        claude @args
+    }
+    finally {
+        Restore-ProcessEnvVars $originalEnvVars
+    }
+}
+
+function claudeqd {
+    <#
+.SYNOPSIS
+    Launches claudeq with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to claudeq and appends --dangerously-skip-permissions.
+
+.EXAMPLE
+    claudeqd
+
+.EXAMPLE
+    claudeqd "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    $claudeArgs = $args + '--dangerously-skip-permissions'
+    claudeq @claudeArgs
+}
+
+function claudeq2 {
+    <#
+.SYNOPSIS
+    Launches Claude Code through the Bailian Token Plan preview profile.
+
+.DESCRIPTION
+    Reads BAILIAN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
+    Manager, or legacy User environment, then temporarily configures Claude Code
+    to use Qwen 3.8 Max Preview with Qwen 3.7 and 3.6 fallback routing. Restores
+    the previous environment after Claude exits.
+
+.EXAMPLE
+    claudeq2
+
+.EXAMPLE
+    claudeq2 "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    $key = Get-AiApiKey 'BAILIAN_TOKEN_PLAN_API_KEY'
+
+    if (-not $key) {
+        Write-Host "BAILIAN_TOKEN_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
+        return
+    }
+
+    $originalEnvVars = Save-ProcessEnvVars @(
+        'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
+        'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+        'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+        'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+    )
+
+    $env:ANTHROPIC_BASE_URL = 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic'
+    $env:ANTHROPIC_AUTH_TOKEN = $key
+    Remove-Item Env:\ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
+
+    $env:ANTHROPIC_MODEL = 'qwen3.8-max-preview'
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3.6-flash'
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.7-max'
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3.8-max-preview'
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = 'qwen3.7-max'
+    $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
+    $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'
+
+    try {
+        Install-GlobalClaudeMd
+        Install-GlobalClaudeSettings
+        claude @args
+    }
+    finally {
+        Restore-ProcessEnvVars $originalEnvVars
+    }
+}
+
+function claudeq2d {
+    <#
+.SYNOPSIS
+    Launches claudeq2 with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to claudeq2 and appends --dangerously-skip-permissions.
+
+.EXAMPLE
+    claudeq2d
+
+.EXAMPLE
+    claudeq2d "Explain the current repository"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    $claudeArgs = $args + '--dangerously-skip-permissions'
+    claudeq2 @claudeArgs
+}
+
 function Install-ClaudeCCRSetup {
     <#
 .SYNOPSIS
