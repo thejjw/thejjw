@@ -4288,6 +4288,60 @@ function Install-KimiSettings {
     Write-Host "kimi: telemetry disabled for the current user" -ForegroundColor Green
 }
 
+function Install-QwenSettings {
+    <#
+.SYNOPSIS
+    Configures user-level privacy defaults for Qwen Code.
+
+.DESCRIPTION
+    Creates or updates ~/.qwen/settings.json while preserving unrelated settings.
+    Disables usage statistics, user feedback prompts, and telemetry.
+
+.NOTES
+    Settings reference (review when updating these defaults):
+    https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/
+#>
+    [CmdletBinding()]
+    param()
+
+    $qwenDir = Join-Path $HOME '.qwen'
+    $settingsJson = Join-Path $qwenDir 'settings.json'
+
+    if (-not (Test-Path -LiteralPath $qwenDir)) {
+        $null = New-Item -ItemType Directory -Path $qwenDir -Force
+    }
+
+    if (Test-Path -LiteralPath $settingsJson) {
+        try {
+            $settings = Get-Content -LiteralPath $settingsJson -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            throw "qwen: unable to parse settings file '$settingsJson': $($_.Exception.Message)"
+        }
+    }
+    else {
+        $settings = [pscustomobject]@{}
+    }
+
+    if ($null -eq $settings -or $settings -isnot [pscustomobject]) {
+        throw "qwen: settings file '$settingsJson' must contain a JSON object."
+    }
+
+    foreach ($sectionName in @('privacy', 'ui', 'telemetry')) {
+        $section = $settings.PSObject.Properties[$sectionName]
+        if ($null -eq $section -or $null -eq $section.Value -or $section.Value -isnot [pscustomobject]) {
+            $settings | Add-Member -NotePropertyName $sectionName -NotePropertyValue ([pscustomobject]@{}) -Force
+        }
+    }
+
+    $settings.privacy | Add-Member -NotePropertyName 'usageStatisticsEnabled' -NotePropertyValue $false -Force
+    $settings.ui | Add-Member -NotePropertyName 'enableUserFeedback' -NotePropertyValue $false -Force
+    $settings.telemetry | Add-Member -NotePropertyName 'enabled' -NotePropertyValue $false -Force
+
+    [IO.File]::WriteAllText($settingsJson, ($settings | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+    Write-Host "qwen: privacy and telemetry settings configured" -ForegroundColor Green
+}
+
 function Install-GrokSettings {
     <#
 .SYNOPSIS
@@ -6966,9 +7020,10 @@ function Install-AiTools {
         try { & npm install -g opencode-ai } catch { Write-Host "Failed to install opencode: $_" -ForegroundColor Red }
     }
 
-    # Configure Kimi Code CLI if MoreAi is requested. Its npm package is managed
-    # through MoreAiNpmPackages with the other optional AI tools.
+    # Configure Qwen Code and Kimi Code if MoreAi is requested. Their npm packages
+    # are managed through MoreAiNpmPackages with the other optional AI tools.
     if ($MoreAi) {
+        Install-QwenSettings
         Install-KimiSettings
     }
 
