@@ -202,7 +202,7 @@ If an MCP tool is unavailable or underperforming, inform the user and suggest al
 "@
 }
 
-# Internal configuration for Install-AiTools
+# Internal configuration for Install-AiTools and Invoke-AiUpgrade
 $_AiToolsInternal = @{
     WingetPackages         = @(
         'Microsoft.Coreutils',
@@ -305,6 +305,18 @@ $_AiToolsInternal = @{
         '@qwen-code/qwen-code',
         '@mimo-ai/cli',
         '@moonshot-ai/kimi-code'
+    )
+    # Keep this registry synchronized with AI CLIs managed by Install-AiTools.
+    # Invoke-AiUpgrade probes each command, so optional tools are safe to include.
+    UpgradeCommands        = @(
+        @{ Label = 'agy';      Cmd = 'agy';      Args = @('update') },
+        @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
+        @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
+        @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
+        @{ Label = 'qwen';     Cmd = 'qwen';     Args = @('update') },
+        @{ Label = 'mimo';     Cmd = 'mimo';     Args = @('upgrade') },
+        @{ Label = 'kimi';     Cmd = 'kimi';     Args = @('upgrade') },
+        @{ Label = 'grok';     Cmd = 'grok';     Args = @('update') }
     )
 }
 
@@ -6726,6 +6738,9 @@ function Install-AiTools {
         [switch]$All
     )
 
+    # Maintenance: when changing the AI CLIs managed below, update
+    # $_AiToolsInternal.UpgradeCommands so the aiu inventory stays synchronized.
+
     if ($Docker -and $Podman) {
         throw "Cannot specify both -Docker and -Podman switches simultaneously."
     }
@@ -7644,27 +7659,22 @@ function Invoke-AiUpgrade {
 .SYNOPSIS
     Updates all AI CLI tools in one shot.
 .DESCRIPTION
-    Runs the update/upgrade command for agy, claude, codex, and opencode sequentially.
-    Use the alias 'aiu' for convenience.
+    Runs the update/upgrade command for each available CLI registered in
+    $_AiToolsInternal.UpgradeCommands. The registry currently covers agy, Claude,
+    Codex, OpenCode, Qwen Code, MiMo, Kimi Code, and Grok. Use the alias 'aiu'
+    for convenience.
 .EXAMPLE
     Invoke-AiUpgrade
 .EXAMPLE
     aiu
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-06
+    Last Edit: 2026-07
 #>
     [CmdletBinding()]
     param()
 
-    $tools = @(
-        @{ Label = 'agy';      Cmd = 'agy';      Args = @('update') },
-        @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
-        @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
-        @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') }
-    )
-
-    foreach ($tool in $tools) {
+    foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
         if (-not (Get-Command $tool.Cmd -ErrorAction SilentlyContinue)) {
             Write-Warning "$($tool.Label): not found in PATH, skipping."
             continue
