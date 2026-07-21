@@ -4295,17 +4295,29 @@ function Install-QwenSettings {
 
 .DESCRIPTION
     Creates or updates ~/.qwen/settings.json while preserving unrelated settings.
-    Disables usage statistics, user feedback prompts, and telemetry.
+    Disables usage statistics, user feedback prompts, and telemetry. After a
+    successful update, creates a sentinel so later calls skip configuration.
+
+.PARAMETER Force
+    Bypass the sentinel check and reapply the settings.
 
 .NOTES
     Settings reference (review when updating these defaults):
     https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/
 #>
     [CmdletBinding()]
-    param()
+    param(
+        [switch]$Force
+    )
 
     $qwenDir = Join-Path $HOME '.qwen'
     $settingsJson = Join-Path $qwenDir 'settings.json'
+    $sentinel = Join-Path $qwenDir '.config_setup_done'
+
+    if ((Test-Path -LiteralPath $sentinel) -and -not $Force) {
+        Write-Host "qwen: config setup already done -- skipping"
+        return
+    }
 
     if (-not (Test-Path -LiteralPath $qwenDir)) {
         $null = New-Item -ItemType Directory -Path $qwenDir -Force
@@ -4339,6 +4351,7 @@ function Install-QwenSettings {
     $settings.telemetry | Add-Member -NotePropertyName 'enabled' -NotePropertyValue $false -Force
 
     [IO.File]::WriteAllText($settingsJson, ($settings | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+    $null = New-Item -ItemType File -Path $sentinel -Force
     Write-Host "qwen: privacy and telemetry settings configured" -ForegroundColor Green
 }
 
