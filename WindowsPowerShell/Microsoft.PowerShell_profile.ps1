@@ -307,15 +307,15 @@ $_AiToolsInternal = @{
         '@moonshot-ai/kimi-code'
     )
     # Keep this registry synchronized with AI CLIs managed by Install-AiTools.
-    # Invoke-AiUpgrade probes each command, so optional tools are safe to include.
+    # Probe defaults to Cmd; set it when an agent uses a different updater.
     UpgradeCommands        = @(
         @{ Label = 'agy';      Cmd = 'agy';      Args = @('update') },
         @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
         @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
         @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
-        @{ Label = 'qwen';     Cmd = 'qwen';     Args = @('update') },
-        @{ Label = 'mimo';     Cmd = 'mimo';     Args = @('upgrade') },
-        @{ Label = 'kimi';     Cmd = 'kimi';     Args = @('upgrade') },
+        @{ Label = 'qwen';     Probe = 'qwen'; Cmd = 'npm'; Args = @('up', '-g', '@qwen-code/qwen-code') },
+        @{ Label = 'mimo';     Probe = 'mimo'; Cmd = 'npm'; Args = @('up', '-g', '@mimo-ai/cli') },
+        @{ Label = 'kimi';     Probe = 'kimi'; Cmd = 'npm'; Args = @('up', '-g', '@moonshot-ai/kimi-code') },
         @{ Label = 'grok';     Cmd = 'grok';     Args = @('update') }
     )
 }
@@ -7662,7 +7662,8 @@ function Invoke-AiUpgrade {
     Runs the update/upgrade command for each available CLI registered in
     $_AiToolsInternal.UpgradeCommands. The registry currently covers agy, Claude,
     Codex, OpenCode, Qwen Code, MiMo, Kimi Code, and Grok. Use the alias 'aiu'
-    for convenience.
+    for convenience. Qwen Code, MiMo, and Kimi Code are updated through their
+    global npm packages instead of their native self-updaters.
 .EXAMPLE
     Invoke-AiUpgrade
 .EXAMPLE
@@ -7675,11 +7676,16 @@ function Invoke-AiUpgrade {
     param()
 
     foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
-        if (-not (Get-Command $tool.Cmd -ErrorAction SilentlyContinue)) {
+        $probe = if ($tool.Probe) { $tool.Probe } else { $tool.Cmd }
+        if (-not (Get-Command $probe -ErrorAction SilentlyContinue)) {
             Write-Warning "$($tool.Label): not found in PATH, skipping."
             continue
         }
-        Write-Host ">>> $($tool.Label) $($tool.Args -join ' ')" -ForegroundColor Cyan
+        if ($probe -ne $tool.Cmd -and -not (Get-Command $tool.Cmd -ErrorAction SilentlyContinue)) {
+            Write-Warning "$($tool.Label): updater '$($tool.Cmd)' not found in PATH, skipping."
+            continue
+        }
+        Write-Host ">>> $($tool.Label): $($tool.Cmd) $($tool.Args -join ' ')" -ForegroundColor Cyan
         & $tool.Cmd @($tool.Args)
     }
 }
