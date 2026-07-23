@@ -848,7 +848,7 @@ for FILE in "${CANDIDATES[@]}"; do
   ORIG_BYTES="$(stat -c%s -- "$FILE")"
   if [[ "$QUALITY_MODE" == "size" ]]; then
     # 1. Compute Default (no --quality) bitrate and estimated size for comparison
-    local DEFAULT_FACTOR="0.70"
+    DEFAULT_FACTOR="0.70"
     case "$CODEC" in
       hevc|h265) DEFAULT_FACTOR="0.80" ;;
       *) DEFAULT_FACTOR="0.70" ;;
