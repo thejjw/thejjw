@@ -7678,11 +7678,9 @@ function Invoke-AiUpgrade {
     foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
         $probe = if ($tool.Probe) { $tool.Probe } else { $tool.Cmd }
         if (-not (Get-Command $probe -ErrorAction SilentlyContinue)) {
-            Write-Warning "$($tool.Label): not found in PATH, skipping."
             continue
         }
         if ($probe -ne $tool.Cmd -and -not (Get-Command $tool.Cmd -ErrorAction SilentlyContinue)) {
-            Write-Warning "$($tool.Label): updater '$($tool.Cmd)' not found in PATH, skipping."
             continue
         }
         Write-Host ">>> $($tool.Label): $($tool.Cmd) $($tool.Args -join ' ')" -ForegroundColor Cyan
