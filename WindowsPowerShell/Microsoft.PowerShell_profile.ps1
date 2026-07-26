@@ -241,6 +241,7 @@ $_AiToolsInternal = @{
         'Microsoft.err',
         'wagoodman.dive',
         'astral-sh.uv',
+        'pnpm.pnpm',
         'SQLite.SQLite',
         'koalaman.shellcheck',
         'Microsoft.VisualStudioCode',
