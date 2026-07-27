@@ -693,7 +693,7 @@ function Get-AAA {
 function Get-MyIP {
     <#
 .SYNOPSIS
-    Uses OpenDNS to return external IP
+    Uses Google DNS to return external IP
 .EXAMPLE
     PS C:\> Get-MyIP
     100.100.100.100
@@ -704,7 +704,7 @@ function Get-MyIP {
     Output (if any)
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2021-06
+    Last Edit: 2026-07
 
     Tested with Windows Powershell. Should work with pwsh.
 #>
