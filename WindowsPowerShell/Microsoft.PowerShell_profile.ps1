@@ -740,6 +740,7 @@ function Test-InternetSpeed {
     Last Edit: 2026-07
 
     Compatible with Windows PowerShell 5.1 and PowerShell.
+    Reference: https://github.com/cloudflare/speedtest
 #>
     [CmdletBinding()]
     param(
