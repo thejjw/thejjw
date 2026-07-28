@@ -726,11 +726,14 @@ function Test-InternetSpeed {
     URL used for the upload test.
 .PARAMETER UploadSizeMB
     Size of the generated upload payload in megabytes. The default is 25 MB.
+.PARAMETER Force
+    Bypasses the data-usage confirmation prompt. Intended for automation and
+    non-interactive sessions.
 .EXAMPLE
     PS C:\> Test-InternetSpeed
-    Tests download and upload throughput using the default payload sizes.
+    Shows the estimated 75 MB payload usage, then prompts before testing.
 .EXAMPLE
-    PS C:\> Test-InternetSpeed -DownloadUrl 'https://speed.cloudflare.com/__down?bytes=1000000' -UploadSizeMB 1
+    PS C:\> Test-InternetSpeed -DownloadUrl 'https://speed.cloudflare.com/__down?bytes=1000000' -UploadSizeMB 1 -Force
     Runs a low-bandwidth smoke test with 1 MB download and upload payloads.
 .OUTPUTS
     PSCustomObject containing success state, speed, byte count, duration, and
@@ -747,8 +750,39 @@ function Test-InternetSpeed {
         [uri] $DownloadUrl = 'https://speed.cloudflare.com/__down?bytes=50000000',
         [uri] $UploadUrl = 'https://speed.cloudflare.com/__up',
         [ValidateRange(1, 1024)]
-        [int] $UploadSizeMB = 25
+        [int] $UploadSizeMB = 25,
+        [switch] $Force
     )
+
+    $uploadBytesCount = [long]$UploadSizeMB * 1000000
+    [long]$downloadBytesEstimate = 0
+    $downloadSizeKnown = (
+        $DownloadUrl.Query -match '(?:^\?|&)bytes=(\d+)(?:&|$)' -and
+        [long]::TryParse($Matches[1], [ref]$downloadBytesEstimate)
+    )
+
+    if ($downloadSizeKnown) {
+        $totalMegabytes = ($downloadBytesEstimate + $uploadBytesCount) / 1000000
+        $dataUsageMessage = (
+            'This test will transfer approximately {0:N2} MB of payload data ' +
+            '({1:N2} MB download + {2:N2} MB upload). Protocol overhead may ' +
+            'increase actual network usage slightly.'
+        ) -f $totalMegabytes, ($downloadBytesEstimate / 1000000), ($uploadBytesCount / 1000000)
+    } else {
+        $dataUsageMessage = (
+            'This test will upload {0:N2} MB of payload data. The download size ' +
+            'cannot be determined from the supplied URL, and protocol overhead ' +
+            'may increase actual network usage slightly.'
+        ) -f ($uploadBytesCount / 1000000)
+    }
+
+    if (-not $Force -and -not $PSCmdlet.ShouldContinue(
+        "$dataUsageMessage`nProceed with the internet speed test?",
+        'Confirm internet speed test'
+    )) {
+        Write-Host 'Internet speed test cancelled. No test data was transferred.' -ForegroundColor Yellow
+        return
+    }
 
     Add-Type -AssemblyName System.Net.Http
 
@@ -815,7 +849,6 @@ function Test-InternetSpeed {
         $content = $null
         try {
             # Generate the requested random payload in memory immediately before upload.
-            $uploadBytesCount = [long]$UploadSizeMB * 1000000
             $payloadBytes = [byte[]]::new([int]$uploadBytesCount)
             [System.Random]::new().NextBytes($payloadBytes)
             $content = [System.Net.Http.ByteArrayContent]::new($payloadBytes)
