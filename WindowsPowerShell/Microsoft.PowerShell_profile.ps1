@@ -712,6 +712,170 @@ function Get-MyIP {
     return (Resolve-DnsName -Name o-o.myaddr.l.google.com -Server ns1.google.com -Type TXT | Select-Object -ExpandProperty Strings);
 }
 
+function Test-InternetSpeed {
+    <#
+.SYNOPSIS
+    Tests internet download and upload throughput against Cloudflare.
+.DESCRIPTION
+    Performs one streaming download and one in-memory upload against Cloudflare's
+    speed test endpoints. Displays progress and returns a structured result with
+    decimal megabits-per-second measurements and per-direction failure details.
+.PARAMETER DownloadUrl
+    URL used for the download test. The default requests a 50 MB payload.
+.PARAMETER UploadUrl
+    URL used for the upload test.
+.PARAMETER UploadSizeMB
+    Size of the generated upload payload in megabytes. The default is 25 MB.
+.EXAMPLE
+    PS C:\> Test-InternetSpeed
+    Tests download and upload throughput using the default payload sizes.
+.EXAMPLE
+    PS C:\> Test-InternetSpeed -DownloadUrl 'https://speed.cloudflare.com/__down?bytes=1000000' -UploadSizeMB 1
+    Runs a low-bandwidth smoke test with 1 MB download and upload payloads.
+.OUTPUTS
+    PSCustomObject containing success state, speed, byte count, duration, and
+    error details for each direction.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+
+    Compatible with Windows PowerShell 5.1 and PowerShell.
+#>
+    [CmdletBinding()]
+    param(
+        [uri] $DownloadUrl = 'https://speed.cloudflare.com/__down?bytes=50000000',
+        [uri] $UploadUrl = 'https://speed.cloudflare.com/__up',
+        [ValidateRange(1, 1024)]
+        [int] $UploadSizeMB = 25
+    )
+
+    Add-Type -AssemblyName System.Net.Http
+
+    $downloadSucceeded = $false
+    $downloadMbps = $null
+    $downloadBytes = $null
+    $downloadSeconds = $null
+    $downloadError = $null
+    $uploadSucceeded = $false
+    $uploadMbps = $null
+    $uploadBytes = $null
+    $uploadSeconds = $null
+    $uploadError = $null
+
+    $httpClient = [System.Net.Http.HttpClient]::new()
+    $stopwatch = [System.Diagnostics.Stopwatch]::new()
+
+    try {
+        Write-Host '1. Testing Download Speed...' -ForegroundColor Cyan
+
+        $response = $null
+        $stream = $null
+        try {
+            $stopwatch.Restart()
+            $response = $httpClient.GetAsync(
+                $DownloadUrl,
+                [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
+            ).GetAwaiter().GetResult()
+            $response.EnsureSuccessStatusCode() | Out-Null
+            $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+
+            $buffer = [byte[]]::new(8192)
+            $totalBytesDownloaded = 0L
+            while (($bytesRead = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $totalBytesDownloaded += $bytesRead
+            }
+            $stopwatch.Stop()
+
+            $downloadSeconds = $stopwatch.Elapsed.TotalSeconds
+            $downloadBytes = $totalBytesDownloaded
+            if ($downloadSeconds -gt 0) {
+                $downloadMbps = ($downloadBytes * 8) / (1000000 * $downloadSeconds)
+            }
+            $downloadSucceeded = $true
+
+            Write-Host ('Downloaded : {0:N2} MB in {1:N2}s' -f ($downloadBytes / 1000000), $downloadSeconds)
+            Write-Host ('Download   : {0:N2} Mbps' -f $downloadMbps) -ForegroundColor Green
+        } catch {
+            $stopwatch.Stop()
+            $downloadError = $_.Exception.Message
+            Write-Error -Message "Download test failed: $downloadError" -ErrorAction Continue
+        } finally {
+            if ($null -ne $stream) {
+                $stream.Dispose()
+            }
+            if ($null -ne $response) {
+                $response.Dispose()
+            }
+        }
+
+        Write-Host "`n2. Testing Upload Speed..." -ForegroundColor Cyan
+
+        $response = $null
+        $content = $null
+        try {
+            # Generate the requested random payload in memory immediately before upload.
+            $uploadBytesCount = [long]$UploadSizeMB * 1000000
+            $payloadBytes = [byte[]]::new([int]$uploadBytesCount)
+            [System.Random]::new().NextBytes($payloadBytes)
+            $content = [System.Net.Http.ByteArrayContent]::new($payloadBytes)
+
+            $stopwatch.Restart()
+            $response = $httpClient.PostAsync($UploadUrl, $content).GetAwaiter().GetResult()
+            $response.EnsureSuccessStatusCode() | Out-Null
+            $stopwatch.Stop()
+
+            $uploadSeconds = $stopwatch.Elapsed.TotalSeconds
+            $uploadBytes = $uploadBytesCount
+            if ($uploadSeconds -gt 0) {
+                $uploadMbps = ($uploadBytes * 8) / (1000000 * $uploadSeconds)
+            }
+            $uploadSucceeded = $true
+
+            Write-Host ('Uploaded   : {0:N2} MB in {1:N2}s' -f ($uploadBytes / 1000000), $uploadSeconds)
+            Write-Host ('Upload     : {0:N2} Mbps' -f $uploadMbps) -ForegroundColor Green
+        } catch {
+            $stopwatch.Stop()
+            $uploadError = $_.Exception.Message
+            Write-Error -Message "Upload test failed: $uploadError" -ErrorAction Continue
+        } finally {
+            if ($null -ne $content) {
+                $content.Dispose()
+            }
+            if ($null -ne $response) {
+                $response.Dispose()
+            }
+        }
+    } finally {
+        $httpClient.Dispose()
+    }
+
+    Write-Host "`n===============================" -ForegroundColor Yellow
+    if ($downloadSucceeded) {
+        Write-Host ('FINAL DOWNLOAD : {0:N2} Mbps' -f $downloadMbps) -ForegroundColor Green
+    } else {
+        Write-Host 'FINAL DOWNLOAD : Failed' -ForegroundColor Red
+    }
+    if ($uploadSucceeded) {
+        Write-Host ('FINAL UPLOAD   : {0:N2} Mbps' -f $uploadMbps) -ForegroundColor Green
+    } else {
+        Write-Host 'FINAL UPLOAD   : Failed' -ForegroundColor Red
+    }
+    Write-Host '===============================' -ForegroundColor Yellow
+
+    return [pscustomobject]@{
+        DownloadSucceeded = $downloadSucceeded
+        DownloadMbps      = $downloadMbps
+        DownloadBytes     = $downloadBytes
+        DownloadSeconds   = $downloadSeconds
+        DownloadError     = $downloadError
+        UploadSucceeded   = $uploadSucceeded
+        UploadMbps        = $uploadMbps
+        UploadBytes       = $uploadBytes
+        UploadSeconds     = $uploadSeconds
+        UploadError       = $uploadError
+    }
+}
+
 function Get-WhoisInfo {
     <#
 .SYNOPSIS
