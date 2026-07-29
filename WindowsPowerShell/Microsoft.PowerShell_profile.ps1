@@ -9870,6 +9870,252 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
     }
 }
 
+function Resolve-WUResultCode {
+    <#
+.SYNOPSIS
+    Resolves Windows Update COM API result codes to human-readable labels.
+.DESCRIPTION
+    Maps integer OperationResultCode values (0 to 5) returned by Microsoft.Update.Session
+    operations into descriptive text strings.
+.PARAMETER Code
+    The integer result code from a Search, Download, or Install operation.
+.OUTPUTS
+    System.String
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    param([int]$Code)
+    switch ($Code) {
+        0 { 'NotStarted (0)' }
+        1 { 'InProgress (1)' }
+        2 { 'Succeeded (2)' }
+        3 { 'SucceededWithErrors (3)' }
+        4 { 'Failed (4)' }
+        5 { 'Aborted (5)' }
+        default { "Unknown ($Code)" }
+    }
+}
+
+function Resolve-WUHResult {
+    <#
+.SYNOPSIS
+    Resolves Windows Update HResult codes to human-readable error descriptions.
+.DESCRIPTION
+    Converts integer HResult values to hexadecimal format (0x8024xxxx) and maps known
+    Windows Update error codes to descriptive messages.
+.PARAMETER H
+    The integer HResult from a Windows Update exception or result object.
+.OUTPUTS
+    System.String
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    param([int]$H)
+    $hex = '0x{0:X8}' -f $H
+    $known = @{
+        '0x00000000' = 'Success'
+        '0x80240022' = 'WU_E_ALL_UPDATES_FAILED - every update in the batch failed'
+        '0x80240044' = 'WU_E_NO_USERTOKEN - not elevated'
+        '0x80070005' = 'E_ACCESSDENIED - needs elevation'
+        '0x8024402C' = 'WU_E_PT_WINHTTP_NAME_NOT_RESOLVED - proxy/DNS'
+        '0x80240438' = 'Blocked by policy (WSUS/Intune managed)'
+        '0x8024001E' = 'WU_E_SERVICE_STOP - wuauserv stopping'
+        '0x80072EE2' = 'Timeout reaching server'
+    }
+    if ($known.ContainsKey($hex)) { "$hex - $($known[$hex])" } else { $hex }
+}
+
+function Invoke-WindowsUpdateScan {
+    <#
+.SYNOPSIS
+    Scans for pending Windows Updates without making any system changes.
+.DESCRIPTION
+    Queries the Microsoft.Update.Session COM API for applicable updates and prints
+    a summary table (KB, SizeMB, Severity, Reboot requirement, Title).
+    Can be run in non-elevated user sessions.
+.EXAMPLE
+    PS C:\> Invoke-WindowsUpdateScan
+.OUTPUTS
+    Microsoft.Update.SearchResult or $null
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param()
+
+    try {
+        $session  = New-Object -ComObject Microsoft.Update.Session
+        $searcher = $session.CreateUpdateSearcher()
+        $searcher.ServerSelection = 2
+    } catch {
+        Write-Host "Failed to create Microsoft.Update.Session COM object: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+
+    Write-Host "Scanning for Windows Updates..." -ForegroundColor Cyan
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $result = $searcher.Search("IsInstalled=0 AND IsHidden=0")
+    } catch {
+        Write-Host "Scan threw: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host (Resolve-WUHResult $_.Exception.HResult) -ForegroundColor Red
+        return $null
+    }
+    $sw.Stop()
+
+    $color = switch ($result.ResultCode) { 2 {'Green'} 3 {'Yellow'} default {'Red'} }
+    Write-Host ("Scan finished in {0:N1}s - {1}" -f `
+        $sw.Elapsed.TotalSeconds, (Resolve-WUResultCode $result.ResultCode)) -ForegroundColor $color
+
+    foreach ($w in $result.Warnings) {
+        Write-Host ("  WARN {0} {1}" -f (Resolve-WUHResult $w.HResult), $w.Message) -ForegroundColor Yellow
+    }
+
+    if ($result.ResultCode -notin 2,3) { Write-Host "Result not trustworthy." -ForegroundColor Red; return $result }
+
+    if ($result.Updates.Count -eq 0) {
+        if ($result.ResultCode -eq 3) {
+            Write-Host "No updates returned, but scan reported errors - inconclusive." -ForegroundColor Yellow
+        } else {
+            Write-Host "No applicable updates available - system is up to date." -ForegroundColor Green
+        }
+        if ((New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired) {
+            Write-Host "Note: reboot pending - more updates may appear after restart." -ForegroundColor Yellow
+        }
+        return $result
+    }
+
+    Write-Host "$($result.Updates.Count) update(s) available:" -ForegroundColor Yellow
+    $result.Updates | ForEach-Object {
+        [pscustomobject]@{
+            KB        = ($_.KBArticleIDs -join ',')
+            SizeMB    = [math]::Round($_.MaxDownloadSize / 1MB, 1)
+            Severity  = $_.MsrcSeverity
+            Reboot    = $_.InstallationBehavior.RebootBehavior -ne 0
+            Dl        = $_.IsDownloaded
+            Title     = if ($_.Title.Length -gt 60) { $_.Title.Substring(0,57) + '...' } else { $_.Title }
+        }
+    } | Format-Table -AutoSize | Out-Host
+
+    return $result
+}
+
+function Invoke-WindowsUpdate {
+    <#
+.SYNOPSIS
+    Downloads and installs pending Windows Updates. Requires Administrator rights.
+.DESCRIPTION
+    Scans, downloads, and installs pending updates using the Windows Update Agent API.
+    Fails immediately if running in an un-elevated PowerShell session.
+.PARAMETER ScanOnly
+    Delegates to Invoke-WindowsUpdateScan without attempting download or installation.
+.EXAMPLE
+    PS C:\> Invoke-WindowsUpdate
+.EXAMPLE
+    PS C:\> Invoke-WindowsUpdate -ScanOnly
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$ScanOnly
+    )
+
+    if ($ScanOnly) {
+        Invoke-WindowsUpdateScan
+        return
+    }
+
+    $isAdmin = ([Security.Principal.WindowsPrincipal]`
+                [Security.Principal.WindowsIdentity]::GetCurrent()
+               ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if (-not $isAdmin) {
+        Write-Host "Error: Administrator rights are required to download and install Windows Updates." -ForegroundColor Red
+        Write-Host "Please re-run PowerShell as Administrator (e.g. right-click -> 'Run as Administrator' or 'sudo powershell')." -ForegroundColor Yellow
+        return
+    }
+
+    $scanResult = Invoke-WindowsUpdateScan
+    if ($null -eq $scanResult -or $scanResult.Updates.Count -eq 0) {
+        return
+    }
+
+    try {
+        $session = New-Object -ComObject Microsoft.Update.Session
+    } catch {
+        Write-Host "Failed to create Microsoft.Update.Session COM object: $($_.Exception.Message)" -ForegroundColor Red
+        return
+    }
+
+    # --- Download ---
+    $coll = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($u in $scanResult.Updates) {
+        if ($u.InstallationBehavior.CanRequestUserInput) {
+            Write-Host "Skipping (needs user input): $($u.Title)" -ForegroundColor Yellow
+            continue
+        }
+        if (-not $u.EulaAccepted) { $u.AcceptEula() }
+        $null = $coll.Add($u)
+    }
+    if ($coll.Count -eq 0) { Write-Host "Nothing eligible to install." -ForegroundColor Yellow; return }
+
+    Write-Host "Downloading $($coll.Count) update(s)..." -ForegroundColor Cyan
+    $dl = $session.CreateUpdateDownloader()
+    $dl.Updates = $coll
+    try { $dlResult = $dl.Download() }
+    catch {
+        Write-Host "Download threw: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host (Resolve-WUHResult $_.Exception.HResult) -ForegroundColor Red
+        return
+    }
+    Write-Host ("Download: {0}" -f (Resolve-WUResultCode $dlResult.ResultCode))
+
+    for ($i = 0; $i -lt $coll.Count; $i++) {
+        $ur = $dlResult.GetUpdateResult($i)
+        if ($ur.ResultCode -ne 2) {
+            Write-Host ("  FAILED {0}`n         {1}" -f `
+                $coll.Item($i).Title, (Resolve-WUHResult $ur.HResult)) -ForegroundColor Red
+        }
+    }
+
+    # --- Install (only what actually downloaded) ---
+    $ready = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($u in $coll) { if ($u.IsDownloaded) { $null = $ready.Add($u) } }
+
+    if ($ready.Count -eq 0) {
+        Write-Host "No updates downloaded successfully - nothing to install." -ForegroundColor Red
+        return
+    }
+
+    Write-Host "Installing $($ready.Count) update(s)..." -ForegroundColor Cyan
+    $inst = $session.CreateUpdateInstaller()
+    $inst.Updates = $ready
+    try { $r = $inst.Install() }
+    catch {
+        Write-Host "Install threw: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host (Resolve-WUHResult $_.Exception.HResult) -ForegroundColor Red
+        return
+    }
+
+    Write-Host ("Install: {0}  RebootRequired={1}" -f `
+        (Resolve-WUResultCode $r.ResultCode), $r.RebootRequired)
+
+    $(for ($i = 0; $i -lt $ready.Count; $i++) {
+        $ur = $r.GetUpdateResult($i)
+        [pscustomobject]@{
+            Result  = Resolve-WUResultCode $ur.ResultCode
+            HResult = '0x{0:X8}' -f $ur.HResult
+            Title   = $ready.Item($i).Title
+        }
+    }) | Format-Table -AutoSize -Wrap | Out-Host
+}
+
 # Auto-load vault credentials at profile load time so every session starts with
 # keys available. Uses -Quiet to avoid printing key counts in transient shells.
 Load-AiApiKeysFromCS -Quiet
+
