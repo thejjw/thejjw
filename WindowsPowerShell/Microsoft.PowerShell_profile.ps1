@@ -5756,6 +5756,11 @@ CC_TMP="$(mktemp -d /tmp/cc-XXXXXX)"
 trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
 CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
 mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
+# Use an installed English UTF-8 locale for the entire remote session.
+CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^c\.utf-?8$/ { print; exit }')"
+[ -n "$CC_LOCALE" ] || CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^en_us\.utf-?8$/ { print; exit }')"
+CC_LOCALE="${CC_LOCALE:-C}"
+export LANG="$CC_LOCALE" LC_ALL="$CC_LOCALE" LANGUAGE=en
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?not set}"
 # ANTHROPIC_BASE_URL is optional - only exported when the caller provided a value
 [ -n "${ANTHROPIC_BASE_URL:-}" ] && export ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL"
@@ -5775,14 +5780,13 @@ export ENABLE_PROMPT_CACHING_1H=1
 export DISABLE_AUTOUPDATER=1
 if ! command -v node &>/dev/null; then
     export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
-    # Keep bootstrap diagnostics in English without changing Claude's session locale.
     curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh \
-        | LC_ALL=C LANG=C NVM_DIR="$NVM_DIR" PROFILE=/dev/null bash
+        | NVM_DIR="$NVM_DIR" PROFILE=/dev/null bash
     . "$NVM_DIR/nvm.sh" --no-use
-    LC_ALL=C LANG=C nvm install --lts --no-progress && LC_ALL=C LANG=C nvm use --lts
+    nvm install --lts --no-progress && nvm use --lts
 fi
 if ! command -v claude &>/dev/null; then
-    LC_ALL=C LANG=C npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
+    npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
     export PATH="$CC_NPM/bin:$PATH"
 fi
 cd "$CC_WORK"
