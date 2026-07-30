@@ -5780,6 +5780,12 @@ export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export ENABLE_PROMPT_CACHING_1H=1
 export DISABLE_AUTOUPDATER=1
+CC_TMUX="$(command -v tmux 2>/dev/null || true)"
+if [ -n "$CC_TMUX" ]; then
+    echo "[tmux] Found $CC_TMUX; using an isolated detachable session (detach: Ctrl-b d)."
+else
+    echo "[tmux] Not found; Claude will run directly in this SSH session."
+fi
 if ! command -v node &>/dev/null; then
     export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
     curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh \
@@ -5795,7 +5801,6 @@ CC_CLAUDE="$(command -v claude)"
 CC_CLAUDE_PATH="$PATH"
 
 # Run tmux itself without provider settings so new user-created windows are clean.
-CC_TMUX="$(command -v tmux 2>/dev/null || true)"
 cc_tmux_clean() (
     unset ANTHROPIC_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_MODEL
     unset ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL
@@ -5868,8 +5873,8 @@ CC_RUNNER_EOF
             exit $?
         fi
         cc_tmux_clean kill-server 2>/dev/null || true
-        echo "[tmux] Per-window environment setup failed; using direct mode." >&2
     fi
+    echo "[tmux] Isolated session setup failed; Claude will run directly in this SSH session." >&2
 fi
 
 cd "$CC_WORK"
