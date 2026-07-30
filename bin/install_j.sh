@@ -35,6 +35,7 @@ done
 PACKAGES="tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
 NVM_VERSION="v0.40.6"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
+UV_INSTALL_URL="https://astral.sh/uv/install.sh"
 
 remove_profile_section() {
   local profile_file="$1" start_marker="$2" end_marker="$3"
@@ -261,7 +262,7 @@ if command -v uv &>/dev/null; then
   echo "uv $(uv --version 2>/dev/null || echo 'installed') already present -- skipping"
 else
   echo "uv: installing via astral.sh..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  curl -LsSf "$UV_INSTALL_URL" | sh
   # Add default uv installation paths to current session so subsequent MCP setups don't fail
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
@@ -1245,7 +1246,7 @@ fi
 # claudez-remote (claudezr) - remote Claude Code via Z.AI
 # ---------------------------------------------------------------------------
 CLAUDEZR_MARKER="# >>> claudez-remote >>>"
-CLAUDEZR_VERSION_MARKER="# remote_claude_base version 7"
+CLAUDEZR_VERSION_MARKER="# remote_claude_base version 8"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> claudez-remote >>>" "# <<< claudez-remote <<<"
@@ -1258,9 +1259,10 @@ if grep -qF "$CLAUDEZR_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez-remote: already in $PROFILE -- skipping"
 else
   # Preserve function variables while substituting the pinned nvm release.
-  sed "s|__NVM_VERSION__|${NVM_VERSION}|g" >> "$PROFILE" << 'CLAUDERZR_EOF'
+  sed -e "s|__NVM_VERSION__|${NVM_VERSION}|g" \
+      -e "s|__UV_INSTALL_URL__|${UV_INSTALL_URL}|g" >> "$PROFILE" << 'CLAUDERZR_EOF'
 # >>> claudez-remote >>>
-# remote_claude_base version 7
+# remote_claude_base version 8
 
 # _claude_sq - single-quote escape a value for safe bash embedding.
 _claude_sq() {
@@ -1292,9 +1294,9 @@ unset HISTFILE
 set +o history
 CC_TMP="$(mktemp -d /tmp/cc-XXXXXX)"
 trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
-CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
+CC_NPM="$CC_TMP/npm"; CC_BIN="$CC_TMP/bin"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
 CC_START_DIR="$PWD"; CC_REAL_HOME="$HOME"; CC_ORIGINAL_PATH="$PATH"
-mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
+mkdir -p "$CC_NPM" "$CC_BIN" "$CC_HOME" "$CC_WORK"
 # Use an installed English UTF-8 locale for the entire remote session.
 CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^c\.utf-?8$/ { print; exit }')"
 [ -n "$CC_LOCALE" ] || CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^en_us\.utf-?8$/ { print; exit }')"
@@ -1333,6 +1335,21 @@ if ! command -v claude &>/dev/null; then
     npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
     export PATH="$CC_NPM/bin:$PATH"
 fi
+CC_SYSTEM_UV="$(command -v uv 2>/dev/null || true)"
+if curl -LsSf __UV_INSTALL_URL__ \
+        | env UV_UNMANAGED_INSTALL="$CC_BIN" sh >/dev/null &&
+    [ -x "$CC_BIN/uv" ] &&
+    CC_UV_VERSION="$("$CC_BIN/uv" --version 2>/dev/null)"; then
+    export PATH="$CC_BIN:$PATH"
+    echo "[uv] Using ephemeral $CC_UV_VERSION at $CC_BIN/uv."
+elif [ -n "$CC_SYSTEM_UV" ] &&
+    CC_UV_VERSION="$("$CC_SYSTEM_UV" --version 2>/dev/null)"; then
+    echo "[uv] Ephemeral install failed; using $CC_UV_VERSION at $CC_SYSTEM_UV."
+else
+    echo "[uv] WARNING: unavailable; Python bootstrap and uv package tools will not be available." >&2
+fi
+echo "[uv] Continuing in 3 seconds..."
+sleep 3
 CC_CLAUDE="$(command -v claude)"
 CC_CLAUDE_PATH="$PATH"
 

@@ -24,6 +24,9 @@ $_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads
 # Pinned nvm release used by ephemeral remote Claude launchers.
 $_NvmVersion = "v0.40.6"
 
+# Official uv installer used by ephemeral remote Claude launchers.
+$_UvInstallUrl = "https://astral.sh/uv/install.sh"
+
 # Generic browser-like User-Agent for outbound HTTP (used by the Save-* chunked downloader).
 # Kept here so it can be updated in one place; bump the Chrome major version periodically to
 # stay current (latest stable: https://chromereleases.googleblog.com/).
@@ -5760,9 +5763,9 @@ unset HISTFILE
 set +o history
 CC_TMP="$(mktemp -d /tmp/cc-XXXXXX)"
 trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
-CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
+CC_NPM="$CC_TMP/npm"; CC_BIN="$CC_TMP/bin"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
 CC_START_DIR="$PWD"; CC_REAL_HOME="$HOME"; CC_ORIGINAL_PATH="$PATH"
-mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
+mkdir -p "$CC_NPM" "$CC_BIN" "$CC_HOME" "$CC_WORK"
 # Use an installed English UTF-8 locale for the entire remote session.
 CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^c\.utf-?8$/ { print; exit }')"
 [ -n "$CC_LOCALE" ] || CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^en_us\.utf-?8$/ { print; exit }')"
@@ -5802,6 +5805,21 @@ if ! command -v claude &>/dev/null; then
     npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
     export PATH="$CC_NPM/bin:$PATH"
 fi
+CC_SYSTEM_UV="$(command -v uv 2>/dev/null || true)"
+if curl -LsSf __UV_INSTALL_URL__ \
+        | env UV_UNMANAGED_INSTALL="$CC_BIN" sh >/dev/null &&
+    [ -x "$CC_BIN/uv" ] &&
+    CC_UV_VERSION="$("$CC_BIN/uv" --version 2>/dev/null)"; then
+    export PATH="$CC_BIN:$PATH"
+    echo "[uv] Using ephemeral $CC_UV_VERSION at $CC_BIN/uv."
+elif [ -n "$CC_SYSTEM_UV" ] &&
+    CC_UV_VERSION="$("$CC_SYSTEM_UV" --version 2>/dev/null)"; then
+    echo "[uv] Ephemeral install failed; using $CC_UV_VERSION at $CC_SYSTEM_UV."
+else
+    echo "[uv] WARNING: unavailable; Python bootstrap and uv package tools will not be available." >&2
+fi
+echo "[uv] Continuing in 3 seconds..."
+sleep 3
 CC_CLAUDE="$(command -v claude)"
 CC_CLAUDE_PATH="$PATH"
 
@@ -5889,6 +5907,7 @@ cd "$CC_WORK"
 HOME="$CC_HOME" claude --dangerously-skip-permissions
 '@
     $script = $script.Replace('__NVM_VERSION__', $_NvmVersion)
+    $script = $script.Replace('__UV_INSTALL_URL__', $_UvInstallUrl)
 
     # Base64-encode the script so it travels as an SSH command argument, not stdin.
     # Claude Code's interactive TUI needs stdin; piping via 'bash -s' would steal it.
