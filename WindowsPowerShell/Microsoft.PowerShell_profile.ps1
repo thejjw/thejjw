@@ -5597,9 +5597,10 @@ Runs Claude Code on a remote SSH endpoint with temporary remote state.
 Base64-encodes a bash launcher and delivers it via the SSH command argument,
 keeping stdin free for the interactive Claude Code TUI. Sets the Anthropic
 environment variables inline and starts claude on the remote host with a
-temporary HOME, npm prefix, and workspace.
-Use this when you want a one-shot remote Claude session without leaving
-permanent state behind.
+temporary HOME, npm prefix, and workspace. When tmux with per-window
+environment support is available, Claude runs in an isolated detachable tmux
+server whose additional windows do not inherit Claude credentials. Otherwise,
+the launcher uses the direct one-shot behavior.
 
 .PARAMETER RemoteHost
 SSH hostname, IP address, or legacy user@host target.
@@ -5755,6 +5756,7 @@ Last Edit: 2026-06
 CC_TMP="$(mktemp -d /tmp/cc-XXXXXX)"
 trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
 CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
+CC_START_DIR="$PWD"; CC_REAL_HOME="$HOME"; CC_ORIGINAL_PATH="$PATH"
 mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
 # Use an installed English UTF-8 locale for the entire remote session.
 CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^c\.utf-?8$/ { print; exit }')"
@@ -5789,6 +5791,81 @@ if ! command -v claude &>/dev/null; then
     npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
     export PATH="$CC_NPM/bin:$PATH"
 fi
+
+# Run tmux itself without provider settings so new user-created windows are clean.
+CC_TMUX="$(command -v tmux 2>/dev/null || true)"
+cc_tmux_clean() (
+    unset ANTHROPIC_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_MODEL
+    unset ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL
+    unset ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL
+    unset CLAUDE_CODE_SUBAGENT_MODEL CLAUDE_CODE_EFFORT_LEVEL
+    unset CLAUDE_CODE_AUTO_COMPACT_WINDOW CLAUDE_CODE_MAX_CONTEXT_TOKENS
+    unset API_TIMEOUT_MS CLAUDE_CODE_DISABLE_1M_CONTEXT
+    unset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC ENABLE_PROMPT_CACHING_1H
+    unset DISABLE_AUTOUPDATER NVM_DIR
+    HOME="$CC_REAL_HOME" PATH="$CC_ORIGINAL_PATH" \
+        "$CC_TMUX" -L "$CC_TMUX_LABEL" "$@"
+)
+
+if [ -n "$CC_TMUX" ]; then
+    CC_TMUX_LABEL="cc-$(date +%Y%m%d-%H%M%S)-$$-$RANDOM"
+    if cc_tmux_clean new-session -d -s claude -n bootstrap -c "$CC_START_DIR" \
+        'while :; do sleep 3600; done'; then
+        CC_TMUX_ENV=(
+            -e "HOME=$CC_HOME"
+            -e "PATH=$PATH"
+            -e "CC_TMP=$CC_TMP"
+            -e "CC_WORK=$CC_WORK"
+            -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+            -e "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_DEFAULT_HAIKU_MODEL"
+            -e "ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_DEFAULT_SONNET_MODEL"
+            -e "ANTHROPIC_DEFAULT_OPUS_MODEL=$ANTHROPIC_DEFAULT_OPUS_MODEL"
+            -e "CLAUDE_CODE_SUBAGENT_MODEL=$CLAUDE_CODE_SUBAGENT_MODEL"
+            -e "CLAUDE_CODE_AUTO_COMPACT_WINDOW=$CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+            -e "API_TIMEOUT_MS=$API_TIMEOUT_MS"
+            -e "CLAUDE_CODE_DISABLE_1M_CONTEXT=$CLAUDE_CODE_DISABLE_1M_CONTEXT"
+            -e "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
+            -e "ENABLE_PROMPT_CACHING_1H=$ENABLE_PROMPT_CACHING_1H"
+            -e "DISABLE_AUTOUPDATER=$DISABLE_AUTOUPDATER"
+        )
+        [ -n "${NVM_DIR:-}" ] && CC_TMUX_ENV+=(-e "NVM_DIR=$NVM_DIR")
+        [ -n "${ANTHROPIC_BASE_URL:-}" ] && CC_TMUX_ENV+=(-e "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL")
+        [ -n "${ANTHROPIC_MODEL:-}" ] && CC_TMUX_ENV+=(-e "ANTHROPIC_MODEL=$ANTHROPIC_MODEL")
+        [ -n "${ANTHROPIC_DEFAULT_FABLE_MODEL:-}" ] && CC_TMUX_ENV+=(-e "ANTHROPIC_DEFAULT_FABLE_MODEL=$ANTHROPIC_DEFAULT_FABLE_MODEL")
+        [ -n "${CLAUDE_CODE_EFFORT_LEVEL:-}" ] && CC_TMUX_ENV+=(-e "CLAUDE_CODE_EFFORT_LEVEL=$CLAUDE_CODE_EFFORT_LEVEL")
+        [ -n "${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-}" ] && CC_TMUX_ENV+=(-e "CLAUDE_CODE_MAX_CONTEXT_TOKENS=$CLAUDE_CODE_MAX_CONTEXT_TOKENS")
+
+        CC_RUNNER="$CC_TMP/run-claude"
+        cat > "$CC_RUNNER" <<'CC_RUNNER_EOF'
+#!/usr/bin/env bash
+cc_cleanup() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    echo "[cleanup] Wiping $CC_TMP ..."
+    rm -rf -- "$CC_TMP"
+    exit "$status"
+}
+trap cc_cleanup EXIT HUP INT TERM
+cd "$CC_WORK"
+claude --dangerously-skip-permissions
+CC_RUNNER_EOF
+        chmod 600 "$CC_RUNNER"
+
+        if cc_tmux_clean new-window -d -t claude: -n claude -c "$CC_WORK" \
+            "${CC_TMUX_ENV[@]}" bash "$CC_RUNNER"; then
+            # The Claude pane now owns cleanup and survives SSH client detachment.
+            trap - EXIT
+            cc_tmux_clean bind-key c new-window -c "$CC_START_DIR"
+            cc_tmux_clean kill-window -t claude:bootstrap
+            echo "[tmux] Reattach after logging in: tmux -L $CC_TMUX_LABEL attach -t claude"
+            cc_tmux_clean attach-session -t claude
+            exit $?
+        fi
+        cc_tmux_clean kill-server 2>/dev/null || true
+        echo "[tmux] Per-window environment setup failed; using direct mode." >&2
+    fi
+fi
+
 cd "$CC_WORK"
 HOME="$CC_HOME" claude --dangerously-skip-permissions
 '@
