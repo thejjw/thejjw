@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 PACKAGES="tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
-NVM_VERSION="v0.40.5"
+NVM_VERSION="v0.40.6"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 
 remove_profile_section() {
@@ -1245,7 +1245,7 @@ fi
 # claudez-remote (claudezr) - remote Claude Code via Z.AI
 # ---------------------------------------------------------------------------
 CLAUDEZR_MARKER="# >>> claudez-remote >>>"
-CLAUDEZR_VERSION_MARKER="# remote_claude_base version 6"
+CLAUDEZR_VERSION_MARKER="# remote_claude_base version 7"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> claudez-remote >>>" "# <<< claudez-remote <<<"
@@ -1257,10 +1257,10 @@ fi
 if grep -qF "$CLAUDEZR_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez-remote: already in $PROFILE -- skipping"
 else
-  # Quoted heredoc -- write function variables verbatim to the profile.
-  cat >> "$PROFILE" << 'CLAUDERZR_EOF'
+  # Preserve function variables while substituting the pinned nvm release.
+  sed "s|__NVM_VERSION__|${NVM_VERSION}|g" >> "$PROFILE" << 'CLAUDERZR_EOF'
 # >>> claudez-remote >>>
-# remote_claude_base version 6
+# remote_claude_base version 7
 
 # _claude_sq - single-quote escape a value for safe bash embedding.
 _claude_sq() {
@@ -1324,7 +1324,7 @@ else
 fi
 if ! command -v node &>/dev/null; then
     export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
-    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh \
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/__NVM_VERSION__/install.sh \
         | NVM_DIR="$NVM_DIR" PROFILE=/dev/null bash
     . "$NVM_DIR/nvm.sh" --no-use
     nvm install --lts --no-progress && nvm use --lts

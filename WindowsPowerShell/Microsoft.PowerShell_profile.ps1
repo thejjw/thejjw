@@ -21,6 +21,9 @@ function prompt {
 # Raw content URL used by Update-Profile to self-update; keep in sync with repo path
 $_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
 
+# Pinned nvm release used by ephemeral remote Claude launchers.
+$_NvmVersion = "v0.40.6"
+
 # Generic browser-like User-Agent for outbound HTTP (used by the Save-* chunked downloader).
 # Kept here so it can be updated in one place; bump the Chrome major version periodically to
 # stay current (latest stable: https://chromereleases.googleblog.com/).
@@ -5790,7 +5793,7 @@ else
 fi
 if ! command -v node &>/dev/null; then
     export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
-    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh \
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/__NVM_VERSION__/install.sh \
         | NVM_DIR="$NVM_DIR" PROFILE=/dev/null bash
     . "$NVM_DIR/nvm.sh" --no-use
     nvm install --lts --no-progress && nvm use --lts
@@ -5885,6 +5888,7 @@ fi
 cd "$CC_WORK"
 HOME="$CC_HOME" claude --dangerously-skip-permissions
 '@
+    $script = $script.Replace('__NVM_VERSION__', $_NvmVersion)
 
     # Base64-encode the script so it travels as an SSH command argument, not stdin.
     # Claude Code's interactive TUI needs stdin; piping via 'bash -s' would steal it.
