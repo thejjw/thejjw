@@ -5775,13 +5775,14 @@ export ENABLE_PROMPT_CACHING_1H=1
 export DISABLE_AUTOUPDATER=1
 if ! command -v node &>/dev/null; then
     export NVM_DIR="$CC_TMP/nvm"; mkdir -p "$NVM_DIR"
+    # Keep bootstrap diagnostics in English without changing Claude's session locale.
     curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh \
-        | NVM_DIR="$NVM_DIR" PROFILE=/dev/null bash
+        | LC_ALL=C LANG=C NVM_DIR="$NVM_DIR" PROFILE=/dev/null bash
     . "$NVM_DIR/nvm.sh" --no-use
-    nvm install --lts --no-progress && nvm use --lts
+    LC_ALL=C LANG=C nvm install --lts --no-progress && LC_ALL=C LANG=C nvm use --lts
 fi
 if ! command -v claude &>/dev/null; then
-    npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
+    LC_ALL=C LANG=C npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
     export PATH="$CC_NPM/bin:$PATH"
 fi
 cd "$CC_WORK"
