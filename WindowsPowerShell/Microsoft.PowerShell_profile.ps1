@@ -5791,6 +5791,8 @@ if ! command -v claude &>/dev/null; then
     npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
     export PATH="$CC_NPM/bin:$PATH"
 fi
+CC_CLAUDE="$(command -v claude)"
+CC_CLAUDE_PATH="$PATH"
 
 # Run tmux itself without provider settings so new user-created windows are clean.
 CC_TMUX="$(command -v tmux 2>/dev/null || true)"
@@ -5815,7 +5817,10 @@ if [ -n "$CC_TMUX" ]; then
             -e "HOME=$CC_HOME"
             -e "PATH=$PATH"
             -e "CC_TMP=$CC_TMP"
+            -e "CC_HOME=$CC_HOME"
             -e "CC_WORK=$CC_WORK"
+            -e "CC_CLAUDE=$CC_CLAUDE"
+            -e "CC_CLAUDE_PATH=$CC_CLAUDE_PATH"
             -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
             -e "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_DEFAULT_HAIKU_MODEL"
             -e "ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_DEFAULT_SONNET_MODEL"
@@ -5847,7 +5852,8 @@ cc_cleanup() {
 }
 trap cc_cleanup EXIT HUP INT TERM
 cd "$CC_WORK"
-claude --dangerously-skip-permissions
+export HOME="$CC_HOME" PATH="$CC_CLAUDE_PATH"
+"$CC_CLAUDE" --dangerously-skip-permissions
 CC_RUNNER_EOF
         chmod 600 "$CC_RUNNER"
 
@@ -5925,7 +5931,7 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
             $clientArgs += @('-i', $temporaryIdentity.Path, $RemoteHost, $remoteCommand)
             plink.exe @clientArgs
         } else {
-            $clientArgs = @('-t', '-o', 'StrictHostKeyChecking=accept-new', '-p', $Port)
+            $clientArgs = @('-tt', '-o', 'StrictHostKeyChecking=accept-new', '-p', $Port)
             if (-not [string]::IsNullOrWhiteSpace($RemoteUser)) { $clientArgs += @('-l', $RemoteUser) }
             if ($temporaryIdentity) {
                 $clientArgs += @('-o', 'IdentitiesOnly=yes', '-i', $temporaryIdentity.Path)
