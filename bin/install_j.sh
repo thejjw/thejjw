@@ -1419,8 +1419,9 @@ REMOTE_SCRIPT
   [[ -n "$effort" ]] && env+=" CLAUDE_CODE_EFFORT_LEVEL=$(_claude_sq "$effort")"
   [[ -n "$max_context" ]] && env+=" CLAUDE_CODE_MAX_CONTEXT_TOKENS=$(_claude_sq "$max_context")"
 
+  # Process substitution supplies the script as a file while preserving the SSH PTY on stdin.
   ssh -t -o StrictHostKeyChecking=accept-new -p "$port" "$host" \
-    "$env bash -c 'echo $encoded | base64 -d | bash'"
+    "$env bash -c 'bash <(printf %s $encoded | base64 -d)'"
 }
 
 # claudezr - One-shot remote Claude Code via Z.AI.

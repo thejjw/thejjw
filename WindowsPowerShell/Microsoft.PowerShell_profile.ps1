@@ -5909,13 +5909,13 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
     # -t: pseudo-TTY required for Claude Code's TUI rendering
     # StrictHostKeyChecking=accept-new: trusts first-seen host keys but
     #   still rejects changed keys (protects against MITM on reconnects)
-    # The base64 payload is decoded and executed with stdin still available to claude
+    # Process substitution supplies the script as a file while preserving the SSH PTY on stdin.
     $temporaryIdentity = $null
     try {
         if (-not [string]::IsNullOrWhiteSpace($KeyFile)) {
             $temporaryIdentity = $_ProfileHelpers.NewTemporarySshIdentity($KeyFile)
         }
-        $remoteCommand = "$envPrefix bash -c 'echo $encoded | base64 -d | bash'"
+        $remoteCommand = "$envPrefix bash -c 'bash <(printf %s $encoded | base64 -d)'"
         if ($temporaryIdentity -and $temporaryIdentity.Format -eq 'PPK') {
             if (-not (Get-Command plink.exe -CommandType Application -ErrorAction SilentlyContinue)) {
                 throw 'Plink is required to use a PPK key. Install PuTTY or pass an OpenSSH-format key.'
