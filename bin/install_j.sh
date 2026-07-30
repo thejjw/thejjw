@@ -459,6 +459,42 @@ MISC_EOF
 fi
 
 # ---------------------------------------------------------------------------
+# Windows Terminal CWD integration - embed into shell profile if not present
+# ---------------------------------------------------------------------------
+WT_CWD_MARKER="# >>> wt_cwd >>>"
+
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> wt_cwd >>>" "# <<< wt_cwd <<<"
+fi
+
+if grep -qF "$WT_CWD_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "wt_cwd: already in $PROFILE -- skipping"
+else
+  cat >> "$PROFILE" << 'WT_CWD_EOF'
+
+# >>> wt_cwd >>>
+# OSC 9;9 lets Windows Terminal detect the CWD so Duplicate Tab / Split Pane inherit it.
+# WT needs a Windows path, so convert with wslpath (\\wsl.localhost\<distro>\...).
+# Author: jjw(@thejjw)  Last Edit: 2026-07
+__wt_cwd() {
+    local win
+    win=$(wslpath -w "$PWD" 2>/dev/null) || return 0
+    [ -n "$win" ] && printf '\e]9;9;%s\e\\' "$win"
+}
+
+if [ -n "$WT_SESSION" ]; then
+    case "$(declare -p PROMPT_COMMAND 2>/dev/null)" in
+        "declare -a"*) PROMPT_COMMAND+=(__wt_cwd) ;;              # bash 5.1+ array form
+        *) PROMPT_COMMAND=${PROMPT_COMMAND:+"$PROMPT_COMMAND; "}__wt_cwd ;;
+    esac
+fi
+# <<< wt_cwd <<<
+WT_CWD_EOF
+
+  echo "wt_cwd: added to $PROFILE"
+fi
+
+# ---------------------------------------------------------------------------
 # nrd - embed into shell profile if not already present
 # ---------------------------------------------------------------------------
 MARKER="# >>> nrd >>>"
