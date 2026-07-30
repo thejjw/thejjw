@@ -263,6 +263,84 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         }
     }
 
+    # Removes a temporary SSH identity directory created by NewTemporarySshIdentity.
+    function RemoveTemporarySshIdentity {
+        param([Parameter(Mandatory = $true)]$Identity)
+
+        $directory = [string]$Identity.Directory
+        if ([string]::IsNullOrWhiteSpace($directory) -or -not (Test-Path -LiteralPath $directory)) { return }
+
+        $resolved = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+        $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
+        if ($resolved.Parent.FullName.TrimEnd('\') -ne $tempRoot -or $resolved.Name -notlike 'claude-ssh-*') {
+            throw "Refusing to remove unexpected SSH identity directory: $directory"
+        }
+        Remove-Item -LiteralPath $resolved.FullName -Recurse -Force -ErrorAction Stop
+    }
+
+    # Creates a temporary SSH identity protected for the current user.
+    function NewTemporarySshIdentity {
+        param([Parameter(Mandatory = $true)][string]$KeyFile)
+
+        $source = Get-Item -LiteralPath (Resolve-Path -LiteralPath $KeyFile -ErrorAction Stop).Path -Force
+        if ($source.PSIsContainer) { throw "SSH key path must be a file: $KeyFile" }
+
+        $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('claude-ssh-' + [guid]::NewGuid().ToString('N'))
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        $sid = $identity.User
+        [System.IO.Directory]::CreateDirectory($tempDirectory) | Out-Null
+
+        try {
+            # Secure the empty directory before any private-key material is written.
+            $directorySecurity = New-Object System.Security.AccessControl.DirectorySecurity
+            $directorySecurity.SetOwner($sid)
+            $directorySecurity.SetAccessRuleProtection($true, $false)
+            $directoryRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                $sid,
+                [System.Security.AccessControl.FileSystemRights]::FullControl,
+                ([System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit),
+                [System.Security.AccessControl.PropagationFlags]::None,
+                [System.Security.AccessControl.AccessControlType]::Allow
+            )
+            $directorySecurity.AddAccessRule($directoryRule)
+            [System.IO.Directory]::SetAccessControl($tempDirectory, $directorySecurity)
+
+            $target = Join-Path $tempDirectory 'identity'
+            $header = Get-Content -LiteralPath $source.FullName -TotalCount 1 -ErrorAction Stop
+            $format = if ($header -match '^PuTTY-User-Key-File-[23]:') { 'PPK' } else { 'OpenSSH' }
+            Copy-Item -LiteralPath $source.FullName -Destination $target -Force -ErrorAction Stop
+
+            $fileSecurity = New-Object System.Security.AccessControl.FileSecurity
+            $fileSecurity.SetOwner($sid)
+            $fileSecurity.SetAccessRuleProtection($true, $false)
+            $fileRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                $sid,
+                [System.Security.AccessControl.FileSystemRights]::FullControl,
+                [System.Security.AccessControl.AccessControlType]::Allow
+            )
+            $fileSecurity.AddAccessRule($fileRule)
+            [System.IO.File]::SetAccessControl($target, $fileSecurity)
+
+            $acl = Get-Acl -LiteralPath $target
+            $ownerAccount = New-Object System.Security.Principal.NTAccount -ArgumentList $acl.Owner
+            $ownerSid = $ownerAccount.Translate(
+                [System.Security.Principal.SecurityIdentifier]
+            )
+            $unexpectedAllow = @($acl.Access | Where-Object {
+                $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
+                $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) -ne $sid
+            })
+            if (-not $acl.AreAccessRulesProtected -or $ownerSid -ne $sid -or $unexpectedAllow.Count -gt 0) {
+                throw 'Failed to restrict the temporary SSH key to the current user.'
+            }
+
+            [pscustomobject]@{ Path = $target; Directory = $tempDirectory; Format = $format }
+        } catch {
+            RemoveTemporarySshIdentity ([pscustomobject]@{ Directory = $tempDirectory })
+            throw
+        }
+    }
+
     $profileHelperFunctions = @(
         'ResolveWUResultCode',
         'ResolveWUHResult',
@@ -274,7 +352,9 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         'GetSeriesStats',
         'GetSpikes',
         'UnwrapZaiData',
-        'ShowFontArchive'
+        'ShowFontArchive',
+        'NewTemporarySshIdentity',
+        'RemoveTemporarySshIdentity'
     )
     Export-ModuleMember -Function $profileHelperFunctions
 }
@@ -5522,7 +5602,10 @@ Use this when you want a one-shot remote Claude session without leaving
 permanent state behind.
 
 .PARAMETER RemoteHost
-SSH target in user@host form.
+SSH hostname, IP address, or legacy user@host target.
+
+.PARAMETER RemoteUser
+Optional SSH login name. Do not use this with a user@host RemoteHost value.
 
 .PARAMETER ApiKey
 Anthropic-compatible API key for the remote session.
@@ -5531,9 +5614,9 @@ Anthropic-compatible API key for the remote session.
 SSH port to connect to. Defaults to 22.
 
 .PARAMETER KeyFile
-Path to an SSH private key file. When specified, ssh uses this key
-exclusively (-i). Otherwise SSH falls back to the default agent/key or
-password prompt.
+Path to an OpenSSH or PuTTY PPK private key. The key is copied to a restricted
+temporary identity and used exclusively. PPK files use Plink; other keys use
+OpenSSH.
 
 .PARAMETER BaseUrl
 Anthropic-compatible API base URL. Optional - omit for direct Anthropic API access.
@@ -5569,7 +5652,7 @@ Z.AI's glm-5.2[1m] requires "1000000" to actually exercise the 1M context window
 Default: empty.
 
 .EXAMPLE
-Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:ANTHROPIC_API_KEY
+Invoke-RemoteClaudeCodeBase remote-host -RemoteUser user -ApiKey $env:ANTHROPIC_API_KEY
 
 .EXAMPLE
 Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN -BaseUrl "https://api.z.ai/api/anthropic"
@@ -5588,7 +5671,7 @@ Last Edit: 2026-06
 #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $true, Position = 0)]
         [string]$RemoteHost,
 
         [Parameter(Mandatory = $true)]
@@ -5626,7 +5709,9 @@ Last Edit: 2026-06
 
         # Optional: 1M-context auto-compact window (CLAUDE_CODE_AUTO_COMPACT_WINDOW).
         # Z.AI's glm-5.2[1m] requires "1000000" to actually exercise 1M context.
-        [string]$AutoCompactWindow = ""
+        [string]$AutoCompactWindow = "",
+
+        [string]$RemoteUser
     )
 
     # Bash single-quote escaping: end quote, insert a literal quote, reopen quote
@@ -5641,6 +5726,10 @@ Last Edit: 2026-06
 
     if ([string]::IsNullOrWhiteSpace($RemoteHost)) {
         throw 'RemoteHost is required.'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($RemoteUser) -and $RemoteHost.Contains('@')) {
+        throw 'Specify the SSH login with either -RemoteUser or a user@host RemoteHost value, not both.'
     }
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
@@ -5710,17 +5799,34 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
     # StrictHostKeyChecking=accept-new: trusts first-seen host keys but
     #   still rejects changed keys (protects against MITM on reconnects)
     # The base64 payload is decoded and executed with stdin still available to claude
-    # Build ssh arguments; add -i only when a key file is explicitly provided
-    $sshArgs = @('-t', '-o', 'StrictHostKeyChecking=accept-new', '-p', $Port)
-    if (-not [string]::IsNullOrWhiteSpace($KeyFile)) {
-        # Resolve to absolute path before passing to ssh on Windows (PS cwd may differ from ssh's)
-        $resolved = (Resolve-Path -LiteralPath $KeyFile -ErrorAction Stop).Path
-        $sshArgs += @('-i', $resolved)
+    $temporaryIdentity = $null
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($KeyFile)) {
+            $temporaryIdentity = $_ProfileHelpers.NewTemporarySshIdentity($KeyFile)
+        }
+        $remoteCommand = "$envPrefix bash -c 'echo $encoded | base64 -d | bash'"
+        if ($temporaryIdentity -and $temporaryIdentity.Format -eq 'PPK') {
+            if (-not (Get-Command plink.exe -CommandType Application -ErrorAction SilentlyContinue)) {
+                throw 'Plink is required to use a PPK key. Install PuTTY or pass an OpenSSH-format key.'
+            }
+            $clientArgs = @('-ssh', '-t', '-P', $Port, '-noagent')
+            if (-not [string]::IsNullOrWhiteSpace($RemoteUser)) { $clientArgs += @('-l', $RemoteUser) }
+            $clientArgs += @('-i', $temporaryIdentity.Path, $RemoteHost, $remoteCommand)
+            plink.exe @clientArgs
+        } else {
+            $clientArgs = @('-t', '-o', 'StrictHostKeyChecking=accept-new', '-p', $Port)
+            if (-not [string]::IsNullOrWhiteSpace($RemoteUser)) { $clientArgs += @('-l', $RemoteUser) }
+            if ($temporaryIdentity) {
+                $clientArgs += @('-o', 'IdentitiesOnly=yes', '-i', $temporaryIdentity.Path)
+            }
+            $clientArgs += @($RemoteHost, $remoteCommand)
+            ssh @clientArgs
+        }
+    } finally {
+        if ($temporaryIdentity) {
+            $_ProfileHelpers.RemoveTemporarySshIdentity($temporaryIdentity)
+        }
     }
-    $sshArgs += $RemoteHost
-    # The encoded script is echoed into base64 for decoding; echo avoids stdin consumption
-    $sshArgs += "$envPrefix bash -c 'echo $encoded | base64 -d | bash'"
-    ssh @sshArgs
 }
 
 function Invoke-RemoteClaudeCodeZ {
@@ -5735,7 +5841,10 @@ Invoke-RemoteClaudeCodeBase. The remote Claude invocation always uses
 --dangerously-skip-permissions.
 
 .PARAMETER RemoteHost
-SSH target in user@host form.
+SSH hostname, IP address, or legacy user@host target.
+
+.PARAMETER RemoteUser
+Optional SSH login name. Do not use this with a user@host RemoteHost value.
 
 .PARAMETER ApiKey
 Anthropic-compatible API key for the remote session.
@@ -5745,7 +5854,7 @@ Optional - falls back to Z_AI_AUTH_TOKEN env var.
 SSH port to connect to. Defaults to 22.
 
 .EXAMPLE
-Invoke-RemoteClaudeCodeZ -RemoteHost user@remote-host
+Invoke-RemoteClaudeCodeZ remote-host -RemoteUser user
 
 .EXAMPLE
 Invoke-RemoteClaudeCodeZ -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN
@@ -5756,7 +5865,7 @@ Last Edit: 2026-06
 #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $true, Position = 0)]
         [string]$RemoteHost,
 
         [string]$ApiKey,
@@ -5764,7 +5873,9 @@ Last Edit: 2026-06
         [int]$Port = 22,
 
         # Optional: SSH private key file for authentication.
-        [string]$KeyFile
+        [string]$KeyFile,
+
+        [string]$RemoteUser
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
@@ -5806,6 +5917,7 @@ Last Edit: 2026-06
         Disable1M         = $Disable1M
     }
     if (-not [string]::IsNullOrWhiteSpace($KeyFile)) { $baseParams['KeyFile'] = $KeyFile }
+    if (-not [string]::IsNullOrWhiteSpace($RemoteUser)) { $baseParams['RemoteUser'] = $RemoteUser }
     Invoke-RemoteClaudeCodeBase @baseParams
 }
 
@@ -6644,7 +6756,10 @@ Claude launcher with MiniMax endpoint defaults. The remote invocation always
 uses --dangerously-skip-permissions.
 
 .PARAMETER RemoteHost
-SSH target in user@host form.
+SSH hostname, IP address, or legacy user@host target.
+
+.PARAMETER RemoteUser
+Optional SSH login name. Do not use this with a user@host RemoteHost value.
 
 .PARAMETER ApiKey
 MiniMax API key for the remote session.
@@ -6653,8 +6768,11 @@ Optional -- falls back to MINIMAX_API_KEY env var.
 .PARAMETER Port
 SSH port to connect to. Defaults to 22.
 
+.PARAMETER KeyFile
+Path to an OpenSSH or PuTTY PPK private key.
+
 .EXAMPLE
-Invoke-RemoteClaudeCodeMM -RemoteHost user@remote-host
+Invoke-RemoteClaudeCodeMM remote-host -RemoteUser user
 
 .EXAMPLE
 Invoke-RemoteClaudeCodeMM -RemoteHost user@remote-host -ApiKey $env:MINIMAX_API_KEY
@@ -6665,7 +6783,7 @@ Last Edit: 2026-05
 #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $true, Position = 0)]
         [string]$RemoteHost,
 
         [string]$ApiKey,
@@ -6673,7 +6791,9 @@ Last Edit: 2026-05
         [int]$Port = 22,
 
         # Optional: SSH private key file for authentication.
-        [string]$KeyFile
+        [string]$KeyFile,
+
+        [string]$RemoteUser
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
@@ -6711,6 +6831,7 @@ Last Edit: 2026-05
         Disable1M   = $Disable1M
     }
     if (-not [string]::IsNullOrWhiteSpace($KeyFile)) { $baseParams['KeyFile'] = $KeyFile }
+    if (-not [string]::IsNullOrWhiteSpace($RemoteUser)) { $baseParams['RemoteUser'] = $RemoteUser }
     Invoke-RemoteClaudeCodeBase @baseParams
 }
 
