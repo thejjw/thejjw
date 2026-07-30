@@ -5622,6 +5622,12 @@ OpenSSH.
 Anthropic-compatible API base URL. Optional - omit for direct Anthropic API access.
 Only needed when routing through a proxy or alternative endpoint.
 
+.PARAMETER AnthropicModel
+Optional primary model name (ANTHROPIC_MODEL).
+
+.PARAMETER FableModel
+Optional default Fable model name (ANTHROPIC_DEFAULT_FABLE_MODEL).
+
 .PARAMETER HaikuModel
 Default Haiku model name.
 
@@ -5650,6 +5656,9 @@ Default: empty.
 Optional 1M-context auto-compact window (CLAUDE_CODE_AUTO_COMPACT_WINDOW).
 Z.AI's glm-5.2[1m] requires "1000000" to actually exercise the 1M context window.
 Default: empty.
+
+.PARAMETER MaxContextTokens
+Optional maximum context token count (CLAUDE_CODE_MAX_CONTEXT_TOKENS).
 
 .EXAMPLE
 Invoke-RemoteClaudeCodeBase remote-host -RemoteUser user -ApiKey $env:ANTHROPIC_API_KEY
@@ -5686,6 +5695,10 @@ Last Edit: 2026-06
         # Leave empty to use the default Anthropic API (api.anthropic.com).
         [string]$BaseUrl = "",
 
+        [string]$AnthropicModel = "",
+
+        [string]$FableModel = "",
+
         [Parameter(Mandatory = $true)]
         [string]$HaikuModel,
 
@@ -5710,6 +5723,8 @@ Last Edit: 2026-06
         # Optional: 1M-context auto-compact window (CLAUDE_CODE_AUTO_COMPACT_WINDOW).
         # Z.AI's glm-5.2[1m] requires "1000000" to actually exercise 1M context.
         [string]$AutoCompactWindow = "",
+
+        [string]$MaxContextTokens = "",
 
         [string]$RemoteUser
     )
@@ -5744,12 +5759,15 @@ mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?not set}"
 # ANTHROPIC_BASE_URL is optional - only exported when the caller provided a value
 [ -n "${ANTHROPIC_BASE_URL:-}" ] && export ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL"
+[ -n "${ANTHROPIC_MODEL:-}" ] && export ANTHROPIC_MODEL="$ANTHROPIC_MODEL"
+[ -n "${ANTHROPIC_DEFAULT_FABLE_MODEL:-}" ] && export ANTHROPIC_DEFAULT_FABLE_MODEL="$ANTHROPIC_DEFAULT_FABLE_MODEL"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-}"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-}"
 export CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-}"
-export CLAUDE_CODE_EFFORT_LEVEL="${CLAUDE_CODE_EFFORT_LEVEL:-}"
+[ -n "${CLAUDE_CODE_EFFORT_LEVEL:-}" ] && export CLAUDE_CODE_EFFORT_LEVEL="$CLAUDE_CODE_EFFORT_LEVEL"
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-}"
+[ -n "${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-}" ] && export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CLAUDE_CODE_MAX_CONTEXT_TOKENS"
 export API_TIMEOUT_MS="${API_TIMEOUT_MS:-300000}"
 export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
@@ -5785,13 +5803,24 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
         "ANTHROPIC_DEFAULT_SONNET_MODEL=$(Escape-BashSingleQuotedValue $SonnetModel)"
         "ANTHROPIC_DEFAULT_OPUS_MODEL=$(Escape-BashSingleQuotedValue $OpusModel)"
         "CLAUDE_CODE_SUBAGENT_MODEL=$(Escape-BashSingleQuotedValue $SubagentModel)"
-        "CLAUDE_CODE_EFFORT_LEVEL=$(Escape-BashSingleQuotedValue $EffortLevel)"
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW=$(Escape-BashSingleQuotedValue $AutoCompactWindow)"
         "API_TIMEOUT_MS=$(Escape-BashSingleQuotedValue $TimeoutMs)"
         "CLAUDE_CODE_DISABLE_1M_CONTEXT=$(Escape-BashSingleQuotedValue $Disable1M)"
     )
     if (-not [string]::IsNullOrWhiteSpace($BaseUrl)) {
         $envParts.Insert(1, "ANTHROPIC_BASE_URL=$(Escape-BashSingleQuotedValue $BaseUrl)")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($AnthropicModel)) {
+        $envParts.Add("ANTHROPIC_MODEL=$(Escape-BashSingleQuotedValue $AnthropicModel)")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($FableModel)) {
+        $envParts.Add("ANTHROPIC_DEFAULT_FABLE_MODEL=$(Escape-BashSingleQuotedValue $FableModel)")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($EffortLevel)) {
+        $envParts.Add("CLAUDE_CODE_EFFORT_LEVEL=$(Escape-BashSingleQuotedValue $EffortLevel)")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($MaxContextTokens)) {
+        $envParts.Add("CLAUDE_CODE_MAX_CONTEXT_TOKENS=$(Escape-BashSingleQuotedValue $MaxContextTokens)")
     }
     $envPrefix = $envParts -join ' '
 
@@ -6188,6 +6217,88 @@ function claudekd {
 #>
     $claudeArgs = $args + '--dangerously-skip-permissions'
     claudek @claudeArgs
+}
+
+function Invoke-RemoteClaudeCodeK {
+    <#
+.SYNOPSIS
+Runs Claude Code on a remote SSH endpoint through Kimi Code.
+
+.DESCRIPTION
+Reads KIMI_API_KEY when ApiKey is omitted, then launches the shared temporary
+remote Claude environment with the same K3 1M model routing as claudek.
+
+.PARAMETER RemoteHost
+SSH hostname, IP address, or legacy user@host target.
+
+.PARAMETER ApiKey
+Kimi Code API key. Defaults to KIMI_API_KEY from the configured credential sources.
+
+.PARAMETER Port
+SSH port to connect to. Defaults to 22.
+
+.PARAMETER KeyFile
+Path to an OpenSSH or PuTTY PPK private key.
+
+.PARAMETER RemoteUser
+Optional SSH login name. Do not use this with a user@host RemoteHost value.
+
+.EXAMPLE
+Invoke-RemoteClaudeCodeK remote-host -RemoteUser user
+
+.EXAMPLE
+Invoke-RemoteClaudeCodeK user@remote-host -KeyFile C:\Keys\remote.ppk
+
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string]$RemoteHost,
+
+        [string]$ApiKey,
+
+        [int]$Port = 22,
+
+        [string]$KeyFile,
+
+        [string]$RemoteUser
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        $ApiKey = Get-AiApiKey 'KIMI_API_KEY'
+    }
+
+    if (-not $ApiKey) {
+        Write-Host "KIMI_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
+        return
+    }
+
+    # Mirror claudek: route every Claude Code model slot through Kimi K3 1M.
+    $model = 'k3[1m]'
+    $baseParams = @{
+        RemoteHost        = $RemoteHost
+        ApiKey            = $ApiKey
+        Port              = $Port
+        BaseUrl           = 'https://api.kimi.com/coding/'
+        AnthropicModel    = $model
+        FableModel        = $model
+        HaikuModel        = $model
+        SonnetModel       = $model
+        OpusModel         = $model
+        SubagentModel     = $model
+        AutoCompactWindow = '1048576'
+        MaxContextTokens = '1048576'
+        TimeoutMs        = '3000000'
+        Disable1M        = '0'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($KeyFile)) { $baseParams['KeyFile'] = $KeyFile }
+    if (-not [string]::IsNullOrWhiteSpace($RemoteUser)) { $baseParams['RemoteUser'] = $RemoteUser }
+    Invoke-RemoteClaudeCodeBase @baseParams
 }
 
 # Qwen Cloud Token Plan (Bailian Token Plan) endpoints for configuring other agents:
