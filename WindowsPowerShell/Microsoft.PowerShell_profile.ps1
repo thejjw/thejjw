@@ -5753,6 +5753,8 @@ Last Edit: 2026-06
     }
 
     $script = @'
+unset HISTFILE
+set +o history
 CC_TMP="$(mktemp -d /tmp/cc-XXXXXX)"
 trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
 CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
@@ -5817,7 +5819,8 @@ cc_tmux_clean() (
 if [ -n "$CC_TMUX" ]; then
     CC_TMUX_LABEL="cc-$(date +%Y%m%d-%H%M%S)-$$-$RANDOM"
     if cc_tmux_clean new-session -d -s claude -n bootstrap -c "$CC_START_DIR" \
-        'while :; do sleep 3600; done'; then
+        'while :; do sleep 3600; done' &&
+        cc_tmux_clean set-environment -t claude HISTFILE /dev/null; then
         CC_TMUX_ENV=(
             -e "HOME=$CC_HOME"
             -e "PATH=$PATH"
@@ -5848,6 +5851,8 @@ if [ -n "$CC_TMUX" ]; then
         CC_RUNNER="$CC_TMP/run-claude"
         cat > "$CC_RUNNER" <<'CC_RUNNER_EOF'
 #!/usr/bin/env bash
+unset HISTFILE
+set +o history
 cc_cleanup() {
     status=$?
     trap - EXIT HUP INT TERM
@@ -5872,8 +5877,8 @@ CC_RUNNER_EOF
             cc_tmux_clean attach-session -t claude
             exit $?
         fi
-        cc_tmux_clean kill-server 2>/dev/null || true
     fi
+    cc_tmux_clean kill-server 2>/dev/null || true
     echo "[tmux] Isolated session setup failed; Claude will run directly in this SSH session." >&2
 fi
 
