@@ -1245,8 +1245,12 @@ fi
 # claudez-remote (claudezr) - remote Claude Code via Z.AI
 # ---------------------------------------------------------------------------
 CLAUDEZR_MARKER="# >>> claudez-remote >>>"
+CLAUDEZR_VERSION_MARKER="# remote_claude_base version 2"
 
 if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudez-remote >>>" "# <<< claudez-remote <<<"
+elif grep -qF "$CLAUDEZR_MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$CLAUDEZR_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudez-remote: upgrading shared remote base"
   remove_profile_section "$PROFILE" "# >>> claudez-remote >>>" "# <<< claudez-remote <<<"
 fi
 
@@ -1256,6 +1260,7 @@ else
   # Quoted heredoc -- write function variables verbatim to the profile.
   cat >> "$PROFILE" << 'CLAUDERZR_EOF'
 # >>> claudez-remote >>>
+# remote_claude_base version 2
 
 # _claude_sq - single-quote escape a value for safe bash embedding.
 _claude_sq() {
@@ -1269,12 +1274,14 @@ _claude_sq() {
 #
 #   Usage: remote_claude_base <user@host> <api_key> [port] [base_url] \
 #          [haiku] [sonnet] [opus] [timeout_ms] [disable_1m] \
-#          [subagent] [effort] [auto_compact_window]
+#          [subagent] [effort] [auto_compact_window] [anthropic_model] \
+#          [fable_model] [max_context_tokens]
 remote_claude_base() {
   local host="$1" key="$2" port="${3:-22}"
   local base_url="${4:-}" haiku="$5" sonnet="$6" opus="$7"
   local timeout="$8" disable_1m="$9"
   local subagent="${10:-}" effort="${11:-}" auto_compact="${12:-}"
+  local anthropic_model="${13:-}" fable="${14:-}" max_context="${15:-}"
 
   [[ -z "$host" ]] && { echo "remote_claude_base: host is required" >&2; return 1; }
   [[ -z "$key"  ]] && { echo "remote_claude_base: api_key is required" >&2; return 1; }
@@ -1287,12 +1294,15 @@ CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
 mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?not set}"
 [ -n "${ANTHROPIC_BASE_URL:-}" ] && export ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL"
+[ -n "${ANTHROPIC_MODEL:-}" ] && export ANTHROPIC_MODEL="$ANTHROPIC_MODEL"
+[ -n "${ANTHROPIC_DEFAULT_FABLE_MODEL:-}" ] && export ANTHROPIC_DEFAULT_FABLE_MODEL="$ANTHROPIC_DEFAULT_FABLE_MODEL"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-}"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-}"
 export CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-}"
-export CLAUDE_CODE_EFFORT_LEVEL="${CLAUDE_CODE_EFFORT_LEVEL:-}"
+[ -n "${CLAUDE_CODE_EFFORT_LEVEL:-}" ] && export CLAUDE_CODE_EFFORT_LEVEL="$CLAUDE_CODE_EFFORT_LEVEL"
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-}"
+[ -n "${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-}" ] && export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CLAUDE_CODE_MAX_CONTEXT_TOKENS"
 export API_TIMEOUT_MS="${API_TIMEOUT_MS:-300000}"
 export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
@@ -1319,11 +1329,14 @@ REMOTE_SCRIPT
   env+=" ANTHROPIC_DEFAULT_SONNET_MODEL=$(_claude_sq "$sonnet")"
   env+=" ANTHROPIC_DEFAULT_OPUS_MODEL=$(_claude_sq "$opus")"
   env+=" CLAUDE_CODE_SUBAGENT_MODEL=$(_claude_sq "$subagent")"
-  env+=" CLAUDE_CODE_EFFORT_LEVEL=$(_claude_sq "$effort")"
   env+=" CLAUDE_CODE_AUTO_COMPACT_WINDOW=$(_claude_sq "$auto_compact")"
   env+=" API_TIMEOUT_MS=$(_claude_sq "$timeout")"
   env+=" CLAUDE_CODE_DISABLE_1M_CONTEXT=$(_claude_sq "$disable_1m")"
   [[ -n "$base_url" ]] && env+=" ANTHROPIC_BASE_URL=$(_claude_sq "$base_url")"
+  [[ -n "$anthropic_model" ]] && env+=" ANTHROPIC_MODEL=$(_claude_sq "$anthropic_model")"
+  [[ -n "$fable" ]] && env+=" ANTHROPIC_DEFAULT_FABLE_MODEL=$(_claude_sq "$fable")"
+  [[ -n "$effort" ]] && env+=" CLAUDE_CODE_EFFORT_LEVEL=$(_claude_sq "$effort")"
+  [[ -n "$max_context" ]] && env+=" CLAUDE_CODE_MAX_CONTEXT_TOKENS=$(_claude_sq "$max_context")"
 
   ssh -t -o StrictHostKeyChecking=accept-new -p "$port" "$host" \
     "$env bash -c 'echo $encoded | base64 -d | bash'"
@@ -1358,6 +1371,53 @@ CLAUDERZR_EOF
   echo "# <<< claudez-remote <<<" >> "$PROFILE"
 
   echo "claudez-remote: added to $PROFILE"
+fi
+
+# ---------------------------------------------------------------------------
+# claudek-remote (claudekr) - remote Claude Code via Kimi
+# ---------------------------------------------------------------------------
+CLAUDEKR_MARKER="# >>> claudek-remote >>>"
+
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudek-remote >>>" "# <<< claudek-remote <<<"
+fi
+
+if grep -qF "$CLAUDEKR_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudek-remote: already in $PROFILE -- skipping"
+else
+  cat >> "$PROFILE" << 'CLAUDEKR_EOF'
+# >>> claudek-remote >>>
+
+# claudekr - One-shot remote Claude Code via Kimi K3 1M.
+#   Usage: claudekr <user@host> [port]
+claudekr() {
+  local host="$1" port="${2:-22}"
+
+  [[ -z "$host" ]] && { echo "claudekr: host is required" >&2; echo "  Usage: claudekr <user@host> [port]" >&2; return 1; }
+
+  local key
+  key="$(_jjw_secret k)" || return 1
+
+  # Mirror claudek: route every Claude Code model slot through Kimi K3 1M.
+  remote_claude_base "$host" "$key" "$port" \
+    "https://api.kimi.com/coding/" \
+    "k3[1m]" \
+    "k3[1m]" \
+    "k3[1m]" \
+    "3000000" \
+    "0" \
+    "k3[1m]" \
+    "" \
+    "1048576" \
+    "k3[1m]" \
+    "k3[1m]" \
+    "1048576"
+}
+
+# <<< claudek-remote <<<
+CLAUDEKR_EOF
+
+  echo "claudek-remote: added to $PROFILE"
 fi
 
 # ---------------------------------------------------------------------------
