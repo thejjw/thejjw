@@ -460,6 +460,9 @@ fi
 
 # ---------------------------------------------------------------------------
 # Windows Terminal CWD integration - embed into shell profile if not present
+# Note: If Windows Terminal does not inherit CWD on duplicate tab / split pane,
+# use wsl.exe directly in settings.json (e.g. "commandline": "wsl.exe -d Ubuntu")
+# instead of distro executables (ubuntu.exe). Ref: https://github.com/microsoft/terminal/issues/12978
 # ---------------------------------------------------------------------------
 WT_CWD_MARKER="# >>> wt_cwd >>>"
 
@@ -475,6 +478,8 @@ else
 # >>> wt_cwd >>>
 # OSC 9;9 lets Windows Terminal detect the CWD so Duplicate Tab / Split Pane inherit it.
 # WT needs a Windows path, so convert with wslpath (\\wsl.localhost\<distro>\...).
+# Note: If CWD is not inherited, use wsl.exe directly (e.g. "commandline": "wsl.exe -d Ubuntu")
+# instead of ubuntu.exe. Ref: https://github.com/microsoft/terminal/issues/12978
 # Author: jjw(@thejjw)  Last Edit: 2026-07
 __wt_cwd() {
     local win
