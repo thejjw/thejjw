@@ -15,10 +15,11 @@ metadata:
 
 ## How to search
 
-Send a GET request to DuckDuckGo's HTML endpoint:
+Send a GET request to DuckDuckGo's HTML endpoint, with a browser User-Agent header (requests without one may get a response page that contains no parseable results):
 
 ```
 GET https://html.duckduckgo.com/html?q=<encoded_query>
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
 ```
 
 ### Parse results
@@ -71,3 +72,4 @@ Do not use this skill merely because information is current, unavailable locally
 - This relies on DuckDuckGo's HTML structure. If DDG changes their markup, parsing may silently fail and return no results.
 - No result count limit — all parsed results are returned.
 - There is no API rate limit, but excessive requests may trigger CAPTCHAs or blocks from DDG.
+- When parsing yields zero results, do not assume the query matched nothing: save the raw HTML and check for `result__a` markers (markup changed), a CAPTCHA/challenge page (blocked — back off or switch to another search skill), or a missing User-Agent header.
