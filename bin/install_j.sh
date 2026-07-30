@@ -1245,7 +1245,7 @@ fi
 # claudez-remote (claudezr) - remote Claude Code via Z.AI
 # ---------------------------------------------------------------------------
 CLAUDEZR_MARKER="# >>> claudez-remote >>>"
-CLAUDEZR_VERSION_MARKER="# remote_claude_base version 2"
+CLAUDEZR_VERSION_MARKER="# remote_claude_base version 3"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> claudez-remote >>>" "# <<< claudez-remote <<<"
@@ -1260,7 +1260,7 @@ else
   # Quoted heredoc -- write function variables verbatim to the profile.
   cat >> "$PROFILE" << 'CLAUDERZR_EOF'
 # >>> claudez-remote >>>
-# remote_claude_base version 2
+# remote_claude_base version 3
 
 # _claude_sq - single-quote escape a value for safe bash embedding.
 _claude_sq() {
@@ -1292,6 +1292,11 @@ CC_TMP="$(mktemp -d /tmp/cc-XXXXXX)"
 trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
 CC_NPM="$CC_TMP/npm"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
 mkdir -p "$CC_NPM" "$CC_HOME" "$CC_WORK"
+# Use an installed English UTF-8 locale for the entire remote session.
+CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^c\.utf-?8$/ { print; exit }')"
+[ -n "$CC_LOCALE" ] || CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^en_us\.utf-?8$/ { print; exit }')"
+CC_LOCALE="${CC_LOCALE:-C}"
+export LANG="$CC_LOCALE" LC_ALL="$CC_LOCALE" LANGUAGE=en
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?not set}"
 [ -n "${ANTHROPIC_BASE_URL:-}" ] && export ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL"
 [ -n "${ANTHROPIC_MODEL:-}" ] && export ANTHROPIC_MODEL="$ANTHROPIC_MODEL"
