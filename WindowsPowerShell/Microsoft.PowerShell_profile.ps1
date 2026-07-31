@@ -648,14 +648,15 @@ $_AiToolsInternal = @{
     )
     # Keep this registry synchronized with AI CLIs managed by Install-AiTools.
     # Probe defaults to Cmd; set it when an agent uses a different updater.
+    # NpmPackage entries are combined into one global npm update invocation.
     UpgradeCommands        = @(
         @{ Label = 'agy';      Cmd = 'agy';      Args = @('update') },
         @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
         @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
         @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
-        @{ Label = 'qwen';     Probe = 'qwen'; Cmd = 'npm'; Args = @('up', '-g', '@qwen-code/qwen-code') },
-        @{ Label = 'mimo';     Probe = 'mimo'; Cmd = 'npm'; Args = @('up', '-g', '@mimo-ai/cli') },
-        @{ Label = 'kimi';     Probe = 'kimi'; Cmd = 'npm'; Args = @('up', '-g', '@moonshot-ai/kimi-code') },
+        @{ Label = 'qwen';     Probe = 'qwen'; Cmd = 'npm'; NpmPackage = '@qwen-code/qwen-code' },
+        @{ Label = 'mimo';     Probe = 'mimo'; Cmd = 'npm'; NpmPackage = '@mimo-ai/cli' },
+        @{ Label = 'kimi';     Probe = 'kimi'; Cmd = 'npm'; NpmPackage = '@moonshot-ai/kimi-code' },
         @{ Label = 'grok';     Cmd = 'grok';     Args = @('update') }
     )
 }
@@ -8466,8 +8467,8 @@ function Invoke-AiUpgrade {
     Runs the update/upgrade command for each available CLI registered in
     $_AiToolsInternal.UpgradeCommands. The registry currently covers agy, Claude,
     Codex, OpenCode, Qwen Code, MiMo, Kimi Code, and Grok. Use the alias 'aiu'
-    for convenience. Qwen Code, MiMo, and Kimi Code are updated through their
-    global npm packages instead of their native self-updaters.
+    for convenience. Available Qwen Code, MiMo, and Kimi Code installations are
+    updated together through one global npm command instead of native self-updaters.
 .EXAMPLE
     Invoke-AiUpgrade
 .EXAMPLE
@@ -8479,7 +8480,31 @@ function Invoke-AiUpgrade {
     [CmdletBinding()]
     param()
 
+    $npmPackages = @(
+        foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
+            if ($tool.NpmPackage -and (Get-Command $tool.Probe -ErrorAction SilentlyContinue)) {
+                $tool.NpmPackage
+            }
+        }
+    )
+    $npmUpdatePending = $true
+
     foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
+        # Run all eligible npm-managed tools together at the first npm registry entry.
+        if ($tool.NpmPackage) {
+            if (-not $npmUpdatePending) {
+                continue
+            }
+            $npmUpdatePending = $false
+            if ($npmPackages.Count -eq 0 -or -not (Get-Command npm -ErrorAction SilentlyContinue)) {
+                continue
+            }
+            $npmArgs = @('up', '-g') + $npmPackages
+            Write-Host ">>> npm: npm $($npmArgs -join ' ')" -ForegroundColor Cyan
+            & npm @npmArgs
+            continue
+        }
+
         $probe = if ($tool.Probe) { $tool.Probe } else { $tool.Cmd }
         if (-not (Get-Command $probe -ErrorAction SilentlyContinue)) {
             continue
