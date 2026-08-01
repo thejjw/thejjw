@@ -553,6 +553,7 @@ $_AiToolsInternal = @{
         '7zip.7zip',
         'GitHub.cli',
         'Notepad++.Notepad++',
+        'Lapce.Lapce',
         'Microsoft.Edit',
         'Python.PythonInstallManager',
         'cURL.cURL',
