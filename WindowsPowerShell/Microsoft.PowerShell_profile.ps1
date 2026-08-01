@@ -741,8 +741,8 @@ $_AiSkillsInternal = @{
     RepoUrl               = 'https://github.com/thejjw/thejjw.git'
     Branch                = 'main'
     SparsePath            = 'ai-skills'
-    OpenCodeClaudeSkills  = @('codebase-docs', 'web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query', 'kimi-usage-query')
-    AntigravitySkills     = @('codebase-docs', 'session-exporter')
+    OpenCodeClaudeSkills  = @('codebase-docs', 'web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query', 'kimi-usage-query', 'deep-research')
+    AntigravitySkills     = @('codebase-docs', 'session-exporter', 'agy-usage-query')
     CodexSkills           = @('export-chat-codex')
     OpenCodeSkillsPath    = '.agents\skills'
     ClaudeSkillsPath      = '.claude\skills'
@@ -7283,7 +7283,7 @@ function Install-AiSkills {
     Install-AiSkills
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-07
+    Last Edit: 2026-08
 #>
     [CmdletBinding()]
     param(
@@ -7292,8 +7292,6 @@ function Install-AiSkills {
         [switch]$KeepTemp
     )
 
-    $previousVerbosePreference = $VerbosePreference
-    $VerbosePreference = 'Continue'
     $tmpDir = $null
 
     $openCodeClaudeSkills = $_AiSkillsInternal.OpenCodeClaudeSkills
@@ -7349,17 +7347,42 @@ function Install-AiSkills {
         Write-Host "[info] Installing skill '$SkillName' to $ToolName"
         if (-not (Test-Path -LiteralPath $DestinationRoot)) {
             Write-Verbose "Creating skill root: $DestinationRoot"
-            $null = New-Item -ItemType Directory -Path $DestinationRoot -Force -Verbose
-        }
-        if (Test-Path -LiteralPath $dst) {
-            Write-Verbose "Removing existing skill directory: $dst"
-            Remove-Item -LiteralPath $dst -Recurse -Force -Verbose
+            $null = New-Item -ItemType Directory -Path $DestinationRoot -Force
         }
 
-        Write-Verbose "Creating destination skill directory: $dst"
-        $null = New-Item -ItemType Directory -Path $dst -Force -Verbose
-        Write-Verbose "Copying '$src\*' to '$dst'"
-        Copy-Item -Path (Join-Path $src '*') -Destination $dst -Recurse -Force -Verbose
+        # Stage into a sibling directory, then swap into place so a failed copy
+        # never leaves the destination skill missing or half-written.
+        $staging = "$dst.tmp-install"
+        if (Test-Path -LiteralPath $staging) {
+            Write-Verbose "Removing stale staging directory: $staging"
+            Remove-Item -LiteralPath $staging -Recurse -Force
+        }
+
+        try {
+            Write-Verbose "Staging '$src\*' in '$staging'"
+            $null = New-Item -ItemType Directory -Path $staging -Force
+            Copy-Item -Path (Join-Path $src '*') -Destination $staging -Recurse -Force
+            if (-not (Test-Path -LiteralPath (Join-Path $staging 'SKILL.md') -PathType Leaf)) {
+                throw "Copy verification failed for skill '$SkillName': $staging"
+            }
+
+            if (Test-Path -LiteralPath $dst) {
+                Write-Verbose "Removing existing skill directory: $dst"
+                Remove-Item -LiteralPath $dst -Recurse -Force
+            }
+            Write-Verbose "Moving staged skill into place: $dst"
+            Rename-Item -LiteralPath $staging -NewName $SkillName
+        }
+        catch {
+            # Best-effort staging cleanup; must not mask the original failure.
+            if (Test-Path -LiteralPath $staging) {
+                Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path -LiteralPath $staging) {
+                    Write-Warning "Staging directory still exists after cleanup: $staging"
+                }
+            }
+            throw
+        }
     }
 
     function Set-OpenCodeSkillPermissions {
@@ -7370,7 +7393,7 @@ function Install-AiSkills {
 
         if (-not (Test-Path -LiteralPath $openCodeConfigDir)) {
             Write-Verbose "Creating OpenCode config directory: $openCodeConfigDir"
-            $null = New-Item -ItemType Directory -Path $openCodeConfigDir -Force -Verbose
+            $null = New-Item -ItemType Directory -Path $openCodeConfigDir -Force
         }
 
         if (-not (Test-Path -LiteralPath $openCodeConfigFile)) {
@@ -7389,13 +7412,42 @@ function Install-AiSkills {
         if (-not $config) {
             $config = [pscustomobject]@{}
         }
-        if (-not $config.PSObject.Properties['permission']) {
+
+        # OpenCode permits scalar forms such as "permission": "allow" and
+        # "permission": { "skill": "ask" }. Normalize to the granular object
+        # form, preserving any scalar as the wildcard default.
+        $permissionProp = $config.PSObject.Properties['permission']
+        if (-not $permissionProp -or $null -eq $permissionProp.Value) {
             Write-Verbose "Adding OpenCode permission object"
-            $config | Add-Member -NotePropertyName 'permission' -NotePropertyValue ([pscustomobject]@{})
+            $config | Add-Member -NotePropertyName 'permission' -NotePropertyValue ([pscustomobject]@{}) -Force
         }
-        if (-not $config.permission.PSObject.Properties['skill']) {
+        elseif ($permissionProp.Value -is [string]) {
+            if ($permissionProp.Value -eq 'allow') {
+                Write-Verbose "OpenCode permission is already 'allow'; skill permissions not needed."
+                return
+            }
+            Write-Verbose "Converting scalar OpenCode permission '$($permissionProp.Value)' to object form"
+            $config.permission = [pscustomobject]@{ '*' = $permissionProp.Value }
+        }
+        elseif ($permissionProp.Value -isnot [pscustomobject]) {
+            throw "OpenCode config 'permission' has unexpected type: $($permissionProp.Value.GetType().Name)"
+        }
+
+        $skillProp = $config.permission.PSObject.Properties['skill']
+        if (-not $skillProp -or $null -eq $skillProp.Value) {
             Write-Verbose "Adding OpenCode permission.skill object"
-            $config.permission | Add-Member -NotePropertyName 'skill' -NotePropertyValue ([pscustomobject]@{})
+            $config.permission | Add-Member -NotePropertyName 'skill' -NotePropertyValue ([pscustomobject]@{}) -Force
+        }
+        elseif ($skillProp.Value -is [string]) {
+            if ($skillProp.Value -eq 'allow') {
+                Write-Verbose "OpenCode skill permission is already 'allow'; nothing to change."
+                return
+            }
+            Write-Verbose "Converting scalar OpenCode skill permission '$($skillProp.Value)' to object form"
+            $config.permission.skill = [pscustomobject]@{ '*' = $skillProp.Value }
+        }
+        elseif ($skillProp.Value -isnot [pscustomobject]) {
+            throw "OpenCode config 'permission.skill' has unexpected type: $($skillProp.Value.GetType().Name)"
         }
 
         foreach ($skill in $SkillNames) {
@@ -7433,8 +7485,6 @@ function Install-AiSkills {
         }
         Write-Verbose "Skill source directory: $skillsSourceDir"
 
-        Set-OpenCodeSkillPermissions -SkillNames $openCodeClaudeSkills
-
         foreach ($skill in $openCodeClaudeSkills) {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $openCodeSkillsDir -ToolName 'OpenCode'
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $claudeSkillsDir -ToolName 'Claude Code'
@@ -7448,6 +7498,10 @@ function Install-AiSkills {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $codexSkillsDir -ToolName 'Codex'
         }
 
+        # Update OpenCode config only after every skill installed successfully,
+        # so permissions never advertise skills whose install failed.
+        Set-OpenCodeSkillPermissions -SkillNames $openCodeClaudeSkills
+
         Write-Host ""
         Write-Host "[done] Installed AI skills:" -ForegroundColor Green
         Write-Host "  OpenCode and Claude Code: $($openCodeClaudeSkills -join ', ')"
@@ -7455,7 +7509,8 @@ function Install-AiSkills {
         Write-Host "  Codex: $($codexSkills -join ', ')"
     }
     catch {
-        Write-Error "Install-AiSkills failed: $_"
+        Write-Host "[error] Install-AiSkills failed: $_" -ForegroundColor Red
+        throw
     }
     finally {
         if ($tmpDir -and (Test-Path -LiteralPath $tmpDir)) {
@@ -7464,7 +7519,8 @@ function Install-AiSkills {
             }
             else {
                 Write-Verbose "Removing temporary clone: $tmpDir"
-                Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction Stop
+                # Best-effort cleanup; must not mask an in-flight failure.
+                Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
                 if (Test-Path -LiteralPath $tmpDir) {
                     Write-Warning "Temporary clone still exists after cleanup: $tmpDir"
                 }
@@ -7473,7 +7529,6 @@ function Install-AiSkills {
                 }
             }
         }
-        $VerbosePreference = $previousVerbosePreference
     }
 }
 
