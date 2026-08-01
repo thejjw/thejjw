@@ -638,6 +638,7 @@ $_AiToolsInternal = @{
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
     }
     NpmPackages            = @(
+        '@earendil-works/pi-coding-agent',
         '@musistudio/claude-code-router',
         'oh-my-free-models'
     )
