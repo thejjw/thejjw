@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: Deep research harness -- clarify scope, confirm a research plan, fan out web searches, cross-reference and verify claims, and write a long-form cited report to a file. Use only when the user explicitly asks for deep research, a thorough analysis, or a comprehensive research report, or names this skill. Do not auto-select for ordinary questions or quick lookups.
+description: Deep research harness -- clarify scope, confirm a research plan, fan out web searches, cross-reference and verify claims, and deliver a long-form cited report. Use only when the user explicitly asks for deep research, a thorough analysis, or a comprehensive research report, or names this skill. Do not auto-select for ordinary questions or quick lookups.
 metadata:
   audience: agents
   auth: none
@@ -12,7 +12,7 @@ metadata:
 - Decompose the brief into research threads and present the plan for user confirmation
 - Research each thread with web searches and full-page reads, using parallel subagents when the harness supports them
 - Cross-reference sources, verify claims, and flag contradictions and gaps
-- Write a comprehensive, cited, long-form report to a Markdown file and summarize it in chat
+- Prefer writing a comprehensive, cited, long-form report to a Markdown file and summarize it in chat
 
 ## When to use me
 
@@ -84,7 +84,7 @@ Use whatever web search and page-fetch tools the harness provides (built-in sear
 
 After every search, reflect in one line: what was found, what is missing, is there enough.
 
-**If the harness supports subagents / parallel agents:** delegate one subagent per thread, launched together. Each subagent prompt must be fully standalone -- subagents cannot see this conversation or each other's work, so include the research brief, the thread scope, the search budget, and the return format below. Write out full names; no unexplained acronyms.
+**If the harness supports subagents / parallel agents:** delegate one subagent per thread in capacity-bounded waves. Launch only as many agents as the harness currently permits, wait for that wave to finish, then launch the next wave until every thread is complete. If capacity is zero, or a launch is rejected, research each affected thread sequentially in the parent context using the same search budget and return format; retrying later is optional, but no thread may be skipped or dropped. Each subagent prompt must be fully standalone -- subagents cannot see this conversation or each other's work, so include the research brief, the thread scope, the search budget, and the return format below. Write out full names; no unexplained acronyms.
 
 ```text
 ## <Thread title>
@@ -103,7 +103,7 @@ After every search, reflect in one line: what was found, what is missing, is the
 
 Subagents only research and return text; they must not write files.
 
-**If the harness has no subagents:** research the threads sequentially in your own context. After finishing each thread, write a compact thread-notes block in the same format above before starting the next thread. Preserve facts and quotes verbatim -- do not paraphrase them away -- and keep every source URL. These notes are a compression buffer so each new thread starts with a clean working set.
+**If the harness has no subagents, or for any thread handled by the parent fallback:** research the threads sequentially in your own context. After finishing each thread, write a compact thread-notes block in the same format above before starting the next thread. Preserve facts and quotes verbatim -- do not paraphrase them away -- and keep every source URL. These notes are a compression buffer so each new thread starts with a clean working set.
 
 Either way, fetch and read the most promising pages in full (aim for 5-10 pages across all threads). Prioritize official or authoritative sources, detailed technical articles, and primary data over summaries.
 
@@ -161,8 +161,11 @@ Quality gates before delivering:
 
 ### Phase 5 -- Deliver
 
-1. Write the report to `deep-research-YYYYMMDD-<slug>.md` in the workspace root, where `<slug>` is 2-4 descriptive lowercase words joined with hyphens (at most ~20 characters). If the file already exists, append `-2`, `-3`, and so on instead of overwriting.
-2. In chat, return the file path plus a 3-4 sentence summary of the most important findings. Do not paste the full report into chat.
+Apply all Phase 4 quality and citation gates before using any delivery method.
+
+1. Prefer writing the report to `deep-research-YYYYMMDD-<slug>.md` in the workspace root, where `<slug>` is 2-4 descriptive lowercase words joined with hyphens (at most ~20 characters). If the file already exists, append `-2`, `-3`, and so on instead of overwriting.
+2. If the write is unavailable, denied, or fails, deliver the complete report through a supported artifact mechanism. If none is available, return the complete report in chat. In either fallback, explicitly state that no report file was created.
+3. When the file write succeeds, return the file path plus a 3-4 sentence summary of the most important findings. Do not paste the full report into chat.
 
 ## Limitations
 

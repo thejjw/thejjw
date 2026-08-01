@@ -8,7 +8,7 @@ Reusable agent skill documentation for AI coding environments.
   - Intended for Antigravity CLI only.
 - `codebase-docs`: Maintain codebase documentation in the `docs/` folder using surgical git-based updates.
   - Intended for OpenCode, Claude Code, and Antigravity.
-- `deep-research`: Deep research harness — clarify scope, confirm a research plan, fan out web searches, verify claims, and write a cited long-form report to a file.
+- `deep-research`: Deep research harness — clarify scope, confirm a research plan, fan out web searches, verify claims, and deliver a cited long-form report.
   - Intended for all AI coding agents.
 - `deepseek-usage-query`: Query DeepSeek API balance and estimate token budget from current pricing.
   - Intended for OpenCode and Claude Code.
