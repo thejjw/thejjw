@@ -7347,41 +7347,71 @@ function Install-AiSkills {
         Write-Host "[info] Installing skill '$SkillName' to $ToolName"
         if (-not (Test-Path -LiteralPath $DestinationRoot)) {
             Write-Verbose "Creating skill root: $DestinationRoot"
-            $null = New-Item -ItemType Directory -Path $DestinationRoot -Force
+            $null = New-Item -ItemType Directory -Path $DestinationRoot -Force -ErrorAction Stop
         }
 
-        # Stage into a sibling directory, then swap into place so a failed copy
-        # never leaves the destination skill missing or half-written.
+        # Use recoverable sibling directories so an interrupted or failed swap
+        # can restore the previous complete installation.
         $staging = "$dst.tmp-install"
-        if (Test-Path -LiteralPath $staging) {
-            Write-Verbose "Removing stale staging directory: $staging"
-            Remove-Item -LiteralPath $staging -Recurse -Force
-        }
+        $backup = "$dst.backup-install"
 
         try {
+            if (Test-Path -LiteralPath $backup) {
+                if (Test-Path -LiteralPath $dst) {
+                    Write-Verbose "Removing stale backup directory: $backup"
+                    Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction Stop
+                }
+                else {
+                    Write-Verbose "Restoring interrupted skill installation from: $backup"
+                    Rename-Item -LiteralPath $backup -NewName $SkillName -ErrorAction Stop
+                }
+            }
+            if (Test-Path -LiteralPath $staging) {
+                Write-Verbose "Removing stale staging directory: $staging"
+                Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop
+            }
+
             Write-Verbose "Staging '$src\*' in '$staging'"
-            $null = New-Item -ItemType Directory -Path $staging -Force
-            Copy-Item -Path (Join-Path $src '*') -Destination $staging -Recurse -Force
+            $null = New-Item -ItemType Directory -Path $staging -Force -ErrorAction Stop
+            Copy-Item -Path (Join-Path $src '*') -Destination $staging -Recurse -Force -ErrorAction Stop
             if (-not (Test-Path -LiteralPath (Join-Path $staging 'SKILL.md') -PathType Leaf)) {
                 throw "Copy verification failed for skill '$SkillName': $staging"
             }
 
             if (Test-Path -LiteralPath $dst) {
-                Write-Verbose "Removing existing skill directory: $dst"
-                Remove-Item -LiteralPath $dst -Recurse -Force
+                Write-Verbose "Backing up existing skill directory: $dst"
+                Rename-Item -LiteralPath $dst -NewName (Split-Path -Leaf $backup) -ErrorAction Stop
             }
             Write-Verbose "Moving staged skill into place: $dst"
-            Rename-Item -LiteralPath $staging -NewName $SkillName
+            Rename-Item -LiteralPath $staging -NewName $SkillName -ErrorAction Stop
+            if (Test-Path -LiteralPath $backup) {
+                Write-Verbose "Removing replaced skill backup: $backup"
+                Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction Stop
+            }
         }
         catch {
-            # Best-effort staging cleanup; must not mask the original failure.
+            $installError = $_
+            if (Test-Path -LiteralPath $backup) {
+                try {
+                    if (Test-Path -LiteralPath $dst) {
+                        Remove-Item -LiteralPath $dst -Recurse -Force -ErrorAction Stop
+                    }
+                    Rename-Item -LiteralPath $backup -NewName $SkillName -ErrorAction Stop
+                    Write-Warning "Restored previous skill installation after failure: $dst"
+                }
+                catch {
+                    Write-Warning "Could not restore previous skill installation; backup remains at: $backup"
+                }
+            }
+
+            # Best-effort staging cleanup must not mask the original failure.
             if (Test-Path -LiteralPath $staging) {
                 Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
                 if (Test-Path -LiteralPath $staging) {
                     Write-Warning "Staging directory still exists after cleanup: $staging"
                 }
             }
-            throw
+            throw $installError
         }
     }
 
@@ -7487,6 +7517,13 @@ function Install-AiSkills {
 
         foreach ($skill in $openCodeClaudeSkills) {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $openCodeSkillsDir -ToolName 'OpenCode'
+        }
+
+        # Configure OpenCode as soon as its own installation is complete so a
+        # failure in another tool cannot leave installed skills inaccessible.
+        Set-OpenCodeSkillPermissions -SkillNames $openCodeClaudeSkills
+
+        foreach ($skill in $openCodeClaudeSkills) {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $claudeSkillsDir -ToolName 'Claude Code'
         }
 
@@ -7497,10 +7534,6 @@ function Install-AiSkills {
         foreach ($skill in $codexSkills) {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $codexSkillsDir -ToolName 'Codex'
         }
-
-        # Update OpenCode config only after every skill installed successfully,
-        # so permissions never advertise skills whose install failed.
-        Set-OpenCodeSkillPermissions -SkillNames $openCodeClaudeSkills
 
         Write-Host ""
         Write-Host "[done] Installed AI skills:" -ForegroundColor Green
