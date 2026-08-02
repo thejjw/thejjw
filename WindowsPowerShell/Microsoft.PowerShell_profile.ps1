@@ -10351,6 +10351,148 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
     }
 }
 
+function Enable-WindowsSudo {
+    <#
+.SYNOPSIS
+    Enables the inbox Windows Sudo command in inline mode.
+.DESCRIPTION
+    Requires Windows 11 version 24H2 (build 26100) or later. Requests elevation
+    once and configures sudo.exe to run elevated commands in the current console.
+.EXAMPLE
+    PS C:\> Enable-WindowsSudo
+.OUTPUTS
+    System.Boolean. True when inline Windows Sudo is enabled; otherwise false.
+.NOTES
+    Inline mode lets unelevated processes share console input with the elevated
+    process. Enable it only on a trusted interactive workstation.
+#>
+    [CmdletBinding()]
+    param()
+
+    $sudoPath = Join-Path $env:SystemRoot 'System32\sudo.exe'
+    $windowsVersion = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue
+    $build = 0
+    if ($windowsVersion -and -not [int]::TryParse([string]$windowsVersion.CurrentBuildNumber, [ref]$build)) {
+        $build = 0
+    }
+
+    if ($build -lt 26100 -or -not (Test-Path -LiteralPath $sudoPath -PathType Leaf)) {
+        Write-Error 'Windows Sudo requires Windows 11 version 24H2 (build 26100) or later.'
+        return $false
+    }
+
+    $sudoConfigPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo'
+    $sudoConfig = Get-ItemProperty -LiteralPath $sudoConfigPath -ErrorAction SilentlyContinue
+    if ($sudoConfig -and $sudoConfig.Enabled -eq 3) {
+        Write-Host 'Windows Sudo is already enabled in inline mode.' -ForegroundColor Green
+        return $true
+    }
+
+    try {
+        $process = Start-Process -FilePath $sudoPath -ArgumentList @('config', '--enable', 'normal') `
+            -Verb RunAs -Wait -PassThru -ErrorAction Stop
+    } catch {
+        Write-Error "Windows Sudo setup was cancelled or failed: $($_.Exception.Message)"
+        return $false
+    }
+
+    $sudoConfig = Get-ItemProperty -LiteralPath $sudoConfigPath -ErrorAction SilentlyContinue
+    if ($process.ExitCode -ne 0 -or -not $sudoConfig -or $sudoConfig.Enabled -ne 3) {
+        Write-Error "Windows Sudo did not enable inline mode (exit code $($process.ExitCode))."
+        return $false
+    }
+
+    Write-Host 'Windows Sudo is enabled in inline mode.' -ForegroundColor Green
+    return $true
+}
+
+function Invoke-Elevated {
+    <#
+.SYNOPSIS
+    Runs a native command or PowerShell script block with administrator rights.
+.DESCRIPTION
+    Uses the inbox Windows Sudo command and the normal UAC consent flow. Native
+    executables receive arguments directly. PowerShell cmdlets, functions,
+    pipelines, and expressions must be supplied as one script block.
+.PARAMETER NoProfile
+    Prevents the elevated PowerShell child from loading PowerShell profiles.
+.PARAMETER Command
+    A native executable plus arguments, or one PowerShell script block.
+.EXAMPLE
+    PS C:\> Invoke-Elevated winget upgrade --all
+.EXAMPLE
+    PS C:\> Invoke-Elevated { Get-Service -Name wuauserv | Restart-Service }
+.EXAMPLE
+    PS C:\> Invoke-Elevated -NoProfile { whoami /groups }
+.NOTES
+    A script block runs in a new process and does not inherit live variables or
+    objects from the calling session.
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$NoProfile,
+
+        [Parameter(Mandatory = $true, Position = 0, ValueFromRemainingArguments = $true)]
+        [object[]]$Command
+    )
+
+    $sudoPath = Join-Path $env:SystemRoot 'System32\sudo.exe'
+    $windowsVersion = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue
+    $build = 0
+    if ($windowsVersion -and -not [int]::TryParse([string]$windowsVersion.CurrentBuildNumber, [ref]$build)) {
+        $build = 0
+    }
+
+    if ($build -lt 26100 -or -not (Test-Path -LiteralPath $sudoPath -PathType Leaf)) {
+        Write-Error 'Invoke-Elevated requires Windows 11 version 24H2 (build 26100) or later.'
+        return
+    }
+
+    $sudoConfig = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo' -ErrorAction SilentlyContinue
+    if (-not $sudoConfig -or $sudoConfig.Enabled -ne 3) {
+        Write-Error 'Windows Sudo is not enabled in inline mode. Run Enable-WindowsSudo first.'
+        return
+    }
+
+    if ($Command.Count -eq 1 -and $Command[0] -is [scriptblock]) {
+        $powerShellPath = (Get-Process -Id $PID -ErrorAction Stop).MainModule.FileName
+        $location = $ExecutionContext.SessionState.Path.CurrentLocation.Path.Replace("'", "''")
+        $scriptText = $Command[0].ToString()
+        $wrappedCommand = @"
+Set-Location -LiteralPath '$location'
+`$global:LASTEXITCODE = `$null
+& {
+$scriptText
+}
+`$commandSucceeded = `$?
+`$nativeExitCode = `$global:LASTEXITCODE
+if (`$null -ne `$nativeExitCode) { exit `$nativeExitCode }
+if (-not `$commandSucceeded) { exit 1 }
+"@
+        $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($wrappedCommand))
+        $powerShellArguments = @('-NoLogo')
+        if ($NoProfile) { $powerShellArguments += '-NoProfile' }
+        $powerShellArguments += @('-EncodedCommand', $encodedCommand)
+
+        & $sudoPath $powerShellPath @powerShellArguments
+        return
+    }
+
+    if ($Command[0] -isnot [string]) {
+        Write-Error 'The command must be a native executable name or a single PowerShell script block.'
+        return
+    }
+
+    $nativeCommand = Get-Command -Name ([string]$Command[0]) -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $nativeCommand) {
+        Write-Error "'$($Command[0])' is not a native executable. Wrap PowerShell commands in braces: Invoke-Elevated { <command> }."
+        return
+    }
+
+    $nativeArguments = if ($Command.Count -gt 1) { $Command[1..($Command.Count - 1)] } else { @() }
+    & $sudoPath $nativeCommand.Source @nativeArguments
+}
+
 function Invoke-WindowsUpdateScan {
     <#
 .SYNOPSIS
