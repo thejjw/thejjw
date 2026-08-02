@@ -543,6 +543,16 @@ If an MCP tool is unavailable or underperforming, inform the user and suggest al
 
 # Internal configuration for Install-AiTools and Invoke-AiUpgrade
 $_AiToolsInternal = @{
+    PowerShellModules      = @(
+        @{
+            Name               = 'Pester'
+            MinimumVersion     = '6.0'
+            Repository         = 'PSGallery'
+            Scope              = 'CurrentUser'
+            Force              = $true
+            SkipPublisherCheck = $true
+        }
+    )
     WingetPackages         = @(
         'Microsoft.Coreutils',
         'Microsoft.VCRedist.2015+.x64',
@@ -7568,13 +7578,13 @@ function Install-AiSkills {
 function Install-AiTools {
     <#
 .SYNOPSIS
-    Installs common developer tools and CLIs via winget/npm and helper installers.
+    Installs common developer tools, PowerShell modules, and CLIs.
 
 .DESCRIPTION
-    Checks for the presence of a curated list of Windows packages (via `winget`) and
-    installs any that are missing. Also ensures `git` is present (offers interactive
-    winget install), installs a small set of global `npm` packages, and bootstraps the
-    Antigravity and Claude CLIs using their install scripts.
+    Checks for configured PowerShell modules and installs them for the current user
+    before processing a curated list of Windows packages via `winget`. Also ensures
+    `git` is present, installs global `npm` packages, and bootstraps AI CLIs using
+    their supported installers.
 
     On first run this helper will ask once whether to proceed automatically with
     installations; if you decline, it will list missing items for manual review and exit.
@@ -7650,6 +7660,7 @@ function Install-AiTools {
         $MoreAi = $true
     }
 
+    $powerShellModules = @($_AiToolsInternal.PowerShellModules)
     $wingetPackages = $_AiToolsInternal.WingetPackages
     if ($ExtendedSetup) {
         $wingetPackages += $_AiToolsInternal.ExtendedWingetPackages
@@ -7690,6 +7701,13 @@ function Install-AiTools {
     if ($All) { $setupLabels = @('all') }
     $setupLabel = $setupLabels -join ', '
     Write-Host "The setup will check/install the following items ($setupLabel):" -ForegroundColor Cyan
+    Write-Host "PowerShell modules (total: $($powerShellModules.Count)):" -ForegroundColor Cyan
+    $moduleIdx = 0
+    foreach ($module in $powerShellModules) {
+        $moduleIdx++
+        Write-Host " - [$moduleIdx/$($powerShellModules.Count)] $($module.Name) >= $($module.MinimumVersion) ($($module.Scope))"
+    }
+
     Write-Host "Winget packages (total: $($wingetPackages.Count)):" -ForegroundColor Cyan
     $wingetIdx = 0
     foreach ($p in $wingetPackages) {
@@ -7719,10 +7737,82 @@ function Install-AiTools {
     }
 
     if (-not $Auto) {
-        $choice = Read-Host -Prompt "Proceed with automatic installation of missing items? This will run winget/npm/installers. Continue? (Y/n)"
+        $choice = Read-Host -Prompt "Proceed with automatic installation of missing items? This will install PowerShell modules and run winget/npm/installers. Continue? (Y/n)"
         if ($choice -in @('n', 'N')) {
             Write-Host "Aborting automatic installs. Run Install-AiTools -Auto when ready to continue." -ForegroundColor Yellow
             return
+        }
+    }
+
+    # Install configured modules before Winget so PowerShell-only setup remains
+    # useful on machines where App Installer is absent or unavailable.
+    if ($powerShellModules.Count -gt 0) {
+        Write-Host 'Checking PowerShell modules...' -ForegroundColor Cyan
+        $minimumNuGetVersion = [version]'2.8.5.201'
+        $moduleInstallIdx = 0
+
+        foreach ($module in $powerShellModules) {
+            $moduleInstallIdx++
+            $minimumVersion = [version]$module.MinimumVersion
+            $installedModule = Get-Module -ListAvailable -Name $module.Name |
+                Where-Object { $_.Version -ge $minimumVersion } |
+                Sort-Object Version -Descending |
+                Select-Object -First 1
+
+            if ($installedModule -and -not $Update) {
+                Write-Host "[$moduleInstallIdx/$($powerShellModules.Count)] installed: $($module.Name) $($installedModule.Version)" -ForegroundColor Green
+                continue
+            }
+
+            $action = if ($installedModule) { 'Updating' } else { 'Installing' }
+            Write-Host "[$moduleInstallIdx/$($powerShellModules.Count)] $action $($module.Name) >= $minimumVersion..." -ForegroundColor Cyan
+
+            try {
+                if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) {
+                    throw 'Install-Module is unavailable. Install PowerShellGet and retry.'
+                }
+
+                # Older Windows PowerShell defaults may not negotiate the TLS
+                # version required by PowerShell Gallery.
+                [Net.ServicePointManager]::SecurityProtocol =
+                    [Net.ServicePointManager]::SecurityProtocol -bor
+                    [Net.SecurityProtocolType]::Tls12
+
+                $nuGetProvider = Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Version -ge $minimumNuGetVersion } |
+                    Sort-Object Version -Descending |
+                    Select-Object -First 1
+                if (-not $nuGetProvider) {
+                    Write-Host "Bootstrapping NuGet provider >= $minimumNuGetVersion..." -ForegroundColor Yellow
+                    Install-PackageProvider -Name NuGet -MinimumVersion $minimumNuGetVersion `
+                        -Scope CurrentUser -Force -Confirm:$false -ErrorAction Stop | Out-Null
+                }
+
+                $installParameters = @{
+                    Name           = $module.Name
+                    MinimumVersion = $module.MinimumVersion
+                    Repository     = $module.Repository
+                    Scope          = $module.Scope
+                    Confirm        = $false
+                    ErrorAction    = 'Stop'
+                }
+                if ($module.Force) { $installParameters.Force = $true }
+                if ($module.SkipPublisherCheck) { $installParameters.SkipPublisherCheck = $true }
+                Install-Module @installParameters
+
+                $installedModule = Get-Module -ListAvailable -Name $module.Name |
+                    Where-Object { $_.Version -ge $minimumVersion } |
+                    Sort-Object Version -Descending |
+                    Select-Object -First 1
+                if (-not $installedModule) {
+                    throw "$($module.Name) >= $minimumVersion was not discoverable after installation."
+                }
+
+                Write-Host "Installed $($module.Name) $($installedModule.Version)." -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "PowerShell module setup failed for $($module.Name): $($_.Exception.Message)"
+            }
         }
     }
 

@@ -4,6 +4,10 @@ The test suite targets the current stable Pester 6 release. Windows PowerShell
 5.1 includes Microsoft-signed Pester 3.4.0; leave that system module in place
 and install current Pester side by side for the active user:
 
+`Install-AiTools` installs or updates the configured Pester 6 package before
+its Winget and npm phases. Use the commands below when installing the test
+dependency manually or recovering from a gallery/bootstrap failure.
+
 ```powershell
 Install-Module -Name Pester -MinimumVersion 6.0 -Scope CurrentUser `
     -Force -SkipPublisherCheck
