@@ -976,7 +976,7 @@ if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez: already in $PROFILE -- skipping"
 else
   ensure_secret z "Z.AI API token"
-  Z_AI_AUTH_TOKEN="$(read_secret z)"
+  ZAI_API_KEY="$(read_secret z)"
 
     # Add the claudez functions
     # about supported models: "All plans support GLM-5.2, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
@@ -1012,7 +1012,7 @@ claudez() {
   local key
   key="$(_jjw_secret z)" || return 1
   _zai_peak_warning
-  Z_AI_AUTH_TOKEN="$key" \
+  ZAI_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
@@ -1035,7 +1035,7 @@ claudezm() {
   local key
   key="$(_jjw_secret z)" || return 1
   _zai_peak_warning
-  Z_AI_AUTH_TOKEN="$key" \
+  ZAI_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
@@ -1059,9 +1059,9 @@ EOF
     # Configure MCP servers via Claude CLI (preferred over direct JSON edits)
     if command -v claude &>/dev/null; then
       CLAUDEZ_ENV=(
-        Z_AI_AUTH_TOKEN="$Z_AI_AUTH_TOKEN"
+        ZAI_API_KEY="$ZAI_API_KEY"
         ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
-        ANTHROPIC_AUTH_TOKEN="$Z_AI_AUTH_TOKEN"
+        ANTHROPIC_AUTH_TOKEN="$ZAI_API_KEY"
         API_TIMEOUT_MS="3000000"
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
       )
@@ -1075,7 +1075,7 @@ EOF
       else
         # Keep the placeholder literal for Claude Code to expand at runtime.
         # shellcheck disable=SC2016
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-search-prime https://api.z.ai/api/mcp/web_search_prime/mcp --header 'Authorization: Bearer ${Z_AI_AUTH_TOKEN}' >/dev/null 2>&1; then
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-search-prime https://api.z.ai/api/mcp/web_search_prime/mcp --header 'Authorization: Bearer ${ZAI_API_KEY}' >/dev/null 2>&1; then
           echo "claudez: added web-search-prime"
         else
           echo "claudez: failed to add web-search-prime" >&2
@@ -1088,7 +1088,7 @@ EOF
         echo "claudez: web-reader already exists -- skipping"
       else
         # shellcheck disable=SC2016
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-reader https://api.z.ai/api/mcp/web_reader/mcp --header 'Authorization: Bearer ${Z_AI_AUTH_TOKEN}' >/dev/null 2>&1; then
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http web-reader https://api.z.ai/api/mcp/web_reader/mcp --header 'Authorization: Bearer ${ZAI_API_KEY}' >/dev/null 2>&1; then
           echo "claudez: added web-reader"
         else
           echo "claudez: failed to add web-reader" >&2
@@ -1101,7 +1101,7 @@ EOF
         echo "claudez: zread already exists -- skipping"
       else
         # shellcheck disable=SC2016
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http zread https://api.z.ai/api/mcp/zread/mcp --header 'Authorization: Bearer ${Z_AI_AUTH_TOKEN}' >/dev/null 2>&1; then
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user -t http zread https://api.z.ai/api/mcp/zread/mcp --header 'Authorization: Bearer ${ZAI_API_KEY}' >/dev/null 2>&1; then
           echo "claudez: added zread"
         else
           echo "claudez: failed to add zread" >&2
@@ -1114,7 +1114,7 @@ EOF
         echo "claudez: zai-mcp-server already exists -- skipping"
       else
         # shellcheck disable=SC2016
-        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user zai-mcp-server --env 'Z_AI_API_KEY=${Z_AI_AUTH_TOKEN}' Z_AI_MODE=ZAI -- npx -y @z_ai/mcp-server >/dev/null 2>&1; then
+        if env "${CLAUDEZ_ENV[@]}" claude mcp add -s user zai-mcp-server --env 'Z_AI_API_KEY=${ZAI_API_KEY}' Z_AI_MODE=ZAI -- npx -y @z_ai/mcp-server >/dev/null 2>&1; then
           echo "claudez: added zai-mcp-server"
         else
           echo "claudez: failed to add zai-mcp-server" >&2

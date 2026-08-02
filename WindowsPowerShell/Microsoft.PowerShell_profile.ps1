@@ -780,7 +780,7 @@ $_CcrInternal = @{
     Providers = @{
         zai = @{
             base        = 'https://api.z.ai/api/anthropic/v1/messages'
-            key         = '$Z_AI_AUTH_TOKEN'
+            key         = '$ZAI_API_KEY'
             models      = @('glm-4.5-air', 'glm-5.2[1m]', 'glm-4.7', 'glm-4.6v')
             transformer = 'Anthropic'
         }
@@ -5238,10 +5238,10 @@ function claudez {
     Launches Claude Code through the Z.AI-backed profile helper.
 
 .DESCRIPTION
-    Reads the Z.AI API key from the Z_AI_AUTH_TOKEN environment variable
+    Reads the Z.AI API key from the ZAI_API_KEY environment variable
     (current session first, then User scope), runs one-time claudez setup,
     configures runtime environment, then invokes claude with the supplied arguments.
-    If Z_AI_AUTH_TOKEN is not set, the function aborts and prints setup guidance.
+    If ZAI_API_KEY is not set, the function aborts and prints setup guidance.
     about supported models:
         "All plans support GLM-5.2, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
         See https://docs.z.ai/devpack/latest-model for the current lineup.
@@ -5257,19 +5257,19 @@ function claudez {
     claudez "Explain the current repository"
 
 .EXAMPLE
-    [Environment]::SetEnvironmentVariable('Z_AI_AUTH_TOKEN', '<your_token>', 'User')
+    [Environment]::SetEnvironmentVariable('ZAI_API_KEY', '<your_token>', 'User')
     # Restart PowerShell, then run:
     claudez
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-06
+    Last Edit: 2026-08
 #>
     # Read token using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
-    $token = Get-AiApiKey 'Z_AI_AUTH_TOKEN'
+    $token = Get-AiApiKey 'ZAI_API_KEY'
 
     if (-not $token) {
-        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
+        Write-Host "ZAI_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
@@ -5332,13 +5332,13 @@ function claudezm {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-06
+    Last Edit: 2026-08
 #>
     # Read token using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
-    $token = Get-AiApiKey 'Z_AI_AUTH_TOKEN'
+    $token = Get-AiApiKey 'ZAI_API_KEY'
 
     if (-not $token) {
-        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
+        Write-Host "ZAI_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
@@ -5684,11 +5684,11 @@ Optional maximum context token count (CLAUDE_CODE_MAX_CONTEXT_TOKENS).
 Invoke-RemoteClaudeCodeBase remote-host -RemoteUser user -ApiKey $env:ANTHROPIC_API_KEY
 
 .EXAMPLE
-Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN -BaseUrl "https://api.z.ai/api/anthropic"
+Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:ZAI_API_KEY -BaseUrl "https://api.z.ai/api/anthropic"
 
 .EXAMPLE
 # Match local claudezm routing for Z.AI:
-Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN `
+Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:ZAI_API_KEY `
     -BaseUrl "https://api.z.ai/api/anthropic" `
     -HaikuModel "glm-4.5-air" -SonnetModel "glm-5.2[1m]" -OpusModel "glm-5.2[1m]" `
     -SubagentModel "glm-5.2[1m]" -EffortLevel "max" -AutoCompactWindow "1000000" `
@@ -5696,7 +5696,7 @@ Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_
 
 .NOTES
 Author: jjw(@thejjw)
-Last Edit: 2026-06
+Last Edit: 2026-08
 #>
     [CmdletBinding()]
     param(
@@ -5998,7 +5998,7 @@ function Invoke-RemoteClaudeCodeZ {
 Runs Claude Code on a remote SSH endpoint with temporary remote state.
 
 .DESCRIPTION
-Prompts for the API key from Z_AI_AUTH_TOKEN if it is not provided, then runs
+Prompts for the API key from ZAI_API_KEY if it is not provided, then runs
 the remote Claude launcher with the remote defaults defined inside
 Invoke-RemoteClaudeCodeBase. The remote Claude invocation always uses
 --dangerously-skip-permissions.
@@ -6011,7 +6011,7 @@ Optional SSH login name. Do not use this with a user@host RemoteHost value.
 
 .PARAMETER ApiKey
 Anthropic-compatible API key for the remote session.
-Optional - falls back to Z_AI_AUTH_TOKEN env var.
+Optional - falls back to ZAI_API_KEY env var.
 
 .PARAMETER Port
 SSH port to connect to. Defaults to 22.
@@ -6020,11 +6020,11 @@ SSH port to connect to. Defaults to 22.
 Invoke-RemoteClaudeCodeZ remote-host -RemoteUser user
 
 .EXAMPLE
-Invoke-RemoteClaudeCodeZ -RemoteHost user@remote-host -ApiKey $env:Z_AI_AUTH_TOKEN
+Invoke-RemoteClaudeCodeZ -RemoteHost user@remote-host -ApiKey $env:ZAI_API_KEY
 
 .NOTES
 Author: jjw(@thejjw)
-Last Edit: 2026-06
+Last Edit: 2026-08
 #>
     [CmdletBinding()]
     param(
@@ -6042,11 +6042,11 @@ Last Edit: 2026-06
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        $ApiKey = Get-AiApiKey 'Z_AI_AUTH_TOKEN'
+        $ApiKey = Get-AiApiKey 'ZAI_API_KEY'
     }
 
     if (-not $ApiKey) {
-        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
+        Write-Host "ZAI_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
@@ -6663,7 +6663,7 @@ function Install-ClaudeCCRSetup {
     setup helpers so cccr can use the same MCP servers as claudez and claudemm.
 
 .PARAMETER ZaiToken
-    Z.AI token. Defaults to Get-AiApiKey 'Z_AI_AUTH_TOKEN'.
+    Z.AI token. Defaults to Get-AiApiKey 'ZAI_API_KEY'.
 
 .PARAMETER MiniMaxKey
     MiniMax API key. Defaults to Get-AiApiKey 'MINIMAX_API_KEY'. Optional; if missing, MiniMax
@@ -6688,7 +6688,7 @@ function Install-ClaudeCCRSetup {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-06
+    Last Edit: 2026-08
 #>
     [CmdletBinding()]
     param(
@@ -6699,7 +6699,7 @@ function Install-ClaudeCCRSetup {
         [switch]$Force
     )
 
-    if ([string]::IsNullOrWhiteSpace($ZaiToken))    { $ZaiToken    = Get-AiApiKey 'Z_AI_AUTH_TOKEN' }
+    if ([string]::IsNullOrWhiteSpace($ZaiToken))    { $ZaiToken    = Get-AiApiKey 'ZAI_API_KEY' }
     if ([string]::IsNullOrWhiteSpace($MiniMaxKey))  { $MiniMaxKey  = Get-AiApiKey 'MINIMAX_API_KEY' }
     if ([string]::IsNullOrWhiteSpace($DeepSeekKey)) { $DeepSeekKey = Get-AiApiKey 'DEEPSEEK_API_KEY' }
     if ([string]::IsNullOrWhiteSpace($GeminiKey))   { $GeminiKey   = Get-AiApiKey 'GEMINI_API_KEY' }
@@ -6709,7 +6709,7 @@ function Install-ClaudeCCRSetup {
     }
 
     if (-not $ZaiToken) {
-        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting CCR setup." -ForegroundColor Red
+        Write-Host "ZAI_API_KEY is not set. Aborting CCR setup." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return $false
@@ -6863,7 +6863,7 @@ function cccr {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-06
+    Last Edit: 2026-08
 #>
     # Strip the CCR-only force flag from the forwarded claude args so /model etc. still work.
     $forceSetup   = $false
@@ -6873,9 +6873,9 @@ function cccr {
         else                                           { $claudeArgArr += $arg }
     }
 
-    $zaiToken    = Get-AiApiKey 'Z_AI_AUTH_TOKEN'
+    $zaiToken    = Get-AiApiKey 'ZAI_API_KEY'
     if (-not $zaiToken) {
-        Write-Host "Z_AI_AUTH_TOKEN is not set. Aborting." -ForegroundColor Red
+        Write-Host "ZAI_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
@@ -6887,7 +6887,7 @@ function cccr {
     # Snapshot every env var we may transiently mutate so the caller's session is untouched
     # once claude exits (or this function returns early).
     $originalEnvVars = Save-ProcessEnvVars @(
-        'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY',
+        'ZAI_API_KEY', 'MINIMAX_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY',
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY',
         'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'API_TIMEOUT_MS', 'NO_PROXY',
@@ -6900,9 +6900,9 @@ function cccr {
 
     try {
         # CCR reads provider api_key values from the env at startup. The keys normally live in
-        # the Windows Credential Manager; surface them as process env so $Z_AI_AUTH_TOKEN, etc.
+        # the Windows Credential Manager; surface them as process env so $ZAI_API_KEY, etc.
         # resolve inside config.json. They are torn down in the finally block.
-        $env:Z_AI_AUTH_TOKEN = $zaiToken
+        $env:ZAI_API_KEY = $zaiToken
         if ($miniMaxKey)  { $env:MINIMAX_API_KEY  = $miniMaxKey }
         if ($deepSeekKey) { $env:DEEPSEEK_API_KEY = $deepSeekKey }
         if ($geminiKey)   { $env:GEMINI_API_KEY   = $geminiKey }
@@ -8090,7 +8090,7 @@ function Set-AiApiKeys {
     (DEPRECATED: Now delegates securely to Set-AiApiKeysCS)
 
 .DESCRIPTION
-    Checks for existing values of AI API key (e.g. `DEEPSEEK_API_KEY`, `Z_AI_AUTH_TOKEN`, ...) in
+    Checks for existing values of AI API key (e.g. `DEEPSEEK_API_KEY`, `ZAI_API_KEY`, ...) in
     the current session and the persisted User environment. Presents a summary and prompts
     the user to enter missing keys (or optionally overwrite existing ones). Values are
     saved to the User environment via [Environment]::SetEnvironmentVariable so they persist
@@ -8107,7 +8107,7 @@ function Set-AiApiKeys {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-05
+    Last Edit: 2026-08
 #>
     [CmdletBinding()]
     param(
@@ -8118,7 +8118,7 @@ function Set-AiApiKeys {
     Set-AiApiKeysCS -Force:$Force
 
     # <# Legacy environment variable implementation commented out below:
-    # $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    # $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     #
     # function Get-UserValue($n) {
     #     # Check process (current session) first, then persisted User scope
@@ -8233,7 +8233,7 @@ function Set-AiApiKeysCS {
 
     .NOTES
         Author: jjw(@thejjw)
-        Last Edit: 2026-05
+        Last Edit: 2026-08
     #>
     [CmdletBinding()]
     param(
@@ -8245,7 +8245,7 @@ function Set-AiApiKeysCS {
     # Windows PowerShell 5.1 and PowerShell 7+ on Windows.
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     # All keys share a single resource userName so they form a logical group in
     # Credential Manager and can be enumerated/cleared together.
     $userName = 'api-key'
@@ -8337,7 +8337,7 @@ function Load-AiApiKeysFromCS {
 
     .NOTES
         Author: jjw(@thejjw)
-        Last Edit: 2026-05
+        Last Edit: 2026-08
     #>
     [CmdletBinding()]
     param(
@@ -8345,7 +8345,7 @@ function Load-AiApiKeysFromCS {
     )
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'Z_AI_AUTH_TOKEN', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     $userName = 'api-key'
 
     $loadedCount = 0
@@ -8710,7 +8710,7 @@ Set-Alias -Name aiu -Value Invoke-AiUpgrade
 # === AI provider usage-query functions ===
 # Provides Get-MinimaxUsage, Get-ZaiUsage, Get-DeepseekUsage, and Get-KimiUsage. Call any of
 # them after the vault credentials load further down (Load-AiApiKeysFromCS) so
-# $env:MINIMAX_API_KEY, $env:Z_AI_AUTH_TOKEN, $env:DEEPSEEK_API_KEY, and
+# $env:MINIMAX_API_KEY, $env:ZAI_API_KEY, $env:DEEPSEEK_API_KEY, and
 # $env:KIMI_API_KEY are populated.
 
 
@@ -8892,14 +8892,14 @@ function Get-ZaiUsage {
     Queries Z.AI's model-usage, tool-usage, and quota-limit endpoints over
     the trailing 24 hours.
 .DESCRIPTION
-    Calls api.z.ai with the bearer token in $env:Z_AI_AUTH_TOKEN over a
+    Calls api.z.ai with the bearer token in $env:ZAI_API_KEY over a
     yesterday-at-current-hour to end-of-current-hour window. Prints model
     and tool usage totals, hourly averages, peak hours, hourly spikes
     (configurable multiplier), and quota usage with reset times. Stores
     the three responses in $Global:zaiLastQuery as @{ Model; Tool; Quota }
     and returns the same.
 .PARAMETER Token
-    Z.AI auth token. Defaults to $env:Z_AI_AUTH_TOKEN.
+    Z.AI auth token. Defaults to $env:ZAI_API_KEY.
 .PARAMETER McpWarnPercent
     Quota-percent threshold for the MCP/month window.
 .PARAMETER TokenWarnPercent
@@ -8915,18 +8915,18 @@ function Get-ZaiUsage {
     Get-ZaiUsage -McpWarnPercent 50 -All
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-06
+    Last Edit: 2026-08
 #>
     [CmdletBinding()]
     param(
-        [string]$Token = $env:Z_AI_AUTH_TOKEN,
+        [string]$Token = $env:ZAI_API_KEY,
         [int]$McpWarnPercent = 80,
         [int]$TokenWarnPercent = 80,
         [double]$SpikeRatio = 3.0,
         [switch]$All
     )
 
-    if (-not $Token) { Write-Error 'Z_AI_AUTH_TOKEN not set (env var or -Token).'; return }
+    if (-not $Token) { Write-Error 'ZAI_API_KEY not set (env var or -Token).'; return }
 
     $base = 'https://api.z.ai'
     $now  = Get-Date
