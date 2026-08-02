@@ -7966,8 +7966,14 @@ function Install-AiTools {
         Write-Host ".NET SDK install script completed." -ForegroundColor Green
     }
 
+    # Keep npm defaults grouped here so additional setup can be added later.
+    function Set-NpmConfiguration {
+        & npm config set fund false
+    }
+
     # Install global npm packages if npm available
     if (Get-Command npm -ErrorAction SilentlyContinue) {
+        Set-NpmConfiguration
         $totalNpm = $npmPackages.Count
         $npmInstallIdx = 0
         # Install each NPM global package, printing progress

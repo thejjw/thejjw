@@ -24,6 +24,7 @@ Describe 'Install-AiTools PowerShell modules' {
             throw 'Could not load Install-AiTools and its configuration from the profile.'
         }
 
+        $script:installerAst = $installerAst
         . ([scriptblock]::Create($configAst.Extent.Text))
         . ([scriptblock]::Create($installerAst.Extent.Text))
         $script:configuredModules = @($_AiToolsInternal.PowerShellModules)
@@ -92,6 +93,31 @@ Describe 'Install-AiTools PowerShell modules' {
         $pester.Scope | Should -Be 'CurrentUser'
         $pester.Force | Should -BeTrue
         $pester.SkipPublisherCheck | Should -BeTrue
+    }
+
+    It 'configures npm funding notices before global package installs' {
+        $npmConfigurationAst = $script:installerAst.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Set-NpmConfiguration'
+        }, $true)
+        $configurationCalls = @($script:installerAst.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.CommandAst] -and
+                $node.GetCommandName() -eq 'Set-NpmConfiguration'
+        }, $true))
+        $npmInstallCalls = @($script:installerAst.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.CommandAst] -and
+                $node.GetCommandName() -eq 'npm' -and
+                $node.Extent.Text -match '\binstall\b'
+        }, $true))
+
+        $npmConfigurationAst | Should -Not -BeNullOrEmpty
+        $npmConfigurationAst.Extent.Text | Should -Match '& npm config set fund false'
+        $configurationCalls.Count | Should -Be 1
+        $npmInstallCalls.Count | Should -BeGreaterThan 0
+        $configurationCalls[0].Extent.StartOffset | Should -BeLessThan $npmInstallCalls[0].Extent.StartOffset
     }
 
     It 'installs a missing module before checking Winget' {
