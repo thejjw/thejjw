@@ -6483,7 +6483,7 @@ function claudeq {
     Launches Claude Code through the Qwen Cloud Token Plan endpoint.
 
 .DESCRIPTION
-    Reads BAILIAN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
+    Reads QWEN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
     Manager, or legacy User environment, then temporarily configures Claude Code
     to use the Qwen 3.7 model profile. Restores the previous environment after
     Claude exits.
@@ -6496,12 +6496,12 @@ function claudeq {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-07
+    Last Edit: 2026-08
 #>
-    $key = Get-AiApiKey 'BAILIAN_TOKEN_PLAN_API_KEY'
+    $key = Get-AiApiKey 'QWEN_TOKEN_PLAN_API_KEY'
 
     if (-not $key) {
-        Write-Host "BAILIAN_TOKEN_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host "QWEN_TOKEN_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
@@ -6568,7 +6568,7 @@ function claudeq2 {
     Launches Claude Code through the Qwen Cloud Token Plan preview profile.
 
 .DESCRIPTION
-    Reads BAILIAN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
+    Reads QWEN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
     Manager, or legacy User environment, then temporarily configures Claude Code
     to use Qwen 3.8 Max Preview with Qwen 3.7 and 3.6 fallback routing. Restores
     the previous environment after Claude exits.
@@ -6581,12 +6581,12 @@ function claudeq2 {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-07
+    Last Edit: 2026-08
 #>
-    $key = Get-AiApiKey 'BAILIAN_TOKEN_PLAN_API_KEY'
+    $key = Get-AiApiKey 'QWEN_TOKEN_PLAN_API_KEY'
 
     if (-not $key) {
-        Write-Host "BAILIAN_TOKEN_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host "QWEN_TOKEN_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
@@ -8245,7 +8245,7 @@ function Set-AiApiKeysCS {
     # Windows PowerShell 5.1 and PowerShell 7+ on Windows.
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     # All keys share a single resource userName so they form a logical group in
     # Credential Manager and can be enumerated/cleared together.
     $userName = 'api-key'
@@ -8345,7 +8345,7 @@ function Load-AiApiKeysFromCS {
     )
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     $userName = 'api-key'
 
     $loadedCount = 0
