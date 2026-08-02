@@ -22,12 +22,12 @@ Describe 'Windows Sudo profile helpers' {
     }
 
     It 'defines both public functions' {
-        (Get-Command Enable-WindowsSudo -CommandType Function) | Should Not BeNullOrEmpty
-        (Get-Command Invoke-Elevated -CommandType Function) | Should Not BeNullOrEmpty
+        (Get-Command Enable-WindowsSudo -CommandType Function) | Should -Not -BeNullOrEmpty
+        (Get-Command Invoke-Elevated -CommandType Function) | Should -Not -BeNullOrEmpty
     }
 
     It 'forces encoded PowerShell output to remain readable text' {
-        (Get-Content -LiteralPath $profilePath -Raw) | Should Match "'-OutputFormat', 'Text'"
+        (Get-Content -LiteralPath $profilePath -Raw) | Should -Match "'-OutputFormat', 'Text'"
     }
 
     It 'rejects a non-native direct command with script-block guidance' {
@@ -41,7 +41,7 @@ Describe 'Windows Sudo profile helpers' {
         $message = $null
         Invoke-Elevated Get-Service -ErrorVariable message -ErrorAction SilentlyContinue
 
-        ($message -join ' ') | Should Match 'Wrap PowerShell commands in braces'
+        ($message -join ' ') | Should -Match 'Wrap PowerShell commands in braces'
     }
 
     It 'rejects unsupported Windows builds' {
@@ -51,7 +51,7 @@ Describe 'Windows Sudo profile helpers' {
         $message = $null
         Invoke-Elevated whoami -ErrorVariable message -ErrorAction SilentlyContinue
 
-        ($message -join ' ') | Should Match 'build 26100'
+        ($message -join ' ') | Should -Match 'build 26100'
     }
 
     It 'reports an already enabled inline configuration' {
@@ -62,7 +62,7 @@ Describe 'Windows Sudo profile helpers' {
         Mock Test-Path { return $true }
         Mock Start-Process { throw 'Start-Process should not be called' }
 
-        Enable-WindowsSudo | Should Be $true
-        Assert-MockCalled Start-Process -Times 0
+        Enable-WindowsSudo | Should -BeTrue
+        Should -Invoke -CommandName Start-Process -Times 0 -Exactly
     }
 }
