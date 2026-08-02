@@ -26,6 +26,10 @@ Describe 'Windows Sudo profile helpers' {
         (Get-Command Invoke-Elevated -CommandType Function) | Should Not BeNullOrEmpty
     }
 
+    It 'forces encoded PowerShell output to remain readable text' {
+        (Get-Content -LiteralPath $profilePath -Raw) | Should Match "'-OutputFormat', 'Text'"
+    }
+
     It 'rejects a non-native direct command with script-block guidance' {
         Mock Get-ItemProperty {
             if ($LiteralPath -like '*CurrentVersion\Sudo') { return [pscustomobject]@{ Enabled = 3 } }

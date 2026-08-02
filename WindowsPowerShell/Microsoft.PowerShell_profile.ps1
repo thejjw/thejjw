@@ -10459,6 +10459,7 @@ function Invoke-Elevated {
         $location = $ExecutionContext.SessionState.Path.CurrentLocation.Path.Replace("'", "''")
         $scriptText = $Command[0].ToString()
         $wrappedCommand = @"
+`$ProgressPreference = 'SilentlyContinue'
 Set-Location -LiteralPath '$location'
 `$global:LASTEXITCODE = `$null
 & {
@@ -10470,7 +10471,7 @@ if (`$null -ne `$nativeExitCode) { exit `$nativeExitCode }
 if (-not `$commandSucceeded) { exit 1 }
 "@
         $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($wrappedCommand))
-        $powerShellArguments = @('-NoLogo')
+        $powerShellArguments = @('-NoLogo', '-OutputFormat', 'Text')
         if ($NoProfile) { $powerShellArguments += '-NoProfile' }
         $powerShellArguments += @('-EncodedCommand', $encodedCommand)
 
