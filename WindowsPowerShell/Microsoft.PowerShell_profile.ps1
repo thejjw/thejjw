@@ -7748,6 +7748,9 @@ function Install-AiTools {
     # useful on machines where App Installer is absent or unavailable.
     if ($powerShellModules.Count -gt 0) {
         Write-Host 'Checking PowerShell modules...' -ForegroundColor Cyan
+        # PowerShellGet 1.0.0.1 requires NuGet provider 2.8.5.201 or newer to
+        # access NuGet-backed repositories such as PSGallery. This is a shared
+        # package-management prerequisite, not a requirement of Pester itself.
         $minimumNuGetVersion = [version]'2.8.5.201'
         $moduleInstallIdx = 0
 
