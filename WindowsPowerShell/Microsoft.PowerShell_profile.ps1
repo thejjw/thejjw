@@ -6440,7 +6440,7 @@ Last Edit: 2026-07
 #   Anthropic messages: https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic/v1/messages
 #   OpenAI-compatible base: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
 # Current promotions and supported models:
-#   https://www.alibabacloud.com/help/en/model-studio/token-plan-personal-overview
+#   https://docs.qwencloud.com/token-plan/personal/token-plan-personal-overview
 # References:
 #   https://www.alibabacloud.com/help/en/model-studio/claude-code
 #   https://docs.qwencloud.com/developer-guides/clients-and-developer-tools/claude-code
@@ -6451,9 +6451,8 @@ function Show-QwenPeakWarning {
 
 .DESCRIPTION
     During the current 08:00-22:00 UTC+8 daytime window, reports the time until
-    the night discount begins and briefly delays launch. Current promotions also
-    include qwen3.8-max-preview usage as low as 10% of standard Credits and night
-    usage as low as 20%; Alibaba Cloud may change or end these offers at any time.
+    the qwen3.8-max night discount begins and briefly delays launch. Model calls
+    during the night window receive 50% off Credits consumption for a limited time.
 
 .NOTES
     Author: jjw(@thejjw)
@@ -6472,8 +6471,7 @@ function Show-QwenPeakWarning {
 
     # Ceiling preserves a visible final minute until the night window begins.
     $minutesLeft = [int][Math]::Ceiling(($discountStart - $UtcNow).TotalMinutes)
-    Write-Host "Qwen3.8-max-preview limited-time offer: Credits as low as 10% of standard." -ForegroundColor Cyan
-    Write-Host ("Qwen Token Plan night discount is inactive (22:00-08:00 UTC+8; night Credits as low as 20% of standard); starts in {0}h {1}m. Launching in 3 seconds..." -f [int][Math]::Floor($minutesLeft / 60), ($minutesLeft % 60)) -ForegroundColor Yellow
+    Write-Host ("Qwen3.8-max limited-time night discount is inactive (22:00-08:00 UTC+8; 50% off Credits consumption); starts in {0}h {1}m. Launching in 3 seconds..." -f [int][Math]::Floor($minutesLeft / 60), ($minutesLeft % 60)) -ForegroundColor Yellow
     Start-Sleep -Seconds $DelaySeconds
 }
 
@@ -6520,7 +6518,7 @@ function claudeq {
     Remove-Item Env:\ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
 
     $env:ANTHROPIC_MODEL = 'qwen3.7-max'
-    $env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3.8-max-preview'
+    $env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3.8-max'
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3.6-flash'
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.7-plus'
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3.7-max'
@@ -6565,12 +6563,12 @@ function claudeqd {
 function claudeq2 {
     <#
 .SYNOPSIS
-    Launches Claude Code through the Qwen Cloud Token Plan preview profile.
+    Launches Claude Code through the Qwen Cloud Token Plan Qwen 3.8 Max profile.
 
 .DESCRIPTION
     Reads QWEN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
     Manager, or legacy User environment, then temporarily configures Claude Code
-    to use Qwen 3.8 Max Preview with Qwen 3.7 and 3.6 fallback routing. Restores
+    to use Qwen 3.8 Max with Qwen 3.7 and 3.6 fallback routing. Restores
     the previous environment after Claude exits.
 
 .EXAMPLE
@@ -6604,11 +6602,11 @@ function claudeq2 {
     $env:ANTHROPIC_AUTH_TOKEN = $key
     Remove-Item Env:\ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
 
-    $env:ANTHROPIC_MODEL = 'qwen3.8-max-preview'
-    $env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3.8-max-preview'
+    $env:ANTHROPIC_MODEL = 'qwen3.8-max'
+    $env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3.8-max'
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3.6-flash'
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.8-max-preview'
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3.8-max-preview'
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.8-max'
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3.8-max'
     $env:CLAUDE_CODE_SUBAGENT_MODEL = 'qwen3.7-max'
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
     $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = '983616'
