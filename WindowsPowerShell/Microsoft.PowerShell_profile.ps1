@@ -269,6 +269,65 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         }
     }
 
+    # Extracts selected files from a 7z archive with Windows' inbox tar.exe.
+    # Throws a terminating error when the environment or archive is unsupported.
+    function Expand7ZipArchive {
+        param(
+            [Parameter(Mandatory = $true)][string]$Path,
+            [Parameter(Mandatory = $true)][string]$DestinationPath,
+            [string]$Include
+        )
+
+        $archive = Get-Item -LiteralPath $Path -ErrorAction Stop
+        if ($archive.PSIsContainer) { throw "7z archive path must be a file: $Path" }
+
+        $tar = Get-Command tar.exe -CommandType Application -ErrorAction SilentlyContinue
+        if (-not $tar) {
+            throw '7z extraction is unavailable: Windows tar.exe was not found. Install a current Windows archive-tools component and try again.'
+        }
+
+        $listing = @(& $tar.Source -tf $archive.FullName 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw ('Could not list 7z archive: {0}' -f (($listing | ForEach-Object { [string]$_ }) -join ' '))
+        }
+
+        $entries = @($listing | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+        foreach ($entry in $entries) {
+            $normalized = $entry.Replace('\', '/')
+            if ($normalized -match '^(?:/|[A-Za-z]:)' -or $normalized -match '(^|/)\.\.(/|$)') {
+                throw "Refusing unsafe 7z archive entry: $entry"
+            }
+        }
+
+        $selected = @($entries | Where-Object {
+            -not $_.EndsWith('/') -and ([string]::IsNullOrWhiteSpace($Include) -or $_ -match $Include)
+        })
+        if ($selected.Count -eq 0) { throw "No 7z archive entries matched Include '$Include'." }
+
+        $destination = [System.IO.Path]::GetFullPath($DestinationPath)
+        $destinationPrefix = $destination.TrimEnd('\') + '\'
+        [System.IO.Directory]::CreateDirectory($destination) | Out-Null
+        $extractOutput = @(& $tar.Source -xf $archive.FullName -C $destination -- @selected 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw ('Could not extract 7z archive: {0}' -f (($extractOutput | ForEach-Object { [string]$_ }) -join ' '))
+        }
+
+        $result = @()
+        foreach ($entry in $selected) {
+            $relative = $entry.Replace('/', '\')
+            $extractedPath = [System.IO.Path]::GetFullPath((Join-Path $destination $relative))
+            if (-not $extractedPath.StartsWith($destinationPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Refusing extracted path outside destination: $entry"
+            }
+            $item = Get-Item -LiteralPath $extractedPath -Force -ErrorAction Stop
+            if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                throw "Refusing non-file 7z archive entry: $entry"
+            }
+            $result += $item.FullName
+        }
+        return $result
+    }
+
     # Removes a temporary SSH identity directory created by NewTemporarySshIdentity.
     function RemoveTemporarySshIdentity {
         param([Parameter(Mandatory = $true)]$Identity)
@@ -359,6 +418,7 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         'GetSpikes',
         'UnwrapZaiData',
         'ShowFontArchive',
+        'Expand7ZipArchive',
         'NewTemporarySshIdentity',
         'RemoveTemporarySshIdentity'
     )
@@ -685,9 +745,9 @@ $_AiToolsInternal = @{
 #            report so the user sees the transfer cost before anything downloads.
 #   Fonts    Approx. count of font files this pack installs after Include filtering
 #            (from archive inspection); used only for the pre-run summary total.
-#   Kind     'Zip' = archive to open and extract selectively; 'File' = the URL is
-#            itself a single font file (no archive).
-#   Include  Regex (case-insensitive) matched against each zip entry's relative
+#   Kind     'Zip' = archive to open with .NET; '7z' = archive to extract with
+#            Windows' inbox tar.exe; 'File' = the URL is itself a single font.
+#   Include  Regex (case-insensitive) matched against each archive entry's relative
 #            path. Only matching entries are extracted+installed. Chosen per pack
 #            to install ONE clean set and skip redundant format folders plus
 #            __MACOSX/AppleDouble junk. When a pack ships multiple formats the
@@ -699,10 +759,8 @@ $_AiToolsInternal = @{
 #   Probe    A representative installed font filename. If it already exists in the
 #            target Fonts folder, the whole pack is skipped (no download) unless
 #            -Force is passed. This is the cheap pre-download idempotency check.
-#   Extended $true packs are skipped unless -Extended is passed. The three Adobe
-#            Source Han CJK families are extended (opt-in): each archive must be
-#            downloaded whole (Sans ~848 MB, Serif ~716 MB, Mono ~116 MB) even to
-#            install a single collection file, so ~1.68 GB total is opt-in.
+#   Extended $true packs are skipped unless -Extended is passed. This keeps large
+#            CJK downloads, including Source Han and Sarasa, explicitly opt-in.
 #   Note     Optional freeform note shown in -ListOnly output.
 $_FontInstallInternal = @{
     # Per-user (no admin) install target and its font-registration registry key.
@@ -721,6 +779,8 @@ $_FontInstallInternal = @{
         [pscustomobject]@{ Name = 'Galmuri';             Url = 'https://github.com/quiple/galmuri/releases/download/v2.40.3/Galmuri-v2.40.3.zip'; Bytes = 19936233; Fonts = 20; Kind = 'Zip'; Include = '(?i)^[^/]+\.(ttf|ttc)$';                   Probe = 'Galmuri11.ttf';                          Extended = $false; Note = 'Pixel font family; all root-level ttf/ttc.' }
         [pscustomobject]@{ Name = 'OpenDyslexic';        Url = 'https://github.com/antijingoist/opendyslexic/releases/download/v0.91.12/opendyslexic-0.910.12-rc2-2019.10.17.zip'; Bytes = 3627458; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';               Probe = 'OpenDyslexic-Regular.otf';               Extended = $false; Note = 'OTF; skips eot/woff web formats.' }
         [pscustomobject]@{ Name = 'FiraCode';            Url = 'https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip'; Bytes = 2462987; Fonts = 6; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$';                          Probe = 'FiraCode-Regular.ttf';                   Extended = $false; Note = 'Static TTF: the VF defaults to Light weight and legacy apps see "Fira Code Light"; static defaults to Regular with a clean "Fira Code" family.' }
+        [pscustomobject]@{ Name = 'SarasaGothicK';       Url = 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaGothicK-TTF-1.0.40.7z'; Bytes = 63464316; Fonts = 10; Kind = '7z'; Include = '(?i)^SarasaGothicK-[^/]+\.ttf$'; Probe = 'SarasaGothicK-Regular.ttf'; Extended = $true; Note = 'Korean Sarasa Gothic, 5 hinted weights with italics. Requires Windows tar.exe.' }
+        [pscustomobject]@{ Name = 'SarasaMonoK';         Url = 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaMonoK-TTF-1.0.40.7z'; Bytes = 66316218; Fonts = 10; Kind = '7z'; Include = '(?i)^SarasaMonoK-[^/]+\.ttf$'; Probe = 'SarasaMonoK-Regular.ttf'; Extended = $true; Note = 'Korean monospaced Sarasa, 5 hinted weights with italics. Requires Windows tar.exe.' }
         [pscustomobject]@{ Name = 'SourceHanSans';       Url = 'https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/02_SourceHanSans-VF.zip'; Bytes = 888816761; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSans-VF\.ttf\.ttc$'; Probe = 'SourceHanSans-VF.ttf.ttc';       Extended = $true;  Note = 'LARGE ~848 MB. Installs only the pan-CJK OTC variable collection.' }
         [pscustomobject]@{ Name = 'SourceHanSerif';      Url = 'https://github.com/adobe-fonts/source-han-serif/releases/download/2.003R/02_SourceHanSerif-VF.zip'; Bytes = 750817685; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSerif-VF\.ttf\.ttc$'; Probe = 'SourceHanSerif-VF.ttf.ttc';   Extended = $true;  Note = 'LARGE ~716 MB. Installs only the pan-CJK OTC variable collection.' }
         [pscustomobject]@{ Name = 'SourceHanMono';       Url = 'https://github.com/adobe-fonts/source-han-mono/releases/download/1.002/SourceHanMono.ttc'; Bytes = 122117628; Fonts = 1; Kind = 'File'; Include = $null;                              Probe = 'SourceHanMono.ttc';                      Extended = $true;  Note = 'LARGE ~116 MB. Direct .ttc download (no archive).' }
@@ -10140,8 +10200,8 @@ function Install-Fonts {
     each individual font already in the target folder is skipped at install time.
     Pass -Force to re-download and overwrite regardless.
 
-    Extraction uses .NET's System.IO.Compression (native to PowerShell); every
-    archive in the catalog is a standard .zip, so 7-Zip is not required.
+    ZIP extraction uses .NET's System.IO.Compression. Compact 7z packs use the
+    libarchive-based tar.exe included with current Windows; 7-Zip is not required.
 
     Failed downloads are warned (with the URL) and collected into a summary at the
     end so a broken/moved release can be spotted and its Url updated.
@@ -10154,9 +10214,8 @@ function Install-Fonts {
 .PARAMETER AllUsers
     Install machine-wide instead of per-user. Requires an elevated (admin) shell.
 .PARAMETER Extended
-    Also process the extended (opt-in) packs marked Extended=$true in the catalog.
-    These are the large Adobe Source Han CJK families (~1.68 GB combined), off by
-    default.
+    Also process the extended (opt-in) packs marked Extended=$true in the catalog,
+    including the large Adobe Source Han families and Korean Sarasa packs.
 .PARAMETER ListOnly
     Print the catalog (names, sizes, extended state, notes) and the estimated
     download total, then exit without downloading or installing anything.
@@ -10265,6 +10324,14 @@ function Install-Fonts {
 
     if ($ListOnly) { return }
 
+    # Fail before confirmation or downloading when a selected 7z pack cannot be
+    # handled by Windows' inbox libarchive-based tar.exe.
+    if (($packs | Where-Object Kind -eq '7z') -and
+        -not (Get-Command tar.exe -CommandType Application -ErrorAction SilentlyContinue)) {
+        Write-Error 'Selected font packs require 7z extraction, but Windows tar.exe is unavailable.'
+        return
+    }
+
     # Short confirmation before doing any network/disk work (Enter defaults to Yes).
     $choice = Read-Host -Prompt ("Proceed with downloading and installing {0} font pack(s)? (Y/n)" -f $packs.Count)
     if ($choice -in @('n', 'N')) {
@@ -10320,7 +10387,7 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
     $isTransientError = {
         param([string]$Message)
         if ([string]::IsNullOrEmpty($Message)) { return $false }
-        return ($Message -match '(?i)(local file header is corrupt|central directory|end of (the )?stream|unexpected end|corrupt|crc|block length|compressed data|number of entries|timed out|timeout|connection|transport|prematurely|reset by|unable to read data|actively refused)')
+        return ($Message -match '(?i)(local file header is corrupt|central directory|end of (the )?stream|unexpected end( of archive)?|damaged 7-zip archive|data error|corrupt|crc|block length|compressed data|number of entries|timed out|timeout|connection|transport|prematurely|reset by|unable to read data|actively refused)')
     }
 
     # Temp working directory (single archive at a time; cleaned per pack).
@@ -10379,7 +10446,22 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
                         # URL is itself a font file: install it directly.
                         $r = & $installOne $dl
                         if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
-                    } else {
+                    } elseif ($p.Kind -eq '7z') {
+                        # Keep 7z handling behind the shared helper; it validates
+                        # archive paths and returns only the selected extracted files.
+                        $extractDir = Join-Path $work ('extract_' + [System.Guid]::NewGuid().ToString('N'))
+                        try {
+                            $fontPaths = @($_ProfileHelpers.Expand7ZipArchive($dl, $extractDir, $p.Include))
+                            foreach ($fontPath in $fontPaths) {
+                                $r = & $installOne $fontPath
+                                if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
+                            }
+                        } finally {
+                            if (Test-Path -LiteralPath $extractDir) {
+                                Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+                            }
+                        }
+                    } elseif ($p.Kind -eq 'Zip') {
                         # Open the archive and extract ONLY the entries we want, one
                         # at a time, so we never expand the full archive to disk.
                         $zip = [System.IO.Compression.ZipFile]::OpenRead($dl)
@@ -10399,6 +10481,8 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
                         } finally {
                             $zip.Dispose()
                         }
+                    } else {
+                        throw "Unsupported font pack kind '$($p.Kind)' for '$($p.Name)'."
                     }
                     $packOk = $true
                     break
