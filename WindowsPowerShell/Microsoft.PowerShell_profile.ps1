@@ -710,6 +710,7 @@ $_AiToolsInternal = @{
     }
     NpmPackages            = @(
         '@earendil-works/pi-coding-agent',
+        '@oh-my-pi/pi-coding-agent',
         '@musistudio/claude-code-router',
         'oh-my-free-models'
     )
