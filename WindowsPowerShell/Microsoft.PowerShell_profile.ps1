@@ -8030,16 +8030,80 @@ function Install-AiTools {
         & npm config set fund false
     }
 
+    # Returns healthy top-level global npm packages, preserving usable inventory
+    # data even when npm reports an unrelated invalid or missing package.
+    function Get-GlobalNpmInventory {
+        $json = @(& npm ls -g --depth=0 --json 2>$null)
+        $exitCode = $LASTEXITCODE
+        try {
+            $data = ($json -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            Write-Warning "Could not parse the global npm inventory; all selected packages will be checked by npm install. $($_.Exception.Message)"
+            return [pscustomobject]@{ Available = $false; Packages = @{} }
+        }
+
+        $packages = @{}
+        if ($data.dependencies) {
+            foreach ($property in $data.dependencies.PSObject.Properties) {
+                $package = $property.Value
+                $missing = $package.PSObject.Properties['missing'] -and $package.missing
+                $invalid = $package.PSObject.Properties['invalid'] -and $package.invalid
+                if ($package.version -and -not $missing -and -not $invalid) {
+                    $packages[$property.Name] = [string]$package.version
+                }
+            }
+        }
+        if ($exitCode -ne 0) {
+            Write-Warning "npm global inventory returned exit code $exitCode; healthy entries will still be used."
+        }
+        return [pscustomobject]@{ Available = $true; Packages = $packages }
+    }
+
     # Install global npm packages if npm available
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         Set-NpmConfiguration
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "npm funding configuration failed with exit code $LASTEXITCODE; continuing."
+        }
+
+        $inventory = Get-GlobalNpmInventory
         $totalNpm = $npmPackages.Count
-        $npmInstallIdx = 0
-        # Install each NPM global package, printing progress
+        $npmCheckIdx = 0
+        $missingNpmPackages = @()
         foreach ($np in $npmPackages) {
-            $npmInstallIdx++
-            Write-Host "[$npmInstallIdx/$totalNpm] Installing npm package $np (global)..." -ForegroundColor Cyan
-            try { & npm install -g $np } catch { Write-Host "npm install failed for $($np): $_" -ForegroundColor Red }
+            $npmCheckIdx++
+            if ($inventory.Available -and $inventory.Packages.ContainsKey($np)) {
+                Write-Host "[$npmCheckIdx/$totalNpm] installed:   $np $($inventory.Packages[$np])" -ForegroundColor Green
+            }
+            else {
+                Write-Host "[$npmCheckIdx/$totalNpm] not installed: $np" -ForegroundColor Yellow
+                $missingNpmPackages += $np
+            }
+        }
+
+        if ($missingNpmPackages.Count -eq 0) {
+            Write-Host "All selected global npm packages are already installed." -ForegroundColor Green
+        }
+        else {
+            $npmArgs = @('install', '-g') + $missingNpmPackages
+            Write-Host "Installing missing npm packages: $($missingNpmPackages -join ', ')" -ForegroundColor Cyan
+            & npm @npmArgs
+            $npmInstallExitCode = $LASTEXITCODE
+            if ($npmInstallExitCode -ne 0) {
+                Write-Warning "npm install failed with exit code $npmInstallExitCode for: $($missingNpmPackages -join ', ')"
+            }
+
+            $refreshedInventory = Get-GlobalNpmInventory
+            if ($refreshedInventory.Available) {
+                $stillMissing = @($missingNpmPackages | Where-Object { -not $refreshedInventory.Packages.ContainsKey($_) })
+                if ($stillMissing.Count -gt 0) {
+                    Write-Warning "The following global npm packages remain missing or invalid: $($stillMissing -join ', ')"
+                }
+                elseif ($npmInstallExitCode -eq 0) {
+                    Write-Host "All missing global npm packages installed successfully." -ForegroundColor Green
+                }
+            }
         }
     }
     else {
@@ -8098,7 +8162,10 @@ function Install-AiTools {
     # and the native `opencode upgrade` command works as upstream intended.
     if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
         Write-Host "opencode CLI not found; installing via 'npm install -g opencode-ai'..." -ForegroundColor Yellow
-        try { & npm install -g opencode-ai } catch { Write-Host "Failed to install opencode: $_" -ForegroundColor Red }
+        & npm install -g opencode-ai
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Failed to install opencode-ai with npm exit code $LASTEXITCODE."
+        }
     }
 
     # Configure Qwen Code and Kimi Code if MoreAi is requested. Their npm packages
