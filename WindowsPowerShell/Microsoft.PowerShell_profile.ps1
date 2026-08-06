@@ -7634,6 +7634,51 @@ function Install-AiSkills {
     }
 }
 
+function Add-UserPathEntry {
+    <#
+.SYNOPSIS
+    Adds a directory to the current user's PATH when it is not already present.
+.DESCRIPTION
+    Preserves the registry value as ExpandString and also updates the current
+    PowerShell process so newly available commands can be used immediately.
+.PARAMETER Path
+    Directory to add to the user PATH.
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $normalizedPath = $Path.TrimEnd('\')
+    try {
+        $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+        if (-not $key) { throw 'Could not open HKCU\Environment for writing.' }
+        try {
+            $userPath = [string]$key.GetValue('PATH', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $entries = @($userPath -split ';' | Where-Object { $_ })
+            $persisted = @($entries | Where-Object { $_.TrimEnd('\') -ieq $normalizedPath }).Count -gt 0
+            if (-not $persisted) {
+                $key.SetValue('PATH', (($entries + $Path) -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+                Write-Host "Added $Path to the user PATH." -ForegroundColor Green
+            }
+        }
+        finally {
+            $key.Dispose()
+        }
+
+        $available = @($env:PATH -split ';' | Where-Object { $_.TrimEnd('\') -ieq $normalizedPath }).Count -gt 0
+        if (-not $available) {
+            $env:PATH = $env:PATH.TrimEnd(';') + ';' + $Path
+        }
+        return $true
+    }
+    catch {
+        Write-Warning "Could not add $Path to the user PATH. $($_.Exception.Message)"
+        return $false
+    }
+}
+
 function Get-GlobalNpmInventory {
     <#
 .SYNOPSIS
@@ -7916,6 +7961,10 @@ function Install-AiTools {
         }
     }
 
+    # App Installer exposes winget through the per-user WindowsApps aliases.
+    $windowsAppsDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
+    $null = Add-UserPathEntry -Path $windowsAppsDir
+
     # Ensure winget exists
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host "winget not found. Please install 'App Installer' (winget) from Microsoft Store and retry." -ForegroundColor Red
@@ -7926,29 +7975,7 @@ function Install-AiTools {
     # system images don't include it in the default User PATH.  Ensure it's
     # present so `winget list` results translate to discoverable commands.
     $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
-    try {
-        $userPath = Get-ItemPropertyValue -Path 'HKCU:\Environment' -Name 'PATH' -ErrorAction Stop
-        if ($userPath) {
-            $userPathArr = $userPath -split ';'
-            $inPath = $false
-            foreach ($p in $userPathArr) {
-                if ($p.TrimEnd('\') -eq $wingetLinksDir.TrimEnd('\')) {
-                    $inPath = $true
-                    break
-                }
-            }
-            if (-not $inPath) {
-                $newUserPath = $userPath.TrimEnd(';') + ';' + $wingetLinksDir
-                # Write directly to the registry rather than [Environment]::SetEnvironmentVariable
-                # to preserve the existing ExpandString value kind.
-                [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $newUserPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
-                $env:PATH = $env:PATH.TrimEnd(';') + ';' + $wingetLinksDir
-                Write-Host "Added Winget Links directory ($wingetLinksDir) to your User PATH." -ForegroundColor Green
-            }
-        }
-    } catch {
-        # Non-critical -- if registry is inaccessible (e.g. restricted GPO), just proceed.
-    }
+    $null = Add-UserPathEntry -Path $wingetLinksDir
 
     $wingetListOutput = @()
     try {
@@ -8070,6 +8097,11 @@ function Install-AiTools {
 
     # Install global npm packages if npm available
     if (Get-Command npm -ErrorAction SilentlyContinue) {
+        $npmPrefix = [string](@(& npm prefix -g 2>$null) | Select-Object -Last 1)
+        if ($npmPrefix) {
+            $null = Add-UserPathEntry -Path $npmPrefix.Trim()
+        }
+
         Set-NpmConfiguration
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "npm funding configuration failed with exit code $LASTEXITCODE; continuing."

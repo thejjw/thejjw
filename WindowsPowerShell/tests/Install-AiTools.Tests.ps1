@@ -27,6 +27,7 @@ Describe 'Install-AiTools PowerShell modules' {
         $script:installerAst = $installerAst
         . ([scriptblock]::Create($configAst.Extent.Text))
         . ([scriptblock]::Create($installerAst.Extent.Text))
+        function Add-UserPathEntry { param([string]$Path) }
         $script:configuredModules = @($_AiToolsInternal.PowerShellModules)
         $script:originalAiToolsConfig = $_AiToolsInternal
     }
@@ -224,6 +225,7 @@ Describe 'Install-AiTools npm packages' {
         function Install-QwenSettings {}
         function Install-KimiSettings {}
         function Install-GrokSettings {}
+        function Add-UserPathEntry { param([string]$Path) }
         function winget {
             param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
         }
@@ -249,6 +251,7 @@ Describe 'Install-AiTools npm packages' {
 
         Mock Write-Host {}
         Mock Write-Warning {}
+        Mock Add-UserPathEntry { return $true }
         Mock Get-Command {
             if ($Name -in @('winget', 'git', 'npm', 'opencode')) {
                 return [pscustomobject]@{ Name = $Name }
@@ -270,6 +273,10 @@ Describe 'Install-AiTools npm packages' {
                 $global:LASTEXITCODE = $response.ExitCode
                 return $response.Json
             }
+            if ($callArgs[0] -eq 'prefix') {
+                $global:LASTEXITCODE = 0
+                return 'C:\npm-global'
+            }
             $global:LASTEXITCODE = 0
         }
     }
@@ -289,6 +296,22 @@ Describe 'Install-AiTools npm packages' {
         @($script:npmCalls | Where-Object { $_.Args[0] -eq 'install' }).Count | Should -Be 0
         Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
             $Object -eq 'All selected global npm packages are already installed.'
+        }
+    }
+
+    It 'repairs command shim paths before using winget and npm' {
+        $script:inventoryResponses.Enqueue([pscustomobject]@{
+            ExitCode = 0
+            Json = New-NpmInventoryJson $_AiToolsInternal.NpmPackages
+        })
+
+        Install-AiTools -Auto
+
+        Should -Invoke Add-UserPathEntry -Times 1 -Exactly -ParameterFilter {
+            $Path -eq (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps')
+        }
+        Should -Invoke Add-UserPathEntry -Times 1 -Exactly -ParameterFilter {
+            $Path -eq 'C:\npm-global'
         }
     }
 
