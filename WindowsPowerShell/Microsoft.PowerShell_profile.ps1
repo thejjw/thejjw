@@ -2010,15 +2010,11 @@ function Add-WingetPackagePaths {
     Where-Object { (Get-ChildItem -Path $_.FullName -Filter *.exe -File -ErrorAction SilentlyContinue).Count -gt 0 } |
     Select-Object -ExpandProperty FullName
 
-    # Read the persisted user PATH from the registry, not $env:PATH, so that
-    # the update sticks across sessions and doesn't duplicate machine-level entries.
-    $currentPath = (Get-ItemPropertyValue -Path 'HKCU:\Environment' -Name 'PATH')
-    $currentPathArr = $currentPath -split ';'
-
     $added = @()
-    foreach ($path in $binPaths) {
-        if ($currentPathArr -notcontains $path) {
-            $currentPath += ";$path"
+    foreach ($path in @($binPaths | Sort-Object -Unique)) {
+        $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+        $present = @($userPath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $path.TrimEnd('\') }).Count -gt 0
+        if (-not $present -and (Add-UserPathEntry -Path $path)) {
             $added += $path
         }
     }
@@ -2027,18 +2023,12 @@ function Add-WingetPackagePaths {
         Write-Host "No new paths were added. All executable directories are already in PATH."
     }
     else {
-        # Write back via .NET registry API instead of Set-ItemProperty to
-        # guarantee REG_EXPAND_SZ, avoiding environment-variable literal expansion.
-        [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $currentPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
-        # Also update the process PATH so the current session picks up new dirs
-        # immediately without needing a shell restart.
-        $env:PATH = $env:PATH.TrimEnd(';') + ';' + ($added -join ';')
         Write-Host " Added the following paths to your user PATH:"
         $added | ForEach-Object { Write-Host "  - $_" }
     }
 
     Write-Host "`n Updated user PATH:"
-    $currentPath.Split(';') | ForEach-Object { Write-Host "  $_" }
+    [Environment]::GetEnvironmentVariable('PATH', 'User').Split(';') | ForEach-Object { Write-Host "  $_" }
 }
 
 function Remove-WingetPackagePaths {
@@ -2068,45 +2058,50 @@ function Remove-WingetPackagePaths {
     Compatible with Windows PowerShell.
     See Add-WingetPackagePaths
 #>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param()
+
     $wingetRoot = [IO.Path]::Combine($env:LOCALAPPDATA, "Microsoft\WinGet\Packages")
-    $currentPath = (Get-ItemPropertyValue -Path 'HKCU:\Environment' -Name 'PATH')
-    $currentPathArr = $currentPath -split ';' | Where-Object { $_ -ne '' }
-
-    $filtered = @()
-    $removed = @()
-
-    # Use -like prefix match rather than exact comparison so that any
-    # subdirectory under the winget packages root is caught, even if the
-    # specific package structure changes between winget versions.
-    foreach ($p in $currentPathArr) {
-        if ($p -like "$wingetRoot*") {
-            $removed += $p
-        }
-        else {
-            $filtered += $p
-        }
+    $normalizedRoot = $wingetRoot.TrimEnd('\')
+    $isWingetPackagePath = {
+        param([string]$Candidate)
+        $normalizedCandidate = $Candidate.TrimEnd('\')
+        return $normalizedCandidate -ieq $normalizedRoot -or
+            $normalizedCandidate.StartsWith($normalizedRoot + '\', [StringComparison]::OrdinalIgnoreCase)
     }
 
-    if ($removed.Count -eq 0) {
-        Write-Host "No winget paths found in user PATH. Nothing to remove."
-    }
-    else {
-        $newRegPath = $filtered -join ';'
-        # Persist the cleaned PATH to the registry (REG_EXPAND_SZ) for future sessions.
-        [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $newRegPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+    try {
+        $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+        if (-not $key) { throw 'Could not open HKCU\Environment for writing.' }
+        try {
+            $currentPath = [string]$key.GetValue('PATH', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $currentPathArr = @($currentPath -split ';' | Where-Object { $_ })
+            $removed = @($currentPathArr | Where-Object { & $isWingetPackagePath $_ })
+            if ($removed.Count -eq 0) {
+                Write-Host 'No Winget package paths found in the user PATH.'
+                return
+            }
 
-        # Strip the same entries from the live process PATH so the current
-        # session stops resolving executables from removed winget directories.
-        $processPathArr = $env:PATH -split ';' | Where-Object { $_ -ne '' }
-        $newProcessPath = ($processPathArr | Where-Object { $_ -notlike "$wingetRoot*" }) -join ';'
-        $env:PATH = $newProcessPath
+            if (-not $PSCmdlet.ShouldProcess("$($removed.Count) Winget package PATH entries", 'Remove from the user PATH')) {
+                return
+            }
 
-        Write-Host " Removed the following winget directories from your user PATH:"
+            $filtered = @($currentPathArr | Where-Object { -not (& $isWingetPackagePath $_) })
+            $key.SetValue('PATH', ($filtered -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        }
+        finally {
+            $key.Dispose()
+        }
+
+        $processPathArr = @($env:PATH -split ';' | Where-Object { $_ })
+        $env:PATH = @($processPathArr | Where-Object { -not (& $isWingetPackagePath $_) }) -join ';'
+
+        Write-Host '[OK] Removed the following Winget directories from the user PATH:'
         $removed | ForEach-Object { Write-Host "  - $_" }
     }
-
-    Write-Host "`n Updated user PATH:"
-    $filtered | ForEach-Object { Write-Host "  $_" }
+    catch {
+        Write-Warning "Could not remove Winget package paths. $($_.Exception.Message)"
+    }
 }
 
 function New-RandomMacAddress {
@@ -8178,14 +8173,7 @@ function Install-AiTools {
         try { & powershell -NoProfile -Command "iex (irm '$($_AiToolsInternal.Urls.ClaudeCli)')" } catch { Write-Host "Failed to install claude: $_" -ForegroundColor Red }
         # The claude installer places the binary in ~/.local/bin; ensure it's on the user PATH.
         $claudeBin = Join-Path $env:USERPROFILE '.local\bin'
-        $regPath = (Get-ItemPropertyValue -Path 'HKCU:\Environment' -Name 'PATH' -ErrorAction SilentlyContinue)
-        $regArr = if ($regPath) { $regPath -split ';' } else { @() }
-        if ($regArr -notcontains $claudeBin) {
-            $newRegPath = if ($regPath) { $regPath.TrimEnd(';') + ';' + $claudeBin } else { $claudeBin }
-            [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true).SetValue('PATH', $newRegPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
-            $env:PATH = $env:PATH.TrimEnd(';') + ';' + $claudeBin
-            Write-Host "Added $claudeBin to user PATH for claude CLI." -ForegroundColor Green
-        }
+        $null = Add-UserPathEntry -Path $claudeBin
     } else {
         # If claude is present, ensure it's configured with the default settings
         Install-GlobalClaudeSettings

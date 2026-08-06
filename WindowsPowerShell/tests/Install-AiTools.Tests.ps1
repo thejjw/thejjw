@@ -1,3 +1,11 @@
+BeforeAll {
+    $script:userPathBeforeInstallAiToolsTests = [Environment]::GetEnvironmentVariable('PATH', 'User')
+}
+
+AfterAll {
+    [Environment]::GetEnvironmentVariable('PATH', 'User') | Should -BeExactly $script:userPathBeforeInstallAiToolsTests
+}
+
 Describe 'Install-AiTools PowerShell modules' {
     BeforeAll {
         $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'
@@ -99,6 +107,11 @@ Describe 'Install-AiTools PowerShell modules' {
 
     It 'includes Bun in the standard Winget packages' {
         $script:configuredWingetPackages | Should -Contain 'Oven-sh.Bun'
+    }
+
+    It 'does not write the user PATH directly' {
+        $script:installerAst.Extent.Text | Should -Not -Match "SetValue\('PATH'"
+        $script:installerAst.Extent.Text | Should -Not -Match "SetEnvironmentVariable\('PATH'"
     }
 
     It 'configures npm funding notices before global package installs' {
