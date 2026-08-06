@@ -8805,8 +8805,9 @@ function Invoke-AiUpgrade {
 Set-Alias -Name aiu -Value Invoke-AiUpgrade
 
 # === AI provider usage-query functions ===
-# Provides Get-MinimaxUsage, Get-ZaiUsage, Get-DeepseekUsage, and Get-KimiUsage. Call any of
-# them after the vault credentials load further down (Load-AiApiKeysFromCS) so
+# Provides provider-specific Get-*Usage functions and Get-AllAiUsage to discover
+# and run the currently loaded usage functions. Call the provider functions after
+# the vault credentials load further down (Load-AiApiKeysFromCS) so
 # $env:MINIMAX_API_KEY, $env:ZAI_API_KEY, $env:DEEPSEEK_API_KEY, and
 # $env:KIMI_API_KEY are populated.
 
@@ -9865,6 +9866,70 @@ function Get-AgyUsage {
     }
 
     return $resp
+}
+
+# --- Get-AllAiUsage --------------------------------------------------------
+# Discovers currently loaded Get-*Usage functions, confirms the complete list,
+# and invokes each accepted function sequentially.
+
+function Get-AllAiUsage {
+<#
+.SYNOPSIS
+    Discovers and sequentially runs all currently loaded Get-*Usage functions.
+.DESCRIPTION
+    Finds imported functions whose names match Get-*Usage, excludes this
+    aggregate function, and displays the sorted execution list. Prompts once
+    before running anything; pressing Enter accepts the default Yes response.
+    Each discovered FunctionInfo is invoked directly so the reviewed command
+    cannot change through later name resolution. A terminating failure in one
+    function is reported without preventing the remaining functions from running.
+.EXAMPLE
+    Get-AllAiUsage
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-08
+#>
+    [CmdletBinding()]
+    param()
+
+    $selfName = $MyInvocation.MyCommand.Name
+    $usageFunctions = @(
+        Get-Command -Name 'Get-*Usage' -CommandType Function -ListImported -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ine $selfName } |
+            Sort-Object Name
+    )
+
+    if ($usageFunctions.Count -eq 0) {
+        Write-Host 'No other Get-*Usage functions are currently loaded.' -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ("Discovered {0} Get-*Usage function(s):" -f $usageFunctions.Count) -ForegroundColor Cyan
+    for ($index = 0; $index -lt $usageFunctions.Count; $index++) {
+        $usageFunction = $usageFunctions[$index]
+        $origin = if ($usageFunction.ModuleName) { " ($($usageFunction.ModuleName))" } else { '' }
+        Write-Host ('  {0}. {1}{2}' -f ($index + 1), $usageFunction.Name, $origin)
+    }
+
+    while ($true) {
+        $choice = (Read-Host -Prompt ("Run these {0} usage function(s) sequentially? (Y/n)" -f $usageFunctions.Count)).Trim()
+        if (-not $choice -or $choice -match '^(y|yes)$') { break }
+        if ($choice -match '^(n|no)$') {
+            Write-Host 'AI usage queries cancelled.' -ForegroundColor Yellow
+            return
+        }
+        Write-Warning 'Enter Y or N, or press Enter to accept the default (Y).'
+    }
+
+    for ($index = 0; $index -lt $usageFunctions.Count; $index++) {
+        $usageFunction = $usageFunctions[$index]
+        Write-Host ("`n>>> [{0}/{1}] {2}" -f ($index + 1), $usageFunctions.Count, $usageFunction.Name) -ForegroundColor Cyan
+        try {
+            & $usageFunction
+        } catch {
+            Write-Warning ("{0} failed: {1}" -f $usageFunction.Name, $_.Exception.Message)
+        }
+    }
 }
 
 function Save-WebFile {
