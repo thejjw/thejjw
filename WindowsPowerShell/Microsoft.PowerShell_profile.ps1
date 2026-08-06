@@ -9613,6 +9613,455 @@ function Get-KimiUsage {
     return $resp
 }
 
+# --- Get-QwenUsage ---------------------------------------------------------
+# Queries QwenCloud Token Plan's private console quota endpoint. The browser
+# session cookie is stored separately in Windows Credential Manager and is
+# never copied into an environment variable or returned with query results.
+
+function Get-QwenUsage {
+<#
+.SYNOPSIS
+    Queries QwenCloud Token Plan five-hour and seven-day Credit usage.
+.DESCRIPTION
+    Retrieves a QwenCloud console Cookie header from Windows Credential Manager,
+    obtains a temporary console security token, and calls the Token Plan Personal
+    quota endpoint. On first use, displays browser DevTools capture instructions
+    and prompts for the Cookie using hidden input. A newly entered Cookie is saved
+    only after a successful quota query.
+.PARAMETER Setup
+    Forces the Cookie capture and validation flow, replacing the stored value only
+    when the new Cookie successfully queries quota.
+.PARAMETER TimeoutSec
+    HTTP timeout for each QwenCloud request.
+.PARAMETER LowPercent
+    Remaining-percent threshold at or below which a quota is reported as LOW.
+.PARAMETER CriticalPercent
+    Remaining-percent threshold at or below which a quota is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Reports an informational concern when a quota resets within this many hours.
+.PARAMETER All
+    Prints the raw quota response. Otherwise it remains in $Global:qwenLastQuery.
+.EXAMPLE
+    Get-QwenUsage
+.EXAMPLE
+    Get-QwenUsage -Setup
+.EXAMPLE
+    Get-QwenUsage -LowPercent 25 -CriticalPercent 10 -All
+.NOTES
+    The Cookie is sensitive and session-lived. If QwenCloud rejects a stored
+    session, rerun Get-QwenUsage -Setup to capture and validate a replacement.
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Setup,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 15,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 30,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 10,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$All,
+        [Parameter(DontShow = $true)]
+        [scriptblock]$QueryInvoker
+    )
+
+    $credentialResource = 'QWEN_TOKEN_PLAN_COOKIE'
+    $credentialUserName = 'qwencloud-cookie'
+    $consoleOrigin = 'https://home.qwencloud.com'
+    $dashboardUrl = "$consoleOrigin/billing/subscription/token-plan-individual"
+    $userInfoUrl = "$consoleOrigin/tool/user/info.json"
+    $gatewayAction = 'IntlBroadScopeAspnGateway'
+    $usageApi = 'zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage'
+    $usageUrl = "https://cs-data.qwencloud.com/data/api.json?product=sfm_bailian&action=$gatewayAction&api=$([Uri]::EscapeDataString($usageApi))"
+    $browserUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
+
+    # Read the Cookie directly from the per-user Credential Locker. It is
+    # deliberately not routed through Get-AiApiKey or an environment variable.
+    function Get-StoredCookie {
+        [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+        $vault = New-Object Windows.Security.Credentials.PasswordVault
+        try {
+            $credential = $vault.Retrieve($credentialResource, $credentialUserName)
+            $credential.RetrievePassword()
+            return $credential.Password
+        } catch {
+            return $null
+        }
+    }
+
+    # Persist an already validated Cookie in the same Credential Locker used by
+    # the profile's API keys, but under a distinct resource and user name.
+    function Save-StoredCookie([string]$Cookie) {
+        [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+        $vault = New-Object Windows.Security.Credentials.PasswordVault
+        $credential = New-Object Windows.Security.Credentials.PasswordCredential(
+            $credentialResource,
+            $credentialUserName,
+            $Cookie
+        )
+        $vault.Add($credential)
+    }
+
+    # Prompt without echoing the Cookie, then normalize and reject malformed or
+    # multiline input before it can reach an HTTP header.
+    function Read-NewCookie {
+        Write-Host ''
+        Write-Host 'QwenCloud Token Plan Cookie setup' -ForegroundColor Cyan
+        Write-Host "  1. Sign in and open: $dashboardUrl"
+        Write-Host '  2. Open browser DevTools > Network and reload the page.'
+        Write-Host '  3. Filter for api.json, then inspect the api query parameter.'
+        Write-Host "  4. Select exactly: $usageApi" -ForegroundColor Yellow
+        Write-Host '     Do not select: zeldaEasy.bailian-telemetry.platform-model.getModelMonitorDataWithOss' -ForegroundColor DarkGray
+        Write-Host '  5. Copy the complete Request Headers > Cookie value.'
+        Write-Host ''
+
+        $secure = Read-Host -AsSecureString -Prompt 'Paste the complete Cookie header (input hidden; blank to cancel)'
+        if ($null -eq $secure -or $secure.Length -eq 0) { return $null }
+
+        $pointer = [IntPtr]::Zero
+        try {
+            $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+            $cookie = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+        } finally {
+            if ($pointer -ne [IntPtr]::Zero) {
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+            }
+        }
+
+        $cookie = ($cookie.Trim() -replace '^Cookie:\s*', '').Trim()
+        if (-not $cookie) { return $null }
+        if ($cookie -match '[\r\n]') {
+            throw 'The Cookie must be a single-line request-header value.'
+        }
+        $validPairs = @(
+            $cookie.Split(';') |
+                Where-Object { $_ -match '^\s*[^=;]+\s*=\s*.+$' }
+        )
+        if ($validPairs.Count -eq 0) {
+            throw 'The Cookie does not contain a complete name=value pair.'
+        }
+        return $cookie
+    }
+
+    # Execute both private console requests and return only the raw quota payload
+    # plus normalized limits. Cookie and secToken never leave this helper.
+    function Invoke-QwenCloudUsageQuery([string]$Cookie) {
+        function Get-JsonProperty([object]$InputObject, [string]$Name) {
+            if ($null -eq $InputObject) { return $null }
+            $property = $InputObject.PSObject.Properties[$Name]
+            if ($null -eq $property) { return $null }
+            return $property.Value
+        }
+
+        function Send-JsonRequest(
+            [System.Net.Http.HttpClient]$Client,
+            [System.Net.Http.HttpRequestMessage]$Request,
+            [string]$Stage
+        ) {
+            $response = $null
+            try {
+                $response = $Client.SendAsync($Request).GetAwaiter().GetResult()
+                $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                $status = [int]$response.StatusCode
+                if ($status -in @(301, 302, 303, 307, 308, 401, 403)) {
+                    throw "[QwenAuth] $Stage rejected the console session (HTTP $status)."
+                }
+                if (-not $response.IsSuccessStatusCode) {
+                    throw "[QwenTransient] $Stage failed with HTTP $status $($response.ReasonPhrase)."
+                }
+                try {
+                    return $body | ConvertFrom-Json
+                } catch {
+                    throw "[QwenResponse] $Stage returned invalid JSON."
+                }
+            } finally {
+                if ($null -ne $response) { $response.Dispose() }
+                $Request.Dispose()
+            }
+        }
+
+        function ConvertTo-UsedPercent([object]$Value) {
+            if ($null -eq $Value) { return $null }
+            $parsed = 0.0
+            if (-not [double]::TryParse(
+                [string]$Value,
+                [Globalization.NumberStyles]::Float,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsed
+            ) -or $parsed -lt 0) {
+                return $null
+            }
+            $percent = if ($parsed -le 1) { $parsed * 100 } else { $parsed }
+            return [Math]::Min(100, $percent)
+        }
+
+        function ConvertTo-ResetTime([object]$Value) {
+            if ($null -eq $Value) { return $null }
+            $parsed = 0.0
+            if (-not [double]::TryParse(
+                [string]$Value,
+                [Globalization.NumberStyles]::Float,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsed
+            ) -or $parsed -le 0) {
+                return $null
+            }
+            $milliseconds = if ($parsed -lt 1000000000000) { $parsed * 1000 } else { $parsed }
+            try {
+                return [DateTimeOffset]::FromUnixTimeMilliseconds([long]$milliseconds)
+            } catch {
+                return $null
+            }
+        }
+
+        function Get-CookieValue([string]$Name) {
+            foreach ($segment in $Cookie.Split(';')) {
+                $separator = $segment.IndexOf('=')
+                if ($separator -lt 0 -or $segment.Substring(0, $separator).Trim() -cne $Name) { continue }
+                $value = $segment.Substring($separator + 1).Trim()
+                if ($value) { return $value }
+            }
+            return $null
+        }
+
+        Add-Type -AssemblyName System.Net.Http
+        $handler = New-Object System.Net.Http.HttpClientHandler
+        $handler.AllowAutoRedirect = $false
+        # Automatic cookie management replaces a manually supplied Cookie header
+        # with the handler's empty CookieContainer, producing ConsoleNeedLogin.
+        $handler.UseCookies = $false
+        $client = New-Object System.Net.Http.HttpClient($handler)
+        $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
+
+        try {
+            $userRequest = New-Object System.Net.Http.HttpRequestMessage(
+                [System.Net.Http.HttpMethod]::Get,
+                $userInfoUrl
+            )
+            [void]$userRequest.Headers.TryAddWithoutValidation('Accept', 'application/json, text/plain, */*')
+            [void]$userRequest.Headers.TryAddWithoutValidation('Cookie', $Cookie)
+            [void]$userRequest.Headers.TryAddWithoutValidation('Referer', "$consoleOrigin/")
+            [void]$userRequest.Headers.TryAddWithoutValidation('User-Agent', $browserUserAgent)
+            $userPayload = Send-JsonRequest $client $userRequest 'QwenCloud session lookup'
+            $userData = Get-JsonProperty $userPayload 'data'
+            $secToken = Get-JsonProperty $userData 'secToken'
+            $errorCode = [string](Get-JsonProperty $userPayload 'code')
+            if ($errorCode -eq 'ConsoleNeedLogin' -or $secToken -isnot [string] -or -not $secToken) {
+                throw '[QwenAuth] QwenCloud requires a fresh console login.'
+            }
+
+            $cornerstoneParam = [ordered]@{
+                domain      = 'home.qwencloud.com'
+                consoleSite = 'QWENCLOUD'
+                console     = 'ONE_CONSOLE'
+                xsp_lang    = 'en-US'
+                protocol    = 'V2'
+                productCode = 'p_efm'
+            }
+            $requestParams = [ordered]@{
+                Api  = $usageApi
+                Data = @{ cornerstoneParam = $cornerstoneParam }
+                V    = '1.0'
+            } | ConvertTo-Json -Depth 6 -Compress
+            $form = New-Object 'System.Collections.Generic.Dictionary[string,string]'
+            $form.Add('product', 'sfm_bailian')
+            $form.Add('action', $gatewayAction)
+            $form.Add('region', 'ap-southeast-1')
+            $form.Add('sec_token', $secToken)
+            $form.Add('params', $requestParams)
+
+            $usageRequest = New-Object System.Net.Http.HttpRequestMessage(
+                [System.Net.Http.HttpMethod]::Post,
+                $usageUrl
+            )
+            $usageRequest.Content = New-Object System.Net.Http.FormUrlEncodedContent($form)
+            [void]$usageRequest.Headers.TryAddWithoutValidation('Accept', 'application/json, text/plain, */*')
+            [void]$usageRequest.Headers.TryAddWithoutValidation('Cookie', $Cookie)
+            [void]$usageRequest.Headers.TryAddWithoutValidation('Origin', $consoleOrigin)
+            [void]$usageRequest.Headers.TryAddWithoutValidation('Referer', $dashboardUrl)
+            [void]$usageRequest.Headers.TryAddWithoutValidation('User-Agent', $browserUserAgent)
+            [void]$usageRequest.Headers.TryAddWithoutValidation('X-Requested-With', 'XMLHttpRequest')
+            $csrf = Get-CookieValue 'login_aliyunid_csrf'
+            if (-not $csrf) { $csrf = Get-CookieValue 'csrf' }
+            if ($csrf) {
+                [void]$usageRequest.Headers.TryAddWithoutValidation('x-xsrf-token', $csrf)
+                [void]$usageRequest.Headers.TryAddWithoutValidation('x-csrf-token', $csrf)
+            }
+
+            $payload = Send-JsonRequest $client $usageRequest 'QwenCloud usage lookup'
+            $successResponse = Get-JsonProperty $payload 'successResponse'
+            $responseData = Get-JsonProperty $payload 'data'
+            if ($successResponse -eq $false -or $null -eq $responseData) {
+                $failureShape = $payload | ConvertTo-Json -Depth 6 -Compress
+                if ($failureShape -match '(?i)ConsoleNeedLogin|NeedLogin|not.?logged.?in|login.{0,24}expired|unauthorized|forbidden') {
+                    throw '[QwenAuth] QwenCloud requires a fresh console login.'
+                }
+                throw '[QwenResponse] QwenCloud usage lookup returned an unsuccessful response.'
+            }
+
+            $stringData = Get-JsonProperty $responseData 'Data'
+            if ($stringData -is [string]) {
+                try { $responseData = $stringData | ConvertFrom-Json } catch {}
+            }
+            $dataV2 = Get-JsonProperty $responseData 'DataV2'
+            $dataV2Data = Get-JsonProperty $dataV2 'data'
+            if ($null -ne $dataV2Data) { $responseData = $dataV2Data }
+            $nestedData = Get-JsonProperty $responseData 'data'
+            if ($null -ne $nestedData) { $responseData = $nestedData }
+
+            $limits = New-Object System.Collections.Generic.List[object]
+            $fiveHourUsed = ConvertTo-UsedPercent (Get-JsonProperty $responseData 'per5HourPercentage')
+            $sevenDayUsed = ConvertTo-UsedPercent (Get-JsonProperty $responseData 'per1WeekPercentage')
+            if ($null -ne $fiveHourUsed) {
+                $limits.Add([pscustomobject]@{
+                    Window      = '5 Hour Credits'
+                    UsedPercent = $fiveHourUsed
+                    ResetAt     = ConvertTo-ResetTime (Get-JsonProperty $responseData 'per5HourResetTime')
+                })
+            }
+            if ($null -ne $sevenDayUsed) {
+                $limits.Add([pscustomobject]@{
+                    Window      = '7 Day Credits'
+                    UsedPercent = $sevenDayUsed
+                    ResetAt     = ConvertTo-ResetTime (Get-JsonProperty $responseData 'per1WeekResetTime')
+                })
+            }
+            if ($limits.Count -eq 0) {
+                throw '[QwenResponse] QwenCloud returned no recognized quota fields.'
+            }
+
+            return [pscustomobject]@{
+                Raw    = $payload
+                Limits = [object[]]$limits
+            }
+        } catch [System.Threading.Tasks.TaskCanceledException] {
+            throw '[QwenTransient] QwenCloud usage query timed out.'
+        } catch [System.Net.Http.HttpRequestException] {
+            throw "[QwenTransient] QwenCloud usage query failed: $($_.Exception.Message)"
+        } finally {
+            $client.Dispose()
+            $handler.Dispose()
+            $secToken = $null
+        }
+    }
+
+    if ($CriticalPercent -gt $LowPercent) {
+        Write-Error 'CriticalPercent must be less than or equal to LowPercent.'
+        return
+    }
+
+    $newCookie = $false
+    $cookie = if ($Setup) { $null } else { Get-StoredCookie }
+    if (-not $cookie) {
+        if (-not $Setup) {
+            Write-Host 'No stored QwenCloud Cookie was found; starting setup.' -ForegroundColor Yellow
+        }
+        try {
+            $cookie = Read-NewCookie
+        } catch {
+            Write-Error $_.Exception.Message
+            return
+        }
+        if (-not $cookie) {
+            Write-Host 'QwenCloud Cookie setup cancelled; no credential was changed.' -ForegroundColor Yellow
+            return
+        }
+        $newCookie = $true
+    }
+
+    try {
+        $query = if ($QueryInvoker) {
+            & $QueryInvoker $cookie
+        } else {
+            Invoke-QwenCloudUsageQuery $cookie
+        }
+    } catch {
+        $message = $_.Exception.Message
+        if ($message.StartsWith('[QwenAuth]', [StringComparison]::Ordinal)) {
+            $prefix = if ($newCookie) { 'The entered QwenCloud Cookie was rejected and was not saved.' } else { 'The stored QwenCloud Cookie is invalid or expired.' }
+            Write-Error "$prefix Run: Get-QwenUsage -Setup"
+        } elseif ($message.StartsWith('[QwenTransient]', [StringComparison]::Ordinal)) {
+            Write-Error "$($message.Substring('[QwenTransient]'.Length).Trim()) The stored Cookie was retained."
+        } else {
+            Write-Error $message
+        }
+        $cookie = $null
+        return
+    }
+
+    if ($newCookie) {
+        try {
+            Save-StoredCookie $cookie
+            Write-Host 'Validated and saved the QwenCloud Cookie in Windows Credential Manager.' -ForegroundColor Green
+        } catch {
+            Write-Error "Quota query succeeded, but the Cookie could not be saved: $($_.Exception.Message)"
+            $cookie = $null
+            return
+        }
+    }
+    $cookie = $null
+
+    $Global:qwenLastQuery = $query.Raw
+    $_ProfileHelpers.WriteSection('Raw API response (QwenCloud Token Plan)')
+    if ($All) { $query.Raw | ConvertTo-Json -Depth 10 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:qwenLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $_ProfileHelpers.WriteSection('Quota summary (QwenCloud Token Plan)')
+    $rows = New-Object System.Collections.Generic.List[object]
+    $concerns = New-Object System.Collections.Generic.List[string]
+    $now = [DateTimeOffset]::Now
+    foreach ($limit in @($query.Limits)) {
+        $usedPercent = [Math]::Max(0, [Math]::Min(100, [double]$limit.UsedPercent))
+        $remainingPercent = 100 - $usedPercent
+        $status = if ($usedPercent -ge 100) {
+            'EXHAUSTED'
+        } elseif ($remainingPercent -le $CriticalPercent) {
+            'CRITICAL'
+        } elseif ($remainingPercent -le $LowPercent) {
+            'LOW'
+        } else {
+            'OK'
+        }
+
+        $resetText = 'n/a'
+        if ($limit.ResetAt -is [DateTimeOffset]) {
+            $resetLocal = $limit.ResetAt.ToLocalTime()
+            $delta = $resetLocal - $now
+            if ($delta.TotalSeconds -gt 0) {
+                $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($delta))
+                if ($delta.TotalHours -le $ResetWarnHours) {
+                    $concerns.Add(('[INFO] {0}: resets in {1}' -f $limit.Window, ($_ProfileHelpers.FormatDuration($delta))))
+                }
+            } else {
+                $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Window    = $limit.Window
+            Used      = '{0:N1}%' -f $usedPercent
+            Remaining = '{0:N1}%' -f $remainingPercent
+            Status    = $status
+            Reset     = $resetText
+        })
+        if ($status -ne 'OK') {
+            $concerns.Add(('[{0}] {1}: {2:N1}% remaining' -f $status, $limit.Window, $remainingPercent))
+        }
+    }
+    $rows | Format-Table -AutoSize -Wrap | Out-Host
+
+    $_ProfileHelpers.WriteSection('Concerns (QwenCloud Token Plan)')
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) { Write-Host ('  - ' + $concern) -ForegroundColor Yellow }
+    }
+
+    return $query.Raw
+}
+
 # --- Get-AgyUsage ----------------------------------------------------------
 # Queries Antigravity's private cloudcode-pa retrieveUserQuotaSummary API endpoint.
 # Extracts generic credentials from Windows Credential Manager under 'gemini:antigravity'.
