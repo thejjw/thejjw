@@ -761,8 +761,8 @@ $_AiToolsInternal = @{
 #   Probe    A representative installed font filename. If it already exists in the
 #            target Fonts folder, the whole pack is skipped (no download) unless
 #            -Force is passed. This is the cheap pre-download idempotency check.
-#   Extended $true packs are skipped unless -Extended is passed. This keeps large
-#            CJK downloads, including Source Han and Sarasa, explicitly opt-in.
+#   Extended $true packs are skipped unless -Extended is passed. This keeps the
+#            especially large Source Han CJK downloads explicitly opt-in.
 #   Note     Optional freeform note shown in -ListOnly output.
 $_FontInstallInternal = @{
     # Per-user (no admin) install target and its font-registration registry key.
@@ -781,8 +781,8 @@ $_FontInstallInternal = @{
         [pscustomobject]@{ Name = 'Galmuri';             Url = 'https://github.com/quiple/galmuri/releases/download/v2.40.3/Galmuri-v2.40.3.zip'; Bytes = 19936233; Fonts = 20; Kind = 'Zip'; Include = '(?i)^[^/]+\.(ttf|ttc)$';                   Probe = 'Galmuri11.ttf';                          Extended = $false; Note = 'Pixel font family; all root-level ttf/ttc.' }
         [pscustomobject]@{ Name = 'OpenDyslexic';        Url = 'https://github.com/antijingoist/opendyslexic/releases/download/v0.91.12/opendyslexic-0.910.12-rc2-2019.10.17.zip'; Bytes = 3627458; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';               Probe = 'OpenDyslexic-Regular.otf';               Extended = $false; Note = 'OTF; skips eot/woff web formats.' }
         [pscustomobject]@{ Name = 'FiraCode';            Url = 'https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip'; Bytes = 2462987; Fonts = 6; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$';                          Probe = 'FiraCode-Regular.ttf';                   Extended = $false; Note = 'Static TTF: the VF defaults to Light weight and legacy apps see "Fira Code Light"; static defaults to Regular with a clean "Fira Code" family.' }
-        [pscustomobject]@{ Name = 'SarasaGothicK';       Url = 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaGothicK-TTF-1.0.40.7z'; Bytes = 63464316; Fonts = 10; Kind = '7z'; Include = '(?i)^SarasaGothicK-[^/]+\.ttf$'; Probe = 'SarasaGothicK-Regular.ttf'; Extended = $true; Note = 'Korean Sarasa Gothic, 5 hinted weights with italics. Requires Windows tar.exe.' }
-        [pscustomobject]@{ Name = 'SarasaMonoK';         Url = 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaMonoK-TTF-1.0.40.7z'; Bytes = 66316218; Fonts = 10; Kind = '7z'; Include = '(?i)^SarasaMonoK-[^/]+\.ttf$'; Probe = 'SarasaMonoK-Regular.ttf'; Extended = $true; Note = 'Korean monospaced Sarasa, 5 hinted weights with italics. Requires Windows tar.exe.' }
+        [pscustomobject]@{ Name = 'SarasaGothicK';       Url = 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaGothicK-TTF-1.0.40.7z'; Bytes = 63464316; Fonts = 10; Kind = '7z'; Include = '(?i)^SarasaGothicK-[^/]+\.ttf$'; Probe = 'SarasaGothicK-Regular.ttf'; Extended = $false; Note = 'Korean Sarasa Gothic, 5 hinted weights with italics. Requires Windows tar.exe.' }
+        [pscustomobject]@{ Name = 'SarasaMonoK';         Url = 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaMonoK-TTF-1.0.40.7z'; Bytes = 66316218; Fonts = 10; Kind = '7z'; Include = '(?i)^SarasaMonoK-[^/]+\.ttf$'; Probe = 'SarasaMonoK-Regular.ttf'; Extended = $false; Note = 'Korean monospaced Sarasa, 5 hinted weights with italics. Requires Windows tar.exe.' }
         [pscustomobject]@{ Name = 'SourceHanSans';       Url = 'https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/02_SourceHanSans-VF.zip'; Bytes = 888816761; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSans-VF\.ttf\.ttc$'; Probe = 'SourceHanSans-VF.ttf.ttc';       Extended = $true;  Note = 'LARGE ~848 MB. Installs only the pan-CJK OTC variable collection.' }
         [pscustomobject]@{ Name = 'SourceHanSerif';      Url = 'https://github.com/adobe-fonts/source-han-serif/releases/download/2.003R/02_SourceHanSerif-VF.zip'; Bytes = 750817685; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSerif-VF\.ttf\.ttc$'; Probe = 'SourceHanSerif-VF.ttf.ttc';   Extended = $true;  Note = 'LARGE ~716 MB. Installs only the pan-CJK OTC variable collection.' }
         [pscustomobject]@{ Name = 'SourceHanMono';       Url = 'https://github.com/adobe-fonts/source-han-mono/releases/download/1.002/SourceHanMono.ttc'; Bytes = 122117628; Fonts = 1; Kind = 'File'; Include = $null;                              Probe = 'SourceHanMono.ttc';                      Extended = $true;  Note = 'LARGE ~116 MB. Direct .ttc download (no archive).' }
@@ -10343,7 +10343,7 @@ function Install-Fonts {
     Install machine-wide instead of per-user. Requires an elevated (admin) shell.
 .PARAMETER Extended
     Also process the extended (opt-in) packs marked Extended=$true in the catalog,
-    including the large Adobe Source Han families and Korean Sarasa packs.
+    including the large Adobe Source Han families.
 .PARAMETER ListOnly
     Print the catalog (names, sizes, extended state, notes) and the estimated
     download total, then exit without downloading or installing anything.

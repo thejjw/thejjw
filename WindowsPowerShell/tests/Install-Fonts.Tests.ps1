@@ -77,14 +77,14 @@ Describe 'Install-Fonts archive handling and catalog' {
         }
     }
 
-    It 'pins the two Korean Sarasa packs as extended 7z downloads' {
+    It 'pins the two Korean Sarasa packs as standard 7z downloads' {
         $packs = @($_FontInstallInternal.Packs | Where-Object Name -like 'Sarasa*')
 
         $packs.Count | Should -Be 2
         $packs.Name | Should -Contain 'SarasaGothicK'
         $packs.Name | Should -Contain 'SarasaMonoK'
         $packs.Kind | Select-Object -Unique | Should -Be '7z'
-        @($packs | Where-Object { -not $_.Extended }).Count | Should -Be 0
+        @($packs | Where-Object { $_.Extended }).Count | Should -Be 0
         ($packs | Measure-Object -Property Fonts -Sum).Sum | Should -Be 20
 
         $gothic = $packs | Where-Object Name -eq 'SarasaGothicK'
