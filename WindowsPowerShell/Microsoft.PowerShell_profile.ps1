@@ -8280,7 +8280,8 @@ function Set-AiApiKeysCS {
         Checks for existing values of AI API keys in the Windows Credential Manager (PasswordVault).
         Presents a summary and prompts the user to enter missing keys (or optionally overwrite existing ones).
         Values are securely saved using Windows Credential Manager (DPAPI-encrypted), keeping plaintext
-        credentials out of your registry.
+        credentials out of your registry. Saving QWEN_TOKEN_PLAN_API_KEY also saves the same value as
+        BAILIAN_TOKEN_PLAN_API_KEY without an additional prompt.
 
     .PARAMETER Force
         When supplied, prompt to overwrite existing keys instead of skipping them.
@@ -8361,6 +8362,18 @@ function Set-AiApiKeysCS {
             $newCred = New-Object Windows.Security.Credentials.PasswordCredential($n, $userName, $plain)
             $vault.Add($newCred)
             Write-Host "Successfully saved $n to Windows Credential Manager." -ForegroundColor Green
+
+            if ($n -eq 'QWEN_TOKEN_PLAN_API_KEY') {
+                try {
+                    $bailianName = 'BAILIAN_TOKEN_PLAN_API_KEY'
+                    $bailianCred = New-Object Windows.Security.Credentials.PasswordCredential($bailianName, $userName, $plain)
+                    $vault.Add($bailianCred)
+                    Write-Host "Duplicated $n to $bailianName in Windows Credential Manager." -ForegroundColor Cyan
+                }
+                catch {
+                    Write-Host "Failed to duplicate $n to BAILIAN_TOKEN_PLAN_API_KEY: $_" -ForegroundColor Red
+                }
+            }
         }
         catch {
             Write-Host "Failed to save secure input for $($n): $_" -ForegroundColor Red
@@ -8399,7 +8412,7 @@ function Load-AiApiKeysFromCS {
     )
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     $userName = 'api-key'
 
     $loadedCount = 0
