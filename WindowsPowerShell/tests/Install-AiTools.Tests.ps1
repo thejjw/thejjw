@@ -29,6 +29,7 @@ Describe 'Install-AiTools PowerShell modules' {
         . ([scriptblock]::Create($installerAst.Extent.Text))
         function Add-UserPathEntry { param([string]$Path) }
         $script:configuredModules = @($_AiToolsInternal.PowerShellModules)
+        $script:configuredWingetPackages = @($_AiToolsInternal.WingetPackages)
         $script:originalAiToolsConfig = $_AiToolsInternal
     }
 
@@ -94,6 +95,10 @@ Describe 'Install-AiTools PowerShell modules' {
         $pester.Scope | Should -Be 'CurrentUser'
         $pester.Force | Should -BeTrue
         $pester.SkipPublisherCheck | Should -BeTrue
+    }
+
+    It 'includes Bun in the standard Winget packages' {
+        $script:configuredWingetPackages | Should -Contain 'Oven-sh.Bun'
     }
 
     It 'configures npm funding notices before global package installs' {

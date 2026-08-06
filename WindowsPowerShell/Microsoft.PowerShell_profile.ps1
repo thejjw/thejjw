@@ -620,6 +620,7 @@ $_AiToolsInternal = @{
         'Microsoft.IntelligentTerminal',
         'TwibrightLabs.Links',
         'OpenJS.NodeJS.LTS',
+        'Oven-sh.Bun',
         '7zip.7zip',
         'GitHub.cli',
         'Notepad++.Notepad++',
