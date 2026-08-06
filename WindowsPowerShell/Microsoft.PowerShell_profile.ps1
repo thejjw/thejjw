@@ -2014,7 +2014,8 @@ function Add-WingetPackagePaths {
     foreach ($path in @($binPaths | Sort-Object -Unique)) {
         $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
         $present = @($userPath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $path.TrimEnd('\') }).Count -gt 0
-        if (-not $present -and (Add-UserPathEntry -Path $path)) {
+        $pathReady = Add-UserPathEntry -Path $path
+        if (-not $present -and $pathReady) {
             $added += $path
         }
     }
