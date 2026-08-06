@@ -199,6 +199,13 @@ Describe 'Install-AiTools npm packages' {
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
                 $node.Name -eq 'Install-AiTools'
         }, $true)
+        $inventoryAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Get-GlobalNpmInventory'
+        }, $true)
+        if (-not $inventoryAst) { throw 'Could not load Get-GlobalNpmInventory from the profile.' }
+        . ([scriptblock]::Create($inventoryAst.Extent.Text))
         . ([scriptblock]::Create($configAst.Extent.Text))
         . ([scriptblock]::Create($installerAst.Extent.Text))
         $script:originalAiToolsConfigForNpm = $_AiToolsInternal
@@ -217,6 +224,9 @@ Describe 'Install-AiTools npm packages' {
         function Install-QwenSettings {}
         function Install-KimiSettings {}
         function Install-GrokSettings {}
+        function winget {
+            param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
+        }
         function npm {
             param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
         }

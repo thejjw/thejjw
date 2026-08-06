@@ -7634,6 +7634,44 @@ function Install-AiSkills {
     }
 }
 
+function Get-GlobalNpmInventory {
+    <#
+.SYNOPSIS
+    Returns healthy top-level globally installed npm packages.
+.DESCRIPTION
+    Reads npm's global package inventory as JSON and preserves healthy entries
+    even when npm reports an unrelated invalid or missing package.
+#>
+    [CmdletBinding()]
+    param()
+
+    $json = @(& npm ls -g --depth=0 --json 2>$null)
+    $exitCode = $LASTEXITCODE
+    try {
+        $data = ($json -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Could not parse the global npm inventory. $($_.Exception.Message)"
+        return [pscustomobject]@{ Available = $false; Packages = @{} }
+    }
+
+    $packages = @{}
+    if ($data.dependencies) {
+        foreach ($property in $data.dependencies.PSObject.Properties) {
+            $package = $property.Value
+            $missing = $package.PSObject.Properties['missing'] -and $package.missing
+            $invalid = $package.PSObject.Properties['invalid'] -and $package.invalid
+            if ($package.version -and -not $missing -and -not $invalid) {
+                $packages[$property.Name] = [string]$package.version
+            }
+        }
+    }
+    if ($exitCode -ne 0) {
+        Write-Warning "npm global inventory returned exit code $exitCode; healthy entries will still be used."
+    }
+    return [pscustomobject]@{ Available = $true; Packages = $packages }
+}
+
 function Install-AiTools {
     <#
 .SYNOPSIS
@@ -8028,36 +8066,6 @@ function Install-AiTools {
     # Keep npm defaults grouped here so additional setup can be added later.
     function Set-NpmConfiguration {
         & npm config set fund false
-    }
-
-    # Returns healthy top-level global npm packages, preserving usable inventory
-    # data even when npm reports an unrelated invalid or missing package.
-    function Get-GlobalNpmInventory {
-        $json = @(& npm ls -g --depth=0 --json 2>$null)
-        $exitCode = $LASTEXITCODE
-        try {
-            $data = ($json -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
-        }
-        catch {
-            Write-Warning "Could not parse the global npm inventory; all selected packages will be checked by npm install. $($_.Exception.Message)"
-            return [pscustomobject]@{ Available = $false; Packages = @{} }
-        }
-
-        $packages = @{}
-        if ($data.dependencies) {
-            foreach ($property in $data.dependencies.PSObject.Properties) {
-                $package = $property.Value
-                $missing = $package.PSObject.Properties['missing'] -and $package.missing
-                $invalid = $package.PSObject.Properties['invalid'] -and $package.invalid
-                if ($package.version -and -not $missing -and -not $invalid) {
-                    $packages[$property.Name] = [string]$package.version
-                }
-            }
-        }
-        if ($exitCode -ne 0) {
-            Write-Warning "npm global inventory returned exit code $exitCode; healthy entries will still be used."
-        }
-        return [pscustomobject]@{ Available = $true; Packages = $packages }
     }
 
     # Install global npm packages if npm available
@@ -8795,13 +8803,7 @@ function Invoke-AiUpgrade {
     [CmdletBinding()]
     param()
 
-    $npmPackages = @(
-        foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
-            if ($tool.NpmPackage -and (Get-Command $tool.Probe -ErrorAction SilentlyContinue)) {
-                $tool.NpmPackage
-            }
-        }
-    )
+    $npmTools = @($_AiToolsInternal.UpgradeCommands | Where-Object { $_.NpmPackage })
     $npmUpdatePending = $true
 
     foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
@@ -8811,12 +8813,48 @@ function Invoke-AiUpgrade {
                 continue
             }
             $npmUpdatePending = $false
-            if ($npmPackages.Count -eq 0 -or -not (Get-Command npm -ErrorAction SilentlyContinue)) {
+            if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+                Write-Host '>>> npm: skipped (npm is not available).' -ForegroundColor Yellow
                 continue
             }
-            $npmArgs = @('up', '-g') + $npmPackages
+
+            $inventory = Get-GlobalNpmInventory
+            if (-not $inventory.Available) {
+                Write-Host '>>> npm: skipped (global package inventory is unavailable).' -ForegroundColor Yellow
+                continue
+            }
+
+            $npmPackages = @($npmTools.NpmPackage | Where-Object { $inventory.Packages.ContainsKey($_) })
+            if ($npmPackages.Count -eq 0) {
+                Write-Host '>>> npm: no managed npm AI tools are installed.' -ForegroundColor DarkGray
+                continue
+            }
+
+            $outdatedJson = @(& npm outdated -g --json @npmPackages 2>$null)
+            try {
+                $outdatedData = ($outdatedJson -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
+                $outdatedNames = @($outdatedData.PSObject.Properties.Name)
+                $outdatedPackages = @($npmPackages | Where-Object { $_ -in $outdatedNames })
+            }
+            catch {
+                Write-Warning "Could not determine which npm-managed AI tools are outdated; updating all installed candidates. $($_.Exception.Message)"
+                $outdatedPackages = $npmPackages
+            }
+
+            if ($outdatedPackages.Count -eq 0) {
+                Write-Host '>>> npm: all managed npm AI tools are already up to date.' -ForegroundColor Green
+                continue
+            }
+
+            $npmArgs = @('up', '-g') + $outdatedPackages
             Write-Host ">>> npm: npm $($npmArgs -join ' ')" -ForegroundColor Cyan
             & npm @npmArgs
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host 'npm-managed AI tools updated successfully.' -ForegroundColor Green
+            }
+            else {
+                Write-Warning "npm update failed with exit code $LASTEXITCODE for: $($outdatedPackages -join ', ')"
+            }
             continue
         }
 
