@@ -1,0 +1,4 @@
+interface:
+  display_name: "Polish Document"
+  short_description: "Refine rough documents into polished deliverables"
+  default_prompt: "Use $polish-document to refine this document and any related source files."

@@ -44,6 +44,15 @@ Describe 'Install-AiSkills' {
             Set-Content -LiteralPath (Join-Path $skillDir 'payload.txt') -Value "payload-$skill" -Encoding UTF8
         }
 
+        $polishSkill = Join-Path $fixtureSkills 'polish-document'
+        $polishReferences = Join-Path $polishSkill 'references'
+        $polishScripts = Join-Path $polishSkill 'scripts'
+        $polishAgents = Join-Path $polishSkill 'agents'
+        $null = New-Item -ItemType Directory -Path $polishReferences, $polishScripts, $polishAgents -Force
+        Set-Content -LiteralPath (Join-Path $polishReferences 'source-reconciliation.md') -Value 'nested-reference' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $polishScripts 'find-related-files.ps1') -Value 'nested-script' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $polishAgents 'openai.yaml') -Value 'nested-agent-metadata' -Encoding UTF8
+
         & git -C $script:fixtureRepo init --initial-branch=main
         if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the test Git repository.' }
         & git -C $script:fixtureRepo config user.email 'tests@example.invalid'
@@ -79,6 +88,16 @@ Describe 'Install-AiSkills' {
         Test-Path -LiteralPath (Join-Path $skillPath 'stale.txt') | Should -BeFalse
         Test-Path -LiteralPath "$skillPath.tmp-install" | Should -BeFalse
         Test-Path -LiteralPath "$skillPath.backup-install" | Should -BeFalse
+    }
+
+    It 'installs the complete polish-document skill for Codex' {
+        Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main
+
+        $skillPath = Join-Path $env:CODEX_HOME 'skills\polish-document'
+        Test-Path -LiteralPath (Join-Path $skillPath 'SKILL.md') | Should -BeTrue
+        Get-Content -LiteralPath (Join-Path $skillPath 'references\source-reconciliation.md') | Should -Be 'nested-reference'
+        Get-Content -LiteralPath (Join-Path $skillPath 'scripts\find-related-files.ps1') | Should -Be 'nested-script'
+        Get-Content -LiteralPath (Join-Path $skillPath 'agents\openai.yaml') | Should -Be 'nested-agent-metadata'
     }
 
     It 'preserves the previous installation when staging copy fails' {

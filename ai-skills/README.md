@@ -18,6 +18,8 @@ Reusable agent skill documentation for AI coding environments.
   - Intended for OpenCode and Claude Code.
 - `minimax-usage-query`: Query MiniMax token usage, quota limits, and model-specific allowances.
   - Intended for OpenCode and Claude Code.
+- `polish-document`: Refine rough, translated, or inconsistent documents into professional, presentation-ready deliverables.
+  - Intended for Codex only.
 - `session-exporter`: Export the current session conversation history to Markdown.
   - Intended for Antigravity CLI only.
 - `web-search-ddg`: Search current web information using DuckDuckGo with no API key.
