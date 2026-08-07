@@ -58,6 +58,9 @@ Describe 'Install-AiTools PowerShell modules' {
             SdkWingetPackages      = @()
             DbWingetPackages       = @()
             MoreAiWingetPackages   = @()
+            DockerWingetPackage    = 'Docker.DockerDesktop'
+            PodmanWingetPackage    = 'RedHat.Podman'
+            GitWingetPackage       = 'Git.Git'
             NpmPackages            = @()
             MoreAiNpmPackages      = @()
         }
@@ -260,6 +263,9 @@ Describe 'Install-AiTools npm packages' {
             SdkWingetPackages      = @()
             DbWingetPackages       = @()
             MoreAiWingetPackages   = @()
+            DockerWingetPackage    = 'Docker.DockerDesktop'
+            PodmanWingetPackage    = 'RedHat.Podman'
+            GitWingetPackage       = 'Git.Git'
             NpmPackages            = @($script:originalAiToolsConfigForNpm.NpmPackages)
             MoreAiNpmPackages      = @($script:originalAiToolsConfigForNpm.MoreAiNpmPackages)
             Urls                   = @{}

@@ -708,6 +708,9 @@ $_AiToolsInternal = @{
         'GoLang.Go',
         'StrawberryPerl.StrawberryPerl'
     )
+    DockerWingetPackage    = 'Docker.DockerDesktop'
+    PodmanWingetPackage    = 'RedHat.Podman'
+    GitWingetPackage       = 'Git.Git'
     Urls                   = @{
         AgyCli        = 'https://antigravity.google/cli/install.ps1'
         ClaudeCli     = 'https://claude.ai/install.ps1'
@@ -7817,10 +7820,10 @@ function Install-AiTools {
         $Dotnet = $true
     }
     if ($Docker) {
-        $wingetPackages += 'Docker.DockerDesktop'
+        $wingetPackages += $_AiToolsInternal.DockerWingetPackage
     }
     if ($Podman) {
-        $wingetPackages += 'RedHat.Podman'
+        $wingetPackages += $_AiToolsInternal.PodmanWingetPackage
     }
     if ($Database) {
         $wingetPackages += $_AiToolsInternal.DbWingetPackages
@@ -8082,7 +8085,7 @@ function Install-AiTools {
     # Ensure git is present; if not, offer interactive installer
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Write-Host "git not found. Launching interactive winget installer for Git..." -ForegroundColor Yellow
-        Start-Process -FilePath 'winget' -ArgumentList 'install -s winget -e --id Git.Git -i' -NoNewWindow -Wait
+        Start-Process -FilePath 'winget' -ArgumentList "install -s winget -e --id $($_AiToolsInternal.GitWingetPackage) -i" -NoNewWindow -Wait
     }
 
     # Install .NET SDK via official install script (https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-install-script)
@@ -8729,20 +8732,26 @@ function Invoke-AiUpgrade {
 .DESCRIPTION
     Runs the native update/upgrade command for each available CLI registered in
     $_AiToolsInternal.UpgradeCommands (agy, Claude, Codex, OpenCode, and Grok),
+    reports available updates for Winget packages managed by Install-AiTools,
     then checks and updates every npm-installed managed package -- from
     $_AiToolsInternal.NpmPackages and MoreAiNpmPackages -- through one global
-    npm command. Use the alias 'aiu' for convenience. The npm stage lists the
-    managed packages it checks and the available versions before updating.
+    npm command. Winget packages are upgraded only when -Winget is supplied.
+    Use the alias 'aiu' for convenience.
+.PARAMETER Winget
+    Upgrade the reported managed Winget packages. Without this switch, Winget
+    updates are listed only because they may be large or require elevation.
 .EXAMPLE
     Invoke-AiUpgrade
 .EXAMPLE
-    aiu
+    aiu -winget
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-08
 #>
     [CmdletBinding()]
-    param()
+    param(
+        [switch]$Winget
+    )
 
     foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
         $probe = if ($tool.Probe) { $tool.Probe } else { $tool.Cmd }
@@ -8754,6 +8763,88 @@ function Invoke-AiUpgrade {
         }
         Write-Host ">>> $($tool.Label): $($tool.Cmd) $($tool.Args -join ' ')" -ForegroundColor Cyan
         & $tool.Cmd @($tool.Args)
+    }
+
+    # Winget stage: discover updates once, restrict the results to every package
+    # Install-AiTools may manage, and require an explicit switch before installing.
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host '>>> winget: skipped (winget is not available).' -ForegroundColor Yellow
+    }
+    else {
+        $managedWinget = @(
+            @($_AiToolsInternal.WingetPackages) +
+            @($_AiToolsInternal.ExtendedWingetPackages) +
+            @($_AiToolsInternal.SdkWingetPackages) +
+            @($_AiToolsInternal.DbWingetPackages) +
+            @($_AiToolsInternal.MoreAiWingetPackages) +
+            @(
+                $_AiToolsInternal.DockerWingetPackage,
+                $_AiToolsInternal.PodmanWingetPackage,
+                $_AiToolsInternal.GitWingetPackage
+            ) | Where-Object { $_ } | Sort-Object -Unique
+        )
+
+        Write-Host ">>> winget: checking $($managedWinget.Count) managed package(s) for updates..." -ForegroundColor Cyan
+        $wingetOutput = @(& winget list --upgrade-available --source winget --disable-interactivity 2>$null)
+        $wingetExitCode = $LASTEXITCODE
+        if ($wingetExitCode -ne 0) {
+            Write-Warning "Could not query managed Winget updates (exit code $wingetExitCode)."
+        }
+        else {
+            $wingetUpdates = @()
+            foreach ($packageId in $managedWinget) {
+                $escapedId = [regex]::Escape($packageId)
+                # A source-restricted query may omit the Source column; older
+                # Winget versions can still include it in redirected output.
+                $pattern = "(?i)(?:^|\s)$escapedId\s+(?<Current>\S+)\s+(?<Available>\S+)(?:\s+winget)?\s*$"
+                $matchingRow = $wingetOutput | Where-Object { $_ -match $pattern } | Select-Object -First 1
+                if ($matchingRow -and $matchingRow -match $pattern) {
+                    $wingetUpdates += [pscustomobject]@{
+                        Id        = $packageId
+                        Current   = $Matches.Current
+                        Available = $Matches.Available
+                    }
+                }
+            }
+
+            if ($wingetUpdates.Count -eq 0) {
+                Write-Host '>>> winget: all managed packages are already up to date.' -ForegroundColor Green
+            }
+            else {
+                Write-Host ">>> winget: $($wingetUpdates.Count) managed update(s) available:" -ForegroundColor Cyan
+                $nameWidth = ($wingetUpdates.Id | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+                foreach ($update in $wingetUpdates) {
+                    Write-Host ("      {0}  {1} -> {2}" -f $update.Id.PadRight($nameWidth), $update.Current, $update.Available) -ForegroundColor Cyan
+                }
+
+                if (-not $Winget) {
+                    Write-Host ">>> winget: report only; run 'aiu -Winget' to install these updates." -ForegroundColor Yellow
+                }
+                else {
+                    $wingetFailures = @()
+                    foreach ($update in $wingetUpdates) {
+                        $wingetArgs = @('upgrade', '--source', 'winget', '--exact', '--id', $update.Id)
+                        Write-Host ">>> winget: winget $($wingetArgs -join ' ')" -ForegroundColor Cyan
+                        try {
+                            # A child process lets installers display UI and request UAC elevation.
+                            $process = Start-Process -FilePath 'winget' -ArgumentList $wingetArgs -NoNewWindow -Wait -PassThru
+                            if ($process.ExitCode -ne 0) {
+                                $wingetFailures += "$($update.Id) (exit code $($process.ExitCode))"
+                            }
+                        }
+                        catch {
+                            $wingetFailures += "$($update.Id) ($($_.Exception.Message))"
+                        }
+                    }
+                    if ($wingetFailures.Count -eq 0) {
+                        Write-Host 'Winget-managed packages updated successfully.' -ForegroundColor Green
+                    }
+                    else {
+                        Write-Warning "Winget update failed for: $($wingetFailures -join ', ')"
+                    }
+                }
+            }
+        }
     }
 
     # npm stage: update all npm-installed managed packages in one command.
