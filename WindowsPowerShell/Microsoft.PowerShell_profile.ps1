@@ -720,17 +720,16 @@ $_AiToolsInternal = @{
         '@mimo-ai/cli',
         '@moonshot-ai/kimi-code'
     )
-    # Keep this registry synchronized with AI CLIs managed by Install-AiTools.
-    # Probe defaults to Cmd; set it when an agent uses a different updater.
-    # NpmPackage entries are combined into one global npm update invocation.
+    # Keep this registry synchronized with AI CLIs managed by Install-AiTools
+    # that ship a native self-update command. Probe defaults to Cmd; set it when
+    # a CLI's updater probe differs from the command. npm-installed packages are
+    # not listed here -- aiu updates them straight from NpmPackages and
+    # MoreAiNpmPackages above.
     UpgradeCommands        = @(
         @{ Label = 'agy';      Cmd = 'agy';      Args = @('update') },
         @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
         @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
         @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
-        @{ Label = 'qwen';     Probe = 'qwen'; Cmd = 'npm'; NpmPackage = '@qwen-code/qwen-code' },
-        @{ Label = 'mimo';     Probe = 'mimo'; Cmd = 'npm'; NpmPackage = '@mimo-ai/cli' },
-        @{ Label = 'kimi';     Probe = 'kimi'; Cmd = 'npm'; NpmPackage = '@moonshot-ai/kimi-code' },
         @{ Label = 'grok';     Cmd = 'grok';     Args = @('update') }
     )
 }
@@ -7782,8 +7781,9 @@ function Install-AiTools {
         [switch]$All
     )
 
-    # Maintenance: when changing the AI CLIs managed below, update
-    # $_AiToolsInternal.UpgradeCommands so the aiu inventory stays synchronized.
+    # Maintenance: CLIs with a native self-updater need a matching entry in
+    # $_AiToolsInternal.UpgradeCommands. npm packages in NpmPackages /
+    # MoreAiNpmPackages are picked up by aiu automatically -- no registry edit.
 
     if ($Docker -and $Podman) {
         throw "Cannot specify both -Docker and -Podman switches simultaneously."
@@ -8720,113 +8720,24 @@ function Invoke-AiUpgrade {
 .SYNOPSIS
     Updates all AI CLI tools in one shot.
 .DESCRIPTION
-    Runs the update/upgrade command for each available CLI registered in
-    $_AiToolsInternal.UpgradeCommands. The registry currently covers agy, Claude,
-    Codex, OpenCode, Qwen Code, MiMo, Kimi Code, and Grok. Use the alias 'aiu'
-    for convenience. Available Qwen Code, MiMo, and Kimi Code installations are
-    updated together through one global npm command instead of native self-updaters.
-    The npm stage lists the managed packages it checks and the available versions
-    before updating.
+    Runs the native update/upgrade command for each available CLI registered in
+    $_AiToolsInternal.UpgradeCommands (agy, Claude, Codex, OpenCode, and Grok),
+    then checks and updates every npm-installed managed package -- from
+    $_AiToolsInternal.NpmPackages and MoreAiNpmPackages -- through one global
+    npm command. Use the alias 'aiu' for convenience. The npm stage lists the
+    managed packages it checks and the available versions before updating.
 .EXAMPLE
     Invoke-AiUpgrade
 .EXAMPLE
     aiu
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-07
+    Last Edit: 2026-08
 #>
     [CmdletBinding()]
     param()
 
-    $npmTools = @($_AiToolsInternal.UpgradeCommands | Where-Object { $_.NpmPackage })
-    $npmUpdatePending = $true
-
     foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
-        # Run all eligible npm-managed tools together at the first npm registry entry.
-        if ($tool.NpmPackage) {
-            if (-not $npmUpdatePending) {
-                continue
-            }
-            $npmUpdatePending = $false
-            if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-                Write-Host '>>> npm: skipped (npm is not available).' -ForegroundColor Yellow
-                continue
-            }
-
-            $inventory = Get-GlobalNpmInventory
-            if (-not $inventory.Available) {
-                Write-Host '>>> npm: skipped (global package inventory is unavailable).' -ForegroundColor Yellow
-                continue
-            }
-
-            $npmPackages = @($npmTools.NpmPackage | Where-Object { $inventory.Packages.ContainsKey($_) })
-            if ($npmPackages.Count -eq 0) {
-                Write-Host '>>> npm: no managed npm AI tools are installed.' -ForegroundColor DarkGray
-                continue
-            }
-
-            # Phase 1: show the checked set (managed tools that are actually
-            # installed) with installed versions, plus managed tools skipped
-            # because they are not installed.
-            $candidateList = ($npmPackages | ForEach-Object { "$_ ($($inventory.Packages[$_]))" }) -join ', '
-            Write-Host ">>> npm: checking $($npmPackages.Count) managed package(s): $candidateList" -ForegroundColor Cyan
-            $skippedNpm = @($npmTools.NpmPackage | Where-Object { -not $inventory.Packages.ContainsKey($_) })
-            if ($skippedNpm.Count -gt 0) {
-                Write-Host ">>> npm: not installed, skipped: $($skippedNpm -join ', ')" -ForegroundColor DarkGray
-            }
-
-            # npm outdated exits 1 when updates exist; that is not an error, so
-            # its exit code is deliberately ignored here.
-            $outdatedJson = @(& npm outdated -g --json @npmPackages 2>$null)
-            $outdatedText = ($outdatedJson -join [Environment]::NewLine).Trim()
-            $outdatedData = $null
-            if ($outdatedText) {
-                try {
-                    $outdatedData = $outdatedText | ConvertFrom-Json -ErrorAction Stop
-                }
-                catch {
-                    Write-Warning "Could not determine which npm-managed AI tools are outdated; updating all installed candidates. $($_.Exception.Message)"
-                }
-            }
-            # Empty stdout means nothing is outdated. Non-empty stdout that
-            # failed to parse falls back to updating every candidate.
-            $outdatedPackages = @()
-            if ($outdatedData) {
-                $outdatedPackages = @($npmPackages | Where-Object { $_ -in @($outdatedData.PSObject.Properties.Name) })
-            }
-            elseif ($outdatedText) {
-                $outdatedPackages = $npmPackages
-            }
-
-            if ($outdatedPackages.Count -eq 0) {
-                Write-Host '>>> npm: all managed npm AI tools are already up to date.' -ForegroundColor Green
-                continue
-            }
-
-            # Phase 2: show current -> latest per package before touching
-            # anything. For -g, wanted == latest in practice; fall back to
-            # wanted (then the inventory version) when a field is absent.
-            Write-Host ">>> npm: $($outdatedPackages.Count) update(s) available:" -ForegroundColor Cyan
-            $nameWidth = ($outdatedPackages | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
-            foreach ($name in $outdatedPackages) {
-                $info = if ($outdatedData) { $outdatedData.$name } else { $null }
-                $latest = if ($info -and $info.latest) { $info.latest } elseif ($info -and $info.wanted) { $info.wanted } else { '?' }
-                $current = if ($info -and $info.current) { $info.current } else { $inventory.Packages[$name] }
-                Write-Host ("      {0}  {1} -> {2}" -f $name.PadRight($nameWidth), $current, $latest) -ForegroundColor Cyan
-            }
-
-            $npmArgs = @('up', '-g') + $outdatedPackages
-            Write-Host ">>> npm: npm $($npmArgs -join ' ')" -ForegroundColor Cyan
-            & npm @npmArgs
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host 'npm-managed AI tools updated successfully.' -ForegroundColor Green
-            }
-            else {
-                Write-Warning "npm update failed with exit code $LASTEXITCODE for: $($outdatedPackages -join ', ')"
-            }
-            continue
-        }
-
         $probe = if ($tool.Probe) { $tool.Probe } else { $tool.Cmd }
         if (-not (Get-Command $probe -ErrorAction SilentlyContinue)) {
             continue
@@ -8836,6 +8747,88 @@ function Invoke-AiUpgrade {
         }
         Write-Host ">>> $($tool.Label): $($tool.Cmd) $($tool.Args -join ' ')" -ForegroundColor Cyan
         & $tool.Cmd @($tool.Args)
+    }
+
+    # npm stage: update all npm-installed managed packages in one command.
+    # Candidates come from the Install-AiTools npm lists (single source of
+    # truth). opencode-ai is deliberately excluded: the native
+    # 'opencode upgrade' command above owns its updates.
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Write-Host '>>> npm: skipped (npm is not available).' -ForegroundColor Yellow
+        return
+    }
+
+    $inventory = Get-GlobalNpmInventory
+    if (-not $inventory.Available) {
+        Write-Host '>>> npm: skipped (global package inventory is unavailable).' -ForegroundColor Yellow
+        return
+    }
+
+    $managedNpm = @(@($_AiToolsInternal.NpmPackages) + @($_AiToolsInternal.MoreAiNpmPackages) | Sort-Object -Unique)
+    $npmPackages = @($managedNpm | Where-Object { $inventory.Packages.ContainsKey($_) })
+    if ($npmPackages.Count -eq 0) {
+        Write-Host '>>> npm: no managed npm packages are installed.' -ForegroundColor DarkGray
+        return
+    }
+
+    # Phase 1: show the checked set (managed packages that are actually
+    # installed) with installed versions, plus managed packages skipped
+    # because they are not installed.
+    $candidateList = ($npmPackages | ForEach-Object { "$_ ($($inventory.Packages[$_]))" }) -join ', '
+    Write-Host ">>> npm: checking $($npmPackages.Count) managed package(s): $candidateList" -ForegroundColor Cyan
+    $skippedNpm = @($managedNpm | Where-Object { -not $inventory.Packages.ContainsKey($_) })
+    if ($skippedNpm.Count -gt 0) {
+        Write-Host ">>> npm: not installed, skipped: $($skippedNpm -join ', ')" -ForegroundColor DarkGray
+    }
+
+    # npm outdated exits 1 when updates exist; that is not an error, so
+    # its exit code is deliberately ignored here.
+    $outdatedJson = @(& npm outdated -g --json @npmPackages 2>$null)
+    $outdatedText = ($outdatedJson -join [Environment]::NewLine).Trim()
+    $outdatedData = $null
+    if ($outdatedText) {
+        try {
+            $outdatedData = $outdatedText | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            Write-Warning "Could not determine which managed npm packages are outdated; updating all installed candidates. $($_.Exception.Message)"
+        }
+    }
+    # Empty stdout means nothing is outdated. Non-empty stdout that
+    # failed to parse falls back to updating every candidate.
+    $outdatedPackages = @()
+    if ($outdatedData) {
+        $outdatedPackages = @($npmPackages | Where-Object { $_ -in @($outdatedData.PSObject.Properties.Name) })
+    }
+    elseif ($outdatedText) {
+        $outdatedPackages = $npmPackages
+    }
+
+    if ($outdatedPackages.Count -eq 0) {
+        Write-Host '>>> npm: all managed npm packages are already up to date.' -ForegroundColor Green
+        return
+    }
+
+    # Phase 2: show current -> latest per package before touching
+    # anything. For -g, wanted == latest in practice; fall back to
+    # wanted (then the inventory version) when a field is absent.
+    Write-Host ">>> npm: $($outdatedPackages.Count) update(s) available:" -ForegroundColor Cyan
+    $nameWidth = ($outdatedPackages | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+    foreach ($name in $outdatedPackages) {
+        $info = if ($outdatedData) { $outdatedData.$name } else { $null }
+        $latest = if ($info -and $info.latest) { $info.latest } elseif ($info -and $info.wanted) { $info.wanted } else { '?' }
+        $current = if ($info -and $info.current) { $info.current } else { $inventory.Packages[$name] }
+        Write-Host ("      {0}  {1} -> {2}" -f $name.PadRight($nameWidth), $current, $latest) -ForegroundColor Cyan
+    }
+
+    $npmArgs = @('up', '-g') + $outdatedPackages
+    Write-Host ">>> npm: npm $($npmArgs -join ' ')" -ForegroundColor Cyan
+    & npm @npmArgs
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host 'npm-managed packages updated successfully.' -ForegroundColor Green
+    }
+    else {
+        Write-Warning "npm update failed with exit code $LASTEXITCODE for: $($outdatedPackages -join ', ')"
     }
 }
 Set-Alias -Name aiu -Value Invoke-AiUpgrade
