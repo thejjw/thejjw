@@ -1,6 +1,9 @@
 ---
 name: polish-document
 description: Polish an existing document into a professional, business-ready, presentation-ready deliverable. Use for rough, AI-generated, translated, or inconsistently formatted HTML, Markdown, DOCX, PPTX, or PDF documents that need editorial revision, related-source reconciliation, factual verification, structural improvement, useful diagrams or interactions, and final rendering checks. Do not use for ordinary code review or for creating a document from scratch without an existing draft.
+metadata:
+  audience: agents
+  auth: none
 ---
 
 # Polish Document
