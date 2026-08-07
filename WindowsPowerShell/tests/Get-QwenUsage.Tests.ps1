@@ -21,6 +21,7 @@ Describe 'Get-QwenUsage' {
         . ([scriptblock]::Create($script:qwenFunctionText))
 
         $Global:_ProfileHelpers = [pscustomobject]@{}
+        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteUsageTimestamp -Value { param($CommandName) }
         $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteSection -Value { param($Title) }
         $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name FormatDuration -Value {
             param([TimeSpan]$Duration)

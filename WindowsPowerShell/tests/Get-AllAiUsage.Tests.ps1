@@ -37,6 +37,15 @@ Describe 'Get-AllAiUsage discovery and execution' {
         $script:brokenCommand = Microsoft.PowerShell.Core\Get-Command Get-BrokenUsage -CommandType Function
         $script:zuluCommand = Microsoft.PowerShell.Core\Get-Command Get-ZuluUsage -CommandType Function
         $script:allCommand = Microsoft.PowerShell.Core\Get-Command Get-AllAiUsage -CommandType Function
+
+        $Global:_ProfileHelpers = [pscustomobject]@{}
+        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteUsageTimestamp -Value {
+            param($CommandName)
+        }
+    }
+
+    AfterAll {
+        Remove-Variable -Name _ProfileHelpers -Scope Global -ErrorAction SilentlyContinue
     }
 
     BeforeEach {

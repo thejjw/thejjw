@@ -83,6 +83,12 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         Write-Host ('== {0} ==' -f $Title) -ForegroundColor Cyan
     }
 
+    # Print the local start time for a usage-query command.
+    function WriteUsageTimestamp {
+        param([string]$CommandName)
+        Write-Host ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'), $CommandName) -ForegroundColor DarkGray
+    }
+
     # Convert epoch milliseconds to a local DateTime.
     function FromEpochMs {
         param([long]$Value)
@@ -411,6 +417,7 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         'ResolveWUHResult',
         'FormatDuration',
         'WriteSection',
+        'WriteUsageTimestamp',
         'FromEpochMs',
         'FormatTokens',
         'FormatPrice',
@@ -8889,6 +8896,8 @@ function Get-MinimaxUsage {
         [switch]$All
     )
 
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
     if (-not $ApiKey) { Write-Error 'MINIMAX_API_KEY not set (env var or -ApiKey).'; return }
 
     $headers = @{
@@ -9052,6 +9061,8 @@ function Get-ZaiUsage {
         [double]$SpikeRatio = 3.0,
         [switch]$All
     )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
     if (-not $Token) { Write-Error 'ZAI_API_KEY not set (env var or -Token).'; return }
 
@@ -9275,6 +9286,8 @@ function Get-DeepseekUsage {
         [switch]$All
     )
 
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
     # Pricing per 1M tokens (cache_hit, cache_miss, output) for V4 Flash/Pro.
     # Source: api-docs.deepseek.com/quick_start/pricing. Update these rows
     # if pricing changes upstream.
@@ -9431,6 +9444,8 @@ function Get-KimiUsage {
         [int]$ResetWarnHours = 1,
         [switch]$All
     )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
         Write-Error 'KIMI_API_KEY not set (env var or -ApiKey).'
@@ -9695,6 +9710,8 @@ function Get-QwenUsage {
         [Parameter(DontShow = $true)]
         [scriptblock]$QueryInvoker
     )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
     $credentialResource = 'QWEN_TOKEN_PLAN_COOKIE'
     $credentialUserName = 'qwencloud-cookie'
@@ -10133,6 +10150,8 @@ function Get-AgyUsage {
         [switch]$All
     )
 
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
     if ($CriticalPercent -gt $LowPercent) {
         Write-Error 'CriticalPercent must be less than or equal to LowPercent.'
         return
@@ -10369,6 +10388,8 @@ function Get-AllAiUsage {
 #>
     [CmdletBinding()]
     param()
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
     $selfName = $MyInvocation.MyCommand.Name
     $usageFunctions = @(
