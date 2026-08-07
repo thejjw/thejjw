@@ -4717,7 +4717,12 @@ function Install-GlobalClaudeSettings {
 function Install-AgySettings {
     <#
 .SYNOPSIS
-    Ensures ~/.gemini/antigravity-cli/settings.json has the custom status line configured.
+    Configures the Antigravity CLI status line and safe tool permissions.
+
+.DESCRIPTION
+    Ensures ~/.gemini/antigravity-cli/settings.json has the custom status line
+    and managed read, web, and read-only Git permissions configured. Existing
+    unrelated permission rules and settings are preserved.
 
 .PARAMETER Force
     Bypass the sentinel check and reapply settings even if setup was previously completed.
@@ -4759,6 +4764,56 @@ function Install-AgySettings {
     }
     else {
         $settings = [pscustomobject]@{}
+    }
+
+    # Use the current Antigravity permission resource names. Migrate only the
+    # legacy Git rules managed here, preserving every unrelated user rule.
+    $managedPermissionAllow = @(
+        'read_file(*)',
+        'read_url(*)',
+        'command(git status)',
+        'command(git log)',
+        'command(git diff)'
+    )
+    $permissionsProperty = $settings.PSObject.Properties['permissions']
+    if ($permissionsProperty -and $settings.permissions -isnot [pscustomobject]) {
+        Write-Warning 'agy: permissions must be a JSON object; settings were not changed.'
+        return
+    }
+    if ($permissionsProperty) {
+        $permissions = $settings.permissions
+    }
+    else {
+        $permissions = [pscustomobject]@{
+            allow = [object[]]@()
+            ask   = [object[]]@()
+            deny  = [object[]]@()
+        }
+        $settings | Add-Member -NotePropertyName 'permissions' -NotePropertyValue $permissions -Force
+    }
+
+    $mergedAllow = @()
+    foreach ($rule in @($permissions.allow)) {
+        $normalizedRule = switch -CaseSensitive ([string]$rule) {
+            'command(git status*)' { 'command(git status)'; break }
+            'command(git log*)' { 'command(git log)'; break }
+            'command(git diff*)' { 'command(git diff)'; break }
+            default { $rule }
+        }
+        if ($mergedAllow -cnotcontains $normalizedRule) {
+            $mergedAllow += $normalizedRule
+        }
+    }
+    foreach ($rule in $managedPermissionAllow) {
+        if ($mergedAllow -cnotcontains $rule) {
+            $mergedAllow += $rule
+        }
+    }
+    $permissions | Add-Member -NotePropertyName 'allow' -NotePropertyValue ([object[]]@($mergedAllow)) -Force
+    foreach ($permissionList in @('ask', 'deny')) {
+        if (-not $permissions.PSObject.Properties[$permissionList]) {
+            $permissions | Add-Member -NotePropertyName $permissionList -NotePropertyValue ([object[]]@())
+        }
     }
 
     if (Test-Path -LiteralPath $targetStatusLine) {
