@@ -8725,6 +8725,8 @@ function Invoke-AiUpgrade {
     Codex, OpenCode, Qwen Code, MiMo, Kimi Code, and Grok. Use the alias 'aiu'
     for convenience. Available Qwen Code, MiMo, and Kimi Code installations are
     updated together through one global npm command instead of native self-updaters.
+    The npm stage lists the managed packages it checks and the available versions
+    before updating.
 .EXAMPLE
     Invoke-AiUpgrade
 .EXAMPLE
@@ -8763,20 +8765,54 @@ function Invoke-AiUpgrade {
                 continue
             }
 
-            $outdatedJson = @(& npm outdated -g --json @npmPackages 2>$null)
-            try {
-                $outdatedData = ($outdatedJson -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
-                $outdatedNames = @($outdatedData.PSObject.Properties.Name)
-                $outdatedPackages = @($npmPackages | Where-Object { $_ -in $outdatedNames })
+            # Phase 1: show the checked set (managed tools that are actually
+            # installed) with installed versions, plus managed tools skipped
+            # because they are not installed.
+            $candidateList = ($npmPackages | ForEach-Object { "$_ ($($inventory.Packages[$_]))" }) -join ', '
+            Write-Host ">>> npm: checking $($npmPackages.Count) managed package(s): $candidateList" -ForegroundColor Cyan
+            $skippedNpm = @($npmTools.NpmPackage | Where-Object { -not $inventory.Packages.ContainsKey($_) })
+            if ($skippedNpm.Count -gt 0) {
+                Write-Host ">>> npm: not installed, skipped: $($skippedNpm -join ', ')" -ForegroundColor DarkGray
             }
-            catch {
-                Write-Warning "Could not determine which npm-managed AI tools are outdated; updating all installed candidates. $($_.Exception.Message)"
+
+            # npm outdated exits 1 when updates exist; that is not an error, so
+            # its exit code is deliberately ignored here.
+            $outdatedJson = @(& npm outdated -g --json @npmPackages 2>$null)
+            $outdatedText = ($outdatedJson -join [Environment]::NewLine).Trim()
+            $outdatedData = $null
+            if ($outdatedText) {
+                try {
+                    $outdatedData = $outdatedText | ConvertFrom-Json -ErrorAction Stop
+                }
+                catch {
+                    Write-Warning "Could not determine which npm-managed AI tools are outdated; updating all installed candidates. $($_.Exception.Message)"
+                }
+            }
+            # Empty stdout means nothing is outdated. Non-empty stdout that
+            # failed to parse falls back to updating every candidate.
+            $outdatedPackages = @()
+            if ($outdatedData) {
+                $outdatedPackages = @($npmPackages | Where-Object { $_ -in @($outdatedData.PSObject.Properties.Name) })
+            }
+            elseif ($outdatedText) {
                 $outdatedPackages = $npmPackages
             }
 
             if ($outdatedPackages.Count -eq 0) {
                 Write-Host '>>> npm: all managed npm AI tools are already up to date.' -ForegroundColor Green
                 continue
+            }
+
+            # Phase 2: show current -> latest per package before touching
+            # anything. For -g, wanted == latest in practice; fall back to
+            # wanted (then the inventory version) when a field is absent.
+            Write-Host ">>> npm: $($outdatedPackages.Count) update(s) available:" -ForegroundColor Cyan
+            $nameWidth = ($outdatedPackages | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+            foreach ($name in $outdatedPackages) {
+                $info = if ($outdatedData) { $outdatedData.$name } else { $null }
+                $latest = if ($info -and $info.latest) { $info.latest } elseif ($info -and $info.wanted) { $info.wanted } else { '?' }
+                $current = if ($info -and $info.current) { $info.current } else { $inventory.Packages[$name] }
+                Write-Host ("      {0}  {1} -> {2}" -f $name.PadRight($nameWidth), $current, $latest) -ForegroundColor Cyan
             }
 
             $npmArgs = @('up', '-g') + $outdatedPackages
