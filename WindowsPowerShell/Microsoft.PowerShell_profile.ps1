@@ -10562,14 +10562,27 @@ namespace ChunkDownload
                     using (Stream rs = resp.GetResponseStream())
                     using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
                     {
+                        // Guard against a server that ignores Range: writing a full
+                        // 200 body at this offset would silently corrupt the file.
+                        if (resp.StatusCode != HttpStatusCode.PartialContent)
+                            throw new IOException("Expected 206 for range request, got " + (int)resp.StatusCode);
                         fs.Seek(start, SeekOrigin.Begin);
                         byte[] buf = new byte[81920];
                         int n;
+                        long got = 0;
                         while ((n = rs.Read(buf, 0, buf.Length)) > 0)
                         {
                             fs.Write(buf, 0, n);
                             Interlocked.Add(ref _written, n);
+                            got += n;
                         }
+                        // A dropped connection can surface as a clean end-of-stream
+                        // instead of an exception; the pre-allocated file would keep
+                        // zeros for the missing tail and pass the final size check.
+                        // Make it loud so the retry loop fetches the range again.
+                        long want = end - start + 1;
+                        if (got != want)
+                            throw new IOException(string.Format("Short read: got {0} of {1} bytes for range {2}-{3}", got, want, start, end));
                     }
                     return;
                 }
@@ -10936,11 +10949,13 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
     # permanent (bad URL, 404 -- reported immediately, no retry). The dominant
     # transient case is a chunked download that lands a byte-corrupt archive, which
     # surfaces only at extract time as ".ExtractToFile ... A local file header is
-    # corrupt" or a truncated central directory; network stalls are covered too.
+    # corrupt" or a truncated central directory; for 7z via tar.exe the same zeroed
+    # region surfaces as "Unexpected Property ID" (its header parser reading zero
+    # bytes); network stalls are covered too.
     $isTransientError = {
         param([string]$Message)
         if ([string]::IsNullOrEmpty($Message)) { return $false }
-        return ($Message -match '(?i)(local file header is corrupt|central directory|end of (the )?stream|unexpected end( of archive)?|damaged 7-zip archive|data error|corrupt|crc|block length|compressed data|number of entries|timed out|timeout|connection|transport|prematurely|reset by|unable to read data|actively refused)')
+        return ($Message -match '(?i)(local file header is corrupt|central directory|end of (the )?stream|unexpected end( of archive)?|damaged 7-zip archive|unexpected property id|exit delayed from previous errors|data error|corrupt|crc|block length|compressed data|number of entries|timed out|timeout|connection|transport|prematurely|reset by|unable to read data|actively refused)')
     }
 
     # Temp working directory (single archive at a time; cleaned per pack).
