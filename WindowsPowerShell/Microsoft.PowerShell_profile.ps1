@@ -6220,7 +6220,7 @@ function Install-ClaudemmSetup {
         Write-Host "claudemm: MiniMax MCP server already exists -- skipping" -ForegroundColor DarkGray
     }
     else {
-        & claude mcp add -s user MiniMax --env MINIMAX_API_KEY="$Token" --env MINIMAX_API_HOST=https://api.minimax.io -- uvx minimax-coding-plan-mcp -y 2>&1 | Out-Null
+        & claude mcp add -s user MiniMax --env MINIMAX_API_KEY="$Token" --env MINIMAX_API_HOST=https://api.minimax.io -- uvx --with "mcp<2.0.0" minimax-coding-plan-mcp -y 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "claudemm: added MiniMax MCP server" -ForegroundColor Green
         }
