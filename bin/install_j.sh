@@ -57,6 +57,26 @@ remove_profile_section() {
   mv "$tmp_file" "$profile_file"
 }
 
+# >>> jjw-aikeys runtime >>>
+
+# Print the encrypted API-key vault format header.
+_jjw_aikeys_header() {
+  printf '%s' 'JJW-AIKEYS-V1'
+}
+
+# Print ordered primary|alias|alias-description rows for every managed key.
+_jjw_aikeys_spec() {
+  printf '%s\n' \
+    'DEEPSEEK_API_KEY||' \
+    'ZAI_API_KEY||' \
+    'MINIMAX_API_KEY||' \
+    'KIMI_API_KEY||' \
+    'QWEN_TOKEN_PLAN_API_KEY|BAILIAN_TOKEN_PLAN_API_KEY|Qwen and Bailian aliases' \
+    'GEMINI_API_KEY||' \
+    'NVIDIA_API_KEY||' \
+    'OPENROUTER_API_KEY||'
+}
+
 # Print the encrypted API-key vault path for the active user.
 _jjw_aikeys_path() {
   printf '%s/jjw/aikeys.age' "${XDG_CONFIG_HOME:-${HOME}/.config}"
@@ -69,23 +89,24 @@ _jjw_file_mode() {
 
 # Return success only for an API-key name supported by the vault format.
 _jjw_aikeys_name_allowed() {
-  case "$1" in
-    DEEPSEEK_API_KEY|ZAI_API_KEY|MINIMAX_API_KEY|KIMI_API_KEY|\
-    QWEN_TOKEN_PLAN_API_KEY|BAILIAN_TOKEN_PLAN_API_KEY|GEMINI_API_KEY|\
-    NVIDIA_API_KEY|OPENROUTER_API_KEY) return 0 ;;
-    *) return 1 ;;
-  esac
+  local wanted="$1" primary alias alias_description
+  while IFS='|' read -r primary alias alias_description; do
+    if [[ "$wanted" == "$primary" || ( -n "$alias" && "$wanted" == "$alias" ) ]]; then
+      return 0
+    fi
+  done < <(_jjw_aikeys_spec)
+  return 1
 }
 
 # Validate a decrypted vault payload completely before any values are exported.
 _jjw_aikeys_validate() {
   local payload="$1" line name value seen='|' first=true count=0
-  local qwen_value='' bailian_value=''
+  local primary alias alias_description primary_value alias_value
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     if $first; then
       first=false
-      if [[ "$line" != "JJW-AIKEYS-V1" ]]; then
+      if [[ "$line" != "$(_jjw_aikeys_header)" ]]; then
         echo "cloakj: unsupported or malformed vault payload" >&2
         return 1
       fi
@@ -114,24 +135,28 @@ _jjw_aikeys_validate() {
     esac
     seen="${seen}${name}|"
     count=$((count + 1))
-    [[ "$name" == "QWEN_TOKEN_PLAN_API_KEY" ]] && qwen_value="$value"
-    [[ "$name" == "BAILIAN_TOKEN_PLAN_API_KEY" ]] && bailian_value="$value"
   done <<< "$payload"
 
   if $first || (( count == 0 )); then
     echo "cloakj: vault contains no API keys" >&2
     return 1
   fi
-  if [[ -n "$qwen_value" || -n "$bailian_value" ]]; then
-    if [[ -z "$qwen_value" || -z "$bailian_value" ]]; then
-      echo "cloakj: Qwen and Bailian aliases must both be present" >&2
-      return 1
+
+  while IFS='|' read -r primary alias alias_description; do
+    [[ -n "$alias" ]] || continue
+    primary_value="$(_jjw_aikeys_value "$payload" "$primary" 2>/dev/null || true)"
+    alias_value="$(_jjw_aikeys_value "$payload" "$alias" 2>/dev/null || true)"
+    if [[ -n "$primary_value" || -n "$alias_value" ]]; then
+      if [[ -z "$primary_value" || -z "$alias_value" ]]; then
+        echo "cloakj: ${alias_description} must both be present" >&2
+        return 1
+      fi
+      if [[ "$primary_value" != "$alias_value" ]]; then
+        echo "cloakj: ${alias_description} do not match" >&2
+        return 1
+      fi
     fi
-    if [[ "$qwen_value" != "$bailian_value" ]]; then
-      echo "cloakj: Qwen and Bailian aliases do not match" >&2
-      return 1
-    fi
-  fi
+  done < <(_jjw_aikeys_spec)
 }
 
 # Print one named value from an already validated vault payload.
@@ -285,7 +310,7 @@ uncloakj() {
 # Create or update the passphrase-encrypted API-key vault.
 cloakj() {
   local force=false file dir old_payload='' payload tmp='' had_xtrace=false
-  local deepseek zai minimax kimi qwen gemini nvidia openrouter count
+  local primary alias alias_description current selected count
   if (( $# > 1 )); then
     echo "Usage: cloakj [--force]" >&2
     return 1
@@ -346,96 +371,54 @@ cloakj() {
     fi
   fi
 
-  deepseek="$(_jjw_aikeys_value "$old_payload" DEEPSEEK_API_KEY 2>/dev/null || true)"
-  zai="$(_jjw_aikeys_value "$old_payload" ZAI_API_KEY 2>/dev/null || true)"
-  minimax="$(_jjw_aikeys_value "$old_payload" MINIMAX_API_KEY 2>/dev/null || true)"
-  kimi="$(_jjw_aikeys_value "$old_payload" KIMI_API_KEY 2>/dev/null || true)"
-  qwen="$(_jjw_aikeys_value "$old_payload" QWEN_TOKEN_PLAN_API_KEY 2>/dev/null || true)"
-  [[ -n "$qwen" ]] || qwen="$(_jjw_aikeys_value "$old_payload" BAILIAN_TOKEN_PLAN_API_KEY 2>/dev/null || true)"
-  gemini="$(_jjw_aikeys_value "$old_payload" GEMINI_API_KEY 2>/dev/null || true)"
-  nvidia="$(_jjw_aikeys_value "$old_payload" NVIDIA_API_KEY 2>/dev/null || true)"
-  openrouter="$(_jjw_aikeys_value "$old_payload" OPENROUTER_API_KEY 2>/dev/null || true)"
-
-  deepseek="$(_jjw_cloak_value DEEPSEEK_API_KEY "$deepseek" "$force")" || {
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
-    $had_xtrace && set -x
-    return 1
-  }
-  zai="$(_jjw_cloak_value ZAI_API_KEY "$zai" "$force")" || {
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
-    $had_xtrace && set -x
-    return 1
-  }
-  minimax="$(_jjw_cloak_value MINIMAX_API_KEY "$minimax" "$force")" || {
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
-    $had_xtrace && set -x
-    return 1
-  }
-  kimi="$(_jjw_cloak_value KIMI_API_KEY "$kimi" "$force")" || {
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
-    $had_xtrace && set -x
-    return 1
-  }
-  qwen="$(_jjw_cloak_value QWEN_TOKEN_PLAN_API_KEY "$qwen" "$force")" || {
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
-    $had_xtrace && set -x
-    return 1
-  }
-  gemini="$(_jjw_cloak_value GEMINI_API_KEY "$gemini" "$force")" || {
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
-    $had_xtrace && set -x
-    return 1
-  }
-  nvidia="$(_jjw_cloak_value NVIDIA_API_KEY "$nvidia" "$force")" || {
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
-    $had_xtrace && set -x
-    return 1
-  }
-  openrouter="$(_jjw_cloak_value OPENROUTER_API_KEY "$openrouter" "$force")" || {
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
-    $had_xtrace && set -x
-    return 1
-  }
-
-  payload='JJW-AIKEYS-V1'
+  payload="$(_jjw_aikeys_header)"
   count=0
-  [[ -n "$deepseek" ]] && { payload="${payload}"$'\n'"DEEPSEEK_API_KEY=${deepseek}"; count=$((count + 1)); }
-  [[ -n "$zai" ]] && { payload="${payload}"$'\n'"ZAI_API_KEY=${zai}"; count=$((count + 1)); }
-  [[ -n "$minimax" ]] && { payload="${payload}"$'\n'"MINIMAX_API_KEY=${minimax}"; count=$((count + 1)); }
-  [[ -n "$kimi" ]] && { payload="${payload}"$'\n'"KIMI_API_KEY=${kimi}"; count=$((count + 1)); }
-  if [[ -n "$qwen" ]]; then
-    payload="${payload}"$'\n'"QWEN_TOKEN_PLAN_API_KEY=${qwen}"$'\n'"BAILIAN_TOKEN_PLAN_API_KEY=${qwen}"
-    count=$((count + 2))
-  fi
-  [[ -n "$gemini" ]] && { payload="${payload}"$'\n'"GEMINI_API_KEY=${gemini}"; count=$((count + 1)); }
-  [[ -n "$nvidia" ]] && { payload="${payload}"$'\n'"NVIDIA_API_KEY=${nvidia}"; count=$((count + 1)); }
-  [[ -n "$openrouter" ]] && { payload="${payload}"$'\n'"OPENROUTER_API_KEY=${openrouter}"; count=$((count + 1)); }
+  while IFS='|' read -r primary alias alias_description; do
+    current="$(_jjw_aikeys_value "$old_payload" "$primary" 2>/dev/null || true)"
+    if [[ -z "$current" && -n "$alias" ]]; then
+      current="$(_jjw_aikeys_value "$old_payload" "$alias" 2>/dev/null || true)"
+    fi
+    selected="$(_jjw_cloak_value "$primary" "$current" "$force")" || {
+      unset old_payload payload primary alias alias_description current selected tmp
+      $had_xtrace && set -x
+      return 1
+    }
+    if [[ -n "$selected" ]]; then
+      payload="${payload}"$'\n'"${primary}=${selected}"
+      count=$((count + 1))
+      if [[ -n "$alias" ]]; then
+        payload="${payload}"$'\n'"${alias}=${selected}"
+        count=$((count + 1))
+      fi
+    fi
+  done < <(_jjw_aikeys_spec)
+
   if (( count == 0 )); then
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter
+    unset old_payload payload primary alias alias_description current selected
     $had_xtrace && set -x
     echo "cloakj: no API keys were provided" >&2
     return 1
   fi
   if ! _jjw_aikeys_validate "$payload"; then
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter
+    unset old_payload payload primary alias alias_description current selected
     $had_xtrace && set -x
     return 1
   fi
 
   if [[ -f "$file" && "$payload" == "$old_payload" ]] && ! $force; then
     if ! _jjw_aikeys_export "$payload"; then
-      unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter JJW_AIKEYS_LOADED_COUNT
+      unset old_payload payload primary alias alias_description current selected JJW_AIKEYS_LOADED_COUNT
       $had_xtrace && set -x
       return 1
     fi
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter JJW_AIKEYS_LOADED_COUNT
+    unset old_payload payload primary alias alias_description current selected JJW_AIKEYS_LOADED_COUNT
     $had_xtrace && set -x
     echo "cloakj: vault unchanged; loaded existing keys into the current shell session"
     return 0
   fi
 
   tmp="$(umask 077; mktemp "${dir}/.aikeys.age.XXXXXX")" || {
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
+    unset old_payload payload primary alias alias_description current selected tmp
     $had_xtrace && set -x
     return 1
   }
@@ -444,25 +427,25 @@ cloakj() {
     printf '%s\n' "$payload" | age --passphrase > "$tmp"
   ); then
     rm -f "$tmp"
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter
+    unset old_payload payload primary alias alias_description current selected
     $had_xtrace && set -x
     echo "cloakj: vault encryption failed; existing vault was not changed" >&2
     return 1
   fi
   if ! chmod 600 "$tmp" || ! mv "$tmp" "$file"; then
     rm -f "$tmp"
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter
+    unset old_payload payload primary alias alias_description current selected
     $had_xtrace && set -x
     echo "cloakj: failed to replace vault; existing vault was not changed" >&2
     return 1
   fi
   if ! _jjw_aikeys_export "$payload"; then
-    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter JJW_AIKEYS_LOADED_COUNT
+    unset old_payload payload primary alias alias_description current selected JJW_AIKEYS_LOADED_COUNT
     $had_xtrace && set -x
     echo "cloakj: vault stored, but one or more keys could not be loaded into this shell" >&2
     return 1
   fi
-  unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter JJW_AIKEYS_LOADED_COUNT
+  unset old_payload payload primary alias alias_description current selected JJW_AIKEYS_LOADED_COUNT
   $had_xtrace && set -x
   echo "cloakj: stored and loaded $count API key(s) in $file"
 }
@@ -519,6 +502,8 @@ _jjw_secret() {
   fi
   printf '%s' "$value"
 }
+
+# <<< jjw-aikeys runtime <<<
 
 # Install libjxl CLI tools (cjxl/djxl/jxlinfo) from the official statically
 # linked x86_64 release tarball. The published binaries are fully static (no
@@ -1326,8 +1311,9 @@ fi
 # ---------------------------------------------------------------------------
 # jjw credential reader - embed into shell profile if not already present
 # ---------------------------------------------------------------------------
+# >>> jjw-secrets profile installer >>>
 JJW_SECRETS_MARKER="# >>> jjw-secrets >>>"
-JJW_SECRETS_VERSION_MARKER="# jjw-secrets version 2"
+JJW_SECRETS_VERSION_MARKER="# jjw-secrets version 3"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> jjw-secrets >>>" "# <<< jjw-secrets <<<"
@@ -1345,7 +1331,8 @@ else
     echo "$JJW_SECRETS_VERSION_MARKER"
     echo "# Passphrase-encrypted API-key vault and legacy plaintext compatibility."
     for function_name in \
-      _jjw_aikeys_path _jjw_file_mode _jjw_aikeys_name_allowed \
+      _jjw_aikeys_header _jjw_aikeys_spec _jjw_aikeys_path \
+      _jjw_file_mode _jjw_aikeys_name_allowed \
       _jjw_aikeys_validate _jjw_aikeys_value _jjw_aikeys_export \
       _jjw_read_hidden _jjw_cloak_value _jjw_aikeys_check_path \
       uncloakj cloakj _jjw_prepare_secret _jjw_secret; do
@@ -1356,6 +1343,7 @@ else
 
   echo "jjw-secrets: added to $PROFILE"
 fi
+# <<< jjw-secrets profile installer <<<
 
 cloakj
 
