@@ -630,6 +630,7 @@ $_AiToolsInternal = @{
         'Oven-sh.Bun',
         '7zip.7zip',
         'FiloSottile.age',
+        'GnuPG.Gpg4win',
         'GitHub.cli',
         'Notepad++.Notepad++',
         'Lapce.Lapce',
