@@ -9,6 +9,7 @@ set -e
 
 FORCE_REINSTALL=false
 INSTALL_GHOSTTY=false
+INSTALL_CLOAK=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -20,19 +21,24 @@ while [[ $# -gt 0 ]]; do
       INSTALL_GHOSTTY=true
       shift
       ;;
+    --cloak)
+      INSTALL_CLOAK=true
+      shift
+      ;;
     -h|--help)
-      echo "Usage: $0 [--force] [--ghostty]"
+      echo "Usage: $0 [--force] [--ghostty] [--cloak]"
       exit 0
       ;;
     *)
       echo "install_j.sh: unknown argument: $1" >&2
-      echo "Usage: $0 [--force] [--ghostty]" >&2
+      echo "Usage: $0 [--force] [--ghostty] [--cloak]" >&2
       exit 1
       ;;
   esac
 done
 
 PACKAGES="tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
+$INSTALL_CLOAK && PACKAGES="age $PACKAGES"
 NVM_VERSION="v0.40.6"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
@@ -113,6 +119,469 @@ ensure_secret() {
   mv "$tmp" "$file"
   umask "$old_umask"
   echo "secret: stored ${label} in $file"
+}
+
+# Print the encrypted API-key vault path for the active user.
+_jjw_aikeys_path() {
+  printf '%s/jjw/aikeys.age' "${XDG_CONFIG_HOME:-${HOME}/.config}"
+}
+
+# Return a file mode using GNU stat on Linux or BSD stat on macOS.
+_jjw_file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+
+# Return success only for an API-key name supported by the vault format.
+_jjw_aikeys_name_allowed() {
+  case "$1" in
+    DEEPSEEK_API_KEY|ZAI_API_KEY|MINIMAX_API_KEY|KIMI_API_KEY|\
+    QWEN_TOKEN_PLAN_API_KEY|BAILIAN_TOKEN_PLAN_API_KEY|GEMINI_API_KEY|\
+    NVIDIA_API_KEY|OPENROUTER_API_KEY) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Validate a decrypted vault payload completely before any values are exported.
+_jjw_aikeys_validate() {
+  local payload="$1" line name value seen='|' first=true count=0
+  local qwen_value='' bailian_value=''
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if $first; then
+      first=false
+      if [[ "$line" != "JJW-AIKEYS-V1" ]]; then
+        echo "cloakj: unsupported or malformed vault payload" >&2
+        return 1
+      fi
+      continue
+    fi
+
+    if [[ "$line" != *=* || "$line" == *$'\r'* ]]; then
+      echo "cloakj: malformed vault entry" >&2
+      return 1
+    fi
+    name="${line%%=*}"
+    value="${line#*=}"
+    if ! _jjw_aikeys_name_allowed "$name"; then
+      echo "cloakj: unsupported vault entry: $name" >&2
+      return 1
+    fi
+    if [[ -z "$value" ]]; then
+      echo "cloakj: empty vault entry: $name" >&2
+      return 1
+    fi
+    case "$seen" in
+      *"|${name}|"*)
+        echo "cloakj: duplicate vault entry: $name" >&2
+        return 1
+        ;;
+    esac
+    seen="${seen}${name}|"
+    count=$((count + 1))
+    [[ "$name" == "QWEN_TOKEN_PLAN_API_KEY" ]] && qwen_value="$value"
+    [[ "$name" == "BAILIAN_TOKEN_PLAN_API_KEY" ]] && bailian_value="$value"
+  done <<< "$payload"
+
+  if $first || (( count == 0 )); then
+    echo "cloakj: vault contains no API keys" >&2
+    return 1
+  fi
+  if [[ -n "$qwen_value" || -n "$bailian_value" ]]; then
+    if [[ -z "$qwen_value" || -z "$bailian_value" ]]; then
+      echo "cloakj: Qwen and Bailian aliases must both be present" >&2
+      return 1
+    fi
+    if [[ "$qwen_value" != "$bailian_value" ]]; then
+      echo "cloakj: Qwen and Bailian aliases do not match" >&2
+      return 1
+    fi
+  fi
+}
+
+# Print one named value from an already validated vault payload.
+_jjw_aikeys_value() {
+  local payload="$1" wanted="$2" line name
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == *=* ]] || continue
+    name="${line%%=*}"
+    if [[ "$name" == "$wanted" ]]; then
+      printf '%s' "${line#*=}"
+      return 0
+    fi
+  done <<< "$payload"
+  return 1
+}
+
+# Export every entry from an already validated payload into the current shell.
+_jjw_aikeys_export() {
+  local payload="$1" line name value count=0
+  _jjw_aikeys_validate "$payload" || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == *=* ]] || continue
+    name="${line%%=*}"
+    value="${line#*=}"
+    if ! export "$name=$value"; then
+      echo "cloakj: cannot export vault entry: $name" >&2
+      return 1
+    fi
+    count=$((count + 1))
+  done <<< "$payload"
+  JJW_AIKEYS_LOADED_COUNT="$count"
+}
+
+# Read one API key without echoing it; compatible with Bash and zsh.
+_jjw_read_hidden() {
+  local prompt="$1" value
+  if [[ ! -r /dev/tty ]]; then
+    echo "cloakj: an interactive terminal is required" >&2
+    return 1
+  fi
+  if [[ -n "${ZSH_VERSION:-}" ]]; then
+    IFS= read -r -s "value?${prompt}" < /dev/tty || return 1
+  else
+    IFS= read -r -s -p "$prompt" value < /dev/tty || return 1
+  fi
+  printf '\n' > /dev/tty
+  printf '%s' "$value"
+}
+
+# Prompt for a missing or replaceable key and print the selected value.
+_jjw_cloak_value() {
+  local name="$1" current="$2" force="$3" entered
+  if [[ -n "$current" ]] && ! $force; then
+    printf '%s' "$current"
+    return 0
+  fi
+  if [[ -n "$current" ]]; then
+    entered="$(_jjw_read_hidden "Enter $name (blank keeps stored value): ")" || return 1
+    printf '%s' "${entered:-$current}"
+  else
+    entered="$(_jjw_read_hidden "Enter $name (blank skips): ")" || return 1
+    printf '%s' "$entered"
+  fi
+}
+
+# Reject unsafe vault paths and enforce owner-only permissions.
+_jjw_aikeys_check_path() {
+  local file="$1" dir mode
+  dir="${file%/*}"
+  if [[ -L "$dir" || ! -d "$dir" ]]; then
+    echo "cloakj: vault directory must be a regular directory: $dir" >&2
+    return 1
+  fi
+  mode="$(_jjw_file_mode "$dir")" || {
+    echo "cloakj: cannot inspect vault directory permissions: $dir" >&2
+    return 1
+  }
+  if [[ "$mode" != "700" ]]; then
+    echo "cloakj: insecure permissions on $dir (expected 700, found $mode)" >&2
+    return 1
+  fi
+  if [[ -L "$file" || ! -f "$file" ]]; then
+    echo "cloakj: vault must be a regular file: $file" >&2
+    return 1
+  fi
+  mode="$(_jjw_file_mode "$file")" || {
+    echo "cloakj: cannot inspect vault permissions: $file" >&2
+    return 1
+  }
+  if [[ "$mode" != "600" ]]; then
+    echo "cloakj: insecure permissions on $file (expected 600, found $mode)" >&2
+    return 1
+  fi
+}
+
+# Decrypt aikeys.age and load every stored key into the current shell session.
+uncloakj() {
+  local file payload had_xtrace=false count
+  if (( $# > 1 )); then
+    echo "Usage: uncloakj" >&2
+    return 1
+  fi
+  case "${1:-}" in
+    '') ;;
+    -h|--help)
+      echo "Usage: uncloakj"
+      return 0
+      ;;
+    *)
+      echo "uncloakj: unknown argument: $1" >&2
+      echo "Usage: uncloakj" >&2
+      return 1
+      ;;
+  esac
+
+  file="$(_jjw_aikeys_path)"
+  if [[ ! -e "$file" && ! -L "$file" ]]; then
+    echo "uncloakj: no encrypted API-key vault found; starting cloakj" >&2
+    cloakj
+    return $?
+  fi
+  command -v age >/dev/null 2>&1 || {
+    echo "uncloakj: age is required (install with 'apt install age' or 'brew install age')" >&2
+    return 1
+  }
+  _jjw_aikeys_check_path "$file" || return 1
+
+  case "$-" in *x*) had_xtrace=true; set +x ;; esac
+  if ! payload="$(age --decrypt "$file")"; then
+    unset payload
+    $had_xtrace && set -x
+    echo "uncloakj: vault decryption failed" >&2
+    return 1
+  fi
+  if ! _jjw_aikeys_validate "$payload"; then
+    unset payload
+    $had_xtrace && set -x
+    return 1
+  fi
+  if ! _jjw_aikeys_export "$payload"; then
+    unset payload JJW_AIKEYS_LOADED_COUNT
+    $had_xtrace && set -x
+    return 1
+  fi
+  count="${JJW_AIKEYS_LOADED_COUNT:-0}"
+  unset payload JJW_AIKEYS_LOADED_COUNT
+  $had_xtrace && set -x
+  echo "uncloakj: loaded $count API key(s) into the current shell session"
+}
+
+# Create or update the passphrase-encrypted API-key vault.
+cloakj() {
+  local force=false file dir old_payload='' payload tmp='' had_xtrace=false
+  local deepseek zai minimax kimi qwen gemini nvidia openrouter count
+  if (( $# > 1 )); then
+    echo "Usage: cloakj [--force]" >&2
+    return 1
+  fi
+  case "${1:-}" in
+    '') ;;
+    --force) force=true ;;
+    -h|--help)
+      echo "Usage: cloakj [--force]"
+      return 0
+      ;;
+    *)
+      echo "cloakj: unknown argument: $1" >&2
+      echo "Usage: cloakj [--force]" >&2
+      return 1
+      ;;
+  esac
+
+  command -v age >/dev/null 2>&1 || {
+    echo "cloakj: age is required (install with 'apt install age' or 'brew install age')" >&2
+    return 1
+  }
+  file="$(_jjw_aikeys_path)"
+  dir="${file%/*}"
+  if [[ -L "$dir" ]]; then
+    echo "cloakj: refusing symlinked vault directory: $dir" >&2
+    return 1
+  fi
+  if [[ ! -d "$dir" ]]; then
+    (umask 077; mkdir -p "$dir") || return 1
+    chmod 700 "$dir" || return 1
+  else
+    local dir_mode
+    dir_mode="$(_jjw_file_mode "$dir")" || return 1
+    if [[ "$dir_mode" != "700" ]]; then
+      chmod 700 "$dir" || {
+        echo "cloakj: cannot secure vault directory permissions: $dir" >&2
+        return 1
+      }
+    fi
+  fi
+  if [[ -e "$file" || -L "$file" ]]; then
+    _jjw_aikeys_check_path "$file" || return 1
+  fi
+
+  case "$-" in *x*) had_xtrace=true; set +x ;; esac
+  if [[ -f "$file" ]]; then
+    if ! old_payload="$(age --decrypt "$file")"; then
+      unset old_payload
+      $had_xtrace && set -x
+      echo "cloakj: existing vault decryption failed" >&2
+      return 1
+    fi
+    if ! _jjw_aikeys_validate "$old_payload"; then
+      unset old_payload
+      $had_xtrace && set -x
+      return 1
+    fi
+  fi
+
+  deepseek="$(_jjw_aikeys_value "$old_payload" DEEPSEEK_API_KEY 2>/dev/null || true)"
+  zai="$(_jjw_aikeys_value "$old_payload" ZAI_API_KEY 2>/dev/null || true)"
+  minimax="$(_jjw_aikeys_value "$old_payload" MINIMAX_API_KEY 2>/dev/null || true)"
+  kimi="$(_jjw_aikeys_value "$old_payload" KIMI_API_KEY 2>/dev/null || true)"
+  qwen="$(_jjw_aikeys_value "$old_payload" QWEN_TOKEN_PLAN_API_KEY 2>/dev/null || true)"
+  [[ -n "$qwen" ]] || qwen="$(_jjw_aikeys_value "$old_payload" BAILIAN_TOKEN_PLAN_API_KEY 2>/dev/null || true)"
+  gemini="$(_jjw_aikeys_value "$old_payload" GEMINI_API_KEY 2>/dev/null || true)"
+  nvidia="$(_jjw_aikeys_value "$old_payload" NVIDIA_API_KEY 2>/dev/null || true)"
+  openrouter="$(_jjw_aikeys_value "$old_payload" OPENROUTER_API_KEY 2>/dev/null || true)"
+
+  deepseek="$(_jjw_cloak_value DEEPSEEK_API_KEY "$deepseek" "$force")" || {
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
+    $had_xtrace && set -x
+    return 1
+  }
+  zai="$(_jjw_cloak_value ZAI_API_KEY "$zai" "$force")" || {
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
+    $had_xtrace && set -x
+    return 1
+  }
+  minimax="$(_jjw_cloak_value MINIMAX_API_KEY "$minimax" "$force")" || {
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
+    $had_xtrace && set -x
+    return 1
+  }
+  kimi="$(_jjw_cloak_value KIMI_API_KEY "$kimi" "$force")" || {
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
+    $had_xtrace && set -x
+    return 1
+  }
+  qwen="$(_jjw_cloak_value QWEN_TOKEN_PLAN_API_KEY "$qwen" "$force")" || {
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
+    $had_xtrace && set -x
+    return 1
+  }
+  gemini="$(_jjw_cloak_value GEMINI_API_KEY "$gemini" "$force")" || {
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
+    $had_xtrace && set -x
+    return 1
+  }
+  nvidia="$(_jjw_cloak_value NVIDIA_API_KEY "$nvidia" "$force")" || {
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
+    $had_xtrace && set -x
+    return 1
+  }
+  openrouter="$(_jjw_cloak_value OPENROUTER_API_KEY "$openrouter" "$force")" || {
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
+    $had_xtrace && set -x
+    return 1
+  }
+
+  payload='JJW-AIKEYS-V1'
+  count=0
+  [[ -n "$deepseek" ]] && { payload="${payload}"$'\n'"DEEPSEEK_API_KEY=${deepseek}"; count=$((count + 1)); }
+  [[ -n "$zai" ]] && { payload="${payload}"$'\n'"ZAI_API_KEY=${zai}"; count=$((count + 1)); }
+  [[ -n "$minimax" ]] && { payload="${payload}"$'\n'"MINIMAX_API_KEY=${minimax}"; count=$((count + 1)); }
+  [[ -n "$kimi" ]] && { payload="${payload}"$'\n'"KIMI_API_KEY=${kimi}"; count=$((count + 1)); }
+  if [[ -n "$qwen" ]]; then
+    payload="${payload}"$'\n'"QWEN_TOKEN_PLAN_API_KEY=${qwen}"$'\n'"BAILIAN_TOKEN_PLAN_API_KEY=${qwen}"
+    count=$((count + 2))
+  fi
+  [[ -n "$gemini" ]] && { payload="${payload}"$'\n'"GEMINI_API_KEY=${gemini}"; count=$((count + 1)); }
+  [[ -n "$nvidia" ]] && { payload="${payload}"$'\n'"NVIDIA_API_KEY=${nvidia}"; count=$((count + 1)); }
+  [[ -n "$openrouter" ]] && { payload="${payload}"$'\n'"OPENROUTER_API_KEY=${openrouter}"; count=$((count + 1)); }
+  if (( count == 0 )); then
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter
+    $had_xtrace && set -x
+    echo "cloakj: no API keys were provided" >&2
+    return 1
+  fi
+  if ! _jjw_aikeys_validate "$payload"; then
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter
+    $had_xtrace && set -x
+    return 1
+  fi
+
+  if [[ -f "$file" && "$payload" == "$old_payload" ]] && ! $force; then
+    if ! _jjw_aikeys_export "$payload"; then
+      unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter JJW_AIKEYS_LOADED_COUNT
+      $had_xtrace && set -x
+      return 1
+    fi
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter JJW_AIKEYS_LOADED_COUNT
+    $had_xtrace && set -x
+    echo "cloakj: vault unchanged; loaded existing keys into the current shell session"
+    return 0
+  fi
+
+  tmp="$(umask 077; mktemp "${dir}/.aikeys.age.XXXXXX")" || {
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter tmp
+    $had_xtrace && set -x
+    return 1
+  }
+  if ! (
+    trap 'rm -f "$tmp"; exit 1' HUP INT TERM
+    printf '%s\n' "$payload" | age --passphrase > "$tmp"
+  ); then
+    rm -f "$tmp"
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter
+    $had_xtrace && set -x
+    echo "cloakj: vault encryption failed; existing vault was not changed" >&2
+    return 1
+  fi
+  if ! chmod 600 "$tmp" || ! mv "$tmp" "$file"; then
+    rm -f "$tmp"
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter
+    $had_xtrace && set -x
+    echo "cloakj: failed to replace vault; existing vault was not changed" >&2
+    return 1
+  fi
+  if ! _jjw_aikeys_export "$payload"; then
+    unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter JJW_AIKEYS_LOADED_COUNT
+    $had_xtrace && set -x
+    echo "cloakj: vault stored, but one or more keys could not be loaded into this shell" >&2
+    return 1
+  fi
+  unset old_payload payload deepseek zai minimax kimi qwen gemini nvidia openrouter JJW_AIKEYS_LOADED_COUNT
+  $had_xtrace && set -x
+  echo "cloakj: stored and loaded $count API key(s) in $file"
+}
+
+# Unlock the encrypted vault in the parent shell when a required value is absent.
+_jjw_prepare_secret() {
+  local current="$1" vault
+  [[ -n "$current" ]] && return 0
+  vault="$(_jjw_aikeys_path)"
+  if [[ -e "$vault" || -L "$vault" ]]; then
+    uncloakj
+  fi
+}
+
+# Resolve a session value first, then the legacy plaintext store when no vault exists.
+_jjw_secret() {
+  local name="$1" current="$2" vault dir file dir_mode mode value
+  if [[ -n "$current" ]]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  vault="$(_jjw_aikeys_path)"
+  if [[ -e "$vault" || -L "$vault" ]]; then
+    echo "secret: required key is missing from encrypted vault; run cloakj" >&2
+    return 1
+  fi
+
+  dir="${XDG_CONFIG_HOME:-${HOME}/.config}/jjw/s"
+  file="${dir}/${name}"
+  dir_mode="$(_jjw_file_mode "$dir")" || {
+    echo "secret: cannot inspect directory permissions: $dir" >&2
+    return 1
+  }
+  if [[ "$dir_mode" != "700" ]]; then
+    echo "secret: insecure permissions on $dir (expected 700, found $dir_mode)" >&2
+    return 1
+  fi
+  if [[ ! -f "$file" || -L "$file" ]]; then
+    echo "secret: missing regular file: $file" >&2
+    return 1
+  fi
+  mode="$(_jjw_file_mode "$file")" || {
+    echo "secret: cannot inspect permissions: $file" >&2
+    return 1
+  }
+  if [[ "$mode" != "600" ]]; then
+    echo "secret: insecure permissions on $file (expected 600, found $mode)" >&2
+    return 1
+  fi
+  IFS= read -r value < "$file" || true
+  if [[ -z "$value" ]]; then
+    echo "secret: empty credential file: $file" >&2
+    return 1
+  fi
+  printf '%s' "$value"
 }
 
 # Install libjxl CLI tools (cjxl/djxl/jxlinfo) from the official statically
@@ -209,6 +678,16 @@ else
     sudo apt-get update
     install_libjxl_static_tools
     sudo apt-get install -y $PACKAGES
+  fi
+fi
+
+# Install age only when the passphrase-protected API-key mode is requested.
+if $INSTALL_CLOAK && ! command -v age >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    brew install age
+  else
+    echo "cloakj: age could not be installed automatically; install it with 'apt install age' or 'brew install age'" >&2
+    exit 1
   fi
 fi
 
@@ -909,74 +1388,64 @@ fi
 # jjw credential reader - embed into shell profile if not already present
 # ---------------------------------------------------------------------------
 JJW_SECRETS_MARKER="# >>> jjw-secrets >>>"
+JJW_SECRETS_VERSION_MARKER="# jjw-secrets version 2"
 
 if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> jjw-secrets >>>" "# <<< jjw-secrets <<<"
+elif grep -qF "$JJW_SECRETS_MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$JJW_SECRETS_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "jjw-secrets: upgrading encrypted vault support"
   remove_profile_section "$PROFILE" "# >>> jjw-secrets >>>" "# <<< jjw-secrets <<<"
 fi
 
 if grep -qF "$JJW_SECRETS_MARKER" "$PROFILE" 2>/dev/null; then
   echo "jjw-secrets: already in $PROFILE -- skipping"
 else
-  cat >> "$PROFILE" << 'JJW_SECRETS_EOF'
-
-# >>> jjw-secrets >>>
-# _jjw_secret - Read one owner-only credential from ~/.config/jjw/s.
-_jjw_secret() {
-  local name="$1" dir file dir_mode mode
-  dir="${XDG_CONFIG_HOME:-${HOME}/.config}/jjw/s"
-  file="${dir}/${name}"
-
-  dir_mode="$(stat -c '%a' "$dir" 2>/dev/null || stat -f '%Lp' "$dir" 2>/dev/null)" || {
-    echo "secret: cannot inspect directory permissions: $dir" >&2
-    return 1
-  }
-  if [[ "$dir_mode" != "700" ]]; then
-    echo "secret: insecure permissions on $dir (expected 700, found $dir_mode)" >&2
-    return 1
-  fi
-
-  if [[ ! -f "$file" || -L "$file" ]]; then
-    echo "secret: missing regular file: $file" >&2
-    return 1
-  fi
-
-  mode="$(stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file" 2>/dev/null)" || {
-    echo "secret: cannot inspect permissions: $file" >&2
-    return 1
-  }
-  if [[ "$mode" != "600" ]]; then
-    echo "secret: insecure permissions on $file (expected 600, found $mode)" >&2
-    return 1
-  fi
-
-  local value
-  IFS= read -r value < "$file" || true
-  if [[ -z "$value" ]]; then
-    echo "secret: empty credential file: $file" >&2
-    return 1
-  fi
-  printf '%s' "$value"
-}
-# <<< jjw-secrets <<<
-JJW_SECRETS_EOF
+  {
+    echo
+    echo "# >>> jjw-secrets >>>"
+    echo "$JJW_SECRETS_VERSION_MARKER"
+    echo "# Passphrase-encrypted API-key vault and legacy plaintext compatibility."
+    for function_name in \
+      _jjw_aikeys_path _jjw_file_mode _jjw_aikeys_name_allowed \
+      _jjw_aikeys_validate _jjw_aikeys_value _jjw_aikeys_export \
+      _jjw_read_hidden _jjw_cloak_value _jjw_aikeys_check_path \
+      uncloakj cloakj _jjw_prepare_secret _jjw_secret; do
+      declare -f "$function_name"
+    done
+    echo "# <<< jjw-secrets <<<"
+  } >> "$PROFILE"
 
   echo "jjw-secrets: added to $PROFILE"
 fi
+
+if $INSTALL_CLOAK; then
+  if [[ -d "$SECRET_DIR" ]]; then
+    echo "WARNING: --cloak does not migrate or remove existing plaintext files in $SECRET_DIR." >&2
+  fi
+  cloakj
+fi
+AIKEYS_FILE="$(_jjw_aikeys_path)"
 
 # ---------------------------------------------------------------------------
 # claudez functions + MCP servers setup - embed into shell profile if absent
 # ---------------------------------------------------------------------------
 CLAUDEZ_MARKER="# >>> claudez >>>"
+CLAUDEZ_VERSION_MARKER="# claudez credential loader version 2"
 
 if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudez >>>" "# <<< claudez <<<"
+elif grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$CLAUDEZ_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudez: upgrading encrypted vault support"
   remove_profile_section "$PROFILE" "# >>> claudez >>>" "# <<< claudez <<<"
 fi
 
 if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez: already in $PROFILE -- skipping"
 else
-  ensure_secret z "Z.AI API token"
-  ZAI_API_KEY="$(read_secret z)"
+  if ! $INSTALL_CLOAK && [[ ! -e "$AIKEYS_FILE" && ! -L "$AIKEYS_FILE" ]]; then
+    ensure_secret z "Z.AI API token"
+    ZAI_API_KEY="$(read_secret z)"
+  fi
 
     # Add the claudez functions
     # about supported models: "All plans support GLM-5.2, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
@@ -988,6 +1457,7 @@ else
     cat >> "$PROFILE" << 'EOF'
 
 # >>> claudez >>>
+# claudez credential loader version 2
 # Custom Claude Code functions with Z.AI endpoint
 # _zai_peak_warning - Briefly warn when Z.AI's UTC+8 peak window is active.
 # Peak-hours and quota policy: https://docs.z.ai/devpack/overview
@@ -1010,7 +1480,8 @@ _zai_peak_warning() {
 # claudez - Launch the high-effort Z.AI profile.
 claudez() {
   local key
-  key="$(_jjw_secret z)" || return 1
+  _jjw_prepare_secret "${ZAI_API_KEY:-}" || return 1
+  key="$(_jjw_secret z "${ZAI_API_KEY:-}")" || return 1
   _zai_peak_warning
   ZAI_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
@@ -1033,7 +1504,8 @@ claudezd() {
 # claudezm - Launch the maximum-effort Z.AI profile.
 claudezm() {
   local key
-  key="$(_jjw_secret z)" || return 1
+  _jjw_prepare_secret "${ZAI_API_KEY:-}" || return 1
+  key="$(_jjw_secret z "${ZAI_API_KEY:-}")" || return 1
   _zai_peak_warning
   ZAI_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
@@ -1057,7 +1529,13 @@ claudezmd() {
 EOF
 
     # Configure MCP servers via Claude CLI (preferred over direct JSON edits)
-    if command -v claude &>/dev/null; then
+    if ! command -v claude &>/dev/null; then
+      echo "claudez: functions added to $PROFILE"
+      echo "WARNING: claude CLI not found, skipping MCP server configuration"
+    elif [[ -z "${ZAI_API_KEY:-}" ]]; then
+      echo "claudez: functions added to $PROFILE"
+      echo "WARNING: ZAI_API_KEY was not stored, skipping Z.AI MCP server configuration"
+    else
       CLAUDEZ_ENV=(
         ZAI_API_KEY="$ZAI_API_KEY"
         ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
@@ -1123,9 +1601,6 @@ EOF
 
       echo "claudez: functions added to $PROFILE"
       echo "claudez: MCP setup complete"
-    else
-      echo "claudez: functions added to $PROFILE"
-      echo "WARNING: claude CLI not found, skipping MCP server configuration"
     fi
 fi
 
@@ -1133,23 +1608,31 @@ fi
 # claudeds / claudeds2 - DeepSeek Claude Code aliases
 # ---------------------------------------------------------------------------
 CLAUDEDS_MARKER="# >>> claudeds >>>"
+CLAUDEDS_VERSION_MARKER="# claudeds credential loader version 2"
 
 if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudeds >>>" "# <<< claudeds <<<"
+elif grep -qF "$CLAUDEDS_MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$CLAUDEDS_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudeds: upgrading encrypted vault support"
   remove_profile_section "$PROFILE" "# >>> claudeds >>>" "# <<< claudeds <<<"
 fi
 
 if grep -qF "$CLAUDEDS_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudeds: already in $PROFILE -- skipping"
 else
-  ensure_secret ds "DeepSeek API key"
+  if ! $INSTALL_CLOAK && [[ ! -e "$AIKEYS_FILE" && ! -L "$AIKEYS_FILE" ]]; then
+    ensure_secret ds "DeepSeek API key"
+  fi
   cat >> "$PROFILE" << 'EOF'
 
 # >>> claudeds >>>
+# claudeds credential loader version 2
 # Custom Claude Code functions with DeepSeek endpoint
 # claudeds - Launch the maximum-effort DeepSeek profile.
 claudeds() {
   local key
-  key="$(_jjw_secret ds)" || return 1
+  _jjw_prepare_secret "${DEEPSEEK_API_KEY:-}" || return 1
+  key="$(_jjw_secret ds "${DEEPSEEK_API_KEY:-}")" || return 1
   DEEPSEEK_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
@@ -1170,7 +1653,8 @@ claudedsd() {
 # claudeds2 - Launch the high-effort DeepSeek Flash profile.
 claudeds2() {
   local key
-  key="$(_jjw_secret ds)" || return 1
+  _jjw_prepare_secret "${DEEPSEEK_API_KEY:-}" || return 1
+  key="$(_jjw_secret ds "${DEEPSEEK_API_KEY:-}")" || return 1
   DEEPSEEK_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
@@ -1198,23 +1682,31 @@ fi
 # claudek / claudekd - Kimi Claude Code functions
 # ---------------------------------------------------------------------------
 CLAUDEK_MARKER="# >>> claudek >>>"
+CLAUDEK_VERSION_MARKER="# claudek credential loader version 2"
 
 if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudek >>>" "# <<< claudek <<<"
+elif grep -qF "$CLAUDEK_MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$CLAUDEK_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudek: upgrading encrypted vault support"
   remove_profile_section "$PROFILE" "# >>> claudek >>>" "# <<< claudek <<<"
 fi
 
 if grep -qF "$CLAUDEK_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudek: already in $PROFILE -- skipping"
 else
-  ensure_secret k "Kimi API key"
+  if ! $INSTALL_CLOAK && [[ ! -e "$AIKEYS_FILE" && ! -L "$AIKEYS_FILE" ]]; then
+    ensure_secret k "Kimi API key"
+  fi
   cat >> "$PROFILE" << 'EOF'
 
 # >>> claudek >>>
+# claudek credential loader version 2
 # Custom Claude Code functions with Kimi endpoint
 # claudek - Launch the maximum-effort Kimi profile.
 claudek() {
   local key
-  key="$(_jjw_secret k)" || return 1
+  _jjw_prepare_secret "${KIMI_API_KEY:-}" || return 1
+  key="$(_jjw_secret k "${KIMI_API_KEY:-}")" || return 1
 
   env -u ANTHROPIC_AUTH_TOKEN \
     KIMI_API_KEY="$key" \
@@ -1246,7 +1738,7 @@ fi
 # claudez-remote (claudezr) - remote Claude Code via Z.AI
 # ---------------------------------------------------------------------------
 CLAUDEZR_MARKER="# >>> claudez-remote >>>"
-CLAUDEZR_VERSION_MARKER="# remote_claude_base version 8"
+CLAUDEZR_VERSION_MARKER="# remote_claude_base version 9"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> claudez-remote >>>" "# <<< claudez-remote <<<"
@@ -1262,7 +1754,7 @@ else
   sed -e "s|__NVM_VERSION__|${NVM_VERSION}|g" \
       -e "s|__UV_INSTALL_URL__|${UV_INSTALL_URL}|g" >> "$PROFILE" << 'CLAUDERZR_EOF'
 # >>> claudez-remote >>>
-# remote_claude_base version 8
+# remote_claude_base version 9
 
 # _claude_sq - single-quote escape a value for safe bash embedding.
 _claude_sq() {
@@ -1465,7 +1957,8 @@ claudezr() {
   [[ -z "$host" ]] && { echo "claudezr: host is required" >&2; echo "  Usage: claudezr <user@host> [port]" >&2; return 1; }
 
   local key
-  key="$(_jjw_secret z)" || return 1
+  _jjw_prepare_secret "${ZAI_API_KEY:-}" || return 1
+  key="$(_jjw_secret z "${ZAI_API_KEY:-}")" || return 1
 
   # Matches the local claudezm profile: glm-5.2[1m] for Sonnet/Opus/Subagent,
   # effort=max, 1M context enabled via CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
@@ -1492,8 +1985,12 @@ fi
 # claudek-remote (claudekr) - remote Claude Code via Kimi
 # ---------------------------------------------------------------------------
 CLAUDEKR_MARKER="# >>> claudek-remote >>>"
+CLAUDEKR_VERSION_MARKER="# claudek-remote credential loader version 2"
 
 if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudek-remote >>>" "# <<< claudek-remote <<<"
+elif grep -qF "$CLAUDEKR_MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$CLAUDEKR_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudek-remote: upgrading encrypted vault support"
   remove_profile_section "$PROFILE" "# >>> claudek-remote >>>" "# <<< claudek-remote <<<"
 fi
 
@@ -1502,6 +1999,7 @@ if grep -qF "$CLAUDEKR_MARKER" "$PROFILE" 2>/dev/null; then
 else
   cat >> "$PROFILE" << 'CLAUDEKR_EOF'
 # >>> claudek-remote >>>
+# claudek-remote credential loader version 2
 
 # claudekr - One-shot remote Claude Code via Kimi K3 1M.
 #   Usage: claudekr <user@host> [port]
@@ -1511,7 +2009,8 @@ claudekr() {
   [[ -z "$host" ]] && { echo "claudekr: host is required" >&2; echo "  Usage: claudekr <user@host> [port]" >&2; return 1; }
 
   local key
-  key="$(_jjw_secret k)" || return 1
+  _jjw_prepare_secret "${KIMI_API_KEY:-}" || return 1
+  key="$(_jjw_secret k "${KIMI_API_KEY:-}")" || return 1
 
   # Mirror claudek: route every Claude Code model slot through Kimi K3 1M.
   remote_claude_base "$host" "$key" "$port" \
@@ -1539,27 +2038,35 @@ fi
 # claudemm alias + MCP server setup - embed into shell profile if not present
 # ---------------------------------------------------------------------------
 CLAUDEMM_MARKER="# >>> claudemm >>>"
+CLAUDEMM_VERSION_MARKER="# claudemm credential loader version 2"
 
 if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudemm >>>" "# <<< claudemm <<<"
+elif grep -qF "$CLAUDEMM_MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$CLAUDEMM_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudemm: upgrading encrypted vault support"
   remove_profile_section "$PROFILE" "# >>> claudemm >>>" "# <<< claudemm <<<"
 fi
 
 if grep -qF "$CLAUDEMM_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudemm: already in $PROFILE -- skipping"
 else
-  ensure_secret mm "MiniMax API key"
-  MINIMAX_API_KEY="$(read_secret mm)"
+  if ! $INSTALL_CLOAK && [[ ! -e "$AIKEYS_FILE" && ! -L "$AIKEYS_FILE" ]]; then
+    ensure_secret mm "MiniMax API key"
+    MINIMAX_API_KEY="$(read_secret mm)"
+  fi
 
     # Add the claudemm functions
     # https://platform.minimax.io/docs/token-plan/claude-code
     cat >> "$PROFILE" << 'EOF'
 
 # >>> claudemm >>>
+# claudemm credential loader version 2
 # Custom Claude Code functions with MiniMax endpoint
 # claudemm - Launch the MiniMax profile.
 claudemm() {
   local key
-  key="$(_jjw_secret mm)" || return 1
+  _jjw_prepare_secret "${MINIMAX_API_KEY:-}" || return 1
+  key="$(_jjw_secret mm "${MINIMAX_API_KEY:-}")" || return 1
   MINIMAX_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
@@ -1580,7 +2087,13 @@ claudemmd() {
 EOF
 
     # Configure MiniMax MCP server via Claude CLI
-    if command -v claude &>/dev/null; then
+    if ! command -v claude &>/dev/null; then
+      echo "claudemm: functions added to $PROFILE"
+      echo "WARNING: claude CLI not found, skipping MCP server configuration"
+    elif [[ -z "${MINIMAX_API_KEY:-}" ]]; then
+      echo "claudemm: functions added to $PROFILE"
+      echo "WARNING: MINIMAX_API_KEY was not stored, skipping MiniMax MCP server configuration"
+    else
       CLAUDEMM_ENV=(
         MINIMAX_API_KEY="$MINIMAX_API_KEY"
         ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
@@ -1611,9 +2124,6 @@ EOF
 
       echo "claudemm: functions added to $PROFILE"
       echo "claudemm: MCP setup complete"
-    else
-      echo "claudemm: functions added to $PROFILE"
-      echo "WARNING: claude CLI not found, skipping MCP server configuration"
     fi
 fi
 
@@ -1621,8 +2131,12 @@ fi
 # claudemm-remote (claudemmr) - remote Claude Code via MiniMax
 # ---------------------------------------------------------------------------
 CLAUDEMMR_MARKER="# >>> claudemm-remote >>>"
+CLAUDEMMR_VERSION_MARKER="# claudemm-remote credential loader version 2"
 
 if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> claudemm-remote >>>" "# <<< claudemm-remote <<<"
+elif grep -qF "$CLAUDEMMR_MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$CLAUDEMMR_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "claudemm-remote: upgrading encrypted vault support"
   remove_profile_section "$PROFILE" "# >>> claudemm-remote >>>" "# <<< claudemm-remote <<<"
 fi
 
@@ -1632,6 +2146,7 @@ else
   # Quoted heredoc -- write function variables verbatim to the profile.
   cat >> "$PROFILE" << 'CLAUEMMR_EOF'
 # >>> claudemm-remote >>>
+# claudemm-remote credential loader version 2
 
 # claudemmr - One-shot remote Claude Code via MiniMax.
 #   Usage: claudemmr <user@host> [port]
@@ -1641,7 +2156,8 @@ claudemmr() {
   [[ -z "$host" ]] && { echo "claudemmr: host is required" >&2; echo "  Usage: claudemmr <user@host> [port]" >&2; return 1; }
 
   local key
-  key="$(_jjw_secret mm)" || return 1
+  _jjw_prepare_secret "${MINIMAX_API_KEY:-}" || return 1
+  key="$(_jjw_secret mm "${MINIMAX_API_KEY:-}")" || return 1
 
   remote_claude_base "$host" "$key" "$port" \
     "https://api.minimax.io/anthropic" \
