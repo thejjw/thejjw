@@ -664,6 +664,7 @@ $_AiToolsInternal = @{
         'SQLite.SQLite',
         'koalaman.shellcheck',
         'Microsoft.VisualStudioCode',
+        'VSCodium.VSCodium',
         'marlocarlo.psmux',
         'marlocarlo.pstop',
         'marlocarlo.psnet'
@@ -725,7 +726,10 @@ $_AiToolsInternal = @{
         '@oh-my-pi/pi-coding-agent',
         '@musistudio/claude-code-router',
         'oh-my-free-models',
-        '@firecrawl/anydoc'
+        '@firecrawl/anydoc',
+        'typescript',
+        'eslint',
+        'prettier'
     )
     MoreAiNpmPackages      = @(
         '@qwen-code/qwen-code',
