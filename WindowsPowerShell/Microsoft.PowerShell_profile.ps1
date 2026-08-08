@@ -629,6 +629,7 @@ $_AiToolsInternal = @{
         'OpenJS.NodeJS.LTS',
         'Oven-sh.Bun',
         '7zip.7zip',
+        'FiloSottile.age',
         'GitHub.cli',
         'Notepad++.Notepad++',
         'Lapce.Lapce',

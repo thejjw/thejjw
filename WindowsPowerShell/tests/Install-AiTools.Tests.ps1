@@ -112,6 +112,10 @@ Describe 'Install-AiTools PowerShell modules' {
         $script:configuredWingetPackages | Should -Contain 'Oven-sh.Bun'
     }
 
+    It 'includes age in the standard Winget packages' {
+        $script:configuredWingetPackages | Should -Contain 'FiloSottile.age'
+    }
+
     It 'does not write the user PATH directly' {
         $script:installerAst.Extent.Text | Should -Not -Match "SetValue\('PATH'"
         $script:installerAst.Extent.Text | Should -Not -Match "SetEnvironmentVariable\('PATH'"
