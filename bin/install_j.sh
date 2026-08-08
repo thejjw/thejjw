@@ -37,8 +37,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PACKAGES="tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
-$INSTALL_CLOAK && PACKAGES="age $PACKAGES"
+PACKAGES="age tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
 NVM_VERSION="v0.40.6"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
@@ -681,14 +680,16 @@ else
   fi
 fi
 
-# Install age only when the passphrase-protected API-key mode is requested.
+# age is a default package. The apt path installs it with PACKAGES; macOS and
+# other Homebrew-based systems install it here.
+if ! command -v age >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
+  brew install age
+fi
 if $INSTALL_CLOAK && ! command -v age >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1; then
-    brew install age
-  else
-    echo "cloakj: age could not be installed automatically; install it with 'apt install age' or 'brew install age'" >&2
-    exit 1
-  fi
+  echo "cloakj: --cloak requires age; install it with 'apt install age' or 'brew install age'" >&2
+  exit 1
+elif ! command -v age >/dev/null 2>&1; then
+  echo "WARNING: age is unavailable; install it with 'apt install age' or 'brew install age' to use cloakj." >&2
 fi
 
 # ---------------------------------------------------------------------------
