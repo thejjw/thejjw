@@ -9,7 +9,6 @@ set -e
 
 FORCE_REINSTALL=false
 INSTALL_GHOSTTY=false
-INSTALL_CLOAK=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -21,17 +20,13 @@ while [[ $# -gt 0 ]]; do
       INSTALL_GHOSTTY=true
       shift
       ;;
-    --cloak)
-      INSTALL_CLOAK=true
-      shift
-      ;;
     -h|--help)
-      echo "Usage: $0 [--force] [--ghostty] [--cloak]"
+      echo "Usage: $0 [--force] [--ghostty]"
       exit 0
       ;;
     *)
       echo "install_j.sh: unknown argument: $1" >&2
-      echo "Usage: $0 [--force] [--ghostty] [--cloak]" >&2
+      echo "Usage: $0 [--force] [--ghostty]" >&2
       exit 1
       ;;
   esac
@@ -60,64 +55,6 @@ remove_profile_section() {
     { print }
   ' "$profile_file" > "$tmp_file"
   mv "$tmp_file" "$profile_file"
-}
-
-SECRET_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/jjw/s"
-
-# Read a credential file after enforcing its expected owner-only permissions.
-read_secret() {
-  local name="$1" file mode value
-  file="${SECRET_DIR}/${name}"
-
-  if [[ ! -f "$file" || -L "$file" ]]; then
-    echo "secret: missing regular file: $file" >&2
-    return 1
-  fi
-
-  mode="$(stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file" 2>/dev/null)" || {
-    echo "secret: cannot inspect permissions: $file" >&2
-    return 1
-  }
-  if [[ "$mode" != "600" ]]; then
-    echo "secret: insecure permissions on $file (expected 600, found $mode)" >&2
-    return 1
-  fi
-
-  IFS= read -r value < "$file" || true
-  if [[ -z "$value" ]]; then
-    echo "secret: empty credential file: $file" >&2
-    return 1
-  fi
-  printf '%s' "$value"
-}
-
-# Prompt for and atomically create a missing credential file.
-ensure_secret() {
-  local name="$1" label="$2" file tmp old_umask value
-  file="${SECRET_DIR}/${name}"
-
-  if [[ -e "$file" ]]; then
-    read_secret "$name" >/dev/null
-    return
-  fi
-
-  read -r -s -p "Enter ${label}: " value
-  echo
-  if [[ -z "$value" ]]; then
-    echo "secret: ${label} cannot be empty" >&2
-    return 1
-  fi
-
-  mkdir -p "$SECRET_DIR"
-  chmod 700 "$SECRET_DIR"
-  old_umask="$(umask)"
-  umask 077
-  tmp="$(mktemp "${SECRET_DIR}/.${name}.XXXXXX")"
-  printf '%s\n' "$value" > "$tmp"
-  chmod 600 "$tmp"
-  mv "$tmp" "$file"
-  umask "$old_umask"
-  echo "secret: stored ${label} in $file"
 }
 
 # Print the encrypted API-key vault path for the active user.
@@ -676,6 +613,8 @@ else
   else
     sudo apt-get update
     install_libjxl_static_tools
+    # PACKAGES is intentionally split into separate apt arguments.
+    # shellcheck disable=SC2086
     sudo apt-get install -y $PACKAGES
   fi
 fi
@@ -685,11 +624,9 @@ fi
 if ! command -v age >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
   brew install age
 fi
-if $INSTALL_CLOAK && ! command -v age >/dev/null 2>&1; then
-  echo "cloakj: --cloak requires age; install it with 'apt install age' or 'brew install age'" >&2
+if ! command -v age >/dev/null 2>&1; then
+  echo "install_j.sh: age is required; install it with 'apt install age' or 'brew install age'" >&2
   exit 1
-elif ! command -v age >/dev/null 2>&1; then
-  echo "WARNING: age is unavailable; install it with 'apt install age' or 'brew install age' to use cloakj." >&2
 fi
 
 # ---------------------------------------------------------------------------
@@ -715,6 +652,7 @@ if command -v node &>/dev/null && command -v npm &>/dev/null; then
   echo "node $(node -v) / npm $(npm -v) already installed -- skipping nvm"
 else
   curl -o- "$NVM_INSTALL_URL" | bash
+  # shellcheck disable=SC1090
   source ~/.nvm/nvm.sh && nvm install --lts
 fi
 
@@ -1419,13 +1357,7 @@ else
   echo "jjw-secrets: added to $PROFILE"
 fi
 
-if $INSTALL_CLOAK; then
-  if [[ -d "$SECRET_DIR" ]]; then
-    echo "WARNING: --cloak does not migrate or remove existing plaintext files in $SECRET_DIR." >&2
-  fi
-  cloakj
-fi
-AIKEYS_FILE="$(_jjw_aikeys_path)"
+cloakj
 
 # ---------------------------------------------------------------------------
 # claudez functions + MCP servers setup - embed into shell profile if absent
@@ -1443,19 +1375,14 @@ fi
 if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez: already in $PROFILE -- skipping"
 else
-  if ! $INSTALL_CLOAK && [[ ! -e "$AIKEYS_FILE" && ! -L "$AIKEYS_FILE" ]]; then
-    ensure_secret z "Z.AI API token"
-    ZAI_API_KEY="$(read_secret z)"
-  fi
-
-    # Add the claudez functions
-    # about supported models: "All plans support GLM-5.2, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
-    #   See https://docs.z.ai/devpack/latest-model for the current lineup.
-    # about 1M context:
-    #   GLM-5.2 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.2[1m]).
-    #   Z.AI also requires CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000 to actually exercise the 1M window
-    #   (this profile sets it for you). Other GLM models cap at 200K (GLM-5, GLM-5-Turbo) or 128K (GLM-4.5-Air).
-    cat >> "$PROFILE" << 'EOF'
+  # Add the claudez functions
+  # about supported models: "All plans support GLM-5.2, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
+  #   See https://docs.z.ai/devpack/latest-model for the current lineup.
+  # about 1M context:
+  #   GLM-5.2 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.2[1m]).
+  #   Z.AI also requires CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000 to actually exercise the 1M window
+  #   (this profile sets it for you). Other GLM models cap at 200K (GLM-5, GLM-5-Turbo) or 128K (GLM-4.5-Air).
+  cat >> "$PROFILE" << 'EOF'
 
 # >>> claudez >>>
 # claudez credential loader version 2
@@ -1621,9 +1548,6 @@ fi
 if grep -qF "$CLAUDEDS_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudeds: already in $PROFILE -- skipping"
 else
-  if ! $INSTALL_CLOAK && [[ ! -e "$AIKEYS_FILE" && ! -L "$AIKEYS_FILE" ]]; then
-    ensure_secret ds "DeepSeek API key"
-  fi
   cat >> "$PROFILE" << 'EOF'
 
 # >>> claudeds >>>
@@ -1695,9 +1619,6 @@ fi
 if grep -qF "$CLAUDEK_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudek: already in $PROFILE -- skipping"
 else
-  if ! $INSTALL_CLOAK && [[ ! -e "$AIKEYS_FILE" && ! -L "$AIKEYS_FILE" ]]; then
-    ensure_secret k "Kimi API key"
-  fi
   cat >> "$PROFILE" << 'EOF'
 
 # >>> claudek >>>
@@ -2051,14 +1972,9 @@ fi
 if grep -qF "$CLAUDEMM_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudemm: already in $PROFILE -- skipping"
 else
-  if ! $INSTALL_CLOAK && [[ ! -e "$AIKEYS_FILE" && ! -L "$AIKEYS_FILE" ]]; then
-    ensure_secret mm "MiniMax API key"
-    MINIMAX_API_KEY="$(read_secret mm)"
-  fi
-
-    # Add the claudemm functions
-    # https://platform.minimax.io/docs/token-plan/claude-code
-    cat >> "$PROFILE" << 'EOF'
+  # Add the claudemm functions
+  # https://platform.minimax.io/docs/token-plan/claude-code
+  cat >> "$PROFILE" << 'EOF'
 
 # >>> claudemm >>>
 # claudemm credential loader version 2
