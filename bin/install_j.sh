@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PACKAGES="age tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
+PACKAGES="age gnupg pinentry-curses tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
 NVM_VERSION="v0.40.6"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
@@ -604,10 +604,14 @@ else
   fi
 fi
 
-# age is a default package. The apt path installs it with PACKAGES; macOS and
-# other Homebrew-based systems install it here.
+# age, GnuPG, and terminal pinentry support are default packages. The apt path
+# installs them with PACKAGES; macOS and other Homebrew-based systems install
+# age and GnuPG here. Homebrew's GnuPG formula includes pinentry.
 if ! command -v age >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
   brew install age
+fi
+if ! command -v gpg >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
+  brew install gnupg
 fi
 if ! command -v age >/dev/null 2>&1; then
   echo "install_j.sh: age is required; install it with 'apt install age' or 'brew install age'" >&2
