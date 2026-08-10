@@ -1054,6 +1054,44 @@ namespace ewsConsole
     [ewsConsole.Program]::Main($TargetProcesses);
 }
 
+function Get-ISOWeek {
+    <#
+.SYNOPSIS
+    Returns the ISO 8601 week number for a date.
+.DESCRIPTION
+    Calculates the ISO week number using Monday as the first day of the week
+    and the first four-day week as week 1. Defaults to the current date.
+.PARAMETER Date
+    The date whose ISO week number should be returned.
+.EXAMPLE
+    PS C:\> Get-ISOWeek
+
+    Returns the ISO week number for the current date.
+.EXAMPLE
+    PS C:\> Get-ISOWeek '2026-08-10'
+    33
+.OUTPUTS
+    System.Int32. A week number from 1 through 53.
+#>
+    param(
+        [datetime]$Date = (Get-Date)
+    )
+
+    $calendar = [System.Globalization.CultureInfo]::InvariantCulture.Calendar
+    $dayOfWeek = $calendar.GetDayOfWeek($Date)
+
+    # Shift early weekdays into Thursday so year-boundary dates use the ISO week-year.
+    if ($dayOfWeek -ge [DayOfWeek]::Monday -and $dayOfWeek -le [DayOfWeek]::Wednesday) {
+        $Date = $Date.AddDays(3)
+    }
+
+    return $calendar.GetWeekOfYear(
+        $Date,
+        [System.Globalization.CalendarWeekRule]::FirstFourDayWeek,
+        [DayOfWeek]::Monday
+    )
+}
+
 function Get-AAA {
     <#
 .SYNOPSIS
