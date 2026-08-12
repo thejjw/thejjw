@@ -730,11 +730,14 @@ $_AiToolsInternal = @{
         '@firecrawl/anydoc',
         'typescript',
         'eslint',
-        'prettier'
+        'prettier',
+        'terser'
     )
+
+    # commented out entries:
+    # '@mimo-ai/cli',
     MoreAiNpmPackages      = @(
         '@qwen-code/qwen-code',
-        '@mimo-ai/cli',
         '@moonshot-ai/kimi-code'
     )
     # Keep this registry synchronized with AI CLIs managed by Install-AiTools
