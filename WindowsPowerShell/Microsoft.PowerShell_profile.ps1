@@ -840,6 +840,28 @@ $_AiSkillsInternal = @{
     AntigravitySkillsPath = '.gemini\antigravity-cli\skills'
     CodexSkillsPath       = 'skills'
     OpenCodeConfigPath    = '.config\opencode\opencode.json'
+
+    # External skill sources installed into EVERY tool's skill directory in
+    # addition to the internal lists above. Each source is shallow-cloned to its
+    # tip commit at install time; a clone failure warns and skips that source
+    # (internal thejjw skills still install). Fields:
+    #   Name       Unique label; also its subdirectory under the temp clone root.
+    #   RepoUrl    Git remote to clone.
+    #   Branch     Branch or tag (--branch accepts both; pin a tag to freeze).
+    #   SparsePath Optional repo-relative directory containing the skills. When
+    #              set, the clone is blobless+sparse and fetches only that path;
+    #              omit when the repo root IS the skill tree.
+    #   Skills     Skill directory names to install from the source root. The
+    #              same skill name in two sources overwrites on later install,
+    #              so keep the lists disjoint.
+    ExternalSources       = @(
+        @{
+            Name    = 'go-skills'
+            RepoUrl = 'https://github.com/spf13/go-skills.git'
+            Branch  = 'main'
+            Skills  = @('go', 'cobra-viper', 'go-spec-reviewer', 'go-release', 'wails', 'fileflow-pathologize')
+        }
+    )
 }
 
 # Internal configuration for Install-ClaudeCCRSetup (Claude Code Router).
@@ -7447,10 +7469,14 @@ function Install-AiSkills {
 .SYNOPSIS
     Installs public AI skills from the thejjw repository.
 .DESCRIPTION
-    Uses a shallow, blobless, sparse Git clone to fetch only the ai-skills directory,
-    then overwrites the configured skill directories for OpenCode, Claude Code,
-    Antigravity CLI, and Codex. Existing named skill directories are replaced so
-    repeat manual runs refresh changed files and remove stale files.
+    Uses a shallow, blobless, sparse Git clone to fetch only the ai-skills
+    directory from the thejjw repository, then overwrites the configured skill
+    directories for OpenCode, Claude Code, Antigravity CLI, and Codex. External
+    skill sources configured in $_AiSkillsInternal.ExternalSources are
+    shallow-cloned to their tip commit and installed into every tool's skill
+    directory. Existing named skill directories are replaced so repeat manual
+    runs refresh changed files and remove stale files. An unavailable external
+    source warns and is skipped without blocking the internal skills.
 .PARAMETER RepoUrl
     Git repository URL that contains the ai-skills directory.
 .PARAMETER Branch
@@ -7668,56 +7694,161 @@ function Install-AiSkills {
         Write-Host "[info] Updated OpenCode skill permissions."
     }
 
+    # Clones one external skill source down to its tip commit and returns the
+    # directory that contains its skill directories. Throws on any git or layout
+    # failure; the caller decides whether to warn and skip.
+    function Get-ExternalSkillSource {
+        param(
+            [Parameter(Mandatory = $true)]$Source,
+            [Parameter(Mandatory = $true)]
+            [string]$CloneRoot
+        )
+
+        $name = [string]$Source.Name
+        $cloneDir = Join-Path $CloneRoot $name
+        if (Test-Path -LiteralPath $cloneDir) {
+            throw "Duplicate external skill source name: $name"
+        }
+
+        # Tip commit only: shallow, single branch, no tag objects.
+        $cloneArgs = @('clone', '--depth', '1', '--single-branch', '--no-tags', '--branch', [string]$Source.Branch, [string]$Source.RepoUrl, $cloneDir)
+        $sparsePath = [string]$Source.SparsePath
+        if ($sparsePath) {
+            # Large monorepo sources: blobless sparse clone fetching only SparsePath.
+            $cloneArgs += @('--filter=blob:none', '--sparse')
+        }
+
+        Write-Verbose "Cloning external skill source '$name' ($($Source.Branch)) from $($Source.RepoUrl)"
+        & git @cloneArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "git clone failed with exit code $LASTEXITCODE"
+        }
+
+        if ($sparsePath) {
+            Write-Verbose "Sparse-checking out '$sparsePath' for external skill source '$name'"
+            & git -C $cloneDir sparse-checkout set $sparsePath
+            if ($LASTEXITCODE -ne 0) {
+                throw "git sparse-checkout failed with exit code $LASTEXITCODE"
+            }
+            $skillRoot = Join-Path $cloneDir $sparsePath
+        }
+        else {
+            $skillRoot = $cloneDir
+        }
+
+        if (-not (Test-Path -LiteralPath $skillRoot -PathType Container)) {
+            throw "Clone did not produce expected skill directory: $skillRoot"
+        }
+        return $skillRoot
+    }
+
+    # Installs every fetched external skill source into one tool's skill root.
+    # Individual skill failures (upstream rename/removal, disk error) warn and
+    # skip that skill only. Returns the skill names actually installed.
+    function Install-ExternalSkillSources {
+        param(
+            # Not mandatory: an empty array is a valid input when every
+            # external source failed to clone, and Mandatory parameters
+            # reject empty arrays outright.
+            [object[]]$Installs,
+            [Parameter(Mandatory = $true)]
+            [string]$DestinationRoot,
+            [Parameter(Mandatory = $true)]
+            [string]$ToolName
+        )
+
+        $installed = @()
+        foreach ($install in $Installs) {
+            foreach ($skill in $install.Skills) {
+                try {
+                    Copy-SkillDirectory -SkillName $skill -SourceRoot $install.SourceDir -DestinationRoot $DestinationRoot -ToolName $ToolName
+                    $installed += $skill
+                }
+                catch {
+                    Write-Warning "Skipping external skill '$skill' from source '$($install.Name)' for ${ToolName}: $_"
+                }
+            }
+        }
+        return $installed
+    }
+
     try {
         if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
             throw 'git is required but was not found in PATH.'
         }
 
         $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
-        Write-Verbose "Temporary clone directory: $tmpDir"
+        $null = New-Item -ItemType Directory -Path $tmpDir -Force -ErrorAction Stop
+        Write-Verbose "Temporary clone root: $tmpDir"
+
+        $internalCloneDir = Join-Path $tmpDir 'thejjw'
         Write-Verbose "Cloning only branch '$Branch' from $RepoUrl"
-        & git clone --depth 1 --single-branch --branch $Branch --filter=blob:none --sparse $RepoUrl $tmpDir
+        & git clone --depth 1 --single-branch --no-tags --branch $Branch --filter=blob:none --sparse $RepoUrl $internalCloneDir
         if ($LASTEXITCODE -ne 0) {
             throw "git clone failed with exit code $LASTEXITCODE"
         }
 
         Write-Verbose "Sparse-checking out $($_AiSkillsInternal.SparsePath)"
-        & git -C $tmpDir sparse-checkout set $_AiSkillsInternal.SparsePath
+        & git -C $internalCloneDir sparse-checkout set $_AiSkillsInternal.SparsePath
         if ($LASTEXITCODE -ne 0) {
             throw "git sparse-checkout failed with exit code $LASTEXITCODE"
         }
 
-        $skillsSourceDir = Join-Path $tmpDir $_AiSkillsInternal.SparsePath
+        $skillsSourceDir = Join-Path $internalCloneDir $_AiSkillsInternal.SparsePath
         if (-not (Test-Path -LiteralPath $skillsSourceDir -PathType Container)) {
             throw "Sparse checkout did not produce expected directory: $skillsSourceDir"
         }
         Write-Verbose "Skill source directory: $skillsSourceDir"
 
+        # External sources: fetch each one's tip commit only. An unavailable
+        # source warns and is skipped; it must not block the internal skills.
+        $externalInstalls = @()
+        foreach ($source in $_AiSkillsInternal.ExternalSources) {
+            try {
+                $sourceDir = Get-ExternalSkillSource -Source $source -CloneRoot $tmpDir
+                $externalInstalls += @{
+                    Name      = [string]$source.Name
+                    SourceDir = $sourceDir
+                    Skills    = @($source.Skills)
+                }
+            }
+            catch {
+                Write-Warning "External skill source '$($source.Name)' unavailable: $_; skipping."
+            }
+        }
+
         foreach ($skill in $openCodeClaudeSkills) {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $openCodeSkillsDir -ToolName 'OpenCode'
         }
+        $installedExternalOpenCode = @(Install-ExternalSkillSources -Installs $externalInstalls -DestinationRoot $openCodeSkillsDir -ToolName 'OpenCode')
 
         # Configure OpenCode as soon as its own installation is complete so a
         # failure in another tool cannot leave installed skills inaccessible.
-        Set-OpenCodeSkillPermissions -SkillNames $openCodeClaudeSkills
+        Set-OpenCodeSkillPermissions -SkillNames ($openCodeClaudeSkills + $installedExternalOpenCode)
 
         foreach ($skill in $openCodeClaudeSkills) {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $claudeSkillsDir -ToolName 'Claude Code'
         }
+        $null = Install-ExternalSkillSources -Installs $externalInstalls -DestinationRoot $claudeSkillsDir -ToolName 'Claude Code'
 
         foreach ($skill in $antigravitySkills) {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $antigravitySkillsDir -ToolName 'Antigravity CLI'
         }
+        $null = Install-ExternalSkillSources -Installs $externalInstalls -DestinationRoot $antigravitySkillsDir -ToolName 'Antigravity CLI'
 
         foreach ($skill in $codexSkills) {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $codexSkillsDir -ToolName 'Codex'
         }
+        $null = Install-ExternalSkillSources -Installs $externalInstalls -DestinationRoot $codexSkillsDir -ToolName 'Codex'
 
         Write-Host ""
         Write-Host "[done] Installed AI skills:" -ForegroundColor Green
         Write-Host "  OpenCode and Claude Code: $($openCodeClaudeSkills -join ', ')"
         Write-Host "  Antigravity CLI: $($antigravitySkills -join ', ')"
         Write-Host "  Codex: $($codexSkills -join ', ')"
+        foreach ($install in $externalInstalls) {
+            Write-Host "  All tools [$($install.Name)]: $($install.Skills -join ', ')"
+        }
     }
     catch {
         Write-Host "[error] Install-AiSkills failed: $_" -ForegroundColor Red
