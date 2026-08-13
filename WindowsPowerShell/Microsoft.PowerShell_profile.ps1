@@ -5636,6 +5636,44 @@ function claudezmd {
     claudezm @claudeArgs
 }
 
+# Briefly warn when DeepSeek's peak windows (01:00-04:00, 06:00-10:00 UTC / 09:00-12:00, 14:00-18:00 UTC+8) are active.
+# Pricing & peak-hours policy: https://api-docs.deepseek.com/quick_start/pricing
+function Show-DeepseekPeakWarning {
+    param(
+        [DateTime]$UtcNow = [DateTime]::UtcNow,
+        [int]$DelaySeconds = 3
+    )
+
+    $UtcNow = $UtcNow.ToUniversalTime()
+
+    $w1Start = $UtcNow.Date.AddHours(1)
+    $w1End   = $UtcNow.Date.AddHours(4)
+    $w2Start = $UtcNow.Date.AddHours(6)
+    $w2End   = $UtcNow.Date.AddHours(10)
+
+    $inWindow = $false
+    $activeEnd = $null
+    $windowLabel = ''
+
+    if ($UtcNow -ge $w1Start -and $UtcNow -lt $w1End) {
+        $inWindow = $true
+        $activeEnd = $w1End
+        $windowLabel = '01:00-04:00 UTC (09:00-12:00 UTC+8)'
+    } elseif ($UtcNow -ge $w2Start -and $UtcNow -lt $w2End) {
+        $inWindow = $true
+        $activeEnd = $w2End
+        $windowLabel = '06:00-10:00 UTC (14:00-18:00 UTC+8)'
+    }
+
+    if (-not $inWindow) {
+        return
+    }
+
+    $minutesLeft = [int][Math]::Ceiling(($activeEnd - $UtcNow).TotalMinutes)
+    Write-Host ("DeepSeek peak hours are active ({0}); 2x rates apply; ends in {1}h {2}m. Launching in {3} seconds..." -f $windowLabel, [int][Math]::Floor($minutesLeft / 60), ($minutesLeft % 60), $DelaySeconds) -ForegroundColor Yellow
+    Start-Sleep -Seconds $DelaySeconds
+}
+
 function claudeds {
     <#
 .SYNOPSIS
@@ -5660,7 +5698,7 @@ function claudeds {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-05
+    Last Edit: 2026-08
 #>
     # Read key using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
     $key = Get-AiApiKey 'DEEPSEEK_API_KEY'
@@ -5696,6 +5734,7 @@ function claudeds {
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     try {
+        Show-DeepseekPeakWarning
         claude @args
     }
     finally {
@@ -5785,6 +5824,7 @@ function claudeds2 {
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     try {
+        Show-DeepseekPeakWarning
         claude @args
     }
     finally {
@@ -9635,15 +9675,20 @@ function Get-DeepseekUsage {
     $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
     # Pricing per 1M tokens (cache_hit, cache_miss, output) for V4 Flash/Pro.
-    # Source: api-docs.deepseek.com/quick_start/pricing. Update these rows
-    # if pricing changes upstream.
+    # Source: api-docs.deepseek.com/quick_start/pricing (effective Aug 17, 2026 00:00 UTC+8 / Aug 16, 2026 16:00 UTC).
     $pricing = @(
-        [pscustomobject]@{ Model = 'V4 Flash'; Scenario = 'Input  (cache hit)';  CostUsd = 0.0028;   CostCny = 0.02 }
-        [pscustomobject]@{ Model = 'V4 Flash'; Scenario = 'Input  (cache miss)'; CostUsd = 0.14;     CostCny = 1.0 }
-        [pscustomobject]@{ Model = 'V4 Flash'; Scenario = 'Output';              CostUsd = 0.28;     CostCny = 2.0 }
-        [pscustomobject]@{ Model = 'V4 Pro';   Scenario = 'Input  (cache hit)';  CostUsd = 0.003625; CostCny = 0.025 }
-        [pscustomobject]@{ Model = 'V4 Pro';   Scenario = 'Input  (cache miss)'; CostUsd = 0.435;    CostCny = 3.0 }
-        [pscustomobject]@{ Model = 'V4 Pro';   Scenario = 'Output';              CostUsd = 0.87;     CostCny = 6.0 }
+        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.007; CostCny = 0.05 }
+        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.22;  CostCny = 1.50 }
+        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 0.66;  CostCny = 4.50 }
+        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.014; CostCny = 0.10 }
+        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.44;  CostCny = 3.00 }
+        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.32;  CostCny = 9.00 }
+        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.022; CostCny = 0.15 }
+        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.66;  CostCny = 4.50 }
+        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 1.98;  CostCny = 13.50 }
+        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.044; CostCny = 0.30 }
+        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 1.32;  CostCny = 9.00 }
+        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Peak';     Scenario = 'Output';              CostUsd = 3.96;  CostCny = 27.00 }
     )
 
     if (-not $ApiKey) { Write-Error 'DEEPSEEK_API_KEY not set (env var or -ApiKey).'; return }
@@ -9695,6 +9740,7 @@ function Get-DeepseekUsage {
             $tokens = if ($cost -gt 0) { $bal / $cost * 1e6 } else { 0 }
             $rows.Add([pscustomobject]@{
                 Model            = $p.Model
+                Tier             = $p.Tier
                 Scenario         = $p.Scenario
                 Cost_per_1M      = ('{0} {1}' -f $cur, ($_ProfileHelpers.FormatPrice($cost)))
                 Available_Tokens = ($_ProfileHelpers.FormatTokens($tokens))
