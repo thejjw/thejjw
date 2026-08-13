@@ -738,7 +738,9 @@ $_AiToolsInternal = @{
     # '@mimo-ai/cli',
     MoreAiNpmPackages      = @(
         '@qwen-code/qwen-code',
-        '@moonshot-ai/kimi-code'
+        '@moonshot-ai/kimi-code',
+        '@deepseek-ai/dsh',
+        'gloomberb'
     )
     # Keep this registry synchronized with AI CLIs managed by Install-AiTools
     # that ship a native self-update command. Probe defaults to Cmd; set it when
