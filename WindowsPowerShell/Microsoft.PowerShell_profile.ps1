@@ -856,10 +856,24 @@ $_AiSkillsInternal = @{
     #              so keep the lists disjoint.
     ExternalSources       = @(
         @{
-            Name    = 'go-skills'
-            RepoUrl = 'https://github.com/spf13/go-skills.git'
-            Branch  = 'main'
-            Skills  = @('go', 'cobra-viper', 'go-spec-reviewer', 'go-release', 'wails', 'fileflow-pathologize')
+            Name       = 'go-skills'
+            RepoUrl    = 'https://github.com/spf13/go-skills.git'
+            Branch     = 'main'
+            Skills     = @('go', 'cobra-viper', 'go-spec-reviewer', 'go-release', 'wails', 'fileflow-pathologize')
+        },
+        @{
+            Name       = 'apollo-skills'
+            RepoUrl    = 'https://github.com/apollographql/skills.git'
+            Branch     = 'main'
+            SparsePath = 'skills'
+            Skills     = @('rust-best-practices')
+        },
+        @{
+            Name       = 'taste-skill'
+            RepoUrl    = 'https://github.com/Leonxlnx/taste-skill.git'
+            Branch     = 'main'
+            SparsePath = 'skills'
+            Skills     = @('taste-skill')
         }
     )
 }
@@ -7687,6 +7701,9 @@ function Install-AiSkills {
         foreach ($skill in $SkillNames) {
             Write-Verbose "Allowing OpenCode skill permission: $skill"
             $config.permission.skill | Add-Member -NotePropertyName $skill -NotePropertyValue 'allow' -Force
+            if ($skill -eq 'taste-skill') {
+                $config.permission.skill | Add-Member -NotePropertyName 'design-taste-frontend' -NotePropertyValue 'allow' -Force
+            }
         }
 
         Write-Verbose "Writing updated OpenCode config: $openCodeConfigFile"
