@@ -7701,6 +7701,8 @@ function Install-AiSkills {
         foreach ($skill in $SkillNames) {
             Write-Verbose "Allowing OpenCode skill permission: $skill"
             $config.permission.skill | Add-Member -NotePropertyName $skill -NotePropertyValue 'allow' -Force
+            # 'taste-skill' uses 'design-taste-frontend' as its canonical skill/install name in OpenCode.
+            # Explicitly allow 'design-taste-frontend' so permissions apply under both identifiers.
             if ($skill -eq 'taste-skill') {
                 $config.permission.skill | Add-Member -NotePropertyName 'design-taste-frontend' -NotePropertyValue 'allow' -Force
             }
