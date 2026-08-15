@@ -31,14 +31,16 @@ Describe 'Qwen Claude Code profiles' {
         Mock Start-Sleep {}
     }
 
-    It 'uses the production Qwen 3.8 Max model throughout the Qwen profiles' {
+    It 'uses the production Qwen 3.8 Max model and xhigh effort throughout the Qwen profiles' {
         $script:profileText | Should -Not -Match 'qwen3\.8-max-preview'
         $script:functionTexts['claudeq'] | Should -Match "ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3\.8-max'"
+        $script:functionTexts['claudeq'] | Should -Match "CLAUDE_CODE_EFFORT_LEVEL = 'xhigh'"
         $script:functionTexts['claudeq2'] | Should -Match "ANTHROPIC_MODEL = 'qwen3\.8-max'"
         $script:functionTexts['claudeq2'] | Should -Match "ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3\.8-max'"
         $script:functionTexts['claudeq2'] | Should -Match "ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3\.8-max'"
         $script:functionTexts['claudeq2'] | Should -Match "ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3\.8-max'"
         $script:functionTexts['claudeq2'] | Should -Match "CLAUDE_CODE_SUBAGENT_MODEL = 'qwen3\.7-max'"
+        $script:functionTexts['claudeq2'] | Should -Match "CLAUDE_CODE_EFFORT_LEVEL = 'xhigh'"
     }
 
     It 'warns and delays before the night discount window' {
