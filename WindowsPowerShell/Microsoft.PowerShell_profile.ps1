@@ -287,7 +287,7 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         $archive = Get-Item -LiteralPath $Path -ErrorAction Stop
         if ($archive.PSIsContainer) { throw "7z archive path must be a file: $Path" }
 
-        $tar = Get-Command tar.exe -CommandType Application -ErrorAction SilentlyContinue
+        $tar = Get-Command tar.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $tar) {
             throw '7z extraction is unavailable: Windows tar.exe was not found. Install a current Windows archive-tools component and try again.'
         }
