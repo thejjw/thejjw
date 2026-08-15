@@ -1373,7 +1373,7 @@ else
   # about 1M context:
   #   GLM-5.3 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.3[1m]).
   #   Z.AI also requires CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000 to actually exercise the 1M window
-  #   (this profile sets it for you). Other GLM models cap at 200K (GLM-5-Turbo) or 128K (GLM-4.7).
+  #   (this profile sets it for you). Other GLM models cap at 200K (GLM-5-Turbo, GLM-4.7) or 128K (GLM-4.5-Air).
   cat >> "$PROFILE" << 'EOF'
 
 # >>> claudez >>>
