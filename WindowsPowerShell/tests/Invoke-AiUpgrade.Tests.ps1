@@ -197,6 +197,12 @@ Describe 'Invoke-AiUpgrade managed packages' {
         $script:startProcessCalls.Count | Should -Be 2
         ($script:startProcessCalls[0].ArgumentList -join ' ') | Should -Be 'upgrade --source winget --exact --id MiniMax.MiniMaxCode'
         ($script:startProcessCalls[1].ArgumentList -join ' ') | Should -Be 'upgrade --source winget --exact --id ZhipuAI.ZCode'
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -eq '>>> winget: [1/2] upgrading MiniMax.MiniMaxCode  1.1.0 -> 1.2.0'
+        }
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -eq '>>> winget: [2/2] upgrading ZhipuAI.ZCode  1.0.0 -> 2.0.0'
+        }
     }
 
     It 'matches regex punctuation in an exact managed Winget package ID' {

@@ -9143,9 +9143,11 @@ function Invoke-AiUpgrade {
                 }
                 else {
                     $wingetFailures = @()
+                    $wingetUpgradeIndex = 0
                     foreach ($update in $wingetUpdates) {
+                        $wingetUpgradeIndex++
                         $wingetArgs = @('upgrade', '--source', 'winget', '--exact', '--id', $update.Id)
-                        Write-Host ">>> winget: winget $($wingetArgs -join ' ')" -ForegroundColor Cyan
+                        Write-Host (">>> winget: [{0}/{1}] upgrading {2}  {3} -> {4}" -f $wingetUpgradeIndex, $wingetUpdates.Count, $update.Id, $update.Current, $update.Available) -ForegroundColor Cyan
                         try {
                             # A child process lets installers display UI and request UAC elevation.
                             $process = Start-Process -FilePath 'winget' -ArgumentList $wingetArgs -NoNewWindow -Wait -PassThru
