@@ -1368,12 +1368,12 @@ if grep -qF "$CLAUDEZ_MARKER" "$PROFILE" 2>/dev/null; then
   echo "claudez: already in $PROFILE -- skipping"
 else
   # Add the claudez functions
-  # about supported models: "All plans support GLM-5.2, GLM-5-Turbo, GLM-4.7 and GLM-4.5-Air." (https://docs.z.ai/devpack/overview)
+  # about supported models: "All plans support GLM-5.3, GLM-5-Turbo, and GLM-4.7." (https://docs.z.ai/devpack/overview)
   #   See https://docs.z.ai/devpack/latest-model for the current lineup.
   # about 1M context:
-  #   GLM-5.2 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.2[1m]).
+  #   GLM-5.3 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.3[1m]).
   #   Z.AI also requires CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000 to actually exercise the 1M window
-  #   (this profile sets it for you). Other GLM models cap at 200K (GLM-5, GLM-5-Turbo) or 128K (GLM-4.5-Air).
+  #   (this profile sets it for you). Other GLM models cap at 200K (GLM-5-Turbo) or 128K (GLM-4.7).
   cat >> "$PROFILE" << 'EOF'
 
 # >>> claudez >>>
@@ -1382,7 +1382,11 @@ else
 # _zai_peak_warning - Briefly warn when Z.AI's UTC+8 peak window is active.
 # Peak-hours and quota policy: https://docs.z.ai/devpack/overview
 _zai_peak_warning() {
-  local utc hour minute second minutes_left
+  local dow utc hour minute second minutes_left
+  dow="$(date -u +%u)" || return 0
+  # Peak hours apply Monday to Friday only (1-5).
+  (( dow >= 1 && dow <= 5 )) || return 0
+
   utc="$(date -u +%H:%M:%S)" || return 0
   IFS=: read -r hour minute second <<< "$utc"
   hour="${hour#0}"; minute="${minute#0}"; second="${second#0}"
@@ -1391,7 +1395,7 @@ _zai_peak_warning() {
   # 14:00-18:00 UTC+8 is 06:00-10:00 UTC.
   if (( hour >= 6 && hour < 10 )); then
     minutes_left=$(( (10 * 3600 - hour * 3600 - minute * 60 - second + 59) / 60 ))
-    printf 'Z.AI peak hours are active (14:00-18:00 UTC+8); ends in %dh %dm. Launching in 3 seconds...\n' \
+    printf 'Z.AI peak hours are active (14:00-18:00 UTC+8, Mon-Fri); ends in %dh %dm. Launching in 3 seconds...\n' \
       "$((minutes_left / 60))" "$((minutes_left % 60))" >&2
     sleep 3
   fi
@@ -1403,14 +1407,15 @@ claudez() {
   _jjw_prepare_secret "${ZAI_API_KEY:-}" || return 1
   key="$(_jjw_secret z "${ZAI_API_KEY:-}")" || return 1
   _zai_peak_warning
+  # "max is recommended for coding tasks." (2026-08-14, https://z.ai/blog/glm-5.3)
   ZAI_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.7" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.7" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.3[1m]" \
   CLAUDE_CODE_SUBAGENT_MODEL="glm-4.7" \
-  CLAUDE_CODE_EFFORT_LEVEL="high" \
+  CLAUDE_CODE_EFFORT_LEVEL="max" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
@@ -1427,13 +1432,14 @@ claudezm() {
   _jjw_prepare_secret "${ZAI_API_KEY:-}" || return 1
   key="$(_jjw_secret z "${ZAI_API_KEY:-}")" || return 1
   _zai_peak_warning
+  # "max is recommended for coding tasks." (2026-08-14, https://z.ai/blog/glm-5.3)
   ZAI_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.2[1m]" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2[1m]" \
-  CLAUDE_CODE_SUBAGENT_MODEL="glm-5.2[1m]" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.7" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.3[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.3[1m]" \
+  CLAUDE_CODE_SUBAGENT_MODEL="glm-5.3[1m]" \
   CLAUDE_CODE_EFFORT_LEVEL="max" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
@@ -1874,16 +1880,16 @@ claudezr() {
   _jjw_prepare_secret "${ZAI_API_KEY:-}" || return 1
   key="$(_jjw_secret z "${ZAI_API_KEY:-}")" || return 1
 
-  # Matches the local claudezm profile: glm-5.2[1m] for Sonnet/Opus/Subagent,
+  # Matches the local claudezm profile: glm-5.3[1m] for Sonnet/Opus/Subagent,
   # effort=max, 1M context enabled via CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
   remote_claude_base "$host" "$key" "$port" \
     "https://api.z.ai/api/anthropic" \
-    "glm-4.5-air" \
-    "glm-5.2[1m]" \
-    "glm-5.2[1m]" \
+    "glm-4.7" \
+    "glm-5.3[1m]" \
+    "glm-5.3[1m]" \
     "3000000" \
     "0" \
-    "glm-5.2[1m]" \
+    "glm-5.3[1m]" \
     "max" \
     "1000000"
 }
