@@ -675,7 +675,8 @@ $_AiToolsInternal = @{
         'Google.Antigravity',
         'Google.AntigravityIDE',
         'ZhipuAI.ZCode',
-        'MiniMax.MiniMaxCode'
+        'MiniMax.MiniMaxCode',
+        'Anysphere.Cursor'
     )
     ExtendedWingetPackages = @(
         'Insecure.Nmap',
@@ -719,6 +720,7 @@ $_AiToolsInternal = @{
         ClaudeCli     = 'https://claude.ai/install.ps1'
         CodexCli      = 'https://chatgpt.com/codex/install.ps1'
         GrokCli       = 'https://x.ai/cli/install.ps1'
+        CursorCli     = 'https://cursor.com/install?win32=true'
         CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
     }
@@ -752,7 +754,8 @@ $_AiToolsInternal = @{
         @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
         @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
         @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
-        @{ Label = 'grok';     Cmd = 'grok';     Args = @('update') }
+        @{ Label = 'grok';     Cmd = 'grok';     Args = @('update') },
+        @{ Label = 'cursor';   Cmd = 'agent';    Probe = 'cursor-agent'; Args = @('update') }
     )
 }
 
@@ -8069,8 +8072,8 @@ function Install-AiTools {
 
 .PARAMETER MoreAi
     When supplied, also installs extra AI developer tools (SST.OpenCodeDesktop, Google.Antigravity,
-    Google.AntigravityIDE, ZhipuAI.ZCode, MiniMax.MiniMaxCode) via winget, extra global npm packages
-    (@qwen-code/qwen-code, @mimo-ai/cli), and the Kimi Code and Grok CLIs if not present.
+    Google.AntigravityIDE, ZhipuAI.ZCode, MiniMax.MiniMaxCode, Anysphere.Cursor) via winget, extra global npm packages
+    (@qwen-code/qwen-code, @mimo-ai/cli), and the Kimi Code, Grok, and Cursor CLIs if not present.
 
 .PARAMETER All
     When supplied, enables all optional package groups: extended tools, SDK runtimes, .NET SDK,
@@ -8187,8 +8190,8 @@ function Install-AiTools {
     if ($MoreAi) {
         Write-Host " - kimi (Kimi Code CLI)"
         Write-Host " - grok (Grok CLI)"
+        Write-Host " - cursor (Cursor CLI / agent)"
     }
-
     if (-not $Auto) {
         $choice = Read-Host -Prompt "Proceed with automatic installation of missing items? This will install PowerShell modules and run winget/npm/installers. Continue? (Y/n)"
         if ($choice -in @('n', 'N')) {
@@ -8470,8 +8473,8 @@ function Install-AiTools {
     if ($MoreAi) {
         Write-Host " - kimi (Kimi Code CLI)"
         Write-Host " - grok (Grok CLI)"
+        Write-Host " - cursor (Cursor CLI / agent)"
     }
-
     # Install Antigravity and Claude CLIs using their recommended installers
     Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
 
@@ -8534,6 +8537,21 @@ function Install-AiTools {
         } else {
             # If grok is present, ensure it's configured with the default settings
             Install-GrokSettings
+        }
+    }
+
+    # Verify and install Cursor CLI (agent) if MoreAi is requested.
+    # The upstream installer places binaries in %LOCALAPPDATA%\cursor-agent.
+    if ($MoreAi) {
+        if (-not (Get-Command cursor-agent -ErrorAction SilentlyContinue) -and -not (Get-Command agent -ErrorAction SilentlyContinue)) {
+            Write-Host "Cursor CLI (agent) not found; installing via $($_AiToolsInternal.Urls.CursorCli)..." -ForegroundColor Yellow
+            try {
+                & powershell -NoProfile -ExecutionPolicy ByPass -Command "iex (irm '$($_AiToolsInternal.Urls.CursorCli)')"
+                $cursorAgentDir = Join-Path $env:LOCALAPPDATA 'cursor-agent'
+                $null = Add-UserPathEntry -Path $cursorAgentDir
+            } catch {
+                Write-Host "Failed to install Cursor CLI: $_" -ForegroundColor Red
+            }
         }
     }
 
@@ -9035,8 +9053,7 @@ function Invoke-AiUpgrade {
     Updates all AI CLI tools in one shot.
 .DESCRIPTION
     Runs the native update/upgrade command for each available CLI registered in
-    $_AiToolsInternal.UpgradeCommands (agy, Claude, Codex, OpenCode, and Grok),
-    reports available updates for Winget packages managed by Install-AiTools,
+    $_AiToolsInternal.UpgradeCommands (agy, Claude, Codex, OpenCode, Grok, and Cursor),
     then checks and updates every npm-installed managed package -- from
     $_AiToolsInternal.NpmPackages and MoreAiNpmPackages -- through one global
     npm command. Winget packages are upgraded only when -Winget is supplied.

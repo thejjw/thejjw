@@ -241,4 +241,26 @@ Describe 'Invoke-AiUpgrade managed packages' {
         }
         @($script:npmCalls | Where-Object { $_.Args[0] -eq 'ls' }).Count | Should -Be 1
     }
+
+    It 'probes on custom binary before invoking CLI upgrade command' {
+        $_AiToolsInternal.UpgradeCommands = @(
+            @{ Label = 'cursor'; Cmd = 'agent'; Probe = 'cursor-agent'; Args = @('update') }
+        )
+        $script:agentCalled = $false
+        Mock Get-Command {
+            if ($Name -in @('npm', 'cursor-agent', 'agent')) { return [pscustomobject]@{ Name = $Name } }
+            return $null
+        }
+        function agent {
+            param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
+            $script:agentCalled = $true
+        }
+
+        Invoke-AiUpgrade
+
+        $script:agentCalled | Should -BeTrue
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -eq '>>> cursor: agent update'
+        }
+    }
 }
