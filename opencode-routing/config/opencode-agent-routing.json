@@ -7,21 +7,21 @@
       "mode": "primary",
       "model": "openai/gpt-5.5",
       "variant": "high",
-      "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-glm51. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
+      "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-glm53. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
         "task": {
           "*": "deny",
           "fast-discovery-m3": "allow",
-          "hard-impl-glm51": "allow"
+          "hard-impl-glm53": "allow"
         }
       }
     },
     "head-glm": {
-      "description": "Primary GLM orchestration head using GLM 5.1. Use for lower-cost or non-OpenAI main workflows.",
+      "description": "Primary GLM orchestration head using GLM 5.3. Use for lower-cost or non-OpenAI main workflows.",
       "mode": "primary",
-      "model": "zai-coding-plan/glm-5.1",
+      "model": "zai-coding-plan/glm-5.3",
       "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-glm47. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
       "permission": {
         "edit": "ask",
@@ -85,15 +85,15 @@
     "alt_head-glm_stack": {
       "description": "Alternate all-GLM routing profile for lower-cost same-family work.",
       "mode": "primary",
-      "model": "zai-coding-plan/glm-5.1",
-      "prompt": "You are a GLM-stack orchestration head. Use fast-glm-4.5-air for discovery and hard-impl-glm47 for implementation. Keep orchestration concise and verify subagent outputs before finalizing.",
+      "model": "zai-coding-plan/glm-5.3",
+      "prompt": "You are a GLM-stack orchestration head. Use fast-glm-4.7 for discovery and hard-impl-glm53 for implementation. Keep orchestration concise and verify subagent outputs before finalizing.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
         "task": {
           "*": "deny",
-          "fast-glm-4.5-air": "allow",
-          "hard-impl-glm47": "allow"
+          "fast-glm-4.7": "allow",
+          "hard-impl-glm53": "allow"
         }
       }
     },
@@ -117,14 +117,14 @@
       "mode": "primary",
       "model": "openai/gpt-5.5",
       "variant": "high",
-      "prompt": "You are a review-heavy orchestration head. Use fast-discovery-m3 for investigation, hard-impl-glm51 for implementation, and premium-reviewer-gpt-5.5-pro for final review before summarizing.",
+      "prompt": "You are a review-heavy orchestration head. Use fast-discovery-m3 for investigation, hard-impl-glm53 for implementation, and premium-reviewer-gpt-5.5-pro for final review before summarizing.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
         "task": {
           "*": "deny",
           "fast-discovery-m3": "allow",
-          "hard-impl-glm51": "allow",
+          "hard-impl-glm53": "allow",
           "premium-reviewer-gpt-5.5-pro": "allow"
         }
       }
@@ -169,10 +169,10 @@
         "task": "deny"
       }
     },
-    "fast-glm-4.5-air": {
-      "description": "Fast read-only GLM discovery agent using GLM 4.5 Air.",
+    "fast-glm-4.7": {
+      "description": "Fast read-only GLM discovery agent using GLM 4.7.",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-4.5-air",
+      "model": "zai-coding-plan/glm-4.7",
       "steps": 12,
       "prompt": "You are a fast discovery agent. Search, inspect, summarize, and return concise findings with file references. Do not modify files. Prefer targeted searches over exhaustive reading.",
       "permission": {
@@ -189,10 +189,10 @@
         "task": "deny"
       }
     },
-    "hard-impl-glm51": {
-      "description": "Implementation and hard debugging subagent using GLM 5.1.",
+    "hard-impl-glm53": {
+      "description": "Implementation and hard debugging subagent using GLM 5.3.",
       "mode": "subagent",
-      "model": "zai-coding-plan/glm-5.1",
+      "model": "zai-coding-plan/glm-5.3",
       "steps": 40,
       "prompt": "You are an implementation agent. Make the smallest correct code changes, preserve existing style, run focused verification when appropriate, and report what changed. Avoid broad discovery unless necessary.",
       "permission": {
