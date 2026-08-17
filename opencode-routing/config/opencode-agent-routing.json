@@ -3,9 +3,9 @@
   "default_agent": "head-gpt",
   "agent": {
     "head-gpt": {
-      "description": "Primary premium orchestration head using GPT 5.5. Use for planning, delegation, synthesis, and final decisions.",
+      "description": "Primary premium orchestration head using GPT 5.6 Terra. Use for planning, delegation, synthesis, and final decisions.",
       "mode": "primary",
-      "model": "openai/gpt-5.5",
+      "model": "openai/gpt-5.6-terra",
       "variant": "high",
       "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-glm53. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
       "permission": {
@@ -50,10 +50,10 @@
       }
     },
     "alt_head-premium": {
-      "description": "Alternate premium routing profile using GPT 5.5 Pro for orchestration and review-heavy work.",
+      "description": "Alternate premium routing profile using GPT 5.6 Sol for orchestration and review-heavy work.",
       "mode": "primary",
-      "model": "openai/gpt-5.5-pro",
-      "prompt": "You are a premium orchestration head. Use fast-discovery-m3 for quick investigation, hard-impl-openai for implementation, and premium-reviewer-gpt-5.5-pro for final review or high-risk decisions.",
+      "model": "openai/gpt-5.6-sol",
+      "prompt": "You are a premium orchestration head. Use fast-discovery-m3 for quick investigation, hard-impl-openai for implementation, and premium-reviewer-gpt-5.6-sol for final review or high-risk decisions.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
@@ -61,16 +61,16 @@
           "*": "deny",
           "fast-discovery-m3": "allow",
           "hard-impl-openai": "allow",
-          "premium-reviewer-gpt-5.5-pro": "allow"
+          "premium-reviewer-gpt-5.6-sol": "allow"
         }
       }
     },
     "alt_head-openai": {
       "description": "Alternate all-OpenAI routing profile for provider consistency.",
       "mode": "primary",
-      "model": "openai/gpt-5.5",
+      "model": "openai/gpt-5.6-terra",
       "variant": "high",
-      "prompt": "You are an OpenAI-only orchestration head. Use fast-openai-gpt5.4-mini for discovery, hard-impl-openai for implementation, and premium-reviewer-gpt-5.5-pro for review.",
+      "prompt": "You are an OpenAI-only orchestration head. Use fast-openai-gpt5.4-mini for discovery, hard-impl-openai for implementation, and premium-reviewer-gpt-5.6-sol for review.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
@@ -78,7 +78,7 @@
           "*": "deny",
           "fast-openai-gpt5.4-mini": "allow",
           "hard-impl-openai": "allow",
-          "premium-reviewer-gpt-5.5-pro": "allow"
+          "premium-reviewer-gpt-5.6-sol": "allow"
         }
       }
     },
@@ -115,9 +115,9 @@
     "alt_head-review_heavy": {
       "description": "Alternate review-heavy routing profile for changes that need extra audit coverage.",
       "mode": "primary",
-      "model": "openai/gpt-5.5",
+      "model": "openai/gpt-5.6-terra",
       "variant": "high",
-      "prompt": "You are a review-heavy orchestration head. Use fast-discovery-m3 for investigation, hard-impl-glm53 for implementation, and premium-reviewer-gpt-5.5-pro for final review before summarizing.",
+      "prompt": "You are a review-heavy orchestration head. Use fast-discovery-m3 for investigation, hard-impl-glm53 for implementation, and premium-reviewer-gpt-5.6-sol for final review before summarizing.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
@@ -125,7 +125,7 @@
           "*": "deny",
           "fast-discovery-m3": "allow",
           "hard-impl-glm53": "allow",
-          "premium-reviewer-gpt-5.5-pro": "allow"
+          "premium-reviewer-gpt-5.6-sol": "allow"
         }
       }
     },
@@ -257,10 +257,10 @@
         "task": "deny"
       }
     },
-    "premium-reviewer-gpt-5.5-pro": {
-      "description": "Read-only premium reviewer using GPT 5.5 Pro for final audits, risk analysis, and regression checks.",
+    "premium-reviewer-gpt-5.6-sol": {
+      "description": "Read-only premium reviewer using GPT 5.6 Sol for final audits, risk analysis, and regression checks.",
       "mode": "subagent",
-      "model": "openai/gpt-5.5-pro",
+      "model": "openai/gpt-5.6-sol",
       "steps": 20,
       "prompt": "You are a read-only premium reviewer. Prioritize bugs, regressions, security risks, missing tests, and unclear behavior. Provide findings first with file references. Do not modify files.",
       "permission": {

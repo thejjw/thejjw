@@ -46,7 +46,7 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 
 | Agent | Model | Purpose |
 | --- | --- | --- |
-| `head-gpt` | `openai/gpt-5.5` | Main premium orchestrator |
+| `head-gpt` | `openai/gpt-5.6-terra` | Main premium orchestrator |
 | `head-glm` | `zai-coding-plan/glm-5.3` | Main GLM orchestrator |
 | `head-minimax` | `minimax-coding-plan/MiniMax-M3` | Main MiniMax orchestrator |
 
@@ -54,11 +54,11 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 
 | Agent | Model | Purpose |
 | --- | --- | --- |
-| `alt_premium` | `openai/gpt-5.5-pro` | Highest-quality orchestration and review-heavy work |
-| `alt_openai` | `openai/gpt-5.5` | All-OpenAI workflow |
+| `alt_premium` | `openai/gpt-5.6-sol` | Highest-quality orchestration and review-heavy work |
+| `alt_openai` | `openai/gpt-5.6-terra` | All-OpenAI workflow |
 | `alt_glm_stack` | `zai-coding-plan/glm-5.3` | All-GLM workflow |
 | `alt_budget` | `zai-coding-plan/glm-4.7` | Cheap and fast routine workflow |
-| `alt_review_heavy` | `openai/gpt-5.5` | GLM implementation plus premium review |
+| `alt_review_heavy` | `openai/gpt-5.6-terra` | GLM implementation plus premium review |
 
 ## Subagents
 
@@ -71,7 +71,7 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 | `hard-impl-glm47` | `zai-coding-plan/glm-4.7` | Alternate implementation work |
 | `hard-impl-openai` | `openai/gpt-5.3-codex` | OpenAI implementation work |
 | `hard-impl-m3` | `minimax-coding-plan/MiniMax-M3` | MiniMax implementation work |
-| `premium-reviewer-gpt-5.5-pro` | `openai/gpt-5.5-pro` | Read-only final review and risk analysis |
+| `premium-reviewer-gpt-5.6-sol` | `openai/gpt-5.6-sol` | Read-only final review and risk analysis |
 
 ## Routing
 
@@ -80,11 +80,11 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 | `head-gpt` | `fast-discovery-m3`, `hard-impl-glm53` |
 | `head-glm` | `fast-discovery-m3`, `hard-impl-glm47` |
 | `head-minimax` | `fast-discovery-m3`, `hard-impl-m3` |
-| `alt_premium` | `fast-discovery-m3`, `hard-impl-openai`, `premium-reviewer-gpt-5.5-pro` |
-| `alt_openai` | `fast-openai-gpt5.4-mini`, `hard-impl-openai`, `premium-reviewer-gpt-5.5-pro` |
+| `alt_premium` | `fast-discovery-m3`, `hard-impl-openai`, `premium-reviewer-gpt-5.6-sol` |
+| `alt_openai` | `fast-openai-gpt5.4-mini`, `hard-impl-openai`, `premium-reviewer-gpt-5.6-sol` |
 | `alt_glm_stack` | `fast-glm-4.7`, `hard-impl-glm53` |
 | `alt_budget` | `fast-discovery-m3`, `hard-impl-glm47` |
-| `alt_review_heavy` | `fast-discovery-m3`, `hard-impl-glm53`, `premium-reviewer-gpt-5.5-pro` |
+| `alt_review_heavy` | `fast-discovery-m3`, `hard-impl-glm53`, `premium-reviewer-gpt-5.6-sol` |
 
 ## Validation
 
@@ -122,9 +122,9 @@ Example agent override:
 
 ```json
 "head-gpt": {
-  "description": "Primary premium orchestration head using GPT 5.5.",
+  "description": "Primary premium orchestration head using GPT 5.6 Terra.",
   "mode": "primary",
-  "model": "openai/gpt-5.5",
+  "model": "openai/gpt-5.6-terra",
   "variant": "high",
   "temperature": 0.2
 }
