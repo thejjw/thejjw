@@ -838,11 +838,13 @@ $_AiSkillsInternal = @{
     Branch                = 'main'
     SparsePath            = 'ai-skills'
     OpenCodeClaudeSkills  = @('codebase-docs', 'web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query', 'kimi-usage-query', 'deep-research', 'polish-document')
-    AntigravitySkills     = @('codebase-docs', 'session-exporter', 'agy-usage-query', 'deep-research', 'polish-document')
+    AntigravitySharedSkills  = @('codebase-docs', 'deep-research', 'polish-document')
+    AntigravityCliOnlySkills = @('session-exporter', 'agy-usage-query')
     CodexSkills           = @('export-chat-codex', 'polish-document')
     OpenCodeSkillsPath    = '.agents\skills'
     ClaudeSkillsPath      = '.claude\skills'
-    AntigravitySkillsPath = '.gemini\antigravity-cli\skills'
+    AntigravityAppSkillsPath = '.gemini\config\skills'
+    AntigravityCliSkillsPath = '.gemini\antigravity-cli\skills'
     CodexSkillsPath       = 'skills'
     OpenCodeConfigPath    = '.config\opencode\opencode.json'
 
@@ -7539,7 +7541,8 @@ function Install-AiSkills {
 .DESCRIPTION
     Uses a shallow, blobless, sparse Git clone to fetch only the ai-skills
     directory from the thejjw repository, then overwrites the configured skill
-    directories for OpenCode, Claude Code, Antigravity CLI, and Codex. External
+    directories for OpenCode, Claude Code, Antigravity App/IDE, Antigravity CLI,
+    and Codex. External
     skill sources configured in $_AiSkillsInternal.ExternalSources are
     shallow-cloned to their tip commit and installed into every tool's skill
     directory. Existing named skill directories are replaced so repeat manual
@@ -7567,12 +7570,24 @@ function Install-AiSkills {
     $tmpDir = $null
 
     $openCodeClaudeSkills = $_AiSkillsInternal.OpenCodeClaudeSkills
-    $antigravitySkills = $_AiSkillsInternal.AntigravitySkills
+    $antigravitySharedSkills = $_AiSkillsInternal.AntigravitySharedSkills
+    $antigravityCliSkills = @($antigravitySharedSkills + $_AiSkillsInternal.AntigravityCliOnlySkills | Select-Object -Unique)
     $codexSkills = $_AiSkillsInternal.CodexSkills
 
     $openCodeSkillsDir = Join-Path $env:USERPROFILE $_AiSkillsInternal.OpenCodeSkillsPath
     $claudeSkillsDir = Join-Path $env:USERPROFILE $_AiSkillsInternal.ClaudeSkillsPath
-    $antigravitySkillsDir = Join-Path $env:USERPROFILE $_AiSkillsInternal.AntigravitySkillsPath
+    $antigravityTargets = @(
+        @{
+            ToolName        = 'Antigravity Windows App and IDE'
+            DestinationRoot = Join-Path $env:USERPROFILE $_AiSkillsInternal.AntigravityAppSkillsPath
+            Skills          = $antigravitySharedSkills
+        },
+        @{
+            ToolName        = 'Antigravity CLI'
+            DestinationRoot = Join-Path $env:USERPROFILE $_AiSkillsInternal.AntigravityCliSkillsPath
+            Skills          = $antigravityCliSkills
+        }
+    )
     $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
     $codexSkillsDir = Join-Path $codexHome $_AiSkillsInternal.CodexSkillsPath
     $openCodeConfigFile = Join-Path $env:USERPROFILE $_AiSkillsInternal.OpenCodeConfigPath
@@ -7904,10 +7919,12 @@ function Install-AiSkills {
         }
         $null = Install-ExternalSkillSources -Installs $externalInstalls -DestinationRoot $claudeSkillsDir -ToolName 'Claude Code'
 
-        foreach ($skill in $antigravitySkills) {
-            Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $antigravitySkillsDir -ToolName 'Antigravity CLI'
+        foreach ($target in $antigravityTargets) {
+            foreach ($skill in $target.Skills) {
+                Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $target.DestinationRoot -ToolName $target.ToolName
+            }
+            $null = Install-ExternalSkillSources -Installs $externalInstalls -DestinationRoot $target.DestinationRoot -ToolName $target.ToolName
         }
-        $null = Install-ExternalSkillSources -Installs $externalInstalls -DestinationRoot $antigravitySkillsDir -ToolName 'Antigravity CLI'
 
         foreach ($skill in $codexSkills) {
             Copy-SkillDirectory -SkillName $skill -SourceRoot $skillsSourceDir -DestinationRoot $codexSkillsDir -ToolName 'Codex'
@@ -7917,7 +7934,8 @@ function Install-AiSkills {
         Write-Host ""
         Write-Host "[done] Installed AI skills:" -ForegroundColor Green
         Write-Host "  OpenCode and Claude Code: $($openCodeClaudeSkills -join ', ')"
-        Write-Host "  Antigravity CLI: $($antigravitySkills -join ', ')"
+        Write-Host "  Antigravity Windows App and IDE: $($antigravitySharedSkills -join ', ')"
+        Write-Host "  Antigravity CLI: $($antigravityCliSkills -join ', ')"
         Write-Host "  Codex: $($codexSkills -join ', ')"
         foreach ($install in $externalInstalls) {
             Write-Host "  All tools [$($install.Name)]: $($install.Skills -join ', ')"

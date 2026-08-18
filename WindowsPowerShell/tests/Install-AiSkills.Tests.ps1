@@ -25,6 +25,8 @@ Describe 'Install-AiSkills' {
         }
         . ([scriptblock]::Create($runConfigAst.Extent.Text))
         . ([scriptblock]::Create($runInstallerAst.Extent.Text))
+        $script:productionExternalSources = $_AiSkillsInternal.ExternalSources
+        $_AiSkillsInternal.ExternalSources = @()
         $script:copyItemCommand = Get-Command Copy-Item -CommandType Cmdlet
         $script:renameItemCommand = Get-Command Rename-Item -CommandType Cmdlet
         $script:fixtureRepo = Join-Path $TestDrive 'fixture-repo'
@@ -33,7 +35,8 @@ Describe 'Install-AiSkills' {
 
         $allSkills = @(
             $_AiSkillsInternal.OpenCodeClaudeSkills
-            $_AiSkillsInternal.AntigravitySkills
+            $_AiSkillsInternal.AntigravitySharedSkills
+            $_AiSkillsInternal.AntigravityCliOnlySkills
             $_AiSkillsInternal.CodexSkills
         ) | Select-Object -Unique
 
@@ -53,17 +56,23 @@ Describe 'Install-AiSkills' {
         Set-Content -LiteralPath (Join-Path $polishScripts 'find-related-files.ps1') -Value 'nested-script' -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $polishAgents 'openai.yaml') -Value 'nested-agent-metadata' -Encoding UTF8
 
+        $externalSkill = Join-Path $script:fixtureRepo 'external-skills\external-test-skill'
+        $null = New-Item -ItemType Directory -Path $externalSkill -Force
+        Set-Content -LiteralPath (Join-Path $externalSkill 'SKILL.md') -Value '# external-test-skill' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $externalSkill 'payload.txt') -Value 'external-payload' -Encoding UTF8
+
         & git -C $script:fixtureRepo init --initial-branch=main
         if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the test Git repository.' }
         & git -C $script:fixtureRepo config user.email 'tests@example.invalid'
         & git -C $script:fixtureRepo config user.name 'Install-AiSkills Tests'
         # Ignore any machine-wide Git exclude rules when building the fixture.
-        & git -C $script:fixtureRepo add --force ai-skills
+        & git -C $script:fixtureRepo add --force ai-skills external-skills
         $commitOutput = & git -C $script:fixtureRepo -c commit.gpgsign=false commit -m 'test fixture' 2>&1
         if ($LASTEXITCODE -ne 0) { throw "Could not commit the test Git fixture: $($commitOutput -join ' ')" }
     }
 
     BeforeEach {
+        $_AiSkillsInternal.ExternalSources = @()
         $script:originalUserProfile = $env:USERPROFILE
         $script:originalCodexHome = $env:CODEX_HOME
         $env:USERPROFILE = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
@@ -74,6 +83,10 @@ Describe 'Install-AiSkills' {
     AfterEach {
         $env:USERPROFILE = $script:originalUserProfile
         $env:CODEX_HOME = $script:originalCodexHome
+    }
+
+    AfterAll {
+        $_AiSkillsInternal.ExternalSources = $script:productionExternalSources
     }
 
     It 'installs and replaces complete skill directories without leftovers' {
@@ -98,6 +111,56 @@ Describe 'Install-AiSkills' {
         Get-Content -LiteralPath (Join-Path $skillPath 'references\source-reconciliation.md') | Should -Be 'nested-reference'
         Get-Content -LiteralPath (Join-Path $skillPath 'scripts\find-related-files.ps1') | Should -Be 'nested-script'
         Get-Content -LiteralPath (Join-Path $skillPath 'agents\openai.yaml') | Should -Be 'nested-agent-metadata'
+    }
+
+    It 'routes shared and CLI-only skills to the current Antigravity roots' {
+        $appRoot = Join-Path $env:USERPROFILE '.gemini\config\skills'
+        $cliRoot = Join-Path $env:USERPROFILE '.gemini\antigravity-cli\skills'
+        $null = New-Item -ItemType Directory -Path (Join-Path $appRoot 'unrelated-skill') -Force
+        Set-Content -LiteralPath (Join-Path $appRoot 'unrelated-skill\keep.txt') -Value 'keep'
+
+        Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main
+
+        foreach ($root in @($appRoot, $cliRoot)) {
+            $skillPath = Join-Path $root 'polish-document'
+            Test-Path -LiteralPath (Join-Path $skillPath 'SKILL.md') | Should -BeTrue
+            Get-Content -LiteralPath (Join-Path $skillPath 'references\source-reconciliation.md') | Should -Be 'nested-reference'
+            Get-Content -LiteralPath (Join-Path $skillPath 'scripts\find-related-files.ps1') | Should -Be 'nested-script'
+            Get-Content -LiteralPath (Join-Path $skillPath 'agents\openai.yaml') | Should -Be 'nested-agent-metadata'
+        }
+        Test-Path -LiteralPath (Join-Path $appRoot 'agy-usage-query') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $appRoot 'session-exporter') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $cliRoot 'agy-usage-query\SKILL.md') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $cliRoot 'session-exporter\SKILL.md') | Should -BeTrue
+        Get-Content -LiteralPath (Join-Path $appRoot 'unrelated-skill\keep.txt') | Should -Be 'keep'
+
+        foreach ($root in @($appRoot, $cliRoot)) {
+            Set-Content -LiteralPath (Join-Path $root 'polish-document\stale.txt') -Value 'stale'
+        }
+        Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main
+        foreach ($root in @($appRoot, $cliRoot)) {
+            Test-Path -LiteralPath (Join-Path $root 'polish-document\stale.txt') | Should -BeFalse
+        }
+        Get-Content -LiteralPath (Join-Path $appRoot 'unrelated-skill\keep.txt') | Should -Be 'keep'
+    }
+
+    It 'installs external skills into both current Antigravity roots' {
+        $_AiSkillsInternal.ExternalSources = @(
+            @{
+                Name       = 'fixture-external'
+                RepoUrl    = $script:fixtureRepo
+                Branch     = 'main'
+                SparsePath = 'external-skills'
+                Skills     = @('external-test-skill')
+            }
+        )
+
+        Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main
+
+        foreach ($relativeRoot in @('.gemini\config\skills', '.gemini\antigravity-cli\skills')) {
+            $payload = Join-Path $env:USERPROFILE "$relativeRoot\external-test-skill\payload.txt"
+            Get-Content -LiteralPath $payload | Should -Be 'external-payload'
+        }
     }
 
     It 'preserves the previous installation when staging copy fails' {
@@ -126,6 +189,23 @@ Describe 'Install-AiSkills' {
         }
 
         { Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main } | Should -Throw '*promotion failed*'
+
+        Get-Content -LiteralPath (Join-Path $skillPath 'old.txt') | Should -Be 'old'
+        Test-Path -LiteralPath "$skillPath.tmp-install" | Should -BeFalse
+        Test-Path -LiteralPath "$skillPath.backup-install" | Should -BeFalse
+    }
+
+    It 'restores the previous App and IDE installation when its copy fails' {
+        $skillPath = Join-Path $env:USERPROFILE '.gemini\config\skills\codebase-docs'
+        $null = New-Item -ItemType Directory -Path $skillPath -Force
+        Set-Content -LiteralPath (Join-Path $skillPath 'old.txt') -Value 'old'
+        Mock Copy-Item {
+            param($Path, $Destination, $Recurse, $Force)
+            if ($Destination -like '*\.gemini\config\skills\*') { throw 'App copy failed' }
+            & $script:copyItemCommand -Path $Path -Destination $Destination -Recurse:$Recurse -Force:$Force -ErrorAction Stop
+        }
+
+        { Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main } | Should -Throw '*App copy failed*'
 
         Get-Content -LiteralPath (Join-Path $skillPath 'old.txt') | Should -Be 'old'
         Test-Path -LiteralPath "$skillPath.tmp-install" | Should -BeFalse
