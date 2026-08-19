@@ -205,6 +205,9 @@ Describe 'AI API key credential helpers' {
         $script:removedCredentials[0] | Should -Be $grouped
         [Environment]::GetEnvironmentVariable('TEST_GROUPED_API_KEY', 'Process') | Should -BeNullOrEmpty
         [Environment]::GetEnvironmentVariable('TEST_OTHER_API_KEY', 'Process') | Should -Be 'other-value'
+        $script:hostMessages | Should -Contain (
+            'Scrubbed 1 credential(s) from the api-key group and cleared 1 process variable(s).'
+        )
     }
 
     It 'does not mutate the vault or process environment with WhatIf' {
@@ -225,7 +228,22 @@ Describe 'AI API key credential helpers' {
 
         $script:removedCredentials.Count | Should -Be 0
         [Environment]::GetEnvironmentVariable('KIMI_CODE_PLAN_API_KEY', 'Process') | Should -Be 'kimi-value'
-        $script:hostMessages | Should -Contain 'Removed 0 credential(s) and cleared 0 process variable(s).'
+        $script:hostMessages | Should -Contain (
+            'Scrubbed 0 credential(s) from the api-key group and cleared 0 process variable(s).'
+        )
+    }
+
+    It 'lists each successfully scrubbed resource in verbose mode' {
+        $first = [pscustomobject]@{ Resource = 'TEST_GROUPED_API_KEY'; UserName = 'api-key' }
+        $second = [pscustomobject]@{ Resource = 'KIMI_CODE_PLAN_API_KEY'; UserName = 'api-key' }
+        [void]$script:vaultCredentials.Add($first)
+        [void]$script:vaultCredentials.Add($second)
+
+        $verboseMessages = @(Remove-AiApiKeysFromCS -Confirm:$false -Verbose 4>&1)
+        $renderedMessages = @($verboseMessages | ForEach-Object { $_.ToString() })
+
+        $renderedMessages | Should -Contain 'Scrubbed credential: TEST_GROUPED_API_KEY'
+        $renderedMessages | Should -Contain 'Scrubbed credential: KIMI_CODE_PLAN_API_KEY'
     }
 
     It 'derives cleanup names from the credential group instead of a managed-name list' {

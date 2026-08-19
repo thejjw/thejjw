@@ -8807,6 +8807,9 @@ function Remove-AiApiKeysFromCS {
     .EXAMPLE
         Remove-AiApiKeysFromCS -Confirm:$false
 
+    .EXAMPLE
+        Remove-AiApiKeysFromCS -Verbose
+
     .NOTES
         Author: jjw(@thejjw)
         Last Edit: 2026-08
@@ -8838,6 +8841,7 @@ function Remove-AiApiKeysFromCS {
         try {
             $vault.Remove($credential)
             $removedCount++
+            Write-Verbose "Scrubbed credential: $($credential.Resource)"
         }
         catch {
             $failureCount++
@@ -8859,12 +8863,10 @@ function Remove-AiApiKeysFromCS {
         }
     }
 
-    $message = "Removed $removedCount credential(s) and cleared $clearedCount process variable(s)."
+    $message = "Scrubbed $removedCount credential(s) from the api-key group and cleared $clearedCount process variable(s)."
+    Write-Host $message -ForegroundColor Green
     if ($failureCount -gt 0) {
-        Write-Warning "$message $failureCount operation(s) failed."
-    }
-    else {
-        Write-Host $message -ForegroundColor Green
+        Write-Warning "$failureCount operation(s) failed."
     }
 }
 
