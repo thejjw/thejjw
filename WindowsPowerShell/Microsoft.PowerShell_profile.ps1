@@ -8791,6 +8791,91 @@ function Load-AiApiKeysFromCS {
     }
 }
 
+function Remove-AiApiKeysFromCS {
+    <#
+    .SYNOPSIS
+        Removes the profile's API keys from Windows Credential Manager and the current process.
+
+    .DESCRIPTION
+        Removes every credential grouped under the api-key username in Windows PasswordVault.
+        Also clears the corresponding current-process environment variables, including the
+        profile's currently managed API-key names. User- and Machine-scope variables are not changed.
+
+    .EXAMPLE
+        Remove-AiApiKeysFromCS -WhatIf
+
+    .EXAMPLE
+        Remove-AiApiKeysFromCS -Confirm:$false
+
+    .NOTES
+        Author: jjw(@thejjw)
+        Last Edit: 2026-08
+    #>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param()
+
+    $target = "Windows Credential Manager entries grouped as 'api-key' and matching process variables"
+    if (-not $PSCmdlet.ShouldProcess($target, 'Remove AI API keys')) {
+        return
+    }
+
+    [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+    $vault = New-Object Windows.Security.Credentials.PasswordVault
+    try {
+        # RetrieveAll returns a stable snapshot, so removing entries while iterating is safe.
+        $credentials = @($vault.RetrieveAll() | Where-Object { $_.UserName -eq 'api-key' })
+    }
+    catch {
+        Write-Error "Failed to enumerate Windows Credential Manager: $_"
+        return
+    }
+
+    $names = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')) {
+        [void]$names.Add($name)
+    }
+    foreach ($credential in $credentials) {
+        if (-not [string]::IsNullOrWhiteSpace($credential.Resource)) {
+            [void]$names.Add($credential.Resource)
+        }
+    }
+
+    $removedCount = 0
+    $failureCount = 0
+    foreach ($credential in $credentials) {
+        try {
+            $vault.Remove($credential)
+            $removedCount++
+        }
+        catch {
+            $failureCount++
+            Write-Error "Failed to remove credential '$($credential.Resource)': $_" -ErrorAction Continue
+        }
+    }
+
+    $clearedCount = 0
+    foreach ($name in $names) {
+        try {
+            if ($null -ne [Environment]::GetEnvironmentVariable($name, 'Process')) {
+                [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+                $clearedCount++
+            }
+        }
+        catch {
+            $failureCount++
+            Write-Error "Failed to clear process variable '$name': $_" -ErrorAction Continue
+        }
+    }
+
+    $message = "Removed $removedCount credential(s) and cleared $clearedCount process variable(s)."
+    if ($failureCount -gt 0) {
+        Write-Warning "$message $failureCount operation(s) failed."
+    }
+    else {
+        Write-Host $message -ForegroundColor Green
+    }
+}
+
 # https://code.claude.com/docs/en/model-config#special-model-behavior
 # default model setting
 # The behavior of default depends on your account type:

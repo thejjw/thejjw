@@ -11,7 +11,7 @@ Describe 'AI API key credential helpers' {
         if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
 
         $script:functionAsts = @{}
-        foreach ($functionName in @('Set-AiApiKeysCS', 'Load-AiApiKeysFromCS')) {
+        foreach ($functionName in @('Set-AiApiKeysCS', 'Load-AiApiKeysFromCS', 'Remove-AiApiKeysFromCS')) {
             $functionAst = $ast.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -29,17 +29,25 @@ Describe 'AI API key credential helpers' {
         }, $true)
         $script:deprecatedFunctionExists = $null -ne $deprecatedFunction
 
-        . ([scriptblock]::Create($script:functionAsts['Set-AiApiKeysCS'].Extent.Text))
+        foreach ($functionName in $script:functionAsts.Keys) {
+            . ([scriptblock]::Create($script:functionAsts[$functionName].Extent.Text))
+        }
     }
 
     BeforeEach {
         $script:savedCredentials = [System.Collections.Generic.List[object]]::new()
         $script:existingCredentials = @{}
         $script:failBailianSave = $false
+        $script:failRemoveResource = $null
+        $script:failRetrieveAll = $false
         $script:hostMessages = [System.Collections.Generic.List[string]]::new()
+        $script:removedCredentials = [System.Collections.Generic.List[object]]::new()
+        $script:vaultCredentials = [System.Collections.Generic.List[object]]::new()
         $script:vault = [pscustomobject]@{
-            Saved   = $script:savedCredentials
+            All      = $script:vaultCredentials
             Existing = $script:existingCredentials
+            Removed  = $script:removedCredentials
+            Saved    = $script:savedCredentials
         }
         $script:vault | Add-Member -MemberType ScriptMethod -Name Retrieve -Value {
             param($resource, $userName)
@@ -56,6 +64,27 @@ Describe 'AI API key credential helpers' {
             }
 
             [void]$this.Saved.Add($credential)
+        }
+        $script:vault | Add-Member -MemberType ScriptMethod -Name RetrieveAll -Value {
+            if ($script:failRetrieveAll) { throw 'Simulated vault enumeration failure.' }
+            return @($this.All)
+        }
+        $script:vault | Add-Member -MemberType ScriptMethod -Name Remove -Value {
+            param($credential)
+            if ($credential.Resource -eq $script:failRemoveResource) {
+                throw "Simulated removal failure: $($credential.Resource)"
+            }
+            [void]$this.Removed.Add($credential)
+        }
+
+        $script:processNames = @(
+            'DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY',
+            'QWEN_TOKEN_PLAN_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY',
+            'NVIDIA_API_KEY', 'OPENROUTER_API_KEY', 'TEST_GROUPED_API_KEY', 'TEST_OTHER_API_KEY'
+        )
+        $script:originalProcessValues = @{}
+        foreach ($name in $script:processNames) {
+            $script:originalProcessValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
         }
 
         Mock New-Object {
@@ -80,6 +109,12 @@ Describe 'AI API key credential helpers' {
             return 'n'
         }
         Mock Write-Host { [void]$script:hostMessages.Add([string]$Object) }
+    }
+
+    AfterEach {
+        foreach ($name in $script:processNames) {
+            [Environment]::SetEnvironmentVariable($name, $script:originalProcessValues[$name], 'Process')
+        }
     }
 
     It 'removes the deprecated Set-AiApiKeys command' {
@@ -158,5 +193,69 @@ Describe 'AI API key credential helpers' {
         $loaderText | Should -Match 'KIMI_CODE_PLAN_API_KEY'
         $setterText | Should -Not -Match ([regex]::Escape($deprecatedKimiName))
         $loaderText | Should -Not -Match ([regex]::Escape($deprecatedKimiName))
+    }
+
+    It 'removes only grouped credentials and clears their process variables' {
+        $grouped = [pscustomobject]@{ Resource = 'TEST_GROUPED_API_KEY'; UserName = 'api-key' }
+        $unrelated = [pscustomobject]@{ Resource = 'TEST_OTHER_API_KEY'; UserName = 'other-group' }
+        [void]$script:vaultCredentials.Add($grouped)
+        [void]$script:vaultCredentials.Add($unrelated)
+        [Environment]::SetEnvironmentVariable('TEST_GROUPED_API_KEY', 'grouped-value', 'Process')
+        [Environment]::SetEnvironmentVariable('TEST_OTHER_API_KEY', 'other-value', 'Process')
+
+        Remove-AiApiKeysFromCS -Confirm:$false
+
+        $script:removedCredentials.Count | Should -Be 1
+        $script:removedCredentials[0] | Should -Be $grouped
+        [Environment]::GetEnvironmentVariable('TEST_GROUPED_API_KEY', 'Process') | Should -BeNullOrEmpty
+        [Environment]::GetEnvironmentVariable('TEST_OTHER_API_KEY', 'Process') | Should -Be 'other-value'
+    }
+
+    It 'does not mutate the vault or process environment with WhatIf' {
+        $credential = [pscustomobject]@{ Resource = 'TEST_GROUPED_API_KEY'; UserName = 'api-key' }
+        [void]$script:vaultCredentials.Add($credential)
+        [Environment]::SetEnvironmentVariable('TEST_GROUPED_API_KEY', 'grouped-value', 'Process')
+
+        Remove-AiApiKeysFromCS -WhatIf
+
+        $script:removedCredentials.Count | Should -Be 0
+        [Environment]::GetEnvironmentVariable('TEST_GROUPED_API_KEY', 'Process') | Should -Be 'grouped-value'
+    }
+
+    It 'clears managed process variables when the grouped vault is empty' {
+        [Environment]::SetEnvironmentVariable('KIMI_CODE_PLAN_API_KEY', 'kimi-value', 'Process')
+
+        Remove-AiApiKeysFromCS -Confirm:$false
+
+        $script:removedCredentials.Count | Should -Be 0
+        [Environment]::GetEnvironmentVariable('KIMI_CODE_PLAN_API_KEY', 'Process') | Should -BeNullOrEmpty
+        $script:hostMessages | Should -Contain 'Removed 0 credential(s) and cleared 1 process variable(s).'
+    }
+
+    It 'makes no changes when vault enumeration fails' {
+        $script:failRetrieveAll = $true
+        [Environment]::SetEnvironmentVariable('KIMI_CODE_PLAN_API_KEY', 'kimi-value', 'Process')
+
+        Remove-AiApiKeysFromCS -Confirm:$false -ErrorAction SilentlyContinue
+
+        $script:removedCredentials.Count | Should -Be 0
+        [Environment]::GetEnvironmentVariable('KIMI_CODE_PLAN_API_KEY', 'Process') | Should -Be 'kimi-value'
+    }
+
+    It 'continues after an individual credential removal fails' {
+        $failed = [pscustomobject]@{ Resource = 'TEST_GROUPED_API_KEY'; UserName = 'api-key' }
+        $removed = [pscustomobject]@{ Resource = 'KIMI_CODE_PLAN_API_KEY'; UserName = 'api-key' }
+        [void]$script:vaultCredentials.Add($failed)
+        [void]$script:vaultCredentials.Add($removed)
+        $script:failRemoveResource = 'TEST_GROUPED_API_KEY'
+        [Environment]::SetEnvironmentVariable('TEST_GROUPED_API_KEY', 'failed-value', 'Process')
+        [Environment]::SetEnvironmentVariable('KIMI_CODE_PLAN_API_KEY', 'removed-value', 'Process')
+
+        Remove-AiApiKeysFromCS -Confirm:$false 2>$null
+
+        $script:removedCredentials.Count | Should -Be 1
+        $script:removedCredentials[0] | Should -Be $removed
+        [Environment]::GetEnvironmentVariable('TEST_GROUPED_API_KEY', 'Process') | Should -BeNullOrEmpty
+        [Environment]::GetEnvironmentVariable('KIMI_CODE_PLAN_API_KEY', 'Process') | Should -BeNullOrEmpty
     }
 }
