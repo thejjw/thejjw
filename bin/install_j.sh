@@ -70,7 +70,7 @@ _jjw_aikeys_spec() {
     'DEEPSEEK_API_KEY||' \
     'ZAI_API_KEY||' \
     'MINIMAX_API_KEY||' \
-    'KIMI_API_KEY||' \
+    'KIMI_CODE_PLAN_API_KEY||' \
     'QWEN_TOKEN_PLAN_API_KEY|BAILIAN_TOKEN_PLAN_API_KEY|Qwen and Bailian aliases' \
     'GEMINI_API_KEY||' \
     'NVIDIA_API_KEY||' \
@@ -1625,11 +1625,10 @@ else
 # claudek - Launch the maximum-effort Kimi profile.
 claudek() {
   local key
-  _jjw_prepare_secret "${KIMI_API_KEY:-}" || return 1
-  key="$(_jjw_secret k "${KIMI_API_KEY:-}")" || return 1
+  _jjw_prepare_secret "${KIMI_CODE_PLAN_API_KEY:-}" || return 1
+  key="$(_jjw_secret k "${KIMI_CODE_PLAN_API_KEY:-}")" || return 1
 
   env -u ANTHROPIC_AUTH_TOKEN \
-    KIMI_API_KEY="$key" \
     ANTHROPIC_BASE_URL="https://api.kimi.com/coding/" \
     ANTHROPIC_API_KEY="$key" \
     ANTHROPIC_MODEL="k3[1m]" \
@@ -1929,8 +1928,8 @@ claudekr() {
   [[ -z "$host" ]] && { echo "claudekr: host is required" >&2; echo "  Usage: claudekr <user@host> [port]" >&2; return 1; }
 
   local key
-  _jjw_prepare_secret "${KIMI_API_KEY:-}" || return 1
-  key="$(_jjw_secret k "${KIMI_API_KEY:-}")" || return 1
+  _jjw_prepare_secret "${KIMI_CODE_PLAN_API_KEY:-}" || return 1
+  key="$(_jjw_secret k "${KIMI_CODE_PLAN_API_KEY:-}")" || return 1
 
   # Mirror claudek: route every Claude Code model slot through Kimi K3 1M.
   remote_claude_base "$host" "$key" "$port" \

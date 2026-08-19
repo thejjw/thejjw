@@ -148,4 +148,15 @@ Describe 'AI API key credential helpers' {
         $setterNames | Should -Not -Match 'BAILIAN_TOKEN_PLAN_API_KEY'
         $loaderNames | Should -Match 'BAILIAN_TOKEN_PLAN_API_KEY'
     }
+
+    It 'uses the dedicated Kimi Code plan credential name' {
+        $setterText = $script:functionAsts['Set-AiApiKeysCS'].Extent.Text
+        $loaderText = $script:functionAsts['Load-AiApiKeysFromCS'].Extent.Text
+        $deprecatedKimiName = 'KIMI_' + 'API_KEY'
+
+        $setterText | Should -Match 'KIMI_CODE_PLAN_API_KEY'
+        $loaderText | Should -Match 'KIMI_CODE_PLAN_API_KEY'
+        $setterText | Should -Not -Match ([regex]::Escape($deprecatedKimiName))
+        $loaderText | Should -Not -Match ([regex]::Escape($deprecatedKimiName))
+    }
 }

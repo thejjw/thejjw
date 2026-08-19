@@ -56,7 +56,7 @@ load_installer_functions() {
 
 # Clear every environment variable managed by the vault.
 clear_managed_environment() {
-  unset DEEPSEEK_API_KEY ZAI_API_KEY MINIMAX_API_KEY KIMI_API_KEY
+  unset DEEPSEEK_API_KEY ZAI_API_KEY MINIMAX_API_KEY KIMI_CODE_PLAN_API_KEY
   unset QWEN_TOKEN_PLAN_API_KEY BAILIAN_TOKEN_PLAN_API_KEY
   unset GEMINI_API_KEY NVIDIA_API_KEY OPENROUTER_API_KEY
 }
@@ -108,7 +108,7 @@ _jjw_read_hidden() {
     *DEEPSEEK_API_KEY*) printf '%s' "${PROMPT_DEEPSEEK:-}" ;;
     *ZAI_API_KEY*) printf '%s' "${PROMPT_ZAI:-}" ;;
     *MINIMAX_API_KEY*) printf '%s' "${PROMPT_MINIMAX:-}" ;;
-    *KIMI_API_KEY*) printf '%s' "${PROMPT_KIMI:-}" ;;
+    *KIMI_CODE_PLAN_API_KEY*) printf '%s' "${PROMPT_KIMI:-}" ;;
     *QWEN_TOKEN_PLAN_API_KEY*) printf '%s' "${PROMPT_QWEN:-}" ;;
     *GEMINI_API_KEY*) printf '%s' "${PROMPT_GEMINI:-}" ;;
     *NVIDIA_API_KEY*) printf '%s' "${PROMPT_NVIDIA:-}" ;;
@@ -170,11 +170,11 @@ test_public_interface() {
 test_metadata() {
   local expected name runtime count
   new_case metadata
-  expected=$'DEEPSEEK_API_KEY||\nZAI_API_KEY||\nMINIMAX_API_KEY||\nKIMI_API_KEY||\nQWEN_TOKEN_PLAN_API_KEY|BAILIAN_TOKEN_PLAN_API_KEY|Qwen and Bailian aliases\nGEMINI_API_KEY||\nNVIDIA_API_KEY||\nOPENROUTER_API_KEY||'
+  expected=$'DEEPSEEK_API_KEY||\nZAI_API_KEY||\nMINIMAX_API_KEY||\nKIMI_CODE_PLAN_API_KEY||\nQWEN_TOKEN_PLAN_API_KEY|BAILIAN_TOKEN_PLAN_API_KEY|Qwen and Bailian aliases\nGEMINI_API_KEY||\nNVIDIA_API_KEY||\nOPENROUTER_API_KEY||'
   assert_eq 'JJW-AIKEYS-V1' "$(_jjw_aikeys_header)" 'vault header'
   assert_eq "$expected" "$(_jjw_aikeys_spec)" 'key specification'
 
-  for name in DEEPSEEK_API_KEY ZAI_API_KEY MINIMAX_API_KEY KIMI_API_KEY \
+  for name in DEEPSEEK_API_KEY ZAI_API_KEY MINIMAX_API_KEY KIMI_CODE_PLAN_API_KEY \
     QWEN_TOKEN_PLAN_API_KEY BAILIAN_TOKEN_PLAN_API_KEY GEMINI_API_KEY \
     NVIDIA_API_KEY OPENROUTER_API_KEY; do
     _jjw_aikeys_name_allowed "$name" || fail "allowlisted name rejected: $name"
@@ -186,7 +186,7 @@ test_metadata() {
     $0 == "# <<< jjw-aikeys runtime <<<" { emit = 0 }
     emit
   ' "$INSTALLER")"
-  for name in DEEPSEEK_API_KEY ZAI_API_KEY MINIMAX_API_KEY KIMI_API_KEY \
+  for name in DEEPSEEK_API_KEY ZAI_API_KEY MINIMAX_API_KEY KIMI_CODE_PLAN_API_KEY \
     QWEN_TOKEN_PLAN_API_KEY BAILIAN_TOKEN_PLAN_API_KEY GEMINI_API_KEY \
     NVIDIA_API_KEY OPENROUTER_API_KEY; do
     count="$(grep -oF "$name" <<< "$runtime" | wc -l | tr -d ' ')"
@@ -205,7 +205,7 @@ test_initial_creation() {
 
   cloakj > "${CASE_ROOT}/stdout"
   file="$(vault_path)"
-  expected=$'JJW-AIKEYS-V1\nDEEPSEEK_API_KEY=deep=alpha\nZAI_API_KEY=zai-alpha\nMINIMAX_API_KEY=minimax-alpha\nKIMI_API_KEY=kimi-alpha\nQWEN_TOKEN_PLAN_API_KEY=qwen=alpha\nBAILIAN_TOKEN_PLAN_API_KEY=qwen=alpha\nGEMINI_API_KEY=gemini-alpha\nNVIDIA_API_KEY=nvidia-alpha\nOPENROUTER_API_KEY=openrouter-alpha'
+  expected=$'JJW-AIKEYS-V1\nDEEPSEEK_API_KEY=deep=alpha\nZAI_API_KEY=zai-alpha\nMINIMAX_API_KEY=minimax-alpha\nKIMI_CODE_PLAN_API_KEY=kimi-alpha\nQWEN_TOKEN_PLAN_API_KEY=qwen=alpha\nBAILIAN_TOKEN_PLAN_API_KEY=qwen=alpha\nGEMINI_API_KEY=gemini-alpha\nNVIDIA_API_KEY=nvidia-alpha\nOPENROUTER_API_KEY=openrouter-alpha'
   assert_eq "$expected" "$(command cat "$file")" 'canonical payload'
   assert_mode 700 "${file%/*}"
   assert_mode 600 "$file"
@@ -220,7 +220,7 @@ test_initial_creation() {
     'Enter DEEPSEEK_API_KEY (blank skips): ' \
     'Enter ZAI_API_KEY (blank skips): ' \
     'Enter MINIMAX_API_KEY (blank skips): ' \
-    'Enter KIMI_API_KEY (blank skips): ' \
+    'Enter KIMI_CODE_PLAN_API_KEY (blank skips): ' \
     'Enter QWEN_TOKEN_PLAN_API_KEY (blank skips): ' \
     'Enter GEMINI_API_KEY (blank skips): ' \
     'Enter NVIDIA_API_KEY (blank skips): ' \
@@ -246,7 +246,7 @@ test_missing_only_update() {
   printf '%s\n' \
     'Enter ZAI_API_KEY (blank skips): ' \
     'Enter MINIMAX_API_KEY (blank skips): ' \
-    'Enter KIMI_API_KEY (blank skips): ' \
+    'Enter KIMI_CODE_PLAN_API_KEY (blank skips): ' \
     'Enter GEMINI_API_KEY (blank skips): ' \
     'Enter NVIDIA_API_KEY (blank skips): ' \
     'Enter OPENROUTER_API_KEY (blank skips): ' > "$expected_prompts"
@@ -267,7 +267,7 @@ test_missing_only_update() {
 test_forced_update() {
   local file before expected_prompts
   new_case force
-  write_vault $'JJW-AIKEYS-V1\nDEEPSEEK_API_KEY=old-deep\nZAI_API_KEY=old-zai\nMINIMAX_API_KEY=old-minimax\nKIMI_API_KEY=old-kimi\nQWEN_TOKEN_PLAN_API_KEY=old-qwen\nBAILIAN_TOKEN_PLAN_API_KEY=old-qwen\nGEMINI_API_KEY=old-gemini\nNVIDIA_API_KEY=old-nvidia\nOPENROUTER_API_KEY=old-openrouter'
+  write_vault $'JJW-AIKEYS-V1\nDEEPSEEK_API_KEY=old-deep\nZAI_API_KEY=old-zai\nMINIMAX_API_KEY=old-minimax\nKIMI_CODE_PLAN_API_KEY=old-kimi\nQWEN_TOKEN_PLAN_API_KEY=old-qwen\nBAILIAN_TOKEN_PLAN_API_KEY=old-qwen\nGEMINI_API_KEY=old-gemini\nNVIDIA_API_KEY=old-nvidia\nOPENROUTER_API_KEY=old-openrouter'
   file="$(vault_path)"
   export PROMPT_DEEPSEEK='new-deep'
   cloakj --force > "${CASE_ROOT}/stdout"
@@ -279,7 +279,7 @@ test_forced_update() {
     'Enter DEEPSEEK_API_KEY (blank keeps stored value): ' \
     'Enter ZAI_API_KEY (blank keeps stored value): ' \
     'Enter MINIMAX_API_KEY (blank keeps stored value): ' \
-    'Enter KIMI_API_KEY (blank keeps stored value): ' \
+    'Enter KIMI_CODE_PLAN_API_KEY (blank keeps stored value): ' \
     'Enter QWEN_TOKEN_PLAN_API_KEY (blank keeps stored value): ' \
     'Enter GEMINI_API_KEY (blank keeps stored value): ' \
     'Enter NVIDIA_API_KEY (blank keeps stored value): ' \

@@ -6533,7 +6533,7 @@ function claudek {
     Launches Claude Code through the Kimi Code endpoint.
 
 .DESCRIPTION
-    Reads KIMI_API_KEY from the current process, Windows Credential Manager, or
+    Reads KIMI_CODE_PLAN_API_KEY from the current process, Windows Credential Manager, or
     legacy User environment, then temporarily configures Claude Code to use Kimi
     K3 with a 1M context window. Restores the previous environment after Claude exits.
 
@@ -6547,10 +6547,10 @@ function claudek {
     Author: jjw(@thejjw)
     Last Edit: 2026-07
 #>
-    $key = Get-AiApiKey 'KIMI_API_KEY'
+    $key = Get-AiApiKey 'KIMI_CODE_PLAN_API_KEY'
 
     if (-not $key) {
-        Write-Host "KIMI_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host "KIMI_CODE_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
@@ -6619,14 +6619,14 @@ function Invoke-RemoteClaudeCodeK {
 Runs Claude Code on a remote SSH endpoint through Kimi Code.
 
 .DESCRIPTION
-Reads KIMI_API_KEY when ApiKey is omitted, then launches the shared temporary
+Reads KIMI_CODE_PLAN_API_KEY when ApiKey is omitted, then launches the shared temporary
 remote Claude environment with the same K3 1M model routing as claudek.
 
 .PARAMETER RemoteHost
 SSH hostname, IP address, or legacy user@host target.
 
 .PARAMETER ApiKey
-Kimi Code API key. Defaults to KIMI_API_KEY from the configured credential sources.
+Kimi Code API key. Defaults to KIMI_CODE_PLAN_API_KEY from the configured credential sources.
 
 .PARAMETER Port
 SSH port to connect to. Defaults to 22.
@@ -6662,11 +6662,11 @@ Last Edit: 2026-07
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        $ApiKey = Get-AiApiKey 'KIMI_API_KEY'
+        $ApiKey = Get-AiApiKey 'KIMI_CODE_PLAN_API_KEY'
     }
 
     if (-not $ApiKey) {
-        Write-Host "KIMI_API_KEY is not set. Aborting." -ForegroundColor Red
+        Write-Host "KIMI_CODE_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
@@ -8650,7 +8650,7 @@ function Set-AiApiKeysCS {
     # Windows PowerShell 5.1 and PowerShell 7+ on Windows.
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     # All keys share a single resource userName so they form a logical group in
     # Credential Manager and can be enumerated/cleared together.
     $userName = 'api-key'
@@ -8762,7 +8762,7 @@ function Load-AiApiKeysFromCS {
     )
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
     $userName = 'api-key'
 
     $loadedCount = 0
@@ -9277,7 +9277,7 @@ Set-Alias -Name aiu -Value Invoke-AiUpgrade
 # and run the currently loaded usage functions. Call the provider functions after
 # the vault credentials load further down (Load-AiApiKeysFromCS) so
 # $env:MINIMAX_API_KEY, $env:ZAI_API_KEY, $env:DEEPSEEK_API_KEY, and
-# $env:KIMI_API_KEY are populated.
+# $env:KIMI_CODE_PLAN_API_KEY are populated.
 
 
 # --- Get-MinimaxUsage ------------------------------------------------------
@@ -9840,12 +9840,12 @@ function Get-KimiUsage {
     Queries Kimi Code membership quota, rolling limits, and Extra Usage status.
 .DESCRIPTION
     Calls the private https://api.kimi.com/coding/v1/usages endpoint with the
-    Kimi Code API key in $env:KIMI_API_KEY. Reports membership details, weekly
+    Kimi Code API key in $env:KIMI_CODE_PLAN_API_KEY. Reports membership details, weekly
     quota, rolling rate windows, local reset times, concurrent-session limit,
     aggregate quota, and optional Extra Usage wallet fields. Stores the parsed
     response in $Global:kimiLastQuery and returns it.
 .PARAMETER ApiKey
-    Kimi Code API key. Defaults to $env:KIMI_API_KEY.
+    Kimi Code API key. Defaults to $env:KIMI_CODE_PLAN_API_KEY.
 .PARAMETER BaseUrl
     Kimi Code OpenAI-compatible base URL. Defaults to KIMI_CODE_BASE_URL, then
     https://api.kimi.com/coding/v1. The function appends /usages.
@@ -9870,7 +9870,7 @@ function Get-KimiUsage {
 #>
     [CmdletBinding()]
     param(
-        [string]$ApiKey = $env:KIMI_API_KEY,
+        [string]$ApiKey = $env:KIMI_CODE_PLAN_API_KEY,
         [string]$BaseUrl = $env:KIMI_CODE_BASE_URL,
         [ValidateRange(1, 300)]
         [int]$TimeoutSec = 8,
@@ -9886,7 +9886,7 @@ function Get-KimiUsage {
     $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        Write-Error 'KIMI_API_KEY not set (env var or -ApiKey).'
+        Write-Error 'KIMI_CODE_PLAN_API_KEY not set (env var or -ApiKey).'
         return
     }
     if ($CriticalPercent -gt $LowPercent) {
