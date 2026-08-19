@@ -8798,8 +8798,8 @@ function Remove-AiApiKeysFromCS {
 
     .DESCRIPTION
         Removes every credential grouped under the api-key username in Windows PasswordVault.
-        Also clears the corresponding current-process environment variables, including the
-        profile's currently managed API-key names. User- and Machine-scope variables are not changed.
+        Also clears the corresponding current-process environment variable for each grouped
+        credential resource. User- and Machine-scope variables are not changed.
 
     .EXAMPLE
         Remove-AiApiKeysFromCS -WhatIf
@@ -8830,15 +8830,7 @@ function Remove-AiApiKeysFromCS {
         return
     }
 
-    $names = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($name in @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')) {
-        [void]$names.Add($name)
-    }
-    foreach ($credential in $credentials) {
-        if (-not [string]::IsNullOrWhiteSpace($credential.Resource)) {
-            [void]$names.Add($credential.Resource)
-        }
-    }
+    $names = @($credentials.Resource | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
 
     $removedCount = 0
     $failureCount = 0

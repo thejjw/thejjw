@@ -77,11 +77,7 @@ Describe 'AI API key credential helpers' {
             [void]$this.Removed.Add($credential)
         }
 
-        $script:processNames = @(
-            'DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY',
-            'QWEN_TOKEN_PLAN_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY',
-            'NVIDIA_API_KEY', 'OPENROUTER_API_KEY', 'TEST_GROUPED_API_KEY', 'TEST_OTHER_API_KEY'
-        )
+        $script:processNames = @('KIMI_CODE_PLAN_API_KEY', 'TEST_GROUPED_API_KEY', 'TEST_OTHER_API_KEY')
         $script:originalProcessValues = @{}
         foreach ($name in $script:processNames) {
             $script:originalProcessValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -222,14 +218,21 @@ Describe 'AI API key credential helpers' {
         [Environment]::GetEnvironmentVariable('TEST_GROUPED_API_KEY', 'Process') | Should -Be 'grouped-value'
     }
 
-    It 'clears managed process variables when the grouped vault is empty' {
+    It 'does not clear an ungrouped process variable when the grouped vault is empty' {
         [Environment]::SetEnvironmentVariable('KIMI_CODE_PLAN_API_KEY', 'kimi-value', 'Process')
 
         Remove-AiApiKeysFromCS -Confirm:$false
 
         $script:removedCredentials.Count | Should -Be 0
-        [Environment]::GetEnvironmentVariable('KIMI_CODE_PLAN_API_KEY', 'Process') | Should -BeNullOrEmpty
-        $script:hostMessages | Should -Contain 'Removed 0 credential(s) and cleared 1 process variable(s).'
+        [Environment]::GetEnvironmentVariable('KIMI_CODE_PLAN_API_KEY', 'Process') | Should -Be 'kimi-value'
+        $script:hostMessages | Should -Contain 'Removed 0 credential(s) and cleared 0 process variable(s).'
+    }
+
+    It 'derives cleanup names from the credential group instead of a managed-name list' {
+        $removerText = $script:functionAsts['Remove-AiApiKeysFromCS'].Extent.Text
+
+        $removerText | Should -Not -Match 'DEEPSEEK_API_KEY'
+        $removerText | Should -Not -Match 'KIMI_CODE_PLAN_API_KEY'
     }
 
     It 'makes no changes when vault enumeration fails' {
