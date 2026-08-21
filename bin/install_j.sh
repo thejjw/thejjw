@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 PACKAGES="age gnupg pinentry-curses tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
-NVM_VERSION="v0.40.6"
+NVM_VERSION="v0.40.7"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
 

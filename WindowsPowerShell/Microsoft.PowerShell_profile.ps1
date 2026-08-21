@@ -22,7 +22,7 @@ function prompt {
 $_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
 
 # Pinned nvm release used by ephemeral remote Claude launchers.
-$_NvmVersion = "v0.40.6"
+$_NvmVersion = "v0.40.7"
 
 # Official uv installer used by ephemeral remote Claude launchers.
 $_UvInstallUrl = "https://astral.sh/uv/install.sh"
