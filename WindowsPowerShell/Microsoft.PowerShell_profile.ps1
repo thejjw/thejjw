@@ -8058,12 +8058,20 @@ function Install-AiTools {
     before processing a curated list of Windows packages via `winget`. Also ensures
     `git` is present, installs global `npm` packages, and bootstraps AI CLIs using
     their supported installers.
+    Pass -Customize to interactively remove specific package ids from the pending
+    install lists before confirming the run.
 
     On first run this helper will ask once whether to proceed automatically with
     installations; if you decline, it will list missing items for manual review and exit.
 
 .PARAMETER Auto
     When supplied, skip the initial confirmation and proceed automatically.
+
+.PARAMETER Customize
+    When supplied, offer an interactive pruning pass before the confirmation prompt where
+    individual package ids can be removed one by one from the pending install lists
+    (PowerShell modules, winget packages, npm globals). Removed ids are skipped by the
+    checks, installs, and upgrades alike.
 
 .PARAMETER Update
     When supplied, upgrade any already-installed winget packages to their latest versions.
@@ -8106,6 +8114,7 @@ function Install-AiTools {
     [CmdletBinding()]
     param(
         [switch]$Auto,
+        [switch]$Customize,
         [switch]$Update,
         [switch]$ExtendedSetup,
         [switch]$Sdk,
@@ -8211,6 +8220,40 @@ function Install-AiTools {
         Write-Host " - grok (Grok CLI)"
         Write-Host " - cursor (Cursor CLI / agent)"
     }
+
+    # -Customize offers an interactive pruning pass over the pending install
+    # lists (PowerShell modules, winget packages, npm globals) before the
+    # confirmation prompt. Ids are matched case-insensitively against each list.
+    if ($Customize) {
+        while ($true) {
+            $entry = Read-Host -Prompt 'Enter a package id to remove from the install lists (press Enter to proceed)'
+            if ([string]::IsNullOrWhiteSpace($entry)) { break }
+
+            $modulesBefore = $powerShellModules.Count
+            $wingetBefore = $wingetPackages.Count
+            $npmBefore = $npmPackages.Count
+
+            # Filters rebind the local copies; $_AiToolsInternal is never mutated.
+            $powerShellModules = @($powerShellModules | Where-Object { $_.Name -ine $entry })
+            $wingetPackages = @($wingetPackages | Where-Object { $_ -ine $entry })
+            $npmPackages = @($npmPackages | Where-Object { $_ -ine $entry })
+
+            if ($powerShellModules.Count -lt $modulesBefore) {
+                Write-Host "Removed '$entry' from PowerShell modules ($($powerShellModules.Count) remaining)." -ForegroundColor Yellow
+            }
+            elseif ($wingetPackages.Count -lt $wingetBefore) {
+                Write-Host "Removed '$entry' from winget packages ($($wingetPackages.Count) remaining)." -ForegroundColor Yellow
+            }
+            elseif ($npmPackages.Count -lt $npmBefore) {
+                Write-Host "Removed '$entry' from npm packages ($($npmPackages.Count) remaining)." -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "Package id '$entry' was not found in any install list." -ForegroundColor Red
+            }
+        }
+        Write-Host "Pending lists now: PowerShell modules $($powerShellModules.Count), winget $($wingetPackages.Count), npm $($npmPackages.Count)." -ForegroundColor Cyan
+    }
+
     if (-not $Auto) {
         $choice = Read-Host -Prompt "Proceed with automatic installation of missing items? This will install PowerShell modules and run winget/npm/installers. Continue? (Y/n)"
         if ($choice -in @('n', 'N')) {

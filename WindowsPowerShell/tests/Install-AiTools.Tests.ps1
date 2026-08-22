@@ -493,4 +493,54 @@ Describe 'Install-AiTools npm packages' {
 
         Should -Invoke Write-Warning -ParameterFilter { $Message -eq 'Failed to install opencode-ai with npm exit code 8.' }
     }
+
+    It 'removes interactively entered package ids from the pending lists' {
+        $removedPackage = $_AiToolsInternal.NpmPackages[0]
+        $remainingPackages = @($_AiToolsInternal.NpmPackages | Where-Object { $_ -ne $removedPackage })
+        $script:pruneResponses = [System.Collections.Queue]::new()
+        $script:pruneResponses.Enqueue($removedPackage)
+        $script:pruneResponses.Enqueue('')
+        Mock Read-Host { return $script:pruneResponses.Dequeue() }
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson @() })
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson $remainingPackages })
+
+        Install-AiTools -Auto -Customize
+
+        $installCall = @($script:npmCalls | Where-Object { $_.Args[0] -eq 'install' })[0]
+        $installCall.Args | Should -Be (@('install', '-g') + $remainingPackages)
+        Should -Invoke Read-Host -Times 2 -Exactly
+    }
+
+    It 'keeps every package when entered ids match nothing' {
+        $script:pruneResponses = [System.Collections.Queue]::new()
+        $script:pruneResponses.Enqueue('does.not.exist')
+        $script:pruneResponses.Enqueue('')
+        Mock Read-Host { return $script:pruneResponses.Dequeue() }
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson @() })
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson $_AiToolsInternal.NpmPackages })
+
+        Install-AiTools -Auto -Customize
+
+        $installCall = @($script:npmCalls | Where-Object { $_.Args[0] -eq 'install' })[0]
+        $installCall.Args | Should -Be (@('install', '-g') + $_AiToolsInternal.NpmPackages)
+        Should -Invoke Write-Host -ParameterFilter {
+            $Object -eq "Package id 'does.not.exist' was not found in any install list."
+        }
+    }
+
+    It 'removes interactively entered winget ids from the pending installs' {
+        $_AiToolsInternal.WingetPackages = @('Example.One', 'Example.Two')
+        Mock Start-Process {}
+        $script:pruneResponses = [System.Collections.Queue]::new()
+        $script:pruneResponses.Enqueue('Example.One')
+        $script:pruneResponses.Enqueue('')
+        Mock Read-Host { return $script:pruneResponses.Dequeue() }
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson @() })
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson $_AiToolsInternal.NpmPackages })
+
+        Install-AiTools -Auto -Customize
+
+        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter { $ArgumentList -like '*Example.Two*' }
+        Should -Invoke Start-Process -Times 0 -Exactly -ParameterFilter { $ArgumentList -like '*Example.One*' }
+    }
 }
