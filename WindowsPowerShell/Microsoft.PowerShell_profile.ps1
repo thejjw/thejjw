@@ -548,6 +548,7 @@ $_NrdInternal = @{
 * Use Conventional Commits: ``feat:``, ``fix:``, ``refactor:``, ``docs:``, ``chore:``, ``test:``, etc.
 * Write short, imperative descriptions (e.g. ``feat: add input validation``, ``fix: off-by-one in retry loop``).
 * Never append Co-Authored-By trailers to commit messages.
+* Never run ``git push`` unless explicitly directed; keep all commits local.
 
 ## Dependencies
 
