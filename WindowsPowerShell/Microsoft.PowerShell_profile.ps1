@@ -720,7 +720,6 @@ $_AiToolsInternal = @{
         AgyCli        = 'https://antigravity.google/cli/install.ps1'
         ClaudeCli     = 'https://claude.ai/install.ps1'
         CodexCli      = 'https://chatgpt.com/codex/install.ps1'
-        GrokCli       = 'https://x.ai/cli/install.ps1'
         CursorCli     = 'https://cursor.com/install?win32=true'
         CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
@@ -743,6 +742,7 @@ $_AiToolsInternal = @{
         '@qwen-code/qwen-code',
         '@moonshot-ai/kimi-code',
         '@deepseek-ai/dsh',
+        '@xai-official/grok',
         'gloomberb'
     )
     # Keep this registry synchronized with AI CLIs managed by Install-AiTools
@@ -755,7 +755,6 @@ $_AiToolsInternal = @{
         @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
         @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
         @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
-        @{ Label = 'grok';     Cmd = 'grok';     Args = @('update') },
         @{ Label = 'cursor';   Cmd = 'agent';    Probe = 'cursor-agent'; Args = @('update') }
     )
 }
@@ -8091,8 +8090,9 @@ function Install-AiTools {
 
 .PARAMETER MoreAi
     When supplied, also installs extra AI developer tools (SST.OpenCodeDesktop, Google.Antigravity,
-    Google.AntigravityIDE, ZhipuAI.ZCode, MiniMax.MiniMaxCode, Anysphere.Cursor) via winget, extra global npm packages
-    (@qwen-code/qwen-code, @mimo-ai/cli), and the Kimi Code, Grok, and Cursor CLIs if not present.
+    Google.AntigravityIDE, ZhipuAI.ZCode, MiniMax.MiniMaxCode, Anysphere.Cursor) via winget, extra global
+    npm packages (@qwen-code/qwen-code, @moonshot-ai/kimi-code, @deepseek-ai/dsh, @xai-official/grok,
+    gloomberb), and the Cursor CLI (agent) via its installer if not present.
 
 .PARAMETER All
     When supplied, enables all optional package groups: extended tools, SDK runtimes, .NET SDK,
@@ -8101,7 +8101,7 @@ function Install-AiTools {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-07
+    Last Edit: 2026-08
 #>
     [CmdletBinding()]
     param(
@@ -8534,29 +8534,13 @@ function Install-AiTools {
         }
     }
 
-    # Configure Qwen Code and Kimi Code if MoreAi is requested. Their npm packages
-    # are managed through MoreAiNpmPackages with the other optional AI tools.
+    # Configure Qwen Code, Kimi Code, and Grok when MoreAi is requested. All three CLIs
+    # ship as npm packages listed in MoreAiNpmPackages and are installed by the global
+    # npm stage above; only default-settings configuration remains here.
     if ($MoreAi) {
         Install-QwenSettings
         Install-KimiSettings
-    }
-
-    # Verify and install Grok CLI if MoreAi is requested. Probe on the grok binary
-    # (installed as grok.exe under ~/.grok/bin); the upstream installer adds that
-    # directory to the user PATH itself, so no manual PATH handling is needed here.
-    if ($MoreAi) {
-        if (-not (Get-Command grok -ErrorAction SilentlyContinue)) {
-            Write-Host "grok CLI not found; installing via $($_AiToolsInternal.Urls.GrokCli)..." -ForegroundColor Yellow
-            try {
-                & powershell -NoProfile -ExecutionPolicy ByPass -Command "iex (irm '$($_AiToolsInternal.Urls.GrokCli)')"
-                Install-GrokSettings
-            } catch {
-                Write-Host "Failed to install grok: $_" -ForegroundColor Red
-            }
-        } else {
-            # If grok is present, ensure it's configured with the default settings
-            Install-GrokSettings
-        }
+        Install-GrokSettings
     }
 
     # Verify and install Cursor CLI (agent) if MoreAi is requested.
@@ -9151,7 +9135,7 @@ function Invoke-AiUpgrade {
     Updates all AI CLI tools in one shot.
 .DESCRIPTION
     Runs the native update/upgrade command for each available CLI registered in
-    $_AiToolsInternal.UpgradeCommands (agy, Claude, Codex, OpenCode, Grok, and Cursor),
+    $_AiToolsInternal.UpgradeCommands (agy, Claude, Codex, OpenCode, and Cursor),
     then checks and updates every npm-installed managed package -- from
     $_AiToolsInternal.NpmPackages and MoreAiNpmPackages -- through one global
     npm command. Winget packages are upgraded only when -Winget is supplied.
