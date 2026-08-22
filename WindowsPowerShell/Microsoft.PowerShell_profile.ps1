@@ -8072,6 +8072,8 @@ function Install-AiTools {
     individual package ids can be removed one by one from the pending install lists
     (PowerShell modules, winget packages, npm globals). Removed ids are skipped by the
     checks, installs, and upgrades alike.
+    Composes with -Auto: the pruning prompts still run; only the final Y/N
+    confirmation is skipped.
 
 .PARAMETER Update
     When supplied, upgrade any already-installed winget packages to their latest versions.
