@@ -917,7 +917,7 @@ $_CcrInternal = @{
         deepseek = @{
             base        = 'https://api.deepseek.com/anthropic/v1/messages'
             key         = '$DEEPSEEK_API_KEY'
-            models      = @('deepseek-v4-flash[1m]', 'deepseek-v4-pro[1m]')
+            models      = @('deepseek-v4-flash-vision-exp[1m]', 'deepseek-v4-pro[1m]')
             transformer = 'Anthropic'
         }
         gemini = @{
@@ -5734,11 +5734,11 @@ function claudeds {
     $env:ANTHROPIC_AUTH_TOKEN = $key
     # [1m] suffix requests 1M context window from DeepSeek's Anthropic-compatible endpoint
     $env:ANTHROPIC_MODEL = "deepseek-v4-pro[1m]"
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash-vision-exp"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-pro[1m]"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-v4-pro[1m]"
     # Use flash for subagents -- they handle tool routing, not heavy reasoning
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash"
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash-vision-exp"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
@@ -5801,7 +5801,7 @@ function claudeds2 {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-05
+    Last Edit: 2026-08
 #>
     # Read key using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
     $key = Get-AiApiKey 'DEEPSEEK_API_KEY'
@@ -5824,11 +5824,11 @@ function claudeds2 {
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
     # Cheaper profile: Sonnet routes to flash (fast/cheap), only Opus uses pro (expensive/capable)
-    $env:ANTHROPIC_MODEL = "deepseek-v4-flash[1m]"
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash"
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-flash[1m]"
+    $env:ANTHROPIC_MODEL = "deepseek-v4-flash-vision-exp[1m]"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash-vision-exp"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-flash-vision-exp[1m]"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-v4-pro[1m]"
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash"
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash-vision-exp"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "high"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
