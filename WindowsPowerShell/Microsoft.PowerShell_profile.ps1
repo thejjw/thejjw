@@ -5652,8 +5652,8 @@ function claudezmd {
     claudezm @claudeArgs
 }
 
-# Briefly warn when DeepSeek's peak windows (01:00-04:00, 06:00-10:00 UTC / 09:00-12:00, 14:00-18:00 UTC+8) are active.
-# Pricing & peak-hours policy: https://api-docs.deepseek.com/quick_start/pricing
+# Briefly warn when DeepSeek's weekday peak windows (01:00-04:00, 06:00-10:00 UTC / 09:00-12:00, 14:00-18:00 UTC+8) are active.
+# Weekends (Beijing time) bill uniformly at off-peak rates. Pricing & peak-hours policy: https://api-docs.deepseek.com/quick_start/pricing
 function Show-DeepseekPeakWarning {
     param(
         [DateTime]$UtcNow = [DateTime]::UtcNow,
@@ -5661,6 +5661,12 @@ function Show-DeepseekPeakWarning {
     )
 
     $UtcNow = $UtcNow.ToUniversalTime()
+    # Weekends are uniformly off-peak (Beijing time; effective 2026-08-23),
+    # so peak warnings apply only to Beijing Monday-Friday.
+    $beijingNow = $UtcNow.AddHours(8)
+    if ($beijingNow.DayOfWeek -in [DayOfWeek]::Saturday, [DayOfWeek]::Sunday) {
+        return
+    }
 
     $w1Start = $UtcNow.Date.AddHours(1)
     $w1End   = $UtcNow.Date.AddHours(4)
