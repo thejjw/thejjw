@@ -514,6 +514,7 @@ $_NrdInternal = @{
         'wolf', 'wood', 'workshop'
     )
 
+    # Canonical agent-guidance template; keep the nrd AGENT_EOF copy in bin/install_j.sh in sync.
     AgentsMarkdown = @'
 # AGENTS.md
 
