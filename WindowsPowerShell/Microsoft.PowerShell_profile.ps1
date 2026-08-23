@@ -673,7 +673,8 @@ $_AiToolsInternal = @{
         'VSCodium.VSCodium',
         'marlocarlo.psmux',
         'marlocarlo.pstop',
-        'marlocarlo.psnet'
+        'marlocarlo.psnet',
+        'MarcoPontello.TrID'
     )
     MoreAiWingetPackages   = @(
         'SST.OpenCodeDesktop',
