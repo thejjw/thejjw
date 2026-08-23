@@ -1026,7 +1026,13 @@ nrd() {
 
   if $use_agents; then
     $verbose && echo "creating AGENTS.md (canonical) + CLAUDE.local.md/QWEN.md (@import)"
-    # Keep this template in sync with AgentsMarkdown in the PowerShell profile (canonical).
+    # This template is ported from AgentsMarkdown in
+    # WindowsPowerShell/Microsoft.PowerShell_profile.ps1 (the canonical copy).
+    # Porting rule: keep every section byte-identical EXCEPT ## Environment,
+    # which is dropped here -- nrd targets Linux/macOS where the shell is
+    # always bash/zsh, so the canonical template's Windows shell-detection
+    # guidance (PowerShell vs bash) does not apply. When the canonical
+    # template changes, re-check this block against it before pasting.
     cat > "$dir/AGENTS.md" << 'AGENT_EOF'
 # AGENTS.md
 
