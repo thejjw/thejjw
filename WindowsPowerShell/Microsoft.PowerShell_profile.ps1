@@ -514,8 +514,7 @@ $_NrdInternal = @{
         'wolf', 'wood', 'workshop'
     )
 
-    # PowerShell heredoc requires two `` to escape a single literal backtick in the content; this is used for file paths and command examples in the agent guidance
-    AgentsMarkdown = @"
+    AgentsMarkdown = @'
 # AGENTS.md
 
 ## Grounding
@@ -524,14 +523,18 @@ $_NrdInternal = @{
 
 ## Environment
 
-* Platform: Windows 11, shell: Windows PowerShell (powershell.exe).
-* Use PowerShell commands and syntax -- not Unix/bash equivalents.
-  * ``Get-ChildItem`` not ``ls -la``, ``Remove-Item`` not ``rm -rf``, ``Get-Content`` not ``cat``.
-  * Redirect to ``$null`` not ``/dev/null``.
-  * Use semicolons or separate statements -- not ``&&`` to chain commands.
-  * Paths use backslashes (``src\lib\utils.ps1``); avoid forward slashes.
-* When useful and already available, use fast CLI tools such as ``rg``, ``fd``, ``fzf``, or comparable installed tools; otherwise use PowerShell-native commands.
-* If invoking ``git``, ``npm``, ``dotnet``, or other cross-platform CLIs, those are fine as-is.
+* Platform: Windows 11.
+* Do not assume a specific shell. Different agent harnesses run this file with
+  different interpreters (pi/omp variants use a persistent POSIX-style bash even
+  on Windows; some other tools use PowerShell). Before writing compound commands,
+  check what you are actually running (`$BASH_VERSION` vs `$PSVersionTable`)
+  and use that interpreter's native syntax. Forward slashes work everywhere;
+  backslashes separate paths only in PowerShell.
+* Prefer your harness's dedicated file-read/search/edit/background-process tools
+  when provided; fall back to plain commands (`git`, `npm`, `rg`, `fd`) otherwise.
+  Never launch interactive TUIs (e.g. fzf) from a non-interactive tool call --
+  they hang without a TTY.
+* If invoking `git`, `npm`, `dotnet`, or other cross-platform CLIs, those are fine as-is.
 
 ## Code Style
 
@@ -541,19 +544,19 @@ $_NrdInternal = @{
 
 ## Git Discipline
 
-* If the requested work is inside a cloned Git repository nested under this directory, treat that nested repository as the project root. Verify with ``git rev-parse --show-toplevel``, then stage and commit only within that repository; do not stage or commit in any containing parent repository unless explicitly directed.
+* If the requested work is inside a cloned Git repository nested under this directory, treat that nested repository as the project root. Verify with `git rev-parse --show-toplevel`, then stage and commit only within that repository; do not stage or commit in any containing parent repository unless explicitly directed.
 * Always commit after each logical change with a descriptive commit message; never bundle unrelated changes.
-* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes ``AGENTS.md``, ``CLAUDE.md``, ``QWEN.md``, and similar local ``.md`` files used to guide agents.
-* This restriction does not apply to normal project documentation such as ``README.md``, ``CHANGELOG.md``, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
-* Use Conventional Commits: ``feat:``, ``fix:``, ``refactor:``, ``docs:``, ``chore:``, ``test:``, etc.
-* Write short, imperative descriptions (e.g. ``feat: add input validation``, ``fix: off-by-one in retry loop``).
+* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.local.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
+* This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
+* Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
+* Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
 * Never append Co-Authored-By trailers to commit messages.
-* Never run ``git push`` unless explicitly directed; keep all commits local.
+* Never run `git push` unless explicitly directed; keep all commits local.
 
 ## Dependencies
 
 * Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
-* Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as ``deprecated``, yanked releases, or archived repositories, on the chosen package and version. If any are found, prefer a non-deprecated alternative when practical; otherwise warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
+* Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, prefer a non-deprecated alternative when practical; otherwise warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
 
 ## Subagents
 
@@ -563,7 +566,7 @@ $_NrdInternal = @{
   sub-tasks that can run in parallel. The subagent absorbs the noisy tool
   calls and returns only a summary.
 * Do not wrap trivial or single tool calls in a subagent. A one-file read or a
-  quick ``rg``/``fd`` search is cheaper run directly than paying the spawn and
+  quick `rg`/`fd` search is cheaper run directly than paying the spawn and
   round-trip overhead.
 * Keep tightly-coupled work in the main context. Do not delegate edits that
   depend on each other's output, and never have two subagents edit the same
@@ -576,7 +579,7 @@ $_NrdInternal = @{
 * Where it cuts cost without hurting quality, route exploration/search
   subagents to a smaller/faster model and reserve the main session for
   synthesis and architectural judgment.
-"@
+'@
 }
 
 # Internal configuration for Install-GlobalClaudeMd and related Claude Code setup functions
@@ -3809,8 +3812,8 @@ Initializes a git repository in the new directory and configures a local
 identity using the format: username@hostname.local.
 
 .PARAMETER Agents
-Creates basic AGENTS.md, CLAUDE.md, and GEMINI.md template files in the
-directory.
+Creates basic AGENTS.md plus CLAUDE.local.md and QWEN.md (@import) template
+files in the directory.
 Requires -Git.
 
 .PARAMETER Temp
@@ -3940,12 +3943,12 @@ Last Edit: 2026-04
     }
 
     if ($Agents) {
-        Write-Verbose "Creating AGENTS.md (canonical) + CLAUDE.md/GEMINI.md (@import)"
+        Write-Verbose "Creating AGENTS.md (canonical) + CLAUDE.local.md/QWEN.md (@import)"
 
         # Write canonical AGENTS.md using the template defined in global internal configuration
         $_NrdInternal.AgentsMarkdown | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
 
-        # CLAUDE.md imports AGENTS.md -- Claude Code reads CLAUDE.md, not AGENTS.md
+        # CLAUDE.local.md imports AGENTS.md -- Claude Code reads CLAUDE.local.md, not AGENTS.md
         '@AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'CLAUDE.local.md') -Encoding UTF8
 
         # QWEN.md imports AGENTS.md -- Qwen Code reads QWEN.md, not AGENTS.md
