@@ -9375,6 +9375,10 @@ function Invoke-AiUpgrade {
     $nameWidth = ($outdatedPackages | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
     foreach ($name in $outdatedPackages) {
         $info = if ($outdatedData) { $outdatedData.$name } else { $null }
+        # npm emits an array of identical entries when a package has multiple
+        # outdated edges (e.g. eslint's circular peer dep via eslint-utils);
+        # keep one so the version fields below stay scalar strings.
+        if ($info -is [array]) { $info = $info[0] }
         $latest = if ($info -and $info.latest) { $info.latest } elseif ($info -and $info.wanted) { $info.wanted } else { '?' }
         $current = if ($info -and $info.current) { $info.current } else { $inventory.Packages[$name] }
         Write-Host ("      {0}  {1} -> {2}" -f $name.PadRight($nameWidth), $current, $latest) -ForegroundColor Cyan
