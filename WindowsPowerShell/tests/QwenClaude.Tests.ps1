@@ -47,7 +47,7 @@ Describe 'Qwen Claude Code profiles' {
 
         $script:functionTexts['claudeq2'] | Should -Not -Match 'qwen3\.7-plus'
         $script:functionTexts['claudeq2'] | Should -Not -Match 'qwen3\.6-flash'
-        $script:functionTexts['claudeq2'] | Should -Match "ANTHROPIC_MODEL = 'qwen3\.8-max'"
+        $script:functionTexts['claudeq2'] | Should -Match "ANTHROPIC_MODEL = 'qwen3\.8-max\[1m\]'"
         $script:functionTexts['claudeq2'] | Should -Match "ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3\.8-max\[1m\]'"
         $script:functionTexts['claudeq2'] | Should -Match "ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3\.8-flash'"
         $script:functionTexts['claudeq2'] | Should -Match "ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3\.8-flash\[1m\]'"

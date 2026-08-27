@@ -6877,7 +6877,7 @@ function claudeq2 {
     $env:ANTHROPIC_AUTH_TOKEN = $key
     Remove-Item Env:\ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
 
-    $env:ANTHROPIC_MODEL = 'qwen3.8-max'
+    $env:ANTHROPIC_MODEL = 'qwen3.8-max[1m]'
     $env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3.8-max[1m]'
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3.8-flash'
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.8-flash[1m]'
