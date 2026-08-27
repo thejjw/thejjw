@@ -685,6 +685,7 @@ $_AiToolsInternal = @{
         'Anysphere.Cursor'
     )
     ExtendedWingetPackages = @(
+        'TortoiseGit.TortoiseGit',
         'Insecure.Nmap',
         'Buct0r.fullfetch',
         'HTTPie.HTTPie',
