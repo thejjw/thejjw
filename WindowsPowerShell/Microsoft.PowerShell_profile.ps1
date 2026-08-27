@@ -6756,7 +6756,7 @@ function claudeq {
 .DESCRIPTION
     Reads QWEN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
     Manager, or legacy User environment, then temporarily configures Claude Code
-    to use the Qwen 3.7 model profile. Restores the previous environment after
+    to use the Qwen 3.8 Flash model profile. Restores the previous environment after
     Claude exits.
 
 .EXAMPLE
@@ -6791,12 +6791,12 @@ function claudeq {
     $env:ANTHROPIC_AUTH_TOKEN = $key
     Remove-Item Env:\ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
 
-    $env:ANTHROPIC_MODEL = 'qwen3.7-max'
-    $env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3.8-max'
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3.6-flash'
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.7-plus'
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3.7-max'
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = 'qwen3.7-max'
+    $env:ANTHROPIC_MODEL = 'qwen3.8-flash[1m]'
+    $env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3.8-max[1m]'
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3.8-flash'
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.8-flash[1m]'
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3.8-max[1m]'
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = 'qwen3.8-flash'
     $env:CLAUDE_CODE_EFFORT_LEVEL = 'xhigh'
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
     $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = '983616'
@@ -6842,7 +6842,7 @@ function claudeq2 {
 .DESCRIPTION
     Reads QWEN_TOKEN_PLAN_API_KEY from the current process, Windows Credential
     Manager, or legacy User environment, then temporarily configures Claude Code
-    to use Qwen 3.8 Max with Qwen 3.7 and 3.6 fallback routing. Restores
+    to use Qwen 3.8 Max with Qwen 3.8 Flash fallback routing. Restores
     the previous environment after Claude exits.
 
 .EXAMPLE
@@ -6878,11 +6878,11 @@ function claudeq2 {
     Remove-Item Env:\ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
 
     $env:ANTHROPIC_MODEL = 'qwen3.8-max'
-    $env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3.8-max'
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3.6-flash'
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.8-max'
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3.8-max'
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = 'qwen3.7-max'
+    $env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'qwen3.8-max[1m]'
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'qwen3.8-flash'
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'qwen3.8-flash[1m]'
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'qwen3.8-max[1m]'
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = 'qwen3.8-flash'
     $env:CLAUDE_CODE_EFFORT_LEVEL = 'xhigh'
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
     $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = '983616'
