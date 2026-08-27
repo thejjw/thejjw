@@ -5518,11 +5518,11 @@ function claudez {
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     # Map Anthropic model slots to Z.AI equivalents; remove once Claude Code auto-detects these
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.7"
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-4.7"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-5.3-flash"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5.3-flash"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.3[1m]"
 
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-4.7"
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-5.3-flash"
     # "max is recommended for coding tasks." (2026-08-14, https://z.ai/blog/glm-5.3)
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
 
@@ -5588,11 +5588,11 @@ function claudezm {
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     # Max plan compatibility mode uses different default model routing.
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-4.7"
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5.3[1m]"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-5.3-flash"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5.3-flash[1m]"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.3[1m]"
 
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-5.3[1m]"
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-5.3-flash"
     # "max is recommended for coding tasks." (2026-08-14, https://z.ai/blog/glm-5.3)
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
 
@@ -5961,8 +5961,8 @@ Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:ZAI_API_KE
 # Match local claudezm routing for Z.AI:
 Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:ZAI_API_KEY `
     -BaseUrl "https://api.z.ai/api/anthropic" `
-    -HaikuModel "glm-4.7" -SonnetModel "glm-5.3[1m]" -OpusModel "glm-5.3[1m]" `
-    -SubagentModel "glm-5.3[1m]" -EffortLevel "max" -AutoCompactWindow "1000000" `
+    -HaikuModel "glm-5.3-flash" -SonnetModel "glm-5.3-flash[1m]" -OpusModel "glm-5.3[1m]" `
+    -SubagentModel "glm-5.3-flash" -EffortLevel "max" -AutoCompactWindow "1000000" `
     -Disable1M "0"
 
 .NOTES
@@ -6324,13 +6324,14 @@ Last Edit: 2026-08
     }
 
     # Keep the editable remote defaults here so they are easy to tweak later.
-    # Matches the local claudezm profile: glm-5.3[1m] for Sonnet/Opus/Subagent,
-    # effort=max, 1M context enabled via CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
+    # Matches the local claudezm profile: glm-5.3-flash[1m] for Sonnet, glm-5.3[1m] for Opus,
+    # glm-5.3-flash for Haiku/Subagent, effort=max, 1M context enabled via
+    # CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
     $BaseUrl = "https://api.z.ai/api/anthropic"
-    $HaikuModel = "glm-4.7"
-    $SonnetModel = "glm-5.3[1m]"
+    $HaikuModel = "glm-5.3-flash"
+    $SonnetModel = "glm-5.3-flash[1m]"
     $OpusModel = "glm-5.3[1m]"
-    $SubagentModel = "glm-5.3[1m]"
+    $SubagentModel = "glm-5.3-flash"
     $EffortLevel = "max"
     $AutoCompactWindow = "1000000"
     $TimeoutMs = "3000000"

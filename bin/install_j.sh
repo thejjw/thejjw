@@ -1419,10 +1419,10 @@ claudez() {
   ZAI_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.7" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.7" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-5.3-flash" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.3-flash" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.3[1m]" \
-  CLAUDE_CODE_SUBAGENT_MODEL="glm-4.7" \
+  CLAUDE_CODE_SUBAGENT_MODEL="glm-5.3-flash" \
   CLAUDE_CODE_EFFORT_LEVEL="max" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
@@ -1444,10 +1444,10 @@ claudezm() {
   ZAI_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.7" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.3[1m]" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-5.3-flash" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.3-flash[1m]" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.3[1m]" \
-  CLAUDE_CODE_SUBAGENT_MODEL="glm-5.3[1m]" \
+  CLAUDE_CODE_SUBAGENT_MODEL="glm-5.3-flash" \
   CLAUDE_CODE_EFFORT_LEVEL="max" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
@@ -1887,16 +1887,17 @@ claudezr() {
   _jjw_prepare_secret "${ZAI_API_KEY:-}" || return 1
   key="$(_jjw_secret z "${ZAI_API_KEY:-}")" || return 1
 
-  # Matches the local claudezm profile: glm-5.3[1m] for Sonnet/Opus/Subagent,
-  # effort=max, 1M context enabled via CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
+  # Matches the local claudezm profile: glm-5.3-flash[1m] for Sonnet, glm-5.3[1m] for Opus,
+  # glm-5.3-flash for Haiku/Subagent, effort=max, 1M context enabled via
+  # CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
   remote_claude_base "$host" "$key" "$port" \
     "https://api.z.ai/api/anthropic" \
-    "glm-4.7" \
-    "glm-5.3[1m]" \
+    "glm-5.3-flash" \
+    "glm-5.3-flash[1m]" \
     "glm-5.3[1m]" \
     "3000000" \
     "0" \
-    "glm-5.3[1m]" \
+    "glm-5.3-flash" \
     "max" \
     "1000000"
 }
