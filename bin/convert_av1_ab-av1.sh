@@ -70,7 +70,7 @@ for filepath in "${FILELIST[@]}"; do
         log "[INFO] !!!WE WILL DELETE ORIGINAL FILE IF AV1 ENCODE SUCCEEDS!!!"
         log "[INFO] (or if av1 is not smaller or not produced, original file is left as is)"
     fi
-    RUST_LOG=ab_av1=debug ab-av1 auto-encode -i "$filepath" 2>&1 | tee -a "$LOGFILE"
+    RUST_LOG=ab_av1=debug ab-av1 auto-encode -i "$filepath" --fail-fast --verify 2>&1 | tee -a "$LOGFILE"
     file_end=$(date +%s)
     file_elapsed=$((file_end - file_start))
     file_elapsed_fmt=$(printf '%02d:%02d:%02d' $((file_elapsed/3600)) $(((file_elapsed%3600)/60)) $((file_elapsed%60)))
