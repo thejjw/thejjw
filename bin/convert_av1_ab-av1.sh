@@ -71,6 +71,59 @@ for filepath in "${FILELIST[@]}"; do
         log "[INFO] (or if av1 is not smaller or not produced, original file is left as is)"
     fi
     RUST_LOG=ab_av1=debug ab-av1 auto-encode -i "$filepath" --fail-fast --verify 2>&1 | tee -a "$LOGFILE"
+    enc_rc=${PIPESTATUS[0]}
+
+    # If encoding failed (e.g. malformed container / header error), attempt MKV remux and retry
+    if [ $enc_rc -ne 0 ]; then
+        log "[WARN] Encode failed for $filepath (exit code $enc_rc). Input container may be malformed."
+        log "[INFO] Attempting MKV remux repair..."
+
+        dir=$(dirname "$filepath")
+        base=$(basename "$filepath")
+        fname="${base%.*}"
+
+        # Escape brackets/wildcards for safe matching
+        safe_fname="${fname//\[/\\[}"
+        safe_fname="${safe_fname//\]/\\]}"
+        safe_fname="${safe_fname//\*/\\*}"
+        safe_fname="${safe_fname//\?/\\?}"
+
+        # Find, log, and delete any partial/stale AV1 output left from the failed run
+        while IFS= read -r stale_file; do
+            if [ -n "$stale_file" ]; then
+                log "[INFO] Cleaned up stale partial encode output: $stale_file"
+                rm -f "$stale_file"
+            fi
+        done < <(find "$dir" -maxdepth 1 -type f -name "$safe_fname.av1.*" 2>/dev/null)
+
+        remux_target="$dir/$fname.mkv"
+        remux_temp="$dir/.${fname}.remux.mkv"
+
+        ffmpeg -hide_banner -loglevel warning -y \
+            -i "$filepath" \
+            -map 0:v:0 -map 0:a? -map 0:s? \
+            -map_metadata 0 -map_chapters 0 \
+            -c:v copy -c:a copy -c:s copy \
+            "$remux_temp" 2>&1 | tee -a "$LOGFILE"
+        remux_rc=${PIPESTATUS[0]}
+
+        if [ $remux_rc -eq 0 ] && [ -s "$remux_temp" ]; then
+            log "[INFO] Remux successful. Deleting original malformed file: $filepath"
+            rm -f "$filepath"
+            mv "$remux_temp" "$remux_target"
+            log "[INFO] Replaced original with clean remux: $remux_target"
+            filepath="$remux_target"
+
+            log "[INFO] Retrying encode on remuxed file: $filepath"
+            RUST_LOG=ab_av1=debug ab-av1 auto-encode -i "$filepath" --fail-fast --verify 2>&1 | tee -a "$LOGFILE"
+        else
+            log "[ERROR] Remux repair failed (exit code $remux_rc). Giving up on this file."
+            if [ -e "$remux_temp" ]; then
+                log "[INFO] Cleaned up failed remux artifact: $remux_temp"
+                rm -f "$remux_temp"
+            fi
+        fi
+    fi
     file_end=$(date +%s)
     file_elapsed=$((file_end - file_start))
     file_elapsed_fmt=$(printf '%02d:%02d:%02d' $((file_elapsed/3600)) $(((file_elapsed%3600)/60)) $((file_elapsed%60)))
