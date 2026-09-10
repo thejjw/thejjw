@@ -9802,7 +9802,7 @@ function Get-ZaiUsage {
 
 # --- Get-DeepseekUsage -----------------------------------------------------
 # Queries DeepSeek's user-balance endpoint and estimates the token budget
-# remaining under V4 Flash / V4 Pro pricing for each currency with a
+# remaining under V4.1 Flash / V4 Pro (routed) pricing for each currency with a
 # non-zero balance. Stashes the parsed response in
 # $Global:deepseekLastQuery and returns it.
 
@@ -9810,7 +9810,7 @@ function Get-DeepseekUsage {
 <#
 .SYNOPSIS
     Queries DeepSeek's user-balance endpoint and estimates remaining token
-    budget under V4 Flash / V4 Pro pricing.
+    budget under V4.1 Flash / V4 Pro pricing.
 .DESCRIPTION
     Calls https://api.deepseek.com/user/balance with the API key in
     $env:DEEPSEEK_API_KEY, prints the per-currency balances, and for each
@@ -9835,7 +9835,7 @@ function Get-DeepseekUsage {
     $d.balance_infos | Where-Object { $_.currency -eq 'CNY' }
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-06
+    Last Edit: 2026-09
 #>
     [CmdletBinding()]
     param(
@@ -9847,21 +9847,22 @@ function Get-DeepseekUsage {
 
     $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
-    # Pricing per 1M tokens (cache_hit, cache_miss, output) for V4 Flash/Pro.
-    # Source: api-docs.deepseek.com/quick_start/pricing (effective Aug 17, 2026 00:00 UTC+8 / Aug 16, 2026 16:00 UTC).
+    # Pricing per 1M tokens (cache_hit, cache_miss, output) for V4.1 Flash.
+    # Prior to V4.1 Pro launch, requests to V4 Pro are routed to V4.1 Flash and billed at Flash rates.
+    # Source: DeepSeek official notice / api-docs.deepseek.com/quick_start/pricing (effective Sept 10, 2026 04:00 UTC / 12:00 UTC+8).
     $pricing = @(
-        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.007; CostCny = 0.05 }
-        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.22;  CostCny = 1.50 }
-        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 0.66;  CostCny = 4.50 }
-        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.014; CostCny = 0.10 }
-        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.44;  CostCny = 3.00 }
-        [pscustomobject]@{ Model = 'V4 Flash'; Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.32;  CostCny = 9.00 }
-        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.022; CostCny = 0.15 }
-        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.66;  CostCny = 4.50 }
-        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 1.98;  CostCny = 13.50 }
-        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.044; CostCny = 0.30 }
-        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 1.32;  CostCny = 9.00 }
-        [pscustomobject]@{ Model = 'V4 Pro';   Tier = 'Peak';     Scenario = 'Output';              CostUsd = 3.96;  CostCny = 27.00 }
+        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.003; CostCny = 0.02 }
+        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.15;  CostCny = 1.00 }
+        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 0.60;  CostCny = 4.00 }
+        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.006; CostCny = 0.04 }
+        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.30;  CostCny = 2.00 }
+        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.20;  CostCny = 8.00 }
+        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.003; CostCny = 0.02 }
+        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.15;  CostCny = 1.00 }
+        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 0.60;  CostCny = 4.00 }
+        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.006; CostCny = 0.04 }
+        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.30;  CostCny = 2.00 }
+        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.20;  CostCny = 8.00 }
     )
 
     if (-not $ApiKey) { Write-Error 'DEEPSEEK_API_KEY not set (env var or -ApiKey).'; return }
