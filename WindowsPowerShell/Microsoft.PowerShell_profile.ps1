@@ -9836,6 +9836,8 @@ function Get-DeepseekUsage {
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-09
+    Note: When V4.1 Pro launches, update the temporary 'V4 Pro (routed to Flash)'
+    pricing rows in $pricing with official V4.1 Pro rates once announced.
 #>
     [CmdletBinding()]
     param(
@@ -9849,6 +9851,7 @@ function Get-DeepseekUsage {
 
     # Pricing per 1M tokens (cache_hit, cache_miss, output) for V4.1 Flash.
     # Prior to V4.1 Pro launch, requests to V4 Pro are routed to V4.1 Flash and billed at Flash rates.
+    # NOTE: When V4.1 Pro officially launches, update the temporary 'V4 Pro (routed to Flash)' pricing rows with official V4.1 Pro rates once announced.
     # Source: DeepSeek official notice / api-docs.deepseek.com/quick_start/pricing (effective Sept 10, 2026 04:00 UTC / 12:00 UTC+8).
     $pricing = @(
         [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.003; CostCny = 0.02 }
