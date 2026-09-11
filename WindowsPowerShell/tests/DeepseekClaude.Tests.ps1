@@ -31,24 +31,26 @@ Describe 'DeepSeek Claude Code profiles' {
         Mock Start-Sleep {}
     }
 
-    It 'uses the deepseek-v4-flash-vision-exp variant and proper models in DeepSeek profiles' {
+    It 'uses deepseek-flash and proper models in DeepSeek profiles' {
         $script:functionTexts['claudeds'] | Should -Match 'ANTHROPIC_MODEL = "deepseek-v4-pro\[1m\]"'
-        $script:functionTexts['claudeds'] | Should -Match 'ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash-vision-exp"'
+        $script:functionTexts['claudeds'] | Should -Match 'ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-flash"'
         $script:functionTexts['claudeds'] | Should -Match 'ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-pro\[1m\]"'
         $script:functionTexts['claudeds'] | Should -Match 'ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-v4-pro\[1m\]"'
-        $script:functionTexts['claudeds'] | Should -Match 'CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash-vision-exp"'
+        $script:functionTexts['claudeds'] | Should -Match 'CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-flash"'
         $script:functionTexts['claudeds'] | Should -Match 'CLAUDE_CODE_EFFORT_LEVEL = "max"'
+        $script:functionTexts['claudeds'] | Should -Match 'CLAUDE_CODE_AUTO_COMPACT_WINDOW = "786432"'
 
-        $script:functionTexts['claudeds2'] | Should -Match 'ANTHROPIC_MODEL = "deepseek-v4-flash-vision-exp\[1m\]"'
-        $script:functionTexts['claudeds2'] | Should -Match 'ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash-vision-exp"'
-        $script:functionTexts['claudeds2'] | Should -Match 'ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-flash-vision-exp\[1m\]"'
+        $script:functionTexts['claudeds2'] | Should -Match 'ANTHROPIC_MODEL = "deepseek-flash\[1m\]"'
+        $script:functionTexts['claudeds2'] | Should -Match 'ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-flash"'
+        $script:functionTexts['claudeds2'] | Should -Match 'ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-flash\[1m\]"'
         $script:functionTexts['claudeds2'] | Should -Match 'ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-v4-pro\[1m\]"'
-        $script:functionTexts['claudeds2'] | Should -Match 'CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash-vision-exp"'
+        $script:functionTexts['claudeds2'] | Should -Match 'CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-flash"'
         $script:functionTexts['claudeds2'] | Should -Match 'CLAUDE_CODE_EFFORT_LEVEL = "high"'
+        $script:functionTexts['claudeds2'] | Should -Match 'CLAUDE_CODE_AUTO_COMPACT_WINDOW = "786432"'
     }
 
-    It 'configures deepseek-v4-flash-vision-exp in CCR provider models' {
-        $script:profileText | Should -Match "'deepseek-v4-flash-vision-exp\[1m\]'"
+    It 'configures deepseek-flash in CCR provider models' {
+        $script:profileText | Should -Match "'deepseek-flash\[1m\]'"
     }
 
     It 'passes --dangerously-skip-permissions in claudedsd and claudeds2d' {
@@ -56,9 +58,9 @@ Describe 'DeepSeek Claude Code profiles' {
         $script:functionTexts['claudeds2d'] | Should -Match '--dangerously-skip-permissions'
     }
 
-    It 'warns and delays during peak windows' -ForEach @(
-        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-22T02:00:00', [System.DateTimeKind]::Utc) }
-        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-22T08:00:00', [System.DateTimeKind]::Utc) }
+    It 'warns and delays during peak windows on weekdays' -ForEach @(
+        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-24T02:00:00', [System.DateTimeKind]::Utc) }
+        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-24T08:00:00', [System.DateTimeKind]::Utc) }
     ) {
         Show-DeepseekPeakWarning -UtcNow $UtcNow -DelaySeconds 3
 
@@ -69,11 +71,12 @@ Describe 'DeepSeek Claude Code profiles' {
         Should -Invoke Start-Sleep -Times 1 -Exactly -ParameterFilter { $Seconds -eq 3 }
     }
 
-    It 'stays silent outside peak windows' -ForEach @(
-        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-22T00:30:00', [System.DateTimeKind]::Utc) }
-        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-22T04:30:00', [System.DateTimeKind]::Utc) }
-        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-22T10:30:00', [System.DateTimeKind]::Utc) }
-        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-22T23:00:00', [System.DateTimeKind]::Utc) }
+    It 'stays silent outside peak windows and on weekends' -ForEach @(
+        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-24T00:30:00', [System.DateTimeKind]::Utc) }
+        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-24T04:30:00', [System.DateTimeKind]::Utc) }
+        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-24T10:30:00', [System.DateTimeKind]::Utc) }
+        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-24T23:00:00', [System.DateTimeKind]::Utc) }
+        @{ UtcNow = [DateTime]::SpecifyKind([datetime]'2026-08-22T02:00:00', [System.DateTimeKind]::Utc) }
     ) {
         Show-DeepseekPeakWarning -UtcNow $UtcNow -DelaySeconds 3
 

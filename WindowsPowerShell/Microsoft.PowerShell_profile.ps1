@@ -605,8 +605,7 @@ Use MiniMax MCP server for:
 
 **When using DeepSeek models (deepseek-*):**
 Use Claude Code's built-in Web Search tool for web searches; DeepSeek supports it natively through its API. Web Search incurs additional model token costs because DeepSeek makes extra LLM API requests to summarize retrieved content.
-Use MiniMax MCP and Z.ai MCP servers, if available, for image analysis because DeepSeek models are text-only. Fall back to other available means if those MCP tools are unavailable or underperforming.
-
+deepseek-flash natively supports multimodal image understanding (both OpenAI and Anthropic formats). deepseek-v4-pro is text-only; use MiniMax MCP or Z.ai MCP servers if image analysis is required with legacy pro models.
 **When using genuine Anthropic account (Claude Code with native models):**
 Use built-in web fetch and web search tools directly -- they will yield the best results.
 
@@ -924,7 +923,7 @@ $_CcrInternal = @{
         deepseek = @{
             base        = 'https://api.deepseek.com/anthropic/v1/messages'
             key         = '$DEEPSEEK_API_KEY'
-            models      = @('deepseek-v4-flash-vision-exp[1m]', 'deepseek-v4-pro[1m]')
+            models      = @('deepseek-flash[1m]', 'deepseek-v4-pro[1m]')
             transformer = 'Anthropic'
         }
         gemini = @{
@@ -5740,24 +5739,26 @@ function claudeds {
         'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
         'CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
-        'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ENABLE_PROMPT_CACHING_1H'
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ENABLE_PROMPT_CACHING_1H',
+        'CLAUDE_CODE_AUTO_COMPACT_WINDOW'
     )
 
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
     # [1m] suffix requests 1M context window from DeepSeek's Anthropic-compatible endpoint
     $env:ANTHROPIC_MODEL = "deepseek-v4-pro[1m]"
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash-vision-exp"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-flash"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-pro[1m]"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-v4-pro[1m]"
-    # Use flash for subagents -- they handle tool routing, not heavy reasoning
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash-vision-exp"
+    # Use flash for subagents -- fast tool routing
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-flash"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
     $env:ENABLE_PROMPT_CACHING_1H = "1"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
-
+    # 768K compaction threshold for 1M context window
+    $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = "786432"
     try {
         Show-DeepseekPeakWarning
         claude @args
@@ -5797,7 +5798,7 @@ function claudeds2 {
 .DESCRIPTION
     Reads the DeepSeek API key from the DEEPSEEK_API_KEY environment variable
     (current session first, then User scope), configures a cheaper routing profile
-    where Sonnet uses the flash model and only Opus uses the pro model, then
+    where Sonnet uses deepseek-flash and only Opus uses deepseek-v4-pro, then
     invokes claude with the supplied arguments.
     If DEEPSEEK_API_KEY is not set, the function aborts and prints setup guidance.
 
@@ -5814,7 +5815,7 @@ function claudeds2 {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-08
+    Last Edit: 2026-09
 #>
     # Read key using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
     $key = Get-AiApiKey 'DEEPSEEK_API_KEY'
@@ -5831,22 +5832,24 @@ function claudeds2 {
         'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
         'CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
-        'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ENABLE_PROMPT_CACHING_1H'
+        'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ENABLE_PROMPT_CACHING_1H',
+        'CLAUDE_CODE_AUTO_COMPACT_WINDOW'
     )
 
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
-    # Cheaper profile: Sonnet routes to flash (fast/cheap), only Opus uses pro (expensive/capable)
-    $env:ANTHROPIC_MODEL = "deepseek-v4-flash-vision-exp[1m]"
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-v4-flash-vision-exp"
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-v4-flash-vision-exp[1m]"
+    $env:ANTHROPIC_MODEL = "deepseek-flash[1m]"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek-flash"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "deepseek-flash[1m]"
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "deepseek-v4-pro[1m]"
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-v4-flash-vision-exp"
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "deepseek-flash"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "high"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
     $env:ENABLE_PROMPT_CACHING_1H = "1"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
+    # 768K compaction threshold for 1M context window
+    $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = "786432"
 
     try {
         Show-DeepseekPeakWarning
@@ -5856,6 +5859,7 @@ function claudeds2 {
         Restore-ProcessEnvVars $originalEnvVars
     }
 }
+
 
 function claudeds2d {
     <#
@@ -9849,23 +9853,22 @@ function Get-DeepseekUsage {
 
     $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
-    # Pricing per 1M tokens (cache_hit, cache_miss, output) for V4.1 Flash.
-    # Prior to V4.1 Pro launch, requests to V4 Pro are routed to V4.1 Flash and billed at Flash rates.
-    # NOTE: When V4.1 Pro officially launches, update the temporary 'V4 Pro (routed to Flash)' pricing rows with official V4.1 Pro rates once announced.
-    # Source: DeepSeek official notice / api-docs.deepseek.com/quick_start/pricing (effective Sept 10, 2026 04:00 UTC / 12:00 UTC+8).
+    # Pricing per 1M tokens (cache_hit, cache_miss, output) for deepseek-flash (DeepSeek-V4.1-Flash).
+    # Effective Sept 14, 2026 12:00 Beijing Time (04:00 UTC), requests to deepseek-v4-pro route to V4.1 Flash and bill at Flash rates until V4.1 Pro launches.
+    # Source: api-docs.deepseek.com/quick_start/pricing
     $pricing = @(
-        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.003; CostCny = 0.02 }
-        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.15;  CostCny = 1.00 }
-        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 0.60;  CostCny = 4.00 }
-        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.006; CostCny = 0.04 }
-        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.30;  CostCny = 2.00 }
-        [pscustomobject]@{ Model = 'V4.1 Flash';               Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.20;  CostCny = 8.00 }
-        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.003; CostCny = 0.02 }
-        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.15;  CostCny = 1.00 }
-        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 0.60;  CostCny = 4.00 }
-        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.006; CostCny = 0.04 }
-        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.30;  CostCny = 2.00 }
-        [pscustomobject]@{ Model = 'V4 Pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.20;  CostCny = 8.00 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.003; CostCny = 0.02 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.15;  CostCny = 1.00 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 0.60;  CostCny = 4.00 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.006; CostCny = 0.04 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.30;  CostCny = 2.00 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.20;  CostCny = 8.00 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.003; CostCny = 0.02 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.15;  CostCny = 1.00 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 0.60;  CostCny = 4.00 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.006; CostCny = 0.04 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.30;  CostCny = 2.00 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.20;  CostCny = 8.00 }
     )
 
     if (-not $ApiKey) { Write-Error 'DEEPSEEK_API_KEY not set (env var or -ApiKey).'; return }
@@ -9933,6 +9936,7 @@ function Get-DeepseekUsage {
     }
     Write-Host ('  Estimate formula: tokens = balance / cost_per_1M * 1,000,000.') -ForegroundColor DarkGray
     Write-Host ('  Actual spend depends on cache-hit ratio, prompt size, output length, and model mix.') -ForegroundColor DarkGray
+    Write-Host ('  Note: deepseek-v4-pro routes to Flash and bills at Flash rates (effective Sept 14, 2026 12:00 Beijing Time / 04:00 UTC).') -ForegroundColor DarkGray
 
     $_ProfileHelpers.WriteSection('Concerns (DeepSeek)')
     $concerns = New-Object System.Collections.Generic.List[string]

@@ -10,7 +10,7 @@ metadata:
 
 Query the **current balance** from the DeepSeek platform. Returns JSON with balance availability and per-currency balances only; DeepSeek does **not** provide a detailed token-usage ledger from this endpoint.
 
-Use the returned **CNY** and **USD** balances to estimate how much DeepSeek V4.1 Flash or V4 Pro usage remains under the current pricing.
+Use the returned **CNY** and **USD** balances to estimate how much deepseek-flash or deepseek-v4-pro usage remains under the current pricing.
 
 ## Configuration
 
@@ -69,13 +69,12 @@ Use the balance values to estimate rough token budgets with:
 
 For current planning, use the matching currency for the estimate (off-peak baseline; peak hours double these rates):
 
-- DeepSeek V4.1 Flash (Off-Peak)
+- deepseek-flash (Off-Peak)
   - 1M input tokens, cache hit: `0.003 USD` or `0.02 CNY`
   - 1M input tokens, cache miss: `0.15 USD` or `1.00 CNY`
   - 1M output tokens: `0.60 USD` or `4.00 CNY`
-- DeepSeek V4 Pro
-  - Prior to V4.1 Pro launch, all requests to V4 Pro are server-side routed to V4.1 Flash and billed at the V4.1 Flash rates above.
-
+- deepseek-v4-pro
+  - Effective Sept 14, 2026 12:00 Beijing Time (04:00 UTC), all requests to deepseek-v4-pro route to V4.1 Flash and bill at the Flash rates above until V4.1 Pro launches.
 Peak hours (2x rates): Monday to Friday 01:00-04:00 and 06:00-10:00 UTC (09:00-12:00 and 14:00-18:00 Beijing Time). Weekends and all other hours bill at off-peak rates.
 > These estimates are approximate. Actual spend depends on cache-hit ratio, prompt size, output length, and model mix. If both USD and CNY balances are returned, compute both separately and report the more conservative remaining budget when needed.
 

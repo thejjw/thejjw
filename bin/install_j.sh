@@ -1126,8 +1126,7 @@ Use MiniMax MCP server for:
 
 **When using DeepSeek models (deepseek-*):**
 Use Claude Code's built-in Web Search tool for web searches; DeepSeek supports it natively through its API. Web Search incurs additional model token costs because DeepSeek makes extra LLM API requests to summarize retrieved content.
-Use MiniMax MCP and Z.ai MCP servers, if available, for image analysis because DeepSeek models are text-only. Fall back to other available means if those MCP tools are unavailable or underperforming.
-
+deepseek-flash natively supports multimodal image understanding (both OpenAI and Anthropic formats). deepseek-v4-pro is text-only; use MiniMax MCP or Z.ai MCP servers if image analysis is required with legacy pro models.
 **When using genuine Anthropic account (Claude Code with native models):**
 Use built-in web fetch and web search tools directly -- they will yield the best results.
 
@@ -1158,8 +1157,7 @@ Use MiniMax MCP server for:
 
 **When using DeepSeek models (deepseek-*):**
 Use Claude Code's built-in Web Search tool for web searches; DeepSeek supports it natively through its API. Web Search incurs additional model token costs because DeepSeek makes extra LLM API requests to summarize retrieved content.
-Use MiniMax MCP and Z.ai MCP servers, if available, for image analysis because DeepSeek models are text-only. Fall back to other available means if those MCP tools are unavailable or underperforming.
-
+deepseek-flash natively supports multimodal image understanding (both OpenAI and Anthropic formats). deepseek-v4-pro is text-only; use MiniMax MCP or Z.ai MCP servers if image analysis is required with legacy pro models.
 **When using genuine Anthropic account (Claude Code with native models):**
 Use built-in web fetch and web search tools directly -- they will yield the best results.
 
@@ -1569,13 +1567,14 @@ claudeds() {
   ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
   ANTHROPIC_MODEL="deepseek-v4-pro[1m]" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash-vision-exp" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-flash" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]" \
-  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash-vision-exp" \
+  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-flash" \
   CLAUDE_CODE_EFFORT_LEVEL="max" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   ENABLE_PROMPT_CACHING_1H="1" \
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW="786432" \
   claude "$@"
 }
 # claudedsd - Launch claudeds without permission prompts.
@@ -1590,14 +1589,15 @@ claudeds2() {
   DEEPSEEK_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
-  ANTHROPIC_MODEL="deepseek-v4-flash-vision-exp[1m]" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash-vision-exp" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-flash-vision-exp[1m]" \
+  ANTHROPIC_MODEL="deepseek-flash[1m]" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-flash" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-flash[1m]" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]" \
-  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash-vision-exp" \
+  CLAUDE_CODE_SUBAGENT_MODEL="deepseek-flash" \
   CLAUDE_CODE_EFFORT_LEVEL="high" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   ENABLE_PROMPT_CACHING_1H="1" \
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW="786432" \
   claude "$@"
 }
 # claudeds2d - Launch claudeds2 without permission prompts.
