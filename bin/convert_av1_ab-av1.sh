@@ -55,6 +55,10 @@ done
 TOTAL_FILES="${#FILELIST[@]}"
 SKIPPED_FILES=$((${#ALL_FILES[@]} - TOTAL_FILES))
 COUNT=0
+STAT_ORIG_SUCCESS=0
+STAT_REMUX_SUCCESS=0
+STAT_CRF_FAILED=0
+STAT_OTHER_FAILED=0
 
 log "[INFO] Found ${#ALL_FILES[@]} video files total."
 if [ $SKIPPED_FILES -gt 0 ]; then
@@ -66,15 +70,27 @@ for filepath in "${FILELIST[@]}"; do
     COUNT=$((COUNT + 1))
     file_start=$(date +%s)
     log "[INFO] ($COUNT/$TOTAL_FILES) Encoding: $filepath"
+    if [ $((COUNT - 1)) -gt 0 ]; then
+        log "[INFO] Running stats: $((COUNT - 1)) processed ($STAT_ORIG_SUCCESS direct OK, $STAT_REMUX_SUCCESS remux OK, $STAT_CRF_FAILED crf failed, $STAT_OTHER_FAILED other failed)"
+    fi
     if [ $DELETE_ORIGINAL -eq 1 ]; then
         log "[INFO] !!!WE WILL DELETE ORIGINAL FILE IF AV1 ENCODE SUCCEEDS!!!"
         log "[INFO] (or if av1 is not smaller or not produced, original file is left as is)"
     fi
-    RUST_LOG=ab_av1=debug ab-av1 auto-encode -i "$filepath" --fail-fast --verify 2>&1 | tee -a "$LOGFILE"
+    file_status="pending"
+    enc_tmp=$(mktemp) || { log "[ERROR] Failed to allocate temporary diagnostic file."; exit 1; }
+    RUST_LOG=ab_av1=debug ab-av1 auto-encode -i "$filepath" --fail-fast --verify 2>&1 | tee -a "$LOGFILE" "$enc_tmp"
     enc_rc=${PIPESTATUS[0]}
 
-    # If encoding failed (e.g. malformed container / header error), attempt MKV remux and retry
-    if [ $enc_rc -ne 0 ]; then
+    # If encoding succeeded directly
+    if [ $enc_rc -eq 0 ]; then
+        file_status="orig_ok"
+    # If encoding failed because ab-av1 exhausted CRF search under constraints
+    elif grep -Fq "Failed to find a suitable crf" "$enc_tmp"; then
+        log "[WARN] ab-av1 could not satisfy target VMAF/size constraints for $filepath (CRF search exhausted). Skipping remux repair."
+        file_status="crf_failed"
+    # If encoding failed due to container / stream error, attempt MKV remux and retry
+    else
         log "[WARN] Encode failed for $filepath (exit code $enc_rc). Input container may be malformed."
         log "[INFO] Attempting MKV remux repair..."
 
@@ -115,15 +131,43 @@ for filepath in "${FILELIST[@]}"; do
             filepath="$remux_target"
 
             log "[INFO] Retrying encode on remuxed file: $filepath"
-            RUST_LOG=ab_av1=debug ab-av1 auto-encode -i "$filepath" --fail-fast --verify 2>&1 | tee -a "$LOGFILE"
+            > "$enc_tmp"
+            RUST_LOG=ab_av1=debug ab-av1 auto-encode -i "$filepath" --fail-fast --verify 2>&1 | tee -a "$LOGFILE" "$enc_tmp"
+            retry_rc=${PIPESTATUS[0]}
+            if [ $retry_rc -eq 0 ]; then
+                file_status="remux_ok"
+            elif grep -Fq "Failed to find a suitable crf" "$enc_tmp"; then
+                log "[WARN] ab-av1 could not satisfy target VMAF/size constraints for remuxed $filepath (CRF search exhausted)."
+                file_status="crf_failed"
+            else
+                log "[ERROR] Retry encode failed on remuxed file: $filepath (exit code $retry_rc)."
+                file_status="failed"
+            fi
         else
             log "[ERROR] Remux repair failed (exit code $remux_rc). Giving up on this file."
             if [ -e "$remux_temp" ]; then
                 log "[INFO] Cleaned up failed remux artifact: $remux_temp"
                 rm -f "$remux_temp"
             fi
+            file_status="failed"
         fi
     fi
+    rm -f "$enc_tmp"
+
+    case "$file_status" in
+        orig_ok)
+            STAT_ORIG_SUCCESS=$((STAT_ORIG_SUCCESS + 1))
+            ;;
+        remux_ok)
+            STAT_REMUX_SUCCESS=$((STAT_REMUX_SUCCESS + 1))
+            ;;
+        crf_failed)
+            STAT_CRF_FAILED=$((STAT_CRF_FAILED + 1))
+            ;;
+        *)
+            STAT_OTHER_FAILED=$((STAT_OTHER_FAILED + 1))
+            ;;
+    esac
     file_end=$(date +%s)
     file_elapsed=$((file_end - file_start))
     file_elapsed_fmt=$(printf '%02d:%02d:%02d' $((file_elapsed/3600)) $(((file_elapsed%3600)/60)) $((file_elapsed%60)))
@@ -180,4 +224,5 @@ for filepath in "${FILELIST[@]}"; do
     log "-----------------------------------"
 done
 
-log "[INFO] All encodes finished. Log saved to $LOGFILE"
+log "[INFO] All encodes finished. Summary: $TOTAL_FILES files | Direct OK: $STAT_ORIG_SUCCESS | Remux OK: $STAT_REMUX_SUCCESS | CRF failed: $STAT_CRF_FAILED | Other failed: $STAT_OTHER_FAILED"
+log "[INFO] Log saved to $LOGFILE"
