@@ -73,9 +73,13 @@ For current planning, use the matching currency for the estimate (off-peak basel
   - 1M input tokens, cache hit: `0.003 USD` or `0.02 CNY`
   - 1M input tokens, cache miss: `0.15 USD` or `1.00 CNY`
   - 1M output tokens: `0.60 USD` or `4.00 CNY`
-- deepseek-v4-pro
-  - Effective Sept 14, 2026 12:00 Beijing Time (04:00 UTC), all requests to deepseek-v4-pro route to V4.1 Flash and bill at the Flash rates above until V4.1 Pro launches.
+- deepseek-v4-pro (Off-Peak)
+  - 1M input tokens, cache hit: `0.022 USD` or `0.15 CNY`
+  - 1M input tokens, cache miss: `0.66 USD` or `4.50 CNY`
+  - 1M output tokens: `1.98 USD` or `13.50 CNY`
+
 Peak hours (2x rates): Monday to Friday 01:00-04:00 and 06:00-10:00 UTC (09:00-12:00 and 14:00-18:00 Beijing Time). Weekends and all other hours bill at off-peak rates.
+> Per DeepSeek's September 2026 announcement, V4 Pro API service continues after September 14, 2026 with the billing method unchanged (its own rates, no Flash routing).
 > These estimates are approximate. Actual spend depends on cache-hit ratio, prompt size, output length, and model mix. If both USD and CNY balances are returned, compute both separately and report the more conservative remaining budget when needed.
 
 ## Note

@@ -9806,7 +9806,7 @@ function Get-ZaiUsage {
 
 # --- Get-DeepseekUsage -----------------------------------------------------
 # Queries DeepSeek's user-balance endpoint and estimates the token budget
-# remaining under V4.1 Flash / V4 Pro (routed) pricing for each currency with a
+# remaining under V4.1 Flash / V4 Pro pricing for each currency with a
 # non-zero balance. Stashes the parsed response in
 # $Global:deepseekLastQuery and returns it.
 
@@ -9840,8 +9840,8 @@ function Get-DeepseekUsage {
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-09
-    Note: When V4.1 Pro launches, update the temporary 'V4 Pro (routed to Flash)'
-    pricing rows in $pricing with official V4.1 Pro rates once announced.
+    Note: Per DeepSeek's Sept 2026 announcement, V4 Pro API service continues
+    after Sept 14, 2026 with billing unchanged (own rates, no Flash routing).
 #>
     [CmdletBinding()]
     param(
@@ -9853,8 +9853,9 @@ function Get-DeepseekUsage {
 
     $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
-    # Pricing per 1M tokens (cache_hit, cache_miss, output) for deepseek-flash (DeepSeek-V4.1-Flash).
-    # Effective Sept 14, 2026 12:00 Beijing Time (04:00 UTC), requests to deepseek-v4-pro route to V4.1 Flash and bill at Flash rates until V4.1 Pro launches.
+    # Pricing per 1M tokens (cache_hit, cache_miss, output).
+    # deepseek-v4-pro bills at its own rates; per DeepSeek's announcement, V4 Pro API
+    # service continues after Sept 14, 2026 with billing unchanged (no Flash routing).
     # Source: api-docs.deepseek.com/quick_start/pricing
     $pricing = @(
         [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.003; CostCny = 0.02 }
@@ -9863,12 +9864,12 @@ function Get-DeepseekUsage {
         [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.006; CostCny = 0.04 }
         [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.30;  CostCny = 2.00 }
         [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.20;  CostCny = 8.00 }
-        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.003; CostCny = 0.02 }
-        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.15;  CostCny = 1.00 }
-        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 0.60;  CostCny = 4.00 }
-        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.006; CostCny = 0.04 }
-        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.30;  CostCny = 2.00 }
-        [pscustomobject]@{ Model = 'deepseek-v4-pro (routed to Flash)'; Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.20;  CostCny = 8.00 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.022; CostCny = 0.15 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.66;  CostCny = 4.50 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 1.98;  CostCny = 13.50 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.044; CostCny = 0.30 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 1.32;  CostCny = 9.00 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Peak';     Scenario = 'Output';              CostUsd = 3.96;  CostCny = 27.00 }
     )
 
     if (-not $ApiKey) { Write-Error 'DEEPSEEK_API_KEY not set (env var or -ApiKey).'; return }
@@ -9936,7 +9937,7 @@ function Get-DeepseekUsage {
     }
     Write-Host ('  Estimate formula: tokens = balance / cost_per_1M * 1,000,000.') -ForegroundColor DarkGray
     Write-Host ('  Actual spend depends on cache-hit ratio, prompt size, output length, and model mix.') -ForegroundColor DarkGray
-    Write-Host ('  Note: deepseek-v4-pro routes to Flash and bills at Flash rates (effective Sept 14, 2026 12:00 Beijing Time / 04:00 UTC).') -ForegroundColor DarkGray
+    Write-Host ('  Note: deepseek-v4-pro continues after Sept 14, 2026 with billing unchanged (per DeepSeek announcement).') -ForegroundColor DarkGray
 
     $_ProfileHelpers.WriteSection('Concerns (DeepSeek)')
     $concerns = New-Object System.Collections.Generic.List[string]
