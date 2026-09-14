@@ -803,6 +803,7 @@ $_FontInstallInternal = @{
     MachineRegPath  = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
 
     Packs = @(
+        [pscustomobject]@{ Name = 'IntelOneMono';        Url = 'https://github.com/intel/intel-one-mono/releases/download/V1.4.0/ttf.zip'; Bytes = 505443; Fonts = 8; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$'; Probe = 'IntelOneMono-Regular.ttf'; Extended = $false; Note = 'Screen-optimized TTF, 4 weights with matching italics; family "Intel One Mono".' }
         [pscustomobject]@{ Name = 'GoormSansCode';       Url = 'https://statics.goorm.io/fonts/GoormSansCode/v1.0.1/goorm-sans-code-1.0.1.zip'; Bytes = 4528715;   Fonts = 1;  Kind = 'Zip';  Include = '(?i)^goorm sans code 2/Public/[^/]+\.ttf$'; Probe = 'goorm_Sans_Code_400.ttf';                 Extended = $false; Note = 'Coding sans (single weight).' }
         [pscustomobject]@{ Name = 'Jetendard';           Url = 'https://github.com/kuskhan/jetendard/releases/download/v0.1.0/Jetendard-TTF.zip'; Bytes = 37427141; Fonts = 16; Kind = 'Zip';  Include = '(?i)^ttf/[^/]+\.ttf$';                     Probe = 'Jetendard-Regular.ttf';                  Extended = $false; Note = 'Static TTF weights.' }
         [pscustomobject]@{ Name = 'YeomilMono';          Url = 'https://github.com/taevel02/yeomil-mono/releases/download/v1.1.1/YeomilMono-TTF.zip'; Bytes = 3055540; Fonts = 3; Kind = 'Zip';  Include = '(?i)^[^/]+\.ttf$';                         Probe = 'YeomilMono-Regular.ttf';                 Extended = $false; Note = 'Monospace, 3 weights.' }
