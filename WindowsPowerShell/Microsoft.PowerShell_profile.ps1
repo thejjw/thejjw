@@ -8067,6 +8067,65 @@ function Get-GlobalNpmInventory {
     return [pscustomobject]@{ Available = $true; Packages = $packages }
 }
 
+function Invoke-WingetPackage {
+    <#
+.SYNOPSIS
+    Runs winget install or upgrade with optional user-scope and non-elevation isolation.
+.DESCRIPTION
+    Executes winget in a child process via Start-Process. When UserScope is specified,
+    appends '--scope', 'user', '--silent', '--disable-interactivity',
+    '--accept-package-agreements', and '--accept-source-agreements', and applies
+    __COMPAT_LAYER=RunAsInvoker to suppress UAC credential elevation prompts,
+    restoring any previous compatibility layer on completion.
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('install', 'upgrade')]
+        [string]$Action,
+
+        [Parameter(Mandatory = $true)]
+        [string]$PackageId,
+
+        [switch]$UserScope,
+
+        [switch]$Interactive
+    )
+
+    $arguments = @($Action, '--source', 'winget', '--exact', '--id', $PackageId)
+    if ($UserScope) {
+        $arguments += @('--scope', 'user')
+        if (-not $Interactive) {
+            $arguments += @(
+                '--silent',
+                '--disable-interactivity',
+                '--accept-package-agreements',
+                '--accept-source-agreements'
+            )
+        }
+    }
+    if ($Interactive) {
+        $arguments += @('-i')
+    }
+
+    $prevCompat = $env:__COMPAT_LAYER
+    try {
+        if ($UserScope) {
+            $env:__COMPAT_LAYER = 'RunAsInvoker'
+        }
+        $process = Start-Process -FilePath 'winget' -ArgumentList $arguments -NoNewWindow -Wait -PassThru
+        return $process.ExitCode
+    }
+    finally {
+        if ($null -eq $prevCompat) {
+            Remove-Item Env:\__COMPAT_LAYER -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:__COMPAT_LAYER = $prevCompat
+        }
+    }
+}
+
 function Install-AiTools {
     <#
 .SYNOPSIS
@@ -8128,9 +8187,14 @@ function Install-AiTools {
     Docker Desktop, database clients, and extra AI developer tools. Equivalent to -ExtendedSetup -Sdk -Docker -Database -MoreAi.
     Since Docker and Podman are alternatives, -All selects Docker; use -Podman explicitly if preferred.
 
+.PARAMETER UserScope
+    When supplied, restricts winget installs and upgrades to the current user's profile
+    (--scope user), enables unattended/silent switches, suppresses UAC elevation prompts via
+    RunAsInvoker, and requires a non-elevated PowerShell session.
+
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-08
+    Last Edit: 2026-09
 #>
     [CmdletBinding()]
     param(
@@ -8144,7 +8208,8 @@ function Install-AiTools {
         [switch]$Podman,
         [switch]$Database,
         [switch]$MoreAi,
-        [switch]$All
+        [switch]$All,
+        [switch]$UserScope
     )
 
     # Maintenance: CLIs with a native self-updater need a matching entry in
@@ -8154,6 +8219,10 @@ function Install-AiTools {
     if ($Docker -and $Podman) {
         throw "Cannot specify both -Docker and -Podman switches simultaneously."
     }
+    if ($UserScope -and (Test-IsAdministrator)) {
+        throw "Cannot use -UserScope in an elevated PowerShell session. Run from a standard, non-elevated session."
+    }
+
 
     # -All expands into every optional group; Docker is chosen over Podman since they are alternatives.
     # If -Podman was explicitly passed alongside -All, honour Podman instead of Docker.
@@ -8196,6 +8265,7 @@ function Install-AiTools {
     }
 
     $setupLabels = @('standard')
+    if ($UserScope) { $setupLabels += 'userscope' }
     if ($ExtendedSetup) { $setupLabels += 'extended' }
     if ($Sdk) { $setupLabels += 'sdk' }
     if ($Dotnet) { $setupLabels += 'dotnet' }
@@ -8434,11 +8504,13 @@ function Install-AiTools {
         # Install each missing winget package, printing progress
         foreach ($m in $missing) {
             $wingetInstallIdx++
-            Write-Host "[$wingetInstallIdx/$totalMissing] Installing $m..." -ForegroundColor Cyan
+            $scopeTag = if ($UserScope) { ' [user scope]' } else { '' }
+            Write-Host "[$wingetInstallIdx/$totalMissing] Installing $m$scopeTag..." -ForegroundColor Cyan
             try {
-                # Start-Process is used instead of direct invocation so winget can
-                # prompt for UAC elevation without deadlocking the parent console.
-                Start-Process -FilePath 'winget' -ArgumentList "install -s winget -e --id $m" -NoNewWindow -Wait
+                $exitCode = Invoke-WingetPackage -Action install -PackageId $m -UserScope:$UserScope
+                if ($exitCode -ne 0) {
+                    Write-Host "Winget install failed for $m (exit code $exitCode)." -ForegroundColor Yellow
+                }
             }
             catch { Write-Host "Failed to start winget for $($m): $_" -ForegroundColor Red }
         }
@@ -8464,18 +8536,26 @@ function Install-AiTools {
         # Upgrade each installed winget package, printing progress
         foreach ($pkg in $installed) {
             $wingetUpgradeIdx++
-            Write-Host "[$wingetUpgradeIdx/$totalInstalled] Upgrading $pkg..." -ForegroundColor Cyan
+            $scopeTag = if ($UserScope) { ' [user scope]' } else { '' }
+            Write-Host "[$wingetUpgradeIdx/$totalInstalled] Upgrading $pkg$scopeTag..." -ForegroundColor Cyan
             try {
-                Start-Process -FilePath 'winget' -ArgumentList "upgrade -s winget -e --id $pkg" -NoNewWindow -Wait
+                $exitCode = Invoke-WingetPackage -Action upgrade -PackageId $pkg -UserScope:$UserScope
+                if ($exitCode -ne 0) {
+                    Write-Host "Winget upgrade failed for $pkg (exit code $exitCode)." -ForegroundColor Yellow
+                }
             }
             catch { Write-Host "Failed to start winget upgrade for $($pkg): $_" -ForegroundColor Red }
         }
     }
 
-    # Ensure git is present; if not, offer interactive installer
+    # Ensure Git is present; use an interactive installer unless user scope requires unattended setup.
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Write-Host "git not found. Launching interactive winget installer for Git..." -ForegroundColor Yellow
-        Start-Process -FilePath 'winget' -ArgumentList "install -s winget -e --id $($_AiToolsInternal.GitWingetPackage) -i" -NoNewWindow -Wait
+        $gitMsg = if ($UserScope) { "git not found. Installing Git with user scope..." } else { "git not found. Launching interactive winget installer for Git..." }
+        Write-Host $gitMsg -ForegroundColor Yellow
+        try {
+            $null = Invoke-WingetPackage -Action install -PackageId $($_AiToolsInternal.GitWingetPackage) -UserScope:$UserScope -Interactive:(-not $UserScope)
+        }
+        catch { Write-Host "Failed to start winget for Git: $_" -ForegroundColor Red }
     }
 
     # Install .NET SDK via official install script (https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-install-script)
@@ -9207,18 +9287,33 @@ function Invoke-AiUpgrade {
 .PARAMETER Winget
     Upgrade the reported managed Winget packages. Without this switch, Winget
     updates are listed only because they may be large or require elevation.
+.PARAMETER UserScope
+    When supplied with -Winget, restricts winget upgrades to the current user's profile
+    (--scope user), enables unattended/silent switches, suppresses UAC elevation prompts via
+    RunAsInvoker, and requires a non-elevated PowerShell session. Cannot be specified without -Winget.
 .EXAMPLE
     Invoke-AiUpgrade
 .EXAMPLE
     aiu -winget
+.EXAMPLE
+    aiu -Winget -UserScope
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-08
+    Last Edit: 2026-09
 #>
     [CmdletBinding()]
     param(
-        [switch]$Winget
+        [switch]$Winget,
+        [switch]$UserScope
     )
+
+    if ($UserScope -and -not $Winget) {
+        throw "Cannot specify -UserScope without -Winget. In Invoke-AiUpgrade (aiu), Winget upgrades only execute when -Winget is specified."
+    }
+
+    if ($UserScope -and (Test-IsAdministrator)) {
+        throw "Cannot use -UserScope in an elevated PowerShell session. Run from a standard, non-elevated session."
+    }
 
     foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
         $probe = if ($tool.Probe) { $tool.Probe } else { $tool.Cmd }
@@ -9292,13 +9387,12 @@ function Invoke-AiUpgrade {
                     $wingetUpgradeIndex = 0
                     foreach ($update in $wingetUpdates) {
                         $wingetUpgradeIndex++
-                        $wingetArgs = @('upgrade', '--source', 'winget', '--exact', '--id', $update.Id)
-                        Write-Host (">>> winget: [{0}/{1}] upgrading {2}  {3} -> {4}" -f $wingetUpgradeIndex, $wingetUpdates.Count, $update.Id, $update.Current, $update.Available) -ForegroundColor Cyan
+                        $scopeTag = if ($UserScope) { ' [user scope]' } else { '' }
+                        Write-Host (">>> winget: [{0}/{1}] upgrading {2}  {3} -> {4}{5}" -f $wingetUpgradeIndex, $wingetUpdates.Count, $update.Id, $update.Current, $update.Available, $scopeTag) -ForegroundColor Cyan
                         try {
-                            # A child process lets installers display UI and request UAC elevation.
-                            $process = Start-Process -FilePath 'winget' -ArgumentList $wingetArgs -NoNewWindow -Wait -PassThru
-                            if ($process.ExitCode -ne 0) {
-                                $wingetFailures += "$($update.Id) (exit code $($process.ExitCode))"
+                            $exitCode = Invoke-WingetPackage -Action upgrade -PackageId $update.Id -UserScope:$UserScope
+                            if ($exitCode -ne 0) {
+                                $wingetFailures += "$($update.Id) (exit code $exitCode)"
                             }
                         }
                         catch {

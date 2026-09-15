@@ -10,7 +10,7 @@ Describe 'Invoke-AiUpgrade managed packages' {
         )
         if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
 
-        foreach ($functionName in @('Get-GlobalNpmInventory', 'Invoke-AiUpgrade')) {
+        foreach ($functionName in @('Test-IsAdministrator', 'Get-GlobalNpmInventory', 'Invoke-WingetPackage', 'Invoke-AiUpgrade')) {
             $functionAst = $ast.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -54,6 +54,7 @@ Describe 'Invoke-AiUpgrade managed packages' {
 
         Mock Write-Host {}
         Mock Write-Warning {}
+        Mock Test-IsAdministrator { return $false }
         Mock Get-Command {
             if ($Name -in @('npm', 'winget')) { return [pscustomobject]@{ Name = $Name } }
             return $null
@@ -69,7 +70,13 @@ Describe 'Invoke-AiUpgrade managed packages' {
                 FilePath     = $PesterBoundParameters.FilePath
                 ArgumentList = @($PesterBoundParameters.ArgumentList)
             }
-            $packageId = @($PesterBoundParameters.ArgumentList)[-1]
+            $argsList = @($PesterBoundParameters.ArgumentList)
+            $idIdx = $argsList.IndexOf('--id')
+            $packageId = if ($idIdx -ge 0 -and ($idIdx + 1) -lt $argsList.Count) {
+                $argsList[$idIdx + 1]
+            } else {
+                $argsList[-1]
+            }
             $exitCode = if ($script:upgradeExitCodes.ContainsKey($packageId)) {
                 $script:upgradeExitCodes[$packageId]
             }
@@ -267,6 +274,31 @@ Describe 'Invoke-AiUpgrade managed packages' {
         $script:agentCalled | Should -BeTrue
         Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
             $Object -eq '>>> cursor: agent update'
+        }
+    }
+
+    It 'rejects -UserScope without -Winget' {
+        { Invoke-AiUpgrade -UserScope } | Should -Throw '*Cannot specify -UserScope without -Winget*'
+    }
+
+    It 'rejects -UserScope when session is elevated' {
+        Mock Test-IsAdministrator { return $true }
+        { Invoke-AiUpgrade -Winget -UserScope } | Should -Throw '*Cannot use -UserScope in an elevated PowerShell session*'
+    }
+
+    It 'passes user-scope and unattended flags when -Winget -UserScope is supplied' {
+        $script:wingetOutput = @(
+            'Name         Id                    Version Available Source',
+            '-----------------------------------------------------------',
+            'ZCode        ZhipuAI.ZCode          1.0.0   2.0.0     winget'
+        )
+
+        Invoke-AiUpgrade -Winget -UserScope
+
+        $script:startProcessCalls.Count | Should -Be 1
+        ($script:startProcessCalls[0].ArgumentList -join ' ') | Should -Be 'upgrade --source winget --exact --id ZhipuAI.ZCode --scope user --silent --disable-interactivity --accept-package-agreements --accept-source-agreements'
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -eq '>>> winget: [1/1] upgrading ZhipuAI.ZCode  1.0.0 -> 2.0.0 [user scope]'
         }
     }
 }

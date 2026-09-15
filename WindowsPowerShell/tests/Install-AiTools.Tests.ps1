@@ -33,9 +33,17 @@ Describe 'Install-AiTools PowerShell modules' {
         }
 
         $script:installerAst = $installerAst
+        $wingetPkgAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Invoke-WingetPackage'
+        }, $true)
+        if (-not $wingetPkgAst) { throw 'Could not load Invoke-WingetPackage from the profile.' }
+        . ([scriptblock]::Create($wingetPkgAst.Extent.Text))
         . ([scriptblock]::Create($configAst.Extent.Text))
         . ([scriptblock]::Create($installerAst.Extent.Text))
         function Add-UserPathEntry { param([string]$Path) }
+        function Test-IsAdministrator { return $false }
         $script:configuredModules = @($_AiToolsInternal.PowerShellModules)
         $script:configuredWingetPackages = @($_AiToolsInternal.WingetPackages)
         $script:configuredMoreAiWingetPackages = @($_AiToolsInternal.MoreAiWingetPackages)
@@ -254,7 +262,14 @@ Describe 'Install-AiTools npm packages' {
                 $node.Name -eq 'Get-GlobalNpmInventory'
         }, $true)
         if (-not $inventoryAst) { throw 'Could not load Get-GlobalNpmInventory from the profile.' }
+        $wingetPkgAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Invoke-WingetPackage'
+        }, $true)
+        if (-not $wingetPkgAst) { throw 'Could not load Invoke-WingetPackage from the profile.' }
         . ([scriptblock]::Create($inventoryAst.Extent.Text))
+        . ([scriptblock]::Create($wingetPkgAst.Extent.Text))
         . ([scriptblock]::Create($configAst.Extent.Text))
         . ([scriptblock]::Create($installerAst.Extent.Text))
         $script:originalAiToolsConfigForNpm = $_AiToolsInternal
@@ -274,6 +289,7 @@ Describe 'Install-AiTools npm packages' {
         function Install-KimiSettings {}
         function Install-GrokSettings {}
         function Add-UserPathEntry { param([string]$Path) }
+        function Test-IsAdministrator { return $false }
         function winget {
             param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
         }
@@ -542,5 +558,60 @@ Describe 'Install-AiTools npm packages' {
 
         Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter { $ArgumentList -like '*Example.Two*' }
         Should -Invoke Start-Process -Times 0 -Exactly -ParameterFilter { $ArgumentList -like '*Example.One*' }
+    }
+
+    It 'rejects -UserScope when session is elevated' {
+        Mock Test-IsAdministrator { return $true }
+        { Install-AiTools -UserScope -Auto } | Should -Throw '*Cannot use -UserScope in an elevated PowerShell session*'
+    }
+
+    It 'installs winget packages with user scope when -UserScope is supplied' {
+        $_AiToolsInternal.WingetPackages = @('Example.UserScope')
+        Mock Start-Process {}
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson @() })
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson $_AiToolsInternal.NpmPackages })
+
+        Install-AiTools -Auto -UserScope
+
+        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+            $ArgumentList -contains '--scope' -and
+            $ArgumentList -contains 'user' -and
+            $ArgumentList -contains '--silent' -and
+            $ArgumentList -contains 'Example.UserScope'
+        }
+    }
+
+    It 'launches interactive installer for missing Git in default scope' {
+        $_AiToolsInternal.WingetPackages = @()
+        Mock Get-Command {
+            if ($Name -in @('winget', 'npm', 'opencode')) { return [pscustomobject]@{ Name = $Name } }
+            return $null
+        }
+        Mock Start-Process {}
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson @() })
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson $_AiToolsInternal.NpmPackages })
+
+        Install-AiTools -Auto
+
+        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+            ($ArgumentList -join ' ') -eq 'install --source winget --exact --id Git.Git -i'
+        }
+    }
+
+    It 'installs missing Git silently with user scope when -UserScope is supplied' {
+        $_AiToolsInternal.WingetPackages = @()
+        Mock Get-Command {
+            if ($Name -in @('winget', 'npm', 'opencode')) { return [pscustomobject]@{ Name = $Name } }
+            return $null
+        }
+        Mock Start-Process {}
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson @() })
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson $_AiToolsInternal.NpmPackages })
+
+        Install-AiTools -Auto -UserScope
+
+        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+            ($ArgumentList -join ' ') -eq 'install --source winget --exact --id Git.Git --scope user --silent --disable-interactivity --accept-package-agreements --accept-source-agreements'
+        }
     }
 }
