@@ -4927,7 +4927,8 @@ function Install-AgySettings {
 function Install-CodexSettings {
     <#
 .SYNOPSIS
-    Ensures ~/.codex/config.toml has the custom status line array and no attribution.
+    Ensures ~/.codex/config.toml has the custom status line array.
+    Removes the unsupported legacy commit_attribution setting.
 
 .PARAMETER Force
     Bypass the sentinel check and reapply settings even if setup was previously completed.
@@ -4978,6 +4979,7 @@ function Install-CodexSettings {
     )
 
     $updated = [System.Collections.Generic.List[string]]::new()
+    # Remove the unsupported key written by earlier versions of this installer.
     foreach ($line in $lines) {
         if ($line -notmatch '^\s*commit_attribution\s*=') {
             $updated.Add($line)
@@ -4987,8 +4989,6 @@ function Install-CodexSettings {
     while ($updated.Count -gt 0 -and [string]::IsNullOrWhiteSpace($updated[0])) {
         $updated.RemoveAt(0)
     }
-    $updated.Insert(0, '')
-    $updated.Insert(0, 'commit_attribution = ""')
 
     $tuiStart = -1
     for ($i = 0; $i -lt $updated.Count; $i++) {

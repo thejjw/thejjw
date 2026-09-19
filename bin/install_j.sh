@@ -1246,8 +1246,6 @@ else
   else
     cat << 'EOF' >> "$CODEX_CONFIG"
 
-commit_attribution = ""
-
 [tui]
 status_line = [
     "model-with-reasoning",
