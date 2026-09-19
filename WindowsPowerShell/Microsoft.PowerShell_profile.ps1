@@ -687,6 +687,7 @@ $_AiToolsInternal = @{
     ExtendedWingetPackages = @(
         'JRSoftware.InnoSetup',
         'TortoiseGit.TortoiseGit',
+        'Cloudflare.cloudflared',
         'Insecure.Nmap',
         'Buct0r.fullfetch',
         'HTTPie.HTTPie',
