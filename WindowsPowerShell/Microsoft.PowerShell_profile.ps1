@@ -547,7 +547,7 @@ $_NrdInternal = @{
 
 * If the requested work is inside a cloned Git repository nested under this directory, treat that nested repository as the project root. Verify with `git rev-parse --show-toplevel`, then stage and commit only within that repository; do not stage or commit in any containing parent repository unless explicitly directed.
 * Always commit after each logical change with a descriptive commit message; never bundle unrelated changes.
-* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.local.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
+* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md` and similar local `.md` files used to guide agents.
 * This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
 * Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
 * Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
@@ -3817,8 +3817,7 @@ Initializes a git repository in the new directory and configures a local
 identity using the format: username@hostname.local.
 
 .PARAMETER Agents
-Creates basic AGENTS.md plus CLAUDE.local.md and QWEN.md (@import) template
-files in the directory.
+Creates canonical AGENTS.md template file in the directory.
 Requires -Git.
 
 .PARAMETER Temp
@@ -3852,7 +3851,7 @@ and prints verbose output.
 .NOTES
 Alias: nrd
 Author: jjw(@thejjw)
-Last Edit: 2026-04
+Last Edit: 2026-09
 
 #>
     [CmdletBinding()]
@@ -3948,16 +3947,10 @@ Last Edit: 2026-04
     }
 
     if ($Agents) {
-        Write-Verbose "Creating AGENTS.md (canonical) + CLAUDE.local.md/QWEN.md (@import)"
+        Write-Verbose "Creating AGENTS.md (canonical)"
 
         # Write canonical AGENTS.md using the template defined in global internal configuration
         $_NrdInternal.AgentsMarkdown | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
-
-        # CLAUDE.local.md imports AGENTS.md -- Claude Code reads CLAUDE.local.md, not AGENTS.md
-        '@AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'CLAUDE.local.md') -Encoding UTF8
-
-        # QWEN.md imports AGENTS.md -- Qwen Code reads QWEN.md, not AGENTS.md
-        '@./AGENTS.md' | Set-Content -LiteralPath (Join-Path $Path 'QWEN.md') -Encoding UTF8
     }
     Write-Verbose "Changing location to: $Path"
     Set-Location -LiteralPath $Path

@@ -927,7 +927,7 @@ else
 #   nrd                  random name in $PWD
 #   nrd -n my-project    explicit name        (or: nrd my-project)
 #   nrd -g               init git + synthetic identity
-#   nrd -a               create AGENTS.md + CLAUDE.local.md + QWEN.md (@import); requires -g
+#   nrd -a               create canonical AGENTS.md; requires -g
 #   nrd -t               use $TMPDIR as base
 #   nrd -v               verbose
 
@@ -1025,7 +1025,7 @@ nrd() {
   fi
 
   if $use_agents; then
-    $verbose && echo "creating AGENTS.md (canonical) + CLAUDE.local.md/QWEN.md (@import)"
+    $verbose && echo "creating AGENTS.md (canonical)"
     # This template is ported from AgentsMarkdown in
     # WindowsPowerShell/Microsoft.PowerShell_profile.ps1 (the canonical copy).
     # Porting rule: keep every section byte-identical EXCEPT ## Environment,
@@ -1050,7 +1050,7 @@ nrd() {
 
 * If the requested work is inside a cloned Git repository nested under this directory, treat that nested repository as the project root. Verify with `git rev-parse --show-toplevel`, then stage and commit only within that repository; do not stage or commit in any containing parent repository unless explicitly directed.
 * Always commit after each logical change with a descriptive commit message; never bundle unrelated changes.
-* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md`, `CLAUDE.local.md`, `QWEN.md`, and similar local `.md` files used to guide agents.
+* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md` and similar local `.md` files used to guide agents.
 * This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
 * Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
 * Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
@@ -1085,8 +1085,6 @@ nrd() {
   subagents to a smaller/faster model and reserve the main session for
   synthesis and architectural judgment.
 AGENT_EOF
-    printf '@AGENTS.md\n' > "$dir/CLAUDE.local.md"
-    printf '@./AGENTS.md\n' > "$dir/QWEN.md"
   fi
 
   cd "$dir" || return 1
