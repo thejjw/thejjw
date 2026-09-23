@@ -960,6 +960,7 @@ for i in "${!PLAN_FILES[@]}"; do
   log "Passlog dir: $PASSDIR"
 
   ENCODED_WITH_CRF=false
+  RC2=0  # default: no ABR pass-2 error; the ABR block below sets its own
   if $TRY_CRF_FIRST; then
     CRF_VALUE="$(compute_crf_from_complexity "$FILE" "$SRC_BPS")"
     log "Trying CRF-first encode (derived CRF=${CRF_VALUE}) before ABR fallback..."
@@ -980,7 +981,6 @@ for i in "${!PLAN_FILES[@]}"; do
 
     if [[ "$RC_CRF" -eq 0 && -s "$OUT" ]]; then
       ENCODED_WITH_CRF=true
-      RC2=0
       log "CRF-first encode completed."
     else
       rm -f -- "$OUT" 2>/dev/null || true
@@ -988,8 +988,8 @@ for i in "${!PLAN_FILES[@]}"; do
     fi
   fi
 
-  RC2=1
   if ! $ENCODED_WITH_CRF; then
+    RC2=1  # pessimistic default until pass 2 assigns RC2=$?
     log "FFmpeg pass 1..."
     set +e
     # Optional filter args for v:0
