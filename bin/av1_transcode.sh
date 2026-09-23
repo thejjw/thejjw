@@ -5,6 +5,7 @@
 # 2025.12-2026.4 @thejjw
 
 set -u
+# pipefail is load-bearing: pass 2 pipes ffmpeg through tee and relies on its exit status
 set -o pipefail
 
 EXTENSIONS=( "mp4" "m4v" "mkv" "mov" "mpg" "mpeg" "avi" "wmv" "webm" "ts" "3gp" "flv" "m2ts" "mts" "f4v" "rmvb" "rm" "ogv" "divx" "xvid" )
@@ -186,7 +187,6 @@ calculate_vmaf_window() {
 
   # Run ffmpeg with libvmaf filter; map only video streams and reset PTS to avoid DTS warnings.
   # Capture all output to parse for "VMAF score: XX.YY"
-  set +e
   ffmpeg -hide_banner -loglevel info \
     "${window_args[@]}" -i "$distorted" \
     "${window_args[@]}" -i "$reference" \
@@ -195,7 +195,6 @@ calculate_vmaf_window() {
     -an -sn -dn \
     -f null - > "$output_log" 2>&1
   local rc=$?
-  set -e
 
   # Parse stderr/stdout for "VMAF score: XX.YY" lines and take the last one (preserve 2 decimal places)
   local vmaf_score
@@ -964,7 +963,6 @@ for i in "${!PLAN_FILES[@]}"; do
   if $TRY_CRF_FIRST; then
     CRF_VALUE="$(compute_crf_from_complexity "$FILE" "$SRC_BPS")"
     log "Trying CRF-first encode (derived CRF=${CRF_VALUE}) before ABR fallback..."
-    set +e
     VF_ARGS=()
     if $APPLY_FILTER; then
       VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
@@ -977,7 +975,6 @@ for i in "${!PLAN_FILES[@]}"; do
       -c:v:0 libsvtav1 -crf:v:0 "$CRF_VALUE" -b:v:0 0 \
       "$OUT"
     RC_CRF=$?
-    set -e
 
     if [[ "$RC_CRF" -eq 0 && -s "$OUT" ]]; then
       ENCODED_WITH_CRF=true
@@ -991,7 +988,6 @@ for i in "${!PLAN_FILES[@]}"; do
   if ! $ENCODED_WITH_CRF; then
     RC2=1  # pessimistic default until pass 2 assigns RC2=$?
     log "FFmpeg pass 1..."
-    set +e
     # Optional filter args for v:0
     VF_ARGS=()
     if $APPLY_FILTER; then
@@ -1006,7 +1002,6 @@ for i in "${!PLAN_FILES[@]}"; do
       -an -sn -dn \
       -f null /dev/null
     RC1=$?
-    set -e
 
     if [[ "$RC1" -ne 0 ]]; then
       log "ERROR: pass 1 failed (exit=$RC1)."
@@ -1017,7 +1012,6 @@ for i in "${!PLAN_FILES[@]}"; do
     fi
 
     log "FFmpeg pass 2..."
-    set +e
     # Reuse VF_ARGS for pass 2
     VF_ARGS=()
     if $APPLY_FILTER; then
@@ -1032,7 +1026,6 @@ for i in "${!PLAN_FILES[@]}"; do
       -pass 2 -passlogfile "$PASS_PREFIX" \
       "$OUT" 2>&1 | tee /tmp/ffmpeg_pass2.log
     RC2=$?
-    set -e
   fi
 
   rm -rf "$PASSDIR" 2>/dev/null || true
@@ -1046,7 +1039,6 @@ for i in "${!PLAN_FILES[@]}"; do
     # Only map supported Matroska streams (video, audio, subtitles) and skip unsupported types (data, attachments, etc.)
     REMUX_FILE="${FILE}.remux.mkv"
     log "Creating clean MKV: $REMUX_FILE"
-    set +e
     ffmpeg "${FFMPEG_OPTS[@]}" -y \
       -i "$FILE" \
       -map 0:v:0 -map 0:a? -map 0:s? \
@@ -1054,7 +1046,6 @@ for i in "${!PLAN_FILES[@]}"; do
       -c:v copy -c:a copy -c:s copy \
       "$REMUX_FILE"
     REMUX_RC=$?
-    set -e
     
     if [[ "$REMUX_RC" -eq 0 && -s "$REMUX_FILE" ]]; then
       log "Re-mux successful. Replacing original and retrying transcode..."
@@ -1067,7 +1058,6 @@ for i in "${!PLAN_FILES[@]}"; do
       PASSDIR="$(mktemp -d -t av1pass_retry_XXXXXXXX)"
       PASS_PREFIX="${PASSDIR}/ffmpeg2pass"
       log "Retry: FFmpeg pass 1..."
-      set +e
       VF_ARGS=()
       if $APPLY_FILTER; then
         VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
@@ -1081,7 +1071,6 @@ for i in "${!PLAN_FILES[@]}"; do
         -an -sn -dn \
         -f null /dev/null
       RC1=$?
-      set -e
       
       if [[ "$RC1" -ne 0 ]]; then
         log "ERROR: Retry pass 1 failed (exit=$RC1)."
@@ -1093,7 +1082,6 @@ for i in "${!PLAN_FILES[@]}"; do
       
       # Retry pass 2
       log "Retry: FFmpeg pass 2..."
-      set +e
       VF_ARGS=()
       if $APPLY_FILTER; then
         VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
@@ -1108,7 +1096,6 @@ for i in "${!PLAN_FILES[@]}"; do
         -pass 2 -passlogfile "$PASS_PREFIX" \
         "$OUT"
       RC2=$?
-      set -e
       
       rm -rf "$PASSDIR" 2>/dev/null || true
       
@@ -1155,7 +1142,6 @@ for i in "${!PLAN_FILES[@]}"; do
       PASS_PREFIX="${PASSDIR}/ffmpeg2pass"
 
       log "ABR fallback pass 1..."
-      set +e
       VF_ARGS=()
       if $APPLY_FILTER; then
         VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
@@ -1169,7 +1155,6 @@ for i in "${!PLAN_FILES[@]}"; do
         -an -sn -dn \
         -f null /dev/null
       RC1=$?
-      set -e
 
       if [[ "$RC1" -ne 0 ]]; then
         log "ERROR: ABR fallback pass 1 failed (exit=$RC1)."
@@ -1180,7 +1165,6 @@ for i in "${!PLAN_FILES[@]}"; do
       fi
 
       log "ABR fallback pass 2..."
-      set +e
       VF_ARGS=()
       if $APPLY_FILTER; then
         VF_ARGS+=( -filter:v:0 "$FILTER_CHAIN" )
@@ -1194,7 +1178,6 @@ for i in "${!PLAN_FILES[@]}"; do
         -pass 2 -passlogfile "$PASS_PREFIX" \
         "$OUT"
       RC2=$?
-      set -e
       rm -rf "$PASSDIR" 2>/dev/null || true
 
       if [[ "$RC2" -ne 0 || ! -s "$OUT" ]]; then
