@@ -8997,26 +8997,29 @@ function Remove-AiApiKeysFromCS {
 # https://code.claude.com/docs/en/model-config#special-model-behavior
 # default model setting
 # The behavior of default depends on your account type:
-# Max, Team Premium, Enterprise pay-as-you-go, and Anthropic API: defaults to Opus 4.8
-# Pro, Team Standard, and Enterprise subscription seats: defaults to Sonnet 4.6
+# Pro, Max, Team, Enterprise, and Anthropic API: defaults to Opus 5.5
+# Claude Platform on AWS, Amazon Bedrock, and Google Cloud's Agent Platform: defaults to Opus 5.5
+# Microsoft Foundry: defaults to Sonnet 4.5
+# (Before v2.1.280: Sonnet 5 on Pro/Team Standard, Opus 5 on Max/Team Premium/Enterprise/API.)
 # opusplan model setting
 # The opusplan model alias provides an automated hybrid approach:
 # In plan mode - Uses opus for complex reasoning and architecture decisions
 # In execution mode - Automatically switches to sonnet for code generation and implementation
 # This gives you the best of both worlds: Opus’s superior reasoning for planning, and Sonnet’s efficiency for execution.
-# The plan-mode Opus phase uses the same context window as the opus model setting. 
-# On subscription tiers where Opus is automatically upgraded to 1M context, opusplan receives the upgrade in plan mode as well. 
-# To force 1M context for both phases when you are not on an auto-upgrade tier, set the model to opusplan[1m].
+# The plan-mode Opus phase uses the same context window as the opus model setting.
+# When opus and sonnet resolve to models that run with the 1M context window by default (as the
+# current models do on the Anthropic API), both phases run with it.
+# To force 1M context for both phases where they don't, set the model to opusplan[1m] (via /model requires v2.1.265 or later).
 # For a hybrid approach where Claude decides mid-task when to consult a second model rather than switching at the plan boundary, see the advisor tool.
 # https://code.claude.com/docs/en/advisor
 # The advisor tool lets Claude consult a second, typically stronger model at key moments during a task, such as before committing to an approach, when stuck on a recurring error, 
 # or before declaring a task complete. The advisor receives the full conversation, including every tool call and result, and returns guidance that Claude applies before continuing.
 # Pairing	When to use
 # Sonnet main + Opus advisor	Sonnet handles routine work and escalates planning, ambiguous failures, and completion checks to Opus
-# Sonnet main + Fable advisor	Fable 5 guidance at decision points without running Fable 5 throughout. Requires v2.1.170 or later and Fable 5 access
+# Sonnet main + Fable advisor	Fable 5.1 guidance at decision points without running Fable 5.1 throughout. Requires v2.1.257 or later and Fable access
 # Haiku main + Opus advisor	Lowest-cost main model with strong planning. Expect higher cost than Haiku alone but lower than switching the main model to Sonnet or Opus
 # Opus main + Opus advisor	A second Opus reviews the first. Useful for high-stakes tasks where an independent check matters more than cost
-# Fable main + Fable advisor	Highest-capability pairing when Fable 5 is available (v2.1.170+). Fable is a higher tier than Opus and Sonnet, so it is the only accepted advisor for a Fable main model
+# Fable main + Fable advisor	Highest-capability pairing when Fable is available. Fable is a higher tier than Opus and Sonnet, so it is the only accepted advisor for a Fable main model (a Fable 5.1 main accepts only a Fable 5.1 advisor)
 # Sonnet main + Sonnet advisor	A lower-cost second opinion for catching routine oversights
 # Claude decides when to call the advisor. It tends to consult before committing to an approach, when an error keeps recurring, and before declaring a task done, but the timing is model-driven rather than rule-based.
 # Claude calls the advisor at decision points rather than on every turn, so pairing a faster main model with a stronger advisor typically costs less than running the stronger model throughout. Advisor usage counts toward the session totals shown by /usage.
@@ -9042,7 +9045,7 @@ Runs Claude Code with a specific model and permissions skipped.
 
 .NOTES
 Author: jjw(@thejjw)
-Last Edit: 2026-05
+Last Edit: 2026-09
 #>
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
         Write-Host 'claude CLI not found.' -ForegroundColor Red
@@ -9100,17 +9103,17 @@ function Test-AnthropicApi {
     or "https://api.z.ai/api/anthropic").
 
 .PARAMETER Model
-    The model identifier to use for the test request (e.g. "claude-sonnet-4-20250514").
+    The model identifier to use for the test request (e.g. "claude-sonnet-5").
 
 .EXAMPLE
-    Test-AnthropicApi -ApiKey $env:ANTHROPIC_API_KEY -ApiUrl "https://api.anthropic.com" -Model "claude-sonnet-4-20250514"
+    Test-AnthropicApi -ApiKey $env:ANTHROPIC_API_KEY -ApiUrl "https://api.anthropic.com" -Model "claude-sonnet-5"
 
 .EXAMPLE
     Test-AnthropicApi $env:SOME_AUTH_TOKEN "https://api.z.ai/api/anthropic" "glm-5.1"
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-05
+    Last Edit: 2026-09
 #>
     [CmdletBinding()]
     param(
@@ -9194,17 +9197,17 @@ function Test-OpenAiApi {
     or "https://api.deepseek.com/v1").
 
 .PARAMETER Model
-    The model identifier to use for the test request (e.g. "gpt-4o", "deepseek-chat").
+    The model identifier to use for the test request (e.g. "gpt-6-luna", "deepseek-chat").
 
 .EXAMPLE
-    Test-OpenAiApi -ApiKey $env:OPENAI_API_KEY -ApiUrl "https://api.openai.com/v1" -Model "gpt-4o"
+    Test-OpenAiApi -ApiKey $env:OPENAI_API_KEY -ApiUrl "https://api.openai.com/v1" -Model "gpt-6-luna"
 
 .EXAMPLE
     Test-OpenAiApi $env:DEEPSEEK_API_KEY "https://api.deepseek.com/v1" "deepseek-chat"
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-05
+    Last Edit: 2026-09
 #>
     [CmdletBinding()]
     param(
