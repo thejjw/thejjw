@@ -70,13 +70,13 @@
       "mode": "primary",
       "model": "openai/gpt-5.6-terra",
       "variant": "high",
-      "prompt": "You are an OpenAI-only orchestration head. Use fast-openai-gpt5.4-mini for discovery, hard-impl-openai for implementation, and premium-reviewer-gpt-5.6-sol for review.",
+      "prompt": "You are an OpenAI-only orchestration head. Use fast-openai-gpt6-luna for discovery, hard-impl-openai for implementation, and premium-reviewer-gpt-5.6-sol for review.",
       "permission": {
         "edit": "ask",
         "bash": "ask",
         "task": {
           "*": "deny",
-          "fast-openai-gpt5.4-mini": "allow",
+          "fast-openai-gpt6-luna": "allow",
           "hard-impl-openai": "allow",
           "premium-reviewer-gpt-5.6-sol": "allow"
         }
@@ -149,10 +149,10 @@
         "task": "deny"
       }
     },
-    "fast-openai-gpt5.4-mini": {
-      "description": "Fast read-only OpenAI discovery agent using GPT 5.4 Mini.",
+    "fast-openai-gpt6-luna": {
+      "description": "Fast read-only OpenAI discovery agent using GPT 6 Luna.",
       "mode": "subagent",
-      "model": "openai/gpt-5.4-mini",
+      "model": "openai/gpt-6-luna",
       "steps": 12,
       "prompt": "You are a fast discovery agent. Search, inspect, summarize, and return concise findings with file references. Do not modify files. Prefer targeted searches over exhaustive reading.",
       "permission": {
@@ -224,9 +224,9 @@
       }
     },
     "hard-impl-openai": {
-      "description": "Implementation and hard debugging subagent using GPT 5.3 Codex.",
+      "description": "Implementation and hard debugging subagent using GPT 6 Sol.",
       "mode": "subagent",
-      "model": "openai/gpt-5.3-codex",
+      "model": "openai/gpt-6-sol",
       "steps": 40,
       "prompt": "You are an implementation agent. Make the smallest correct code changes, preserve existing style, run focused verification when appropriate, and report what changed. Avoid broad discovery unless necessary.",
       "permission": {

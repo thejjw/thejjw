@@ -2,7 +2,7 @@
 
 This bundle installs a reusable OpenCode configuration for multi-model agent routing. It keeps three primary heads and adds alternate profiles with `alt_` prefixes.
 
-Last updated: 2026-08-17.
+Last updated: 2026-09-23.
 
 ## Requirements
 
@@ -65,11 +65,11 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 | Agent | Model | Purpose |
 | --- | --- | --- |
 | `fast-discovery-m3` | `minimax-coding-plan/MiniMax-M3` | Fast read-only discovery |
-| `fast-openai-gpt5.4-mini` | `openai/gpt-5.4-mini` | OpenAI read-only discovery |
+| `fast-openai-gpt6-luna` | `openai/gpt-6-luna` | OpenAI read-only discovery |
 | `fast-glm-4.7` | `zai-coding-plan/glm-4.7` | GLM read-only discovery |
 | `hard-impl-glm53` | `zai-coding-plan/glm-5.3` | Main implementation work |
 | `hard-impl-glm47` | `zai-coding-plan/glm-4.7` | Alternate implementation work |
-| `hard-impl-openai` | `openai/gpt-5.3-codex` | OpenAI implementation work |
+| `hard-impl-openai` | `openai/gpt-6-sol` | OpenAI implementation work |
 | `hard-impl-m3` | `minimax-coding-plan/MiniMax-M3` | MiniMax implementation work |
 | `premium-reviewer-gpt-5.6-sol` | `openai/gpt-5.6-sol` | Read-only final review and risk analysis |
 
@@ -81,7 +81,7 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 | `head-glm` | `fast-discovery-m3`, `hard-impl-glm47` |
 | `head-minimax` | `fast-discovery-m3`, `hard-impl-m3` |
 | `alt_premium` | `fast-discovery-m3`, `hard-impl-openai`, `premium-reviewer-gpt-5.6-sol` |
-| `alt_openai` | `fast-openai-gpt5.4-mini`, `hard-impl-openai`, `premium-reviewer-gpt-5.6-sol` |
+| `alt_openai` | `fast-openai-gpt6-luna`, `hard-impl-openai`, `premium-reviewer-gpt-5.6-sol` |
 | `alt_glm_stack` | `fast-glm-4.7`, `hard-impl-glm53` |
 | `alt_budget` | `fast-discovery-m3`, `hard-impl-glm47` |
 | `alt_review_heavy` | `fast-discovery-m3`, `hard-impl-glm53`, `premium-reviewer-gpt-5.6-sol` |
