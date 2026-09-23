@@ -490,11 +490,15 @@ verify_remux() {
 # Refuses when the .mkv target already exists (could be a different, still
 # unprocessed input). On success updates the global FILE so the retry encode,
 # VMAF reference and delete policy all use the remuxed file. Returns non-zero
-# on refusal (the remux file is left for the caller to clean up).
+# on refusal or move failure (the remux file is left for the caller to clean up).
+# If removing the old source fails, keep both files and use the adopted remux.
 adopt_remux() {
   local remux="$1" target
   if [[ "$FILE" == *.mkv ]]; then
-    mv -f -- "$remux" "$FILE"
+    if ! mv -f -- "$remux" "$FILE"; then
+      log "ERROR: cannot replace '$FILE' with remux. Original kept."
+      return 1
+    fi
     log "Replaced original with remuxed file: $FILE"
     return 0
   fi
@@ -503,10 +507,16 @@ adopt_remux() {
     log "ERROR: cannot rename remux to '$target' - file already exists. Not replacing original."
     return 1
   fi
-  mv -- "$remux" "$target"
-  rm -f -- "$FILE"
+  if ! mv -- "$remux" "$target"; then
+    log "ERROR: cannot move remux to '$target'. Original kept."
+    return 1
+  fi
+  if rm -f -- "$FILE"; then
+    log "Replaced original with remuxed file: $target"
+  else
+    log "WARNING: could not remove original '$FILE'. Both files kept; using remux: $target"
+  fi
   FILE="$target"
-  log "Replaced original with remuxed file: $FILE"
   return 0
 }
 
