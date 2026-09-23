@@ -433,6 +433,83 @@ get_format_duration() {
     -of default=nk=1:nw=1 -- "$f" 2>/dev/null | head -n 1
 }
 
+# Count streams matching a selector (v, a, s, ...) in a file.
+count_streams() {
+  local f="$1" sel="$2"
+  ffprobe -v error -select_streams "$sel" \
+    -show_entries stream=index \
+    -of csv=p=0 -- "$f" 2>/dev/null | grep -c .
+}
+
+# verify_remux SRC DST - validate a stream-copy remux before it may replace SRC.
+# ffmpeg exiting 0 only proves the muxer finished; with a damaged input it can
+# skip bad packets and still exit 0, silently producing a truncated remux.
+# All checks are cheap container-level probes:
+#   1. DST probes a valid duration at all.
+#   2. DST has >= 1 video stream.
+#   3. Audio/subtitle stream counts match SRC (the remux map intentionally drops
+#      data/attachment streams; kept streams must not silently disappear).
+#   4. Duration matches SRC within 2 s (same tolerance as ab-av1 --verify);
+#      skipped with a note when SRC reports no duration (damaged containers
+#      often don't).
+verify_remux() {
+  local src="$1" dst="$2"
+  local sd dd
+
+  dd="$(get_format_duration "$dst")"
+  if [[ -z "$dd" || "$dd" == "N/A" ]]; then
+    log "WARNING: remux verification failed - cannot probe duration of: $dst"
+    return 1
+  fi
+  if (( $(count_streams "$dst" v) < 1 )); then
+    log "WARNING: remux verification failed - no video stream in: $dst"
+    return 1
+  fi
+  if (( $(count_streams "$dst" a) != $(count_streams "$src" a) )) || \
+     (( $(count_streams "$dst" s) != $(count_streams "$src" s) )); then
+    log "WARNING: remux verification failed - audio/subtitle stream count mismatch: $dst"
+    return 1
+  fi
+  sd="$(get_format_duration "$src")"
+  if [[ -n "$sd" && "$sd" != "N/A" ]]; then
+    if ! awk -v a="$sd" -v b="$dd" 'BEGIN{d=a-b; if(d<0)d=-d; exit !(d<=2)}'; then
+      log "WARNING: remux verification failed - duration mismatch (src=${sd}s vs remux=${dd}s)"
+      return 1
+    fi
+  else
+    log "NOTE: source duration unavailable - skipping remux duration check."
+  fi
+  return 0
+}
+
+# adopt_remux REMUX_FILE - replace the current input FILE with a verified remux.
+# Keeps the .mkv extension matching the container:
+#   - FILE already *.mkv: mv -f over it (plain rename is atomic on the same
+#     filesystem, so no rm+mv gap).
+#   - otherwise: move remux to "${FILE%.*}.mkv", then remove the original.
+# Refuses when the .mkv target already exists (could be a different, still
+# unprocessed input). On success updates the global FILE so the retry encode,
+# VMAF reference and delete policy all use the remuxed file. Returns non-zero
+# on refusal (the remux file is left for the caller to clean up).
+adopt_remux() {
+  local remux="$1" target
+  if [[ "$FILE" == *.mkv ]]; then
+    mv -f -- "$remux" "$FILE"
+    log "Replaced original with remuxed file: $FILE"
+    return 0
+  fi
+  target="${FILE%.*}.mkv"
+  if [[ -e "$target" ]]; then
+    log "ERROR: cannot rename remux to '$target' - file already exists. Not replacing original."
+    return 1
+  fi
+  mv -- "$remux" "$target"
+  rm -f -- "$FILE"
+  FILE="$target"
+  log "Replaced original with remuxed file: $FILE"
+  return 0
+}
+
 get_video_bitrate_bps() {
   local f="$1"
   local br
@@ -1039,7 +1116,9 @@ for i in "${!PLAN_FILES[@]}"; do
     # Only map supported Matroska streams (video, audio, subtitles) and skip unsupported types (data, attachments, etc.)
     REMUX_FILE="${FILE}.remux.mkv"
     log "Creating clean MKV: $REMUX_FILE"
-    ffmpeg "${FFMPEG_OPTS[@]}" -y \
+    # -xerror makes the remux abort non-zero on any demux error instead of
+    # silently skipping bad packets, so REMUX_RC=0 actually means "no errors".
+    ffmpeg "${FFMPEG_OPTS[@]}" -xerror -y \
       -i "$FILE" \
       -map 0:v:0 -map 0:a? -map 0:s? \
       -map_metadata 0 -map_chapters 0 \
@@ -1047,12 +1126,13 @@ for i in "${!PLAN_FILES[@]}"; do
       "$REMUX_FILE"
     REMUX_RC=$?
     
-    if [[ "$REMUX_RC" -eq 0 && -s "$REMUX_FILE" ]]; then
-      log "Re-mux successful. Replacing original and retrying transcode..."
+    # rc=0 + non-empty alone does not prove a faithful remux; verify stream
+    # counts and duration before the permanent replacement, and land the
+    # remux under a .mkv name (see verify_remux/adopt_remux).
+    if [[ "$REMUX_RC" -eq 0 && -s "$REMUX_FILE" ]] && verify_remux "$FILE" "$REMUX_FILE" && adopt_remux "$REMUX_FILE"; then
+      log "Re-mux verified. Retrying transcode..."
       
-      # Replace original with remuxed version
-      rm -f -- "$FILE"
-      mv "$REMUX_FILE" "$FILE"
+      # (original already replaced and FILE updated by adopt_remux above)
       
       # Retry pass 1
       PASSDIR="$(mktemp -d -t av1pass_retry_XXXXXXXX)"
@@ -1109,7 +1189,7 @@ for i in "${!PLAN_FILES[@]}"; do
       
       log "SUCCESS: Transcode completed after re-mux."
     else
-      log "ERROR: Re-mux failed (exit=$REMUX_RC). Giving up on this file."
+      log "ERROR: Re-mux failed or failed verification (exit=$REMUX_RC). Giving up on this file. Original kept."
       rm -f -- "$REMUX_FILE" 2>/dev/null || true
       rm -f -- "$OUT" 2>/dev/null || true
       FILES_FAILED=$((FILES_FAILED+1))
