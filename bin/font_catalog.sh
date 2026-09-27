@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#
+# font_catalog.sh
+# Curated font catalog shared across macOS and Linux font installers.
+# Defines load_font_catalog() which populates the caller's catalog arrays via add_pack().
+#
+# 2026 @thejjw
+#
+
+# Registers all 33 curated packs into caller's add_pack handler
+load_font_catalog() {
+  add_pack "IntelOneMono" "https://github.com/intel/intel-one-mono/releases/download/V1.4.0/ttf.zip" 505443 8 "Zip" '(?i)^ttf/[^/]+\.ttf$' "IntelOneMono-Regular.ttf" 0 'Screen-optimized TTF, 4 weights with matching italics; family "Intel One Mono".'
+  add_pack "GoormSansCode" "https://statics.goorm.io/fonts/GoormSansCode/v1.0.1/goorm-sans-code-1.0.1.zip" 4528715 1 "Zip" '(?i)^goorm sans code 2/Public/[^/]+\.ttf$' "goorm_Sans_Code_400.ttf" 0 'Coding sans (single weight).'
+  add_pack "Jetendard" "https://github.com/kuskhan/jetendard/releases/download/v0.1.0/Jetendard-TTF.zip" 37427141 16 "Zip" '(?i)^ttf/[^/]+\.ttf$' "Jetendard-Regular.ttf" 0 'Static TTF weights.'
+  add_pack "YeomilMono" "https://github.com/taevel02/yeomil-mono/releases/download/v1.1.1/YeomilMono-TTF.zip" 3055540 3 "Zip" '(?i)^[^/]+\.ttf$' "YeomilMono-Regular.ttf" 0 'Monospace, 3 weights.'
+  add_pack "Pretendard" "https://github.com/orioncactus/pretendard/releases/download/v1.3.9/Pretendard-1.3.9.zip" 47304526 9 "Zip" '(?i)^public/static/alternative/[^/]+\.ttf$' "Pretendard-Regular.ttf" 0 'Static TTF: its variable build registers as family "Pretendard Variable", so static is used for a clean "Pretendard" family.'
+  add_pack "WantedSans" "https://github.com/wanteddev/wanted-sans/releases/download/v1.0.3/WantedSans-1.0.3.zip" 21656532 7 "Zip" '(?i)^ttf/[^/]+\.ttf$' "WantedSans-Regular.ttf" 0 'Static TTF: variable build registers as "Wanted Sans Variable"; static keeps a clean "Wanted Sans" family.'
+  add_pack "Galmuri" "https://github.com/quiple/galmuri/releases/download/v2.40.3/Galmuri-v2.40.3.zip" 19936233 20 "Zip" '(?i)^[^/]+\.(ttf|ttc)$' "Galmuri11.ttf" 0 'Pixel font family; all root-level ttf/ttc.'
+  add_pack "OpenDyslexic" "https://github.com/antijingoist/opendyslexic/releases/download/v0.91.12/opendyslexic-0.910.12-rc2-2019.10.17.zip" 3627458 4 "Zip" '(?i)^[^/]+\.otf$' "OpenDyslexic-Regular.otf" 0 'OTF; skips eot/woff web formats.'
+  add_pack "FiraCode" "https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip" 2462987 6 "Zip" '(?i)^ttf/[^/]+\.ttf$' "FiraCode-Regular.ttf" 0 'Static TTF: the VF defaults to Light weight and legacy apps see "Fira Code Light"; static defaults to Regular with a clean "Fira Code" family.'
+  add_pack "SarasaGothicK" "https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaGothicK-TTF-1.0.40.7z" 63464316 10 "7z" '(?i)^SarasaGothicK-[^/]+\.ttf$' "SarasaGothicK-Regular.ttf" 0 'Korean Sarasa Gothic, 5 hinted weights with italics. Requires 7z command.'
+  add_pack "SarasaMonoK" "https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaMonoK-TTF-1.0.40.7z" 66316218 10 "7z" '(?i)^SarasaMonoK-[^/]+\.ttf$' "SarasaMonoK-Regular.ttf" 0 'Korean monospaced Sarasa, 5 hinted weights with italics. Requires 7z command.'
+  add_pack "SourceHanSans" "https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/02_SourceHanSans-VF.zip" 888816761 1 "Zip" '(?i)^Variable/OTC/SourceHanSans-VF\.ttf\.ttc$' "SourceHanSans-VF.ttf.ttc" 1 'LARGE ~848 MB. Installs only the pan-CJK OTC variable collection.'
+  add_pack "SourceHanSerif" "https://github.com/adobe-fonts/source-han-serif/releases/download/2.003R/02_SourceHanSerif-VF.zip" 750817685 1 "Zip" '(?i)^Variable/OTC/SourceHanSerif-VF\.ttf\.ttc$' "SourceHanSerif-VF.ttf.ttc" 1 'LARGE ~716 MB. Installs only the pan-CJK OTC variable collection.'
+  add_pack "SourceHanMono" "https://github.com/adobe-fonts/source-han-mono/releases/download/1.002/SourceHanMono.ttc" 122117628 1 "File" "" "SourceHanMono.ttc" 1 'LARGE ~116 MB. Direct .ttc download (no archive).'
+  add_pack "JetBrainsMono" "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip" 5622857 2 "Zip" '(?i)^fonts/variable/[^/]+\.ttf$' "JetBrainsMono[wght].ttf" 0 'Variable TTF (upright + italic); registers cleanly as "JetBrains Mono", so variable is kept over the static ttf/ set.'
+  add_pack "IBMPlexMono" "https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-mono%402.5.0/ibm-plex-mono.zip" 6940652 16 "Zip" '(?i)^ibm-plex-mono/fonts/complete/otf/[^/]+\.otf$' "IBMPlexMono-Regular.otf" 0 'OTF, all 16 weights incl. italics; skips ttf/woff/woff2.'
+  add_pack "IBMPlexSansKR" "https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-sans-kr%401.1.0/ibm-plex-sans-kr.zip" 73268731 8 "Zip" '(?i)^ibm-plex-sans-kr/fonts/complete/otf/[^/]+\.otf$' "IBMPlexSansKR-Regular.otf" 0 'LARGE ~73 MB (full zip also bundles ttf/woff/woff2); installs OTF, all 8 Korean weights.'
+  add_pack "MonaSans" "https://github.com/github/mona-sans/releases/download/v2.0.27/mona-sans-variable-v2.0.27.zip" 2674251 11 "Zip" '(?i)^fonts/variable/[^/]+\.ttf$' "MonaSansVF[opsz,wght].ttf" 0 'Variable-only distribution (multiple width/optical axes).'
+  add_pack "SUIT" "https://github.com/sun-typeface/SUIT/releases/download/v2.0.5/SUIT-Variable-ttf.zip" 812043 1 "Zip" '(?i)^[^/]+\.ttf$' "SUIT-Variable.ttf" 0 'Single variable TTF.'
+  add_pack "MonoplexKR" "https://github.com/y-kim/monoplex/releases/download/v0.0.2/MonoplexKR-v0.0.2.zip" 74226250 64 "Zip" '(?i)^[^/]+/[^/]+\.ttf$' "MonoplexKR-Regular.ttf" 0 'LARGE ~74 MB. Four families (base/Nerd/Wide/WideNerd), 16 weights each.'
+  add_pack "MinSans" "https://github.com/poposnail61/min-sans/releases/download/v1.4.2/fonts.zip" 31533194 10 "Zip" '(?i)^fonts/static/[^/]+\.otf$' "MinSans-Regular.otf" 0 'Static OTF: variable build registers as "Min Sans VF"; static keeps a clean "Min Sans" family. Skips __MACOSX.'
+  add_pack "Dalmoori" "https://github.com/RanolP/dalmoori-font/releases/download/v0.200/dalmoori-font.zip" 775035 1 "Zip" '(?i)^[^/]+\.ttf$' "dalmoori.ttf" 0 'Single pixel TTF.'
+  add_pack "NanumGothicCoding" "https://github.com/naver/nanumfont/releases/download/VER2.5/NanumGothicCoding-2.5.zip" 1707449 2 "Zip" '(?i)^[^/]+\.ttf$' "NanumGothicCoding.ttf" 0 'Regular + Bold; skips __MACOSX.'
+  add_pack "NanumGothic" "https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-gothic.zip" 12905726 4 "Zip" '(?i)^[^/]+\.ttf$' "NanumGothic.ttf" 0 'TTF, 4 weights (Light/Regular/Bold/ExtraBold). TTF is used because the bundled OTF renames the family to "NanumGothicOTF".'
+  add_pack "NanumMyeongjo" "https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-myeongjo.zip" 7353677 3 "Zip" '(?i)^[^/]+\.ttf$' "NanumMyeongjo.ttf" 0 'TTF, 3 weights (Regular/Bold/ExtraBold). TTF keeps a clean "NanumMyeongjo" family (OTF is "NanumMyeongjoOTF").'
+  add_pack "NanumBarunGothic" "https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-barun-gothic.zip" 15416063 4 "Zip" '(?i)^[^/]+\.ttf$' "NanumBarunGothic.ttf" 0 'TTF, 4 weights (UltraLight/Light/Regular/Bold). TTF keeps a clean "NanumBarunGothic" family (OTF is "NanumBarunGothicOTF").'
+  add_pack "NanumSquare" "https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-square.zip" 4203717 8 "Zip" '(?i)^[^/]+\.ttf$' "NanumSquareR.ttf" 0 'TTF, 8 files: "NanumSquare" + "NanumSquare_ac" (alphabet-matched) sub-families, 4 weights each. TTF keeps clean names (OTF appends "OTF").'
+  add_pack "NanumSquareNeo" "https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-square-neo.zip" 9765932 5 "Zip" '(?i)^nanum-square-neo/TTF/[^/]+\.ttf$' "NanumSquareNeo-bRg.ttf" 0 'Static TTF, 5 weights (Light..Heavy). Static TTF is used because both the variable ("NanumSquare Neo variable") and OTF ("NanumSquare Neo OTF") rename the family; static keeps a clean "NanumSquare Neo".'
+  add_pack "NanumSquareRound" "https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-square-round.zip" 2535434 4 "Zip" '(?i)^[^/]+\.ttf$' "NanumSquareRoundR.ttf" 0 'TTF, 4 weights (Light/Regular/Bold/ExtraBold). TTF keeps a clean "NanumSquareRound" family (OTF appends "OTF").'
+  add_pack "NanumHuman" "https://hangeul.naver.com/hangeul_static/webfont/zips/NanumHuman.zip" 6190692 6 "Zip" '(?i)^NanumHuman/[^/]+\.ttf$' "NanumHumanRegular.ttf" 0 'TTF, 6 weights (ExtraLight..Heavy); skips __MACOSX/woff. Both formats are suffixed upstream, so this registers as "NanumHuman TTF".'
+  add_pack "D2Coding" "https://github.com/naver/d2codingfont/releases/download/VER1.3.2/D2Coding-Ver1.3.2-20180524.zip" 21256997 1 "Zip" '(?i)^D2CodingAll/[^/]+\.ttc$' "D2Coding-Ver1.3.2-20180524-all.ttc" 0 'Installs the D2CodingAll .ttc (regular+bold+ligature in one collection).'
+  add_pack "KoPubWorld" "https://www.kopus.org/wp-content/uploads/2026/04/KOPUBWORLD_OTF_FONTS2026.zip" 20297063 6 "Zip" '(?i)^[^/]+\.otf$' "KoPubWorld Batang_Pro Light.otf" 0 'OTF-only (2026 release). KoPubWorld Batang (serif) + Dotum (sans), 3 weights each (Light/Medium/Bold).'
+  add_pack "KoPub" "https://www.kopus.org/wp-content/uploads/2022/04/KOPUB2.0_OTF_FONTS.zip" 12640328 6 "Zip" '(?i)^[^/]+\.otf$' "KoPub Batang_Pro Light.otf" 0 'OTF-only (classic KoPub 2.0). KoPub Batang (serif) + Dotum (sans), 3 weights each (Light/Medium/Bold).'
+}

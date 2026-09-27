@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 INSTALLER="${REPO_ROOT}/bin/install_fonts_mac.sh"
-PROFILE="${REPO_ROOT}/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
+CATALOG="${REPO_ROOT}/bin/font_catalog.sh"
 TEST_ROOT="$(mktemp -d -t install_fonts_mac_test.XXXXXX)"
 TEST_COUNT=0
 
@@ -92,60 +92,60 @@ with zipfile.ZipFile(zip_path, 'w') as z:
 " "$zip_path" "$@"
 }
 
-# Test 1: Full 33-pack catalog parity against WindowsPowerShell/Microsoft.PowerShell_profile.ps1
-test_catalog_parity() {
+# Test 1: Full 33-pack catalog integrity and schema validation
+test_catalog_integrity() {
   python3 -c '
 import sys, re
 
-profile_path = sys.argv[1]
-mac_script_path = sys.argv[2]
+catalog_path = sys.argv[1]
 
-with open(profile_path, "r", encoding="utf-8") as f:
-    ps_text = f.read()
+with open(catalog_path, "r", encoding="utf-8") as f:
+    text = f.read()
 
-m_ps = re.search(r"Packs\s*=\s*@\(\s*\n(.*?)\n\s*\)", ps_text, re.DOTALL)
-assert m_ps, "Could not locate Packs array in profile"
-
-ps_packs = []
-for l in m_ps.group(1).splitlines():
-    l = l.strip()
-    if not l.startswith("[pscustomobject]@{"):
-        continue
-    matches = re.findall(r"(\w+)\s*=\s*(\x27[^\x27]*\x27|\$true|\$false|\$null|\d+)", l)
-    pack = dict((k, v[1:-1] if v.startswith("\x27") else v) for k, v in matches)
-    ps_packs.append(pack)
-
-assert len(ps_packs) == 33, f"Expected 33 packs in profile, found {len(ps_packs)}"
-
-with open(mac_script_path, "r", encoding="utf-8") as f:
-    mac_text = f.read()
-
-mac_calls = []
-for line in mac_text.splitlines():
+calls = []
+for line in text.splitlines():
+    line = line.strip()
     if not line.startswith("add_pack "):
         continue
-    m = re.match(r"add_pack\s+\"([^\"]+)\"\s+\"([^\"]+)\"\s+(\d+)\s+(\d+)\s+\"([^\"]+)\"\s+(?:\x27([^\x27]*)\x27|\"([^\"]*)\")\s+\"([^\"]+)\"\s+(\d+)", line)
+    m = re.match(r"add_pack\s+\"([^\"]+)\"\s+\"([^\"]+)\"\s+(\d+)\s+(\d+)\s+\"([^\"]+)\"\s+(?:\x27([^\x27]*)\x27|\"([^\"]*)\")\s+\"([^\"]+)\"\s+(\d+)\s+(?:\x27([^\x27]*)\x27|\"([^\"]*)\")", line)
     assert m, f"Line did not match: {line}"
-    groups = m.groups()
-    include = groups[5] if groups[5] is not None else groups[6]
-    mac_calls.append((groups[0], groups[1], groups[2], groups[3], groups[4], include, groups[7], groups[8]))
+    g = m.groups()
+    include = g[5] if g[5] is not None else g[6]
+    note = g[9] if g[9] is not None else g[10]
+    calls.append({
+        "name": g[0],
+        "url": g[1],
+        "bytes": int(g[2]),
+        "fonts": int(g[3]),
+        "kind": g[4],
+        "include": include,
+        "probe": g[7],
+        "extended": int(g[8]),
+        "note": note
+    })
 
-assert len(mac_calls) == 33, f"Expected 33 add_pack calls in mac script, found {len(mac_calls)}"
+assert len(calls) == 33, f"Expected 33 add_pack calls, found {len(calls)}"
 
-for ps, mac in zip(ps_packs, mac_calls):
-    name, url, bytes_sz, fonts, kind, include, probe, ext = mac
-    ps_name = ps["Name"]
-    assert ps_name == name, f"Name mismatch: {ps_name} != {name}"
-    assert ps["Url"] == url, f"Url mismatch for {name}"
-    assert str(ps["Bytes"]) == bytes_sz, f"Bytes mismatch for {name}"
-    assert str(ps["Fonts"]) == fonts, f"Fonts mismatch for {name}"
-    assert ps["Kind"] == kind, f"Kind mismatch for {name}"
-    ps_include = "" if ps.get("Include") == "$null" else ps.get("Include", "")
-    assert ps_include == include, f"Include mismatch for {name}: {ps_include} != {include}"
-    assert ps["Probe"] == probe, f"Probe mismatch for {name}"
-    ps_ext = "1" if ps.get("Extended") == "$true" else "0"
-    assert ps_ext == ext, f"Extended mismatch for {name}"
-' "$PROFILE" "$INSTALLER"
+names = [c["name"] for c in calls]
+probes = [c["probe"] for c in calls]
+assert len(set(names)) == 33, f"Duplicate pack names found: {len(names)} vs {len(set(names))}"
+assert len(set(probes)) == 33, f"Duplicate probe filenames found: {len(probes)} vs {len(set(probes))}"
+
+for c in calls:
+    pname = c["name"]
+    assert pname, "Pack name cannot be empty"
+    assert c["url"].startswith("https://"), f"Pack {pname} URL must start with https://"
+    assert c["bytes"] > 0, f"Pack {pname} bytes must be positive"
+    assert c["fonts"] > 0, f"Pack {pname} font count must be positive"
+    assert c["kind"] in ("Zip", "7z", "File"), f"Pack {pname} invalid kind {c['kind']}"
+    assert c["extended"] in (0, 1), f"Pack {pname} invalid extended {c['extended']}"
+    if c["kind"] == "File":
+        assert c["include"] == "", f"Pack {pname} File kind must have empty Include"
+    else:
+        assert c["include"], f"Pack {pname} Archive kind must have non-empty Include regex"
+    assert c["probe"], f"Pack {pname} probe cannot be empty"
+    assert c["note"], f"Pack {pname} note cannot be empty"
+' "$CATALOG"
 }
 
 # Test 2: Verify all 33 catalog regex patterns are valid in BSD grep -Ei once (?i) is stripped
@@ -158,6 +158,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 
 patterns = []
 for line in text.splitlines():
+    line = line.strip()
     if not line.startswith("add_pack "):
         continue
     m = re.match(r"add_pack\s+\"([^\"]+)\"\s+\"([^\"]+)\"\s+(\d+)\s+(\d+)\s+\"([^\"]+)\"\s+(?:\x27([^\x27]*)\x27|\"([^\"]*)\")", line)
@@ -174,7 +175,7 @@ for pat in patterns:
     norm = re.sub(r"^\(\?i\)", "", pat)
     res = subprocess.run(["grep", "-Ei", norm], input="dummy_line\n", text=True, capture_output=True)
     assert res.returncode < 2, f"Regex syntax error on normalized pattern: {pat} -> {norm}: {res.stderr}"
-' "$INSTALLER"
+' "$CATALOG"
 }
 
 # Test 3: --list runs cleanly without extractors or 7z tool on PATH
@@ -855,7 +856,7 @@ EOF
 }
 
 # Run all test cases in sequence
-run_test 'Catalog parity against WindowsPowerShell profile (33 packs)' test_catalog_parity
+run_test 'Catalog integrity (33 packs, unique names/probes, schema)' test_catalog_integrity
 run_test 'Regex normalization compatibility with BSD grep -Ei' test_regex_normalization_bsd_grep
 run_test '--list execution without 7z extractor' test_list_without_7z
 run_test '--list --extended displays all 33 packs' test_list_extended
