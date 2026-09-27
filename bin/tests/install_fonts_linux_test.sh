@@ -75,6 +75,19 @@ new_case() {
   echo "$dir"
 }
 
+# Creates a sanitized bin directory containing ONLY standard core binaries (no 7z, no fc-cache)
+make_clean_bin() {
+  local target_dir="$1"
+  mkdir -p "$target_dir"
+  local cmd p
+  for cmd in bash sh awk cat chmod cp curl dirname env grep id ls mkdir mktemp mv rm sed seq sort tr unzip wc; do
+    p="$(command -v "$cmd" 2>/dev/null || true)"
+    if [ -n "$p" ] && [ -x "$p" ]; then
+      ln -sf "$p" "$target_dir/$cmd"
+    fi
+  done
+}
+
 # Helper to create a zip file using python3
 create_mock_zip() {
   local zip_path="$1"
@@ -156,8 +169,11 @@ test_preflight_7z_linux_hints() {
   local out="${case_dir}/out.txt"
   local err="${case_dir}/err.txt"
 
+  local clean_bin="${case_dir}/clean_bin"
+  make_clean_bin "$clean_bin"
+
   set +e
-  env -i PATH="/usr/bin:/bin" \
+  env -i PATH="$clean_bin" \
     INSTALL_FONTS_TARGET_DIR="${case_dir}/fonts" \
     "$INSTALLER" -y --name SarasaMonoK > "$out" 2> "$err"
   local status="$?"
@@ -233,10 +249,12 @@ exit 1
 EOF
   chmod +x "${case_dir}/bin/curl"
 
-  # Ensure fc-cache is NOT on PATH
+  # Ensure fc-cache is NOT on PATH using clean_bin
+  local clean_bin="${case_dir}/clean_bin"
+  make_clean_bin "$clean_bin"
   local out="${case_dir}/out.txt"
   MOCK_ZIP="$mock_zip" \
-    PATH="${case_dir}/bin:/usr/bin:/bin" \
+    PATH="${case_dir}/bin:$clean_bin" \
     INSTALL_FONTS_TARGET_DIR="${case_dir}/fonts" \
     "$INSTALLER" -y --name Jetendard > "$out"
 
@@ -351,8 +369,7 @@ EOF
     PATH="${case_dir}/bin:/usr/bin:/bin" \
     INSTALL_FONTS_TARGET_DIR="${case_dir}/fonts" \
     "$INSTALLER" -y --name Jetendard > "$out" 2> "$err"
-
-  assert_contains 'skipped: already installed' "$out" 'Skipped message shown'
+  assert_contains 'already installed (Jetendard-Regular.ttf); skipping download' "$out" 'Skipped message shown'
   assert_eq "0" "$(cat "${case_dir}/work/curl_called")" 'curl not called when probe exists'
   assert_eq "existing" "$(cat "${case_dir}/fonts/Jetendard-Regular.ttf")" 'Pre-existing probe unchanged'
 
@@ -405,7 +422,9 @@ EOF
   assert_contains 'installed 1 font file(s)' "$out" 'Mode-000 file installed'
   local target_file="${case_dir}/fonts/OpenDyslexic-Regular.otf"
   [ -f "$target_file" ] || fail 'OpenDyslexic-Regular.otf was not installed'
-  [ -r "$target_file" ] || fail 'Installed file must be readable'
+  local mode_octal
+  mode_octal="$(python3 -c "import os, stat, sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:])" "$target_file")"
+  assert_eq "644" "$mode_octal" 'Installed file permissions must be normalized to 0644'
   assert_eq "opendyslexic_data" "$(cat "$target_file")"
 }
 

@@ -92,90 +92,91 @@ with zipfile.ZipFile(zip_path, 'w') as z:
 " "$zip_path" "$@"
 }
 
-# Test 1: Full 33-pack catalog integrity and schema validation
+# Test 1: Full 33-pack catalog integrity and schema validation via shell contract
 test_catalog_integrity() {
-  python3 -c '
-import sys, re
+  local case_dir
+  case_dir="$(new_case)"
+  local err="${case_dir}/err.txt"
 
-catalog_path = sys.argv[1]
+  bash -c '
+    set -eu
+    PACK_COUNT=0
+    declare -a NAMES=()
+    declare -a PROBES=()
 
-with open(catalog_path, "r", encoding="utf-8") as f:
-    text = f.read()
+    add_pack() {
+      if [ "$#" -ne 9 ]; then
+        echo "ERROR: add_pack called with $# arguments (expected 9) for pack \"${1:-}\"" >&2
+        exit 1
+      fi
+      local name="$1" url="$2" bytes="$3" fonts="$4" kind="$5" include="$6" probe="$7" ext="$8" note="$9"
+      PACK_COUNT=$((PACK_COUNT + 1))
+      NAMES+=("$name")
+      PROBES+=("$probe")
 
-calls = []
-for line in text.splitlines():
-    line = line.strip()
-    if not line.startswith("add_pack "):
-        continue
-    m = re.match(r"add_pack\s+\"([^\"]+)\"\s+\"([^\"]+)\"\s+(\d+)\s+(\d+)\s+\"([^\"]+)\"\s+(?:\x27([^\x27]*)\x27|\"([^\"]*)\")\s+\"([^\"]+)\"\s+(\d+)\s+(?:\x27([^\x27]*)\x27|\"([^\"]*)\")", line)
-    assert m, f"Line did not match: {line}"
-    g = m.groups()
-    include = g[5] if g[5] is not None else g[6]
-    note = g[9] if g[9] is not None else g[10]
-    calls.append({
-        "name": g[0],
-        "url": g[1],
-        "bytes": int(g[2]),
-        "fonts": int(g[3]),
-        "kind": g[4],
-        "include": include,
-        "probe": g[7],
-        "extended": int(g[8]),
-        "note": note
-    })
+      if [ -z "$name" ]; then echo "Empty name" >&2; exit 1; fi
+      if ! [[ "$url" =~ ^https:// ]]; then echo "URL must start with https://: $url" >&2; exit 1; fi
+      if ! [[ "$bytes" =~ ^[0-9]+$ ]] || [ "$bytes" -le 0 ]; then echo "Invalid bytes: $bytes" >&2; exit 1; fi
+      if ! [[ "$fonts" =~ ^[0-9]+$ ]] || [ "$fonts" -le 0 ]; then echo "Invalid fonts: $fonts" >&2; exit 1; fi
+      if ! [[ "$kind" =~ ^(Zip|7z|File)$ ]]; then echo "Invalid kind: $kind" >&2; exit 1; fi
+      if ! [[ "$ext" =~ ^(0|1)$ ]]; then echo "Invalid extended: $ext" >&2; exit 1; fi
+      if [ -z "$probe" ]; then echo "Empty probe" >&2; exit 1; fi
+      if [ -z "$note" ]; then echo "Empty note" >&2; exit 1; fi
 
-assert len(calls) == 33, f"Expected 33 add_pack calls, found {len(calls)}"
+      if [ "$kind" = "File" ]; then
+        if [ -n "$include" ]; then echo "File kind must have empty include" >&2; exit 1; fi
+      else
+        if [ -z "$include" ]; then echo "Archive kind must have non-empty include" >&2; exit 1; fi
+      fi
+    }
 
-names = [c["name"] for c in calls]
-probes = [c["probe"] for c in calls]
-assert len(set(names)) == 33, f"Duplicate pack names found: {len(names)} vs {len(set(names))}"
-assert len(set(probes)) == 33, f"Duplicate probe filenames found: {len(probes)} vs {len(set(probes))}"
+    # shellcheck source=font_catalog.sh
+    source "$1"
+    load_font_catalog
 
-for c in calls:
-    pname = c["name"]
-    assert pname, "Pack name cannot be empty"
-    assert c["url"].startswith("https://"), f"Pack {pname} URL must start with https://"
-    assert c["bytes"] > 0, f"Pack {pname} bytes must be positive"
-    assert c["fonts"] > 0, f"Pack {pname} font count must be positive"
-    assert c["kind"] in ("Zip", "7z", "File"), f"Pack {pname} invalid kind {c['kind']}"
-    assert c["extended"] in (0, 1), f"Pack {pname} invalid extended {c['extended']}"
-    if c["kind"] == "File":
-        assert c["include"] == "", f"Pack {pname} File kind must have empty Include"
-    else:
-        assert c["include"], f"Pack {pname} Archive kind must have non-empty Include regex"
-    assert c["probe"], f"Pack {pname} probe cannot be empty"
-    assert c["note"], f"Pack {pname} note cannot be empty"
-' "$CATALOG"
+    if [ "$PACK_COUNT" -ne 33 ]; then
+      echo "Expected 33 packs, got $PACK_COUNT" >&2
+      exit 1
+    fi
+
+    unique_names=$(printf "%s\n" "${NAMES[@]}" | sort -u | wc -l | tr -d " ")
+    if [ "$unique_names" -ne 33 ]; then
+      echo "Duplicate pack names detected" >&2
+      exit 1
+    fi
+
+    unique_probes=$(printf "%s\n" "${PROBES[@]}" | sort -u | wc -l | tr -d " ")
+    if [ "$unique_probes" -ne 33 ]; then
+      echo "Duplicate probe filenames detected" >&2
+      exit 1
+    fi
+  ' bash "$CATALOG" > /dev/null 2> "$err" || fail "Catalog integrity failed: $(cat "$err")"
 }
 
 # Test 2: Verify all 33 catalog regex patterns are valid in BSD grep -Ei once (?i) is stripped
 test_regex_normalization_bsd_grep() {
-  python3 -c '
-import sys, re, subprocess
+  local case_dir
+  case_dir="$(new_case)"
+  local err="${case_dir}/err.txt"
 
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    text = f.read()
-
-patterns = []
-for line in text.splitlines():
-    line = line.strip()
-    if not line.startswith("add_pack "):
-        continue
-    m = re.match(r"add_pack\s+\"([^\"]+)\"\s+\"([^\"]+)\"\s+(\d+)\s+(\d+)\s+\"([^\"]+)\"\s+(?:\x27([^\x27]*)\x27|\"([^\"]*)\")", line)
-    assert m, f"Line did not match: {line}"
-    g = m.groups()
-    pat = g[5] if g[5] is not None else g[6]
-    patterns.append(pat)
-
-assert len(patterns) == 33
-
-for pat in patterns:
-    if not pat:
-        continue
-    norm = re.sub(r"^\(\?i\)", "", pat)
-    res = subprocess.run(["grep", "-Ei", norm], input="dummy_line\n", text=True, capture_output=True)
-    assert res.returncode < 2, f"Regex syntax error on normalized pattern: {pat} -> {norm}: {res.stderr}"
-' "$CATALOG"
+  bash -c '
+    set -eu
+    add_pack() {
+      local name="$1" kind="$5" include="$6"
+      [ "$kind" = "File" ] && return 0
+      local norm="${include#(\?i)}"
+      if ! echo "dummy_line" | grep -Ei "$norm" >/dev/null 2>&1; then
+        local st=$?
+        if [ "$st" -ge 2 ]; then
+          echo "Regex syntax error on normalized pattern for $name: $include -> $norm" >&2
+          exit 1
+        fi
+      fi
+    }
+    # shellcheck source=font_catalog.sh
+    source "$1"
+    load_font_catalog
+  ' bash "$CATALOG" > /dev/null 2> "$err" || fail "Regex normalization failed: $(cat "$err")"
 }
 
 # Test 3: --list runs cleanly without extractors or 7z tool on PATH

@@ -22,7 +22,7 @@ RETRIES=2
 LIST_ONLY=0
 YES=0
 
-# Catalog parallel arrays
+# Catalog parallel arrays (1:1 with $_FontInstallInternal.Packs in Microsoft.PowerShell_profile.ps1)
 PACK_NAME=()
 PACK_URL=()
 PACK_BYTES=()
@@ -56,7 +56,6 @@ fi
 # shellcheck source=font_catalog.sh
 source "$CATALOG_FILE"
 load_font_catalog
-
 # Formats byte integer into human-readable string
 format_bytes() {
   local b="$1"
@@ -230,16 +229,19 @@ for i in "${SELECTED_INDICES[@]}"; do
 
   tag=""
   if [ "$ext" -eq 1 ]; then
-    tag=" [EXTENDED]"
+    tag=" [extended]"
+  elif [ "$b" -ge 52428800 ]; then
+    tag=" [LARGE]"
   fi
-  printf "  %2d. %-20s ~%3d fonts  %-10s%s\n" "$idx" "$name" "$fonts" "$(format_bytes "$b")" "$tag"
-  if [ -n "$note" ]; then
-    printf "      %s\n" "$note"
+
+  b_str=$(format_bytes "$b")
+  printf "   %2d. %-20s %10s  ~%d fonts%s\n" "$idx" "$name" "$b_str" "$fonts" "$tag"
+  if [ "$LIST_ONLY" -eq 1 ] && [ -n "$note" ]; then
+    printf "       %s\n" "$note"
   fi
 done
-echo ""
 
-# Exit early if only listing was requested
+# If --list specified, exit 0 immediately before any extractor preflight or network calls
 if [ "$LIST_ONLY" -eq 1 ]; then
   exit 0
 fi
@@ -279,21 +281,16 @@ if [ "$NEEDS_7Z" -eq 1 ]; then
   fi
 fi
 
-# Confirmation prompt
+# Prompt confirmation unless -y / --yes
 if [ "$YES" -eq 0 ]; then
-  if [ -t 0 ]; then
-    printf "Proceed with download and installation? [y/N] "
-    read -r response
-    case "$response" in
-      [yY]|[yY][eE][sS]) ;;
-      *)
-        echo "Aborted by user."
-        exit 130
-        ;;
-    esac
-  else
-    echo "Non-interactive terminal detected without -y/--yes; proceeding with installation."
-  fi
+  printf "Proceed with downloading and installing %d font pack(s)? (Y/n) " "${#SELECTED_INDICES[@]}"
+  read -r choice
+  case "$choice" in
+    [nN]*)
+      echo "Aborting. Nothing was downloaded or installed."
+      exit 130
+      ;;
+  esac
 fi
 
 # Ensure target directory exists and is writable before starting
@@ -302,45 +299,47 @@ if ! mkdir -p "$TARGET_DIR" 2>/dev/null; then
   exit 1
 fi
 
-if [ ! -w "$TARGET_DIR" ]; then
+if [ ! -d "$TARGET_DIR" ] || [ ! -w "$TARGET_DIR" ]; then
   echo "Error: Target directory is not writable: $TARGET_DIR" >&2
   exit 1
 fi
 
-# Setup isolated working directory for downloads and staging
+# Working directory and process-isolated temporary file tracking
 WORK_DIR=$(mktemp -d -t install_fonts_linux.XXXXXX) || {
-  echo "Error: Failed to create temporary work directory." >&2
+  echo "Error: Failed to create temporary working directory." >&2
   exit 1
 }
 
-# Process-isolated temp file tracking for clean aborts
+if [ -z "$WORK_DIR" ] || [ ! -d "$WORK_DIR" ]; then
+  echo "Error: Invalid temporary working directory." >&2
+  exit 1
+fi
+
 TRACKED_TEMP_FILES=()
 
-# Cleanup trap to remove temporary files upon interrupt or exit
+# Process cleanup handler: remove isolated workspace and any tracked destination temp files
 cleanup() {
-  local exit_code=$?
-  trap - EXIT INT TERM HUP
-  if [ "${#TRACKED_TEMP_FILES[@]}" -gt 0 ]; then
-    for tf in "${TRACKED_TEMP_FILES[@]}"; do
-      [ -f "$tf" ] && rm -f -- "$tf"
-    done
-  fi
-  if [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ]; then
+  if [ -n "${WORK_DIR:-}" ] && [ -d "$WORK_DIR" ]; then
     rm -rf -- "$WORK_DIR"
   fi
-  exit "$exit_code"
+  if [ "${#TRACKED_TEMP_FILES[@]}" -gt 0 ]; then
+    for f in "${TRACKED_TEMP_FILES[@]}"; do
+      [ -f "$f" ] && rm -f -- "$f"
+    done
+  fi
 }
-trap cleanup EXIT INT TERM HUP
+trap cleanup EXIT
+trap 'cleanup; trap - INT; kill -s INT "$$"' INT
+trap 'cleanup; trap - TERM; kill -s TERM "$$"' TERM
 
-# Execution loop counters
+# Execution loop state
 TOTAL_INSTALLED=0
 TOTAL_SKIPPED=0
 FAILED_PACKS=()
 
-echo "Starting font installation..."
-idx=0
+item_idx=0
 for i in "${SELECTED_INDICES[@]}"; do
-  idx=$((idx + 1))
+  item_idx=$((item_idx + 1))
   name="${PACK_NAME[$i]}"
   url="${PACK_URL[$i]}"
   bytes="${PACK_BYTES[$i]}"
@@ -349,57 +348,73 @@ for i in "${SELECTED_INDICES[@]}"; do
   include="${PACK_INCLUDE[$i]}"
   probe="${PACK_PROBE[$i]}"
 
-  # Check pre-download idempotency
-  if [ "$FORCE" -eq 0 ] && [ -f "$TARGET_DIR/$probe" ]; then
-    printf "[%2d/%2d] %-20s (skipped: already installed)\n" "$idx" "${#SELECTED_INDICES[@]}" "$name"
+  bytes_str=$(format_bytes "$bytes")
+  echo ""
+  printf "[%d/%d] %s (%s)\n" "$item_idx" "${#SELECTED_INDICES[@]}" "$name" "$bytes_str"
+
+  # Pre-download probe check: skip if representative font already installed and not --force
+  if [ -f "$TARGET_DIR/$probe" ] && [ "$FORCE" -eq 0 ]; then
+    printf "      already installed (%s); skipping download.\n" "$probe"
     TOTAL_SKIPPED=$((TOTAL_SKIPPED + 1))
     continue
   fi
 
-  printf "[%2d/%2d] %-20s (~%s)\n" "$idx" "${#SELECTED_INDICES[@]}" "$name" "$(format_bytes "$bytes")"
+  printf "      source: %s\n" "$url"
 
-  # Fresh staging and download directories per pack
+  # Workspace staging folders for this pack
+  [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ] || {
+    echo "Error: Working directory lost." >&2
+    exit 1
+  }
   DL_DIR="$WORK_DIR/dl"
   STAGED_DIR="$WORK_DIR/staged"
   rm -rf -- "$DL_DIR" "$STAGED_DIR"
-  mkdir -p "$DL_DIR" "$STAGED_DIR"
+  if ! mkdir -p "$DL_DIR" "$STAGED_DIR"; then
+    last_error="Failed to create staging directories"
+    FAILED_PACKS+=("$name: $url")
+    echo "Warning: Install FAILED for '$name': $last_error" >&2
+    continue
+  fi
 
-  dl_file="$DL_DIR/${url##*/}"
-  # Strip query string if present in filename
-  dl_file="${dl_file%%\?*}"
-
-  max_attempts=$((RETRIES + 1))
+  max_attempts=$((1 + RETRIES))
   pack_ok=0
   last_error=""
 
   for attempt in $(seq 1 "$max_attempts"); do
     if [ "$attempt" -gt 1 ]; then
-      printf "      retry %d/%d for '%s'...\n" "$((attempt - 1))" "$RETRIES" "$name"
+      printf "      retry %d/%d (transient error: %s)\n" "$((attempt - 1))" "$RETRIES" "$last_error"
+      sleep_sec=$(( (attempt - 1) * 2 ))
+      [ "$sleep_sec" -gt 10 ] && sleep_sec=10
+      sleep "$sleep_sec"
       rm -rf -- "$DL_DIR" "$STAGED_DIR"
-      mkdir -p "$DL_DIR" "$STAGED_DIR"
+      if ! mkdir -p "$DL_DIR" "$STAGED_DIR"; then
+        last_error="Failed to recreate staging directories on retry"
+        break
+      fi
+    fi
+    # Determine filename for download
+    dl_filename="${url##*/}"
+    dl_file="$DL_DIR/$dl_filename"
+
+    echo "      downloading..."
+    # Download with curl. We do not use -C - after corruption because the file was purged.
+    if ! curl -fLC - --connect-timeout 15 --max-time 1800 -sS -o "$dl_file" "$url"; then
+      last_error="Download failed (HTTP/network error)"
+      # Always remove potentially corrupt or partial download before retry
+      rm -f "$dl_file"
+      continue
     fi
 
-    # Check if download already completed in this run
-    if [ ! -f "$dl_file" ]; then
-      echo "      downloading..."
-      # Download with curl. We do not use -C - after corruption because the file was purged.
-      if ! curl -fLC - --connect-timeout 15 --max-time 1800 -sS -o "$dl_file" "$url"; then
-        last_error="Download failed (HTTP/network error)"
-        # Always remove potentially corrupt or partial download before retry
+    # Extraction step based on pack kind
+    if [ "$kind" = "File" ]; then
+      # Direct single font file download
+      if ! cp "$dl_file" "$STAGED_DIR/$probe"; then
+        last_error="Failed to stage file"
         rm -f "$dl_file"
         continue
       fi
-    fi
-
-    echo "      extracting and verifying..."
-    if [ "$kind" = "File" ]; then
-      # Direct single file font: copy to staging as probe name
-      cp "$dl_file" "$STAGED_DIR/$probe" || {
-        last_error="Failed to stage font file"
-        continue
-      }
     elif [ "$kind" = "Zip" ]; then
-      # Strip leading (?i) from regex
+      # Strip leading (?i) from .NET regex for BSD grep -Ei compatibility
       norm_regex="${include#(\?i)}"
 
       # List entries in archive
@@ -409,20 +424,20 @@ for i in "${SELECTED_INDICES[@]}"; do
         continue
       fi
 
-      # Match entries against regex and skip AppleDouble/resource-fork metadata
+      # Filter matching entries, rejecting __MACOSX and AppleDouble ._* sidecars
       matched_entries=()
       while IFS= read -r entry; do
         [ -z "$entry" ] && continue
-        # Reject AppleDouble metadata and macos directory entries
-        [[ "$entry" =~ (^|/)__MACOSX/ ]] && continue
-        [[ "$entry" =~ (^|/)\._ ]] && continue
-
-        if echo "$entry" | grep -Eiq "$norm_regex"; then
-          matched_entries+=("$entry")
+        case "$entry" in
+          *__MACOSX*|*/._*|._*) continue ;;
+        esac
+        if printf '%s\n' "$entry" | grep -Ei "$norm_regex" >/dev/null 2>&1; then
+          escaped_entry=$(printf '%s\n' "$entry" | sed 's/\\/\\\\/g; s/\[/\\[/g; s/\]/\\]/g; s/\*/\\*/g; s/\?/\\?/g')
+          matched_entries+=("$escaped_entry")
         fi
       done <<< "$entry_list"
 
-      # Extract matched files directly into staging directory
+      # Check for extraction match
       if [ "${#matched_entries[@]}" -gt 0 ]; then
         if ! unzip -q -j -o "$dl_file" "${matched_entries[@]}" -d "$STAGED_DIR" >/dev/null 2>&1; then
           last_error="Failed to extract matching files from ZIP"
@@ -446,10 +461,10 @@ for i in "${SELECTED_INDICES[@]}"; do
       while IFS= read -r line; do
         if [[ "$line" =~ ^Path\ =\ (.*)$ ]]; then
           entry="${BASH_REMATCH[1]}"
-          [ -z "$entry" ] && continue
-          [[ "$entry" =~ (^|/)__MACOSX/ ]] && continue
-          [[ "$entry" =~ (^|/)\._ ]] && continue
-          if echo "$entry" | grep -Eiq "$norm_regex"; then
+          case "$entry" in
+            *__MACOSX*|*/._*|._*) continue ;;
+          esac
+          if printf '%s\n' "$entry" | grep -Ei "$norm_regex" >/dev/null 2>&1; then
             matched_entries+=("$entry")
           fi
         fi
