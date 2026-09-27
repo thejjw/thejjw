@@ -1,0 +1,551 @@
+#!/usr/bin/env bash
+#
+# install_fonts_linux.sh
+# Linux user-scoped counterpart to Windows Install-Fonts.
+# Downloads and installs a curated catalog of fonts into ~/.local/share/fonts (or $XDG_DATA_HOME/fonts).
+#
+# 2026 @thejjw
+#
+
+# Stop on unhandled error or unset variables
+set -u
+
+# Default target directory is user font domain ~/.local/share/fonts (XDG specification)
+# Can be overridden via INSTALL_FONTS_TARGET_DIR for isolated testing or $XDG_DATA_HOME
+TARGET_DIR="${INSTALL_FONTS_TARGET_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fonts}"
+
+# CLI options defaults
+NAME_FILTER=""
+EXTENDED=0
+FORCE=0
+RETRIES=2
+LIST_ONLY=0
+YES=0
+
+# Catalog parallel arrays
+PACK_NAME=()
+PACK_URL=()
+PACK_BYTES=()
+PACK_FONTS=()
+PACK_KIND=()
+PACK_INCLUDE=()
+PACK_PROBE=()
+PACK_EXTENDED=()
+PACK_NOTE=()
+
+# Registers a single font pack into the catalog
+add_pack() {
+  PACK_NAME+=("$1")
+  PACK_URL+=("$2")
+  PACK_BYTES+=("$3")
+  PACK_FONTS+=("$4")
+  PACK_KIND+=("$5")
+  PACK_INCLUDE+=("$6")
+  PACK_PROBE+=("$7")
+  PACK_EXTENDED+=("$8")
+  PACK_NOTE+=("$9")
+}
+
+# Resolve directory of this script to load sibling font_catalog.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CATALOG_FILE="${INSTALL_FONTS_CATALOG:-$SCRIPT_DIR/font_catalog.sh}"
+if [ ! -f "$CATALOG_FILE" ]; then
+  echo "Error: Font catalog not found at $CATALOG_FILE" >&2
+  exit 1
+fi
+# shellcheck source=font_catalog.sh
+source "$CATALOG_FILE"
+load_font_catalog
+
+# Formats byte integer into human-readable string
+format_bytes() {
+  local b="$1"
+  if [ "$b" -ge 1073741824 ]; then
+    awk -v b="$b" 'BEGIN { printf "%.2f GB", b / 1073741824 }'
+  elif [ "$b" -ge 1048576 ]; then
+    awk -v b="$b" 'BEGIN { printf "%.1f MB", b / 1048576 }'
+  elif [ "$b" -ge 1024 ]; then
+    awk -v b="$b" 'BEGIN { printf "%.0f KB", b / 1024 }'
+  else
+    printf "%d B" "$b"
+  fi
+}
+
+# Atomically installs staged font files into target directory.
+# Returns 0 on success, 1 on any file error.
+commit_pack() {
+  local target="$1"
+  local probe_file="$2"
+  shift 2
+  local files=("$@")
+
+  # 1. If --force, remove existing probe first to invalidate partial states
+  if [ "$FORCE" -eq 1 ] && [ -f "$target/$probe_file" ]; then
+    rm -f -- "$target/$probe_file" || return 1
+  fi
+
+  # 2. Commit all non-probe files first using destination temp files + atomic mv
+  local f font_leaf dest_tmp
+  for f in "${files[@]}"; do
+    font_leaf="${f##*/}"
+    [ "$font_leaf" = "$probe_file" ] && continue
+    dest_tmp=$(mktemp "$target/.${font_leaf}.tmp.XXXXXX") || return 1
+    TRACKED_TEMP_FILES+=("$dest_tmp")
+    cp "$f" "$dest_tmp" || return 1
+    chmod 644 "$dest_tmp" || return 1
+    mv -f "$dest_tmp" "$target/$font_leaf" || return 1
+  done
+
+  # 3. Commit probe file LAST as the transaction stamp
+  local probe_tmp
+  probe_tmp=$(mktemp "$target/.${probe_file}.tmp.XXXXXX") || return 1
+  TRACKED_TEMP_FILES+=("$probe_tmp")
+  cp "$STAGED_DIR/$probe_file" "$probe_tmp" || return 1
+  chmod 644 "$probe_tmp" || return 1
+  mv -f "$probe_tmp" "$target/$probe_file" || return 1
+
+  return 0
+}
+
+# Displays usage help and exits
+show_help() {
+  cat <<'EOF'
+Usage: install_fonts_linux.sh [OPTIONS]
+
+Downloads and installs a curated catalog of fonts into ~/.local/share/fonts.
+
+Options:
+  -n, --name <substring[,substring...]>  Filter font packs by name (case-insensitive substring).
+  -e, --extended        Include extended packs (Source Han pan-CJK collections).
+  -f, --force           Reinstall and overwrite existing fonts.
+  -r, --retries <0-10>  Max retries for transient network/archive errors (default: 2).
+  -l, --list            Print catalog summary and size estimates, then exit.
+  -y, --yes             Bypass interactive confirmation prompt.
+  -h, --help            Show this help message and exit.
+EOF
+}
+
+# Parse CLI options
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -n|--name)
+      [ "$#" -ge 2 ] || { echo "Error: $1 requires an argument." >&2; exit 1; }
+      NAME_FILTER="$2"
+      shift 2
+      ;;
+    -e|--extended)
+      EXTENDED=1
+      shift
+      ;;
+    -f|--force)
+      FORCE=1
+      shift
+      ;;
+    -r|--retries)
+      [ "$#" -ge 2 ] || { echo "Error: $1 requires an integer argument." >&2; exit 1; }
+      RETRIES="$2"
+      if ! [[ "$RETRIES" =~ ^[0-9]+$ ]] || [ "$RETRIES" -lt 0 ] || [ "$RETRIES" -gt 10 ]; then
+        echo "Error: --retries must be an integer between 0 and 10." >&2
+        exit 1
+      fi
+      shift 2
+      ;;
+    -l|--list)
+      LIST_ONLY=1
+      shift
+      ;;
+    -y|--yes)
+      YES=1
+      shift
+      ;;
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "" >&2
+      show_help >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Filter selected pack indices based on --extended and --name
+SELECTED_INDICES=()
+shopt -s nocasematch 2>/dev/null || true
+for i in "${!PACK_NAME[@]}"; do
+  # Check extended condition
+  if [ "${PACK_EXTENDED[$i]}" -eq 1 ] && [ "$EXTENDED" -eq 0 ]; then
+    continue
+  fi
+  # Check name substring filter (case-insensitive literal substring, comma-separated tokens supported)
+  if [ -n "$NAME_FILTER" ]; then
+    matched_name=0
+    IFS=',' read -r -a name_tokens <<< "$NAME_FILTER"
+    for token in "${name_tokens[@]}"; do
+      token="$(echo "$token" | tr -d '[:space:]')"
+      [ -z "$token" ] && continue
+      if [[ "${PACK_NAME[$i]}" == *"$token"* ]]; then
+        matched_name=1
+        break
+      fi
+    done
+    if [ "$matched_name" -eq 0 ]; then
+      continue
+    fi
+  fi
+  SELECTED_INDICES+=("$i")
+done
+shopt -u nocasematch 2>/dev/null || true
+
+if [ "${#SELECTED_INDICES[@]}" -eq 0 ]; then
+  echo "No matching font packs to install."
+  exit 0
+fi
+
+# Calculate totals for summary
+TOTAL_BYTES=0
+TOTAL_FONTS=0
+for i in "${SELECTED_INDICES[@]}"; do
+  TOTAL_BYTES=$((TOTAL_BYTES + PACK_BYTES[i]))
+  TOTAL_FONTS=$((TOTAL_FONTS + PACK_FONTS[i]))
+done
+
+# Print pre-run catalog summary
+TOTAL_BYTES_STR=$(format_bytes "$TOTAL_BYTES")
+echo ""
+printf "== Install-Fonts (Linux): %d pack(s), ~%d font file(s), ~%s to download ==\n" \
+  "${#SELECTED_INDICES[@]}" "$TOTAL_FONTS" "$TOTAL_BYTES_STR"
+printf "   Target: %s\n" "$TARGET_DIR"
+
+idx=0
+for i in "${SELECTED_INDICES[@]}"; do
+  idx=$((idx + 1))
+  name="${PACK_NAME[$i]}"
+  b="${PACK_BYTES[$i]}"
+  fonts="${PACK_FONTS[$i]}"
+  ext="${PACK_EXTENDED[$i]}"
+  note="${PACK_NOTE[$i]}"
+
+  tag=""
+  if [ "$ext" -eq 1 ]; then
+    tag=" [EXTENDED]"
+  fi
+  printf "  %2d. %-20s ~%3d fonts  %-10s%s\n" "$idx" "$name" "$fonts" "$(format_bytes "$b")" "$tag"
+  if [ -n "$note" ]; then
+    printf "      %s\n" "$note"
+  fi
+done
+echo ""
+
+# Exit early if only listing was requested
+if [ "$LIST_ONLY" -eq 1 ]; then
+  exit 0
+fi
+
+# Preflight: check for required inbox tools
+if ! command -v curl >/dev/null 2>&1; then
+  echo "Error: curl is required but was not found on PATH." >&2
+  exit 1
+fi
+
+if ! command -v unzip >/dev/null 2>&1; then
+  echo "Error: unzip is required but was not found on PATH." >&2
+  exit 1
+fi
+
+# Preflight: check if any selected pack requires 7z extraction
+NEEDS_7Z=0
+for i in "${SELECTED_INDICES[@]}"; do
+  if [ "${PACK_KIND[$i]}" = "7z" ]; then
+    NEEDS_7Z=1
+    break
+  fi
+done
+
+SEVENZ=""
+if [ "$NEEDS_7Z" -eq 1 ]; then
+  if command -v 7zz >/dev/null 2>&1; then
+    SEVENZ="7zz"
+  elif command -v 7z >/dev/null 2>&1; then
+    SEVENZ="7z"
+  elif command -v 7za >/dev/null 2>&1; then
+    SEVENZ="7za"
+  else
+    echo "Error: Selected pack(s) require 7z archive extraction, but '7zz', '7z', or '7za' was not found on PATH." >&2
+    echo "Install with package manager: sudo apt install p7zip-full, dnf install p7zip p7zip-plugins, or pacman -S p7zip" >&2
+    exit 1
+  fi
+fi
+
+# Confirmation prompt
+if [ "$YES" -eq 0 ]; then
+  if [ -t 0 ]; then
+    printf "Proceed with download and installation? [y/N] "
+    read -r response
+    case "$response" in
+      [yY]|[yY][eE][sS]) ;;
+      *)
+        echo "Aborted by user."
+        exit 130
+        ;;
+    esac
+  else
+    echo "Non-interactive terminal detected without -y/--yes; proceeding with installation."
+  fi
+fi
+
+# Ensure target directory exists and is writable before starting
+if ! mkdir -p "$TARGET_DIR" 2>/dev/null; then
+  echo "Error: Failed to create target directory: $TARGET_DIR" >&2
+  exit 1
+fi
+
+if [ ! -w "$TARGET_DIR" ]; then
+  echo "Error: Target directory is not writable: $TARGET_DIR" >&2
+  exit 1
+fi
+
+# Setup isolated working directory for downloads and staging
+WORK_DIR=$(mktemp -d -t install_fonts_linux.XXXXXX) || {
+  echo "Error: Failed to create temporary work directory." >&2
+  exit 1
+}
+
+# Process-isolated temp file tracking for clean aborts
+TRACKED_TEMP_FILES=()
+
+# Cleanup trap to remove temporary files upon interrupt or exit
+cleanup() {
+  local exit_code=$?
+  trap - EXIT INT TERM HUP
+  if [ "${#TRACKED_TEMP_FILES[@]}" -gt 0 ]; then
+    for tf in "${TRACKED_TEMP_FILES[@]}"; do
+      [ -f "$tf" ] && rm -f -- "$tf"
+    done
+  fi
+  if [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ]; then
+    rm -rf -- "$WORK_DIR"
+  fi
+  exit "$exit_code"
+}
+trap cleanup EXIT INT TERM HUP
+
+# Execution loop counters
+TOTAL_INSTALLED=0
+TOTAL_SKIPPED=0
+FAILED_PACKS=()
+
+echo "Starting font installation..."
+idx=0
+for i in "${SELECTED_INDICES[@]}"; do
+  idx=$((idx + 1))
+  name="${PACK_NAME[$i]}"
+  url="${PACK_URL[$i]}"
+  bytes="${PACK_BYTES[$i]}"
+  fonts="${PACK_FONTS[$i]}"
+  kind="${PACK_KIND[$i]}"
+  include="${PACK_INCLUDE[$i]}"
+  probe="${PACK_PROBE[$i]}"
+
+  # Check pre-download idempotency
+  if [ "$FORCE" -eq 0 ] && [ -f "$TARGET_DIR/$probe" ]; then
+    printf "[%2d/%2d] %-20s (skipped: already installed)\n" "$idx" "${#SELECTED_INDICES[@]}" "$name"
+    TOTAL_SKIPPED=$((TOTAL_SKIPPED + 1))
+    continue
+  fi
+
+  printf "[%2d/%2d] %-20s (~%s)\n" "$idx" "${#SELECTED_INDICES[@]}" "$name" "$(format_bytes "$bytes")"
+
+  # Fresh staging and download directories per pack
+  DL_DIR="$WORK_DIR/dl"
+  STAGED_DIR="$WORK_DIR/staged"
+  rm -rf -- "$DL_DIR" "$STAGED_DIR"
+  mkdir -p "$DL_DIR" "$STAGED_DIR"
+
+  dl_file="$DL_DIR/${url##*/}"
+  # Strip query string if present in filename
+  dl_file="${dl_file%%\?*}"
+
+  max_attempts=$((RETRIES + 1))
+  pack_ok=0
+  last_error=""
+
+  for attempt in $(seq 1 "$max_attempts"); do
+    if [ "$attempt" -gt 1 ]; then
+      printf "      retry %d/%d for '%s'...\n" "$((attempt - 1))" "$RETRIES" "$name"
+      rm -rf -- "$DL_DIR" "$STAGED_DIR"
+      mkdir -p "$DL_DIR" "$STAGED_DIR"
+    fi
+
+    # Check if download already completed in this run
+    if [ ! -f "$dl_file" ]; then
+      echo "      downloading..."
+      # Download with curl. We do not use -C - after corruption because the file was purged.
+      if ! curl -fLC - --connect-timeout 15 --max-time 1800 -sS -o "$dl_file" "$url"; then
+        last_error="Download failed (HTTP/network error)"
+        # Always remove potentially corrupt or partial download before retry
+        rm -f "$dl_file"
+        continue
+      fi
+    fi
+
+    echo "      extracting and verifying..."
+    if [ "$kind" = "File" ]; then
+      # Direct single file font: copy to staging as probe name
+      cp "$dl_file" "$STAGED_DIR/$probe" || {
+        last_error="Failed to stage font file"
+        continue
+      }
+    elif [ "$kind" = "Zip" ]; then
+      # Strip leading (?i) from regex
+      norm_regex="${include#(\?i)}"
+
+      # List entries in archive
+      if ! entry_list=$(unzip -Z1 "$dl_file" 2>&1); then
+        last_error="Corrupt ZIP archive ($entry_list)"
+        rm -f "$dl_file"
+        continue
+      fi
+
+      # Match entries against regex and skip AppleDouble/resource-fork metadata
+      matched_entries=()
+      while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        # Reject AppleDouble metadata and macos directory entries
+        [[ "$entry" =~ (^|/)__MACOSX/ ]] && continue
+        [[ "$entry" =~ (^|/)\._ ]] && continue
+
+        if echo "$entry" | grep -Eiq "$norm_regex"; then
+          matched_entries+=("$entry")
+        fi
+      done <<< "$entry_list"
+
+      # Extract matched files directly into staging directory
+      if [ "${#matched_entries[@]}" -gt 0 ]; then
+        if ! unzip -q -j -o "$dl_file" "${matched_entries[@]}" -d "$STAGED_DIR" >/dev/null 2>&1; then
+          last_error="Failed to extract matching files from ZIP"
+          rm -f "$dl_file"
+          continue
+        fi
+      fi
+    elif [ "$kind" = "7z" ]; then
+      # Strip leading (?i) from regex
+      norm_regex="${include#(\?i)}"
+
+      # List archive entries with 7z
+      if ! listing=$("$SEVENZ" l -ba -slt "$dl_file" 2>&1); then
+        last_error="Corrupt 7z archive ($listing)"
+        rm -f "$dl_file"
+        continue
+      fi
+
+      # Extract paths from Path = ... lines in 7z verbose listing
+      matched_entries=()
+      while IFS= read -r line; do
+        if [[ "$line" =~ ^Path\ =\ (.*)$ ]]; then
+          entry="${BASH_REMATCH[1]}"
+          [ -z "$entry" ] && continue
+          [[ "$entry" =~ (^|/)__MACOSX/ ]] && continue
+          [[ "$entry" =~ (^|/)\._ ]] && continue
+          if echo "$entry" | grep -Eiq "$norm_regex"; then
+            matched_entries+=("$entry")
+          fi
+        fi
+      done <<< "$listing"
+
+      if [ "${#matched_entries[@]}" -gt 0 ]; then
+        if ! "$SEVENZ" e -y -o"$STAGED_DIR" "$dl_file" "${matched_entries[@]}" >/dev/null 2>&1; then
+          last_error="Failed to extract matching files from 7z"
+          rm -f "$dl_file"
+          continue
+        fi
+      fi
+    else
+      last_error="Unsupported font pack kind '$kind'"
+      break
+    fi
+
+    # Normalize permissions: ensure extracted font files are readable and writable
+    # (some archives like OpenDyslexic store files with mode 0000)
+    if ! chmod -R u+rw "$STAGED_DIR" 2>/dev/null; then
+      last_error="Failed to set read/write permissions on staged files"
+      echo "Warning: $last_error for '$name'; aborting pack without retry." >&2
+      break
+    fi
+
+    # Pre-commit validation gate
+    staged_files=()
+    for f in "$STAGED_DIR/"*; do
+      [ -f "$f" ] && staged_files+=("$f")
+    done
+    staged_count="${#staged_files[@]}"
+
+    # Hard check 1: at least one font file extracted
+    if [ "$staged_count" -eq 0 ]; then
+      last_error="No matching font entries found in archive (layout drift or invalid regex)"
+      echo "Warning: $last_error for '$name'; aborting pack without retry." >&2
+      break
+    fi
+
+    # Hard check 2: probe font exists and is non-empty
+    if [ ! -s "$STAGED_DIR/$probe" ]; then
+      last_error="Staged probe file '$probe' is missing or 0 bytes"
+      echo "Warning: $last_error for '$name'; aborting pack without retry." >&2
+      break
+    fi
+
+    # Soft check: warn if extracted file count differs from catalog estimated count
+    if [ "$staged_count" -ne "$fonts" ]; then
+      printf "      notice: extracted %d file(s), catalog estimated ~%d\n" "$staged_count" "$fonts"
+    fi
+
+    # Pack-level atomic commit protocol
+    if ! commit_pack "$TARGET_DIR" "$probe" "${staged_files[@]}"; then
+      last_error="Atomic commit failed during installation into target directory"
+      # Invariant: ensure probe is absent if commit failed mid-way
+      [ -f "$TARGET_DIR/$probe" ] && rm -f "$TARGET_DIR/$probe"
+      echo "Warning: $last_error for '$name'; aborting pack." >&2
+      break
+    fi
+    pack_ok=1
+    TOTAL_INSTALLED=$((TOTAL_INSTALLED + staged_count))
+    printf "      installed %d font file(s) (running total installed: %d)\n" "$staged_count" "$TOTAL_INSTALLED"
+    break
+  done
+
+  # Record failure if pack was not successfully installed
+  if [ "$pack_ok" -eq 0 ]; then
+    FAILED_PACKS+=("$name: $url")
+    echo "Warning: Install FAILED for '$name': $last_error" >&2
+  fi
+
+  # Cleanup download and staged directory for this pack
+  [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ] && rm -rf -- "$DL_DIR" "$STAGED_DIR"
+done
+
+# Final execution summary
+echo ""
+printf "== Done: %d installed, %d skipped, %d failure(s). ==\n" \
+  "$TOTAL_INSTALLED" "$TOTAL_SKIPPED" "${#FAILED_PACKS[@]}"
+
+if [ "$TOTAL_INSTALLED" -gt 0 ]; then
+  if command -v fc-cache >/dev/null 2>&1; then
+    echo "Updating Fontconfig cache (fc-cache -f)..."
+    fc-cache -f "$TARGET_DIR" || echo "Warning: fc-cache returned non-zero." >&2
+  else
+    echo "Note: fc-cache not found on PATH. Installed fonts will be recognized once Fontconfig is updated."
+  fi
+  echo "Note: Already-running applications may need to be restarted to refresh their font list."
+fi
+
+if [ "${#FAILED_PACKS[@]}" -gt 0 ]; then
+  echo "Failed packs:"
+  for f in "${FAILED_PACKS[@]}"; do
+    printf "  - %s\n" "$f"
+  done
+  exit 1
+fi
+
+exit 0
