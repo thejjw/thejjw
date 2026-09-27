@@ -80,11 +80,12 @@ make_clean_bin() {
   local target_dir="$1"
   mkdir -p "$target_dir"
   local cmd p
-  for cmd in bash sh awk cat chmod cp curl dirname env grep id ls mkdir mktemp mv rm sed seq sort tr unzip wc; do
+  for cmd in bash sh awk cat chmod cp curl dirname env grep id ls mkdir mktemp mv rm sed seq sleep sort tr unzip wc; do
     p="$(command -v "$cmd" 2>/dev/null || true)"
-    if [ -n "$p" ] && [ -x "$p" ]; then
-      ln -sf "$p" "$target_dir/$cmd"
+    if [ -z "$p" ] || [ ! -x "$p" ]; then
+      fail "make_clean_bin: required system command '$cmd' not found on PATH"
     fi
+    ln -sf "$p" "$target_dir/$cmd"
   done
 }
 

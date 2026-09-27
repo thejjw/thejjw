@@ -22,7 +22,7 @@ RETRIES=2
 LIST_ONLY=0
 YES=0
 
-# Catalog parallel arrays (1:1 with $_FontInstallInternal.Packs in Microsoft.PowerShell_profile.ps1)
+# Catalog parallel arrays populated from font_catalog.sh
 PACK_NAME=()
 PACK_URL=()
 PACK_BYTES=()

@@ -128,6 +128,7 @@ test_catalog_integrity() {
       else
         if [ -z "$include" ]; then echo "Archive kind must have non-empty include" >&2; exit 1; fi
       fi
+      return 0
     }
 
     # shellcheck source=font_catalog.sh
@@ -165,18 +166,64 @@ test_regex_normalization_bsd_grep() {
       local name="$1" kind="$5" include="$6"
       [ "$kind" = "File" ] && return 0
       local norm="${include#(\?i)}"
-      if ! echo "dummy_line" | grep -Ei "$norm" >/dev/null 2>&1; then
-        local st=$?
-        if [ "$st" -ge 2 ]; then
-          echo "Regex syntax error on normalized pattern for $name: $include -> $norm" >&2
-          exit 1
-        fi
+      local st=0
+      if echo "dummy_line" | grep -Ei "$norm" >/dev/null 2>&1; then
+        :
+      else
+        st=$?
       fi
+      if [ "$st" -ge 2 ]; then
+        echo "Regex syntax error on normalized pattern for $name: $include -> $norm" >&2
+        exit 1
+      fi
+      return 0
     }
     # shellcheck source=font_catalog.sh
     source "$1"
     load_font_catalog
   ' bash "$CATALOG" > /dev/null 2> "$err" || fail "Regex normalization failed: $(cat "$err")"
+}
+
+# Test 2b: Prove regex validator rejects malformed regex patterns
+test_regex_validator_rejects_malformed_pattern() {
+  local case_dir
+  case_dir="$(new_case)"
+  local bad_catalog="${case_dir}/bad_catalog.sh"
+  local err="${case_dir}/err.txt"
+
+  cat <<'EOF' > "$bad_catalog"
+load_font_catalog() {
+  add_pack "BadPack" "https://example.com/bad.zip" 100 1 "Zip" '(?i)[invalid' "Bad.ttf" 0 "Bad pack"
+}
+EOF
+
+  set +e
+  bash -c '
+    set -eu
+    add_pack() {
+      local name="$1" kind="$5" include="$6"
+      [ "$kind" = "File" ] && return 0
+      local norm="${include#(\?i)}"
+      local st=0
+      if echo "dummy_line" | grep -Ei "$norm" >/dev/null 2>&1; then
+        :
+      else
+        st=$?
+      fi
+      if [ "$st" -ge 2 ]; then
+        echo "Regex syntax error on normalized pattern for $name: $include -> $norm" >&2
+        exit 1
+      fi
+      return 0
+    }
+    source "$1"
+    load_font_catalog
+  ' bash "$bad_catalog" > /dev/null 2> "$err"
+  local status="$?"
+  set -e
+
+  assert_eq "1" "$status" 'Validator exited with non-zero on invalid regex'
+  assert_contains "Regex syntax error on normalized pattern for BadPack: (?i)[invalid -> [invalid" "$err" 'Syntax error reported'
 }
 
 # Test 3: --list runs cleanly without extractors or 7z tool on PATH
@@ -859,6 +906,7 @@ EOF
 # Run all test cases in sequence
 run_test 'Catalog integrity (33 packs, unique names/probes, schema)' test_catalog_integrity
 run_test 'Regex normalization compatibility with BSD grep -Ei' test_regex_normalization_bsd_grep
+run_test 'Regex validator rejects malformed patterns' test_regex_validator_rejects_malformed_pattern
 run_test '--list execution without 7z extractor' test_list_without_7z
 run_test '--list --extended displays all 33 packs' test_list_extended
 run_test 'Preflight hard failure when 7z missing on selected pack' test_preflight_fails_without_7z
