@@ -26,7 +26,19 @@ Describe 'Invoke-AiUpgrade managed packages' {
         function winget {
             param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
         }
+        $script:testHostTitle = $null
+        try {
+            $script:testHostTitle = $Host.UI.RawUI.WindowTitle
+        } catch {}
     }
+    AfterAll {
+        if ($script:testHostTitle) {
+            try {
+                $Host.UI.RawUI.WindowTitle = $script:testHostTitle
+            } catch {}
+        }
+    }
+
 
     BeforeEach {
         $_AiToolsInternal = @{
@@ -300,5 +312,45 @@ Describe 'Invoke-AiUpgrade managed packages' {
         Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
             $Object -eq '>>> winget: [1/1] upgrading ZhipuAI.ZCode  1.0.0 -> 2.0.0 [user scope]'
         }
+    }
+
+    It 'restores initial window title after npm stage runs' {
+        $initialTitle = 'Custom Tab Title'
+        $Host.UI.RawUI.WindowTitle = $initialTitle
+        $script:inventoryJson = '{"dependencies":{"@qwen-code/qwen-code":{"version":"1.0.0"}}}'
+        $script:outdatedJson = '{"@qwen-code/qwen-code":{"current":"1.0.0","wanted":"2.0.0","latest":"2.0.0"}}'
+        Mock npm {
+            param($ArgumentList)
+            $callArgs = @($ArgumentList)
+            $script:npmCalls += [pscustomobject]@{ Args = $callArgs }
+            if ($callArgs[0] -eq 'ls') {
+                $global:LASTEXITCODE = 0
+                return $script:inventoryJson
+            }
+            if ($callArgs[0] -eq 'outdated') {
+                $Host.UI.RawUI.WindowTitle = 'npm outdated @qwen-code/qwen-code'
+                $global:LASTEXITCODE = 1
+                return $script:outdatedJson
+            }
+            if ($callArgs[0] -eq 'up') {
+                $Host.UI.RawUI.WindowTitle = 'npm up -g @qwen-code/qwen-code'
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+        }
+
+        Invoke-AiUpgrade
+
+        $Host.UI.RawUI.WindowTitle | Should -Be $initialTitle
+    }
+
+    It 'falls back to default shell title if initial title was an npm command' {
+        $Host.UI.RawUI.WindowTitle = 'npm outdated @some-pkg'
+        $script:inventoryJson = '{"dependencies":{}}'
+
+        Invoke-AiUpgrade
+
+        $expectedDefault = if ($PSEdition -eq 'Core') { 'PowerShell' } else { 'Windows PowerShell' }
+        $Host.UI.RawUI.WindowTitle | Should -Be $expectedDefault
     }
 }

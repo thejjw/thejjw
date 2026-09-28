@@ -9281,7 +9281,8 @@ function Invoke-AiUpgrade {
     then checks and updates every npm-installed managed package -- from
     $_AiToolsInternal.NpmPackages and MoreAiNpmPackages -- through one global
     npm command. Winget packages are upgraded only when -Winget is supplied.
-    Use the alias 'aiu' for convenience.
+    Preserves and restores the terminal window title so npm commands cannot
+    leave the tab title stuck. Use the alias 'aiu' for convenience.
 .PARAMETER Winget
     Upgrade the reported managed Winget packages. Without this switch, Winget
     updates are listed only because they may be large or require elevation.
@@ -9313,6 +9314,15 @@ function Invoke-AiUpgrade {
         throw "Cannot use -UserScope in an elevated PowerShell session. Run from a standard, non-elevated session."
     }
 
+    $originalTitle = $null
+    try {
+        $originalTitle = $Host.UI.RawUI.WindowTitle
+    }
+    catch {
+        # Host environment may not support WindowTitle (e.g. non-interactive/headless).
+    }
+
+    try {
     foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
         $probe = if ($tool.Probe) { $tool.Probe } else { $tool.Cmd }
         if (-not (Get-Command $probe -ErrorAction SilentlyContinue)) {
@@ -9492,6 +9502,22 @@ function Invoke-AiUpgrade {
     }
     else {
         Write-Warning "npm update failed with exit code $LASTEXITCODE for: $($outdatedPackages -join ', ')"
+    }
+    }
+    finally {
+        try {
+            if ($originalTitle -and $originalTitle -notmatch '^(?:npm|node)\b') {
+                $Host.UI.RawUI.WindowTitle = $originalTitle
+            }
+            else {
+                $defaultTitle = if ($PSEdition -eq 'Core') { 'PowerShell' } else { 'Windows PowerShell' }
+                $isAdmin = if (Get-Command Test-IsAdministrator -ErrorAction SilentlyContinue) { Test-IsAdministrator } else { $false }
+                $Host.UI.RawUI.WindowTitle = if ($isAdmin) { "Administrator: $defaultTitle" } else { $defaultTitle }
+            }
+        }
+        catch {
+            # Ignore when host does not support setting WindowTitle.
+        }
     }
 }
 Set-Alias -Name aiu -Value Invoke-AiUpgrade
