@@ -8778,7 +8778,7 @@ function Get-AiApiKey {
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
     try {
-        $cred = $vault.Retrieve($Name, 'api-key')
+        $cred = $vault.Retrieve($Name, $_AiKeysInternal.UserName)
         $cred.RetrievePassword()
         return $cred.Password
     }
@@ -8983,7 +8983,7 @@ function Remove-AiApiKeysFromCS {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param()
 
-    $target = "Windows Credential Manager entries grouped as 'api-key' and matching process variables"
+    $target = "Windows Credential Manager entries grouped as '$($_AiKeysInternal.UserName)' and matching process variables"
     if (-not $PSCmdlet.ShouldProcess($target, 'Remove AI API keys')) {
         return
     }
@@ -8992,7 +8992,7 @@ function Remove-AiApiKeysFromCS {
     $vault = New-Object Windows.Security.Credentials.PasswordVault
     try {
         # RetrieveAll returns a stable snapshot, so removing entries while iterating is safe.
-        $credentials = @($vault.RetrieveAll() | Where-Object { $_.UserName -eq 'api-key' })
+        $credentials = @($vault.RetrieveAll() | Where-Object { $_.UserName -eq $_AiKeysInternal.UserName })
     }
     catch {
         Write-Error "Failed to enumerate Windows Credential Manager: $_"
@@ -9029,7 +9029,7 @@ function Remove-AiApiKeysFromCS {
         }
     }
 
-    $message = "Scrubbed $removedCount credential(s) from the api-key group and cleared $clearedCount process variable(s)."
+    $message = "Scrubbed $removedCount credential(s) from the $($_AiKeysInternal.UserName) group and cleared $clearedCount process variable(s)."
     Write-Host $message -ForegroundColor Green
     if ($failureCount -gt 0) {
         Write-Warning "$failureCount operation(s) failed."

@@ -538,7 +538,7 @@ function Invoke-InstallOmpRadeonProvider {
     if (-not (Test-ProfileLoadsKey $VaultResource)) {
         Write-Host ''
         Write-Host "Note: no startup profile exports $VaultResource yet, so new shells lose the key." -ForegroundColor Yellow
-        Write-Host "Add '$VaultResource' to the `$names list in Load-AiApiKeysFromCS and Set-AiApiKeysCS" -ForegroundColor Yellow
+        Write-Host "Add '$VaultResource' to the `$Names list in `$_AiKeysInternal" -ForegroundColor Yellow
         Write-Host 'in Microsoft.PowerShell_profile.ps1 to have it re-injected on every shell start.' -ForegroundColor Yellow
     }
 }
