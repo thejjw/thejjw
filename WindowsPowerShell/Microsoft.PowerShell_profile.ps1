@@ -8764,14 +8764,15 @@ function Get-AiApiKey {
 function Set-AiApiKeysCS {
     <#
     .SYNOPSIS
-        Interactive helper to view and set Claude-related API keys in Windows Credential Manager.
+        Interactive helper to view and set AI provider API keys in Windows Credential Manager.
 
     .DESCRIPTION
         Checks for existing values of AI API keys in the Windows Credential Manager (PasswordVault).
         Presents a summary and prompts the user to enter missing keys (or optionally overwrite existing ones).
         Values are securely saved using Windows Credential Manager (DPAPI-encrypted), keeping plaintext
         credentials out of your registry. Saving QWEN_TOKEN_PLAN_API_KEY also saves the same value as
-        BAILIAN_TOKEN_PLAN_API_KEY without an additional prompt.
+        BAILIAN_TOKEN_PLAN_API_KEY without an additional prompt. OpenCode Go uses its own
+        OPENCODE_GO_API_KEY credential; the shared OPENCODE_API_KEY is not changed.
 
     .PARAMETER Force
         When supplied, prompt to overwrite existing keys instead of skipping them.
@@ -8790,7 +8791,7 @@ function Set-AiApiKeysCS {
     # Windows PowerShell 5.1 and PowerShell 7+ on Windows.
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY', 'OPENCODE_GO_API_KEY')
     # All keys share a single resource userName so they form a logical group in
     # Credential Manager and can be enumerated/cleared together.
     $userName = 'api-key'
@@ -8902,7 +8903,7 @@ function Load-AiApiKeysFromCS {
     )
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY')
+    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY', 'OPENCODE_GO_API_KEY')
     $userName = 'api-key'
 
     $loadedCount = 0
@@ -9543,9 +9544,7 @@ Set-Alias -Name aiu -Value Invoke-AiUpgrade
 # and run the currently loaded usage functions. Call the provider functions after
 # the vault credentials load further down (Load-AiApiKeysFromCS) so
 # $env:MINIMAX_API_KEY, $env:ZAI_API_KEY, $env:DEEPSEEK_API_KEY, and
-# $env:KIMI_CODE_PLAN_API_KEY are populated. Get-OpencodeGoUsage is the
-# exception: its key comes from $env:OPENCODE_GO_API_KEY / $env:OPENCODE_API_KEY
-# or from the OpenCode CLI auth store, neither of which the vault loader touches.
+# $env:KIMI_CODE_PLAN_API_KEY and $env:OPENCODE_GO_API_KEY are populated.
 
 
 # --- Get-MinimaxUsage ------------------------------------------------------
@@ -11087,7 +11086,8 @@ function Get-OpencodeGoUsage {
     Queries OpenCode Go subscription usage windows (rolling, weekly, monthly).
 .DESCRIPTION
     Calls https://opencode.ai/zen/go/v1/usage with the workspace API key in
-    $env:OPENCODE_GO_API_KEY, falling back to $env:OPENCODE_API_KEY and then to
+    Get-AiApiKey 'OPENCODE_GO_API_KEY' (process environment, Credential Manager,
+    then legacy User environment), falling back to $env:OPENCODE_API_KEY and then to
     the "opencode-go" entry in the OpenCode CLI auth store (auth.json).
     Reports the upstream status, used percent, and local reset time for each
     window.
@@ -11099,9 +11099,9 @@ function Get-OpencodeGoUsage {
 
     Stores the parsed response in $Global:opencodeGoLastQuery and returns it.
 .PARAMETER ApiKey
-    OpenCode Go workspace API key. Defaults to $env:OPENCODE_GO_API_KEY, then
-    $env:OPENCODE_API_KEY (shared with the Zen provider), then the OpenCode CLI
-    auth store.
+    OpenCode Go workspace API key. When omitted, uses Get-AiApiKey for
+    OPENCODE_GO_API_KEY, then $env:OPENCODE_API_KEY (shared with the Zen
+    provider), then the OpenCode CLI auth store. Save the Go key with Set-AiApiKeysCS.
 .PARAMETER TimeoutSec
     HTTP request timeout in seconds. Defaults to 15.
 .PARAMETER LowPercent
@@ -11126,7 +11126,7 @@ function Get-OpencodeGoUsage {
 #>
     [CmdletBinding()]
     param(
-        [string]$ApiKey = $env:OPENCODE_GO_API_KEY,
+        [string]$ApiKey,
         [ValidateRange(1, 300)]
         [int]$TimeoutSec = 15,
         [ValidateRange(0, 100)]
@@ -11149,17 +11149,12 @@ function Get-OpencodeGoUsage {
         return
     }
 
-    # Resolve the key: explicit argument, then $env:OPENCODE_GO_API_KEY (the
-    # parameter default), then OpenCode's own $env:OPENCODE_API_KEY, then the key
-    # the OpenCode CLI stores when /connect is used. The auth store is only read,
-    # never written.
-    #
-    # OPENCODE_API_KEY is checked before the store even though it is shared with
-    # the Zen provider: an explicit session variable must win over a stored key,
-    # and the store read below is keyed to the "opencode-go" entry precisely.
+    # Reuse the profile's credential lookup so a newly saved Go key works even
+    # before Load-AiApiKeysFromCS runs. Keep the shared Zen key as a fallback.
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) { $ApiKey = Get-AiApiKey 'OPENCODE_GO_API_KEY' }
     if ([string]::IsNullOrWhiteSpace($ApiKey)) { $ApiKey = $env:OPENCODE_API_KEY }
 
-    if (-not $ApiKey) {
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
         $authFile = if ($env:XDG_DATA_HOME) {
             Join-Path $env:XDG_DATA_HOME 'opencode\auth.json'
         } else {
@@ -11176,7 +11171,7 @@ function Get-OpencodeGoUsage {
     }
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        Write-Error 'No OpenCode Go API key found. Run /connect in OpenCode, or set OPENCODE_GO_API_KEY / OPENCODE_API_KEY; keys are issued at https://opencode.ai/auth.'
+        Write-Error 'No OpenCode Go API key found. Save OPENCODE_GO_API_KEY with Set-AiApiKeysCS, run /connect in OpenCode, or set OPENCODE_GO_API_KEY / OPENCODE_API_KEY; keys are issued at https://opencode.ai/auth.'
         return
     }
 

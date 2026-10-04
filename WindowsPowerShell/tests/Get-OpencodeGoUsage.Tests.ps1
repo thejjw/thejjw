@@ -19,6 +19,9 @@ Describe 'Get-OpencodeGoUsage' {
 
         . ([scriptblock]::Create($functionAst.Extent.Text))
 
+        # The isolated usage function must never access the real credential vault.
+        function Get-AiApiKey { param([string]$Name) }
+
         $Global:_ProfileHelpers = [pscustomobject]@{}
         $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteUsageTimestamp -Value { param($CommandName) }
         $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteSection -Value { param($Title) }
@@ -53,6 +56,7 @@ Describe 'Get-OpencodeGoUsage' {
 
         Mock Write-Host { [void]$script:hostMessages.Add([string]$Object) }
         Mock Out-Host {}
+        Mock Get-AiApiKey { return $env:OPENCODE_GO_API_KEY }
         Mock New-Object {
             if ($TypeName -eq 'System.Collections.Generic.List[object]') {
                 Write-Output -NoEnumerate ([System.Collections.Generic.List[object]]::new())
@@ -70,6 +74,57 @@ Describe 'Get-OpencodeGoUsage' {
     AfterEach {
         $env:OPENCODE_GO_API_KEY = $script:savedApiKey
         $env:OPENCODE_API_KEY = $script:savedSharedKey
+    }
+
+    It 'prefers a stored Go credential over the shared key and CLI auth store' {
+        Mock Get-AiApiKey { return 'stored-go-key' }
+        Mock Test-Path { $true }
+        Mock Get-Content { '{"opencode-go":{"type":"api","key":"cli-key"}}' }
+        $env:OPENCODE_API_KEY = 'shared-key'
+        $query = {
+            param($key)
+            $script:queriedKey = $key
+            [pscustomobject]@{ usage = [pscustomobject]@{} }
+        }
+
+        Get-OpencodeGoUsage -QueryInvoker $query | Out-Null
+
+        $script:queriedKey | Should -Be 'stored-go-key'
+        Should -Invoke Get-AiApiKey -Times 1 -Exactly -ParameterFilter { $Name -eq 'OPENCODE_GO_API_KEY' }
+        Should -Invoke Get-Content -Times 0 -Exactly
+    }
+
+    It 'uses an explicit API key without accessing credential storage' {
+        Mock Get-AiApiKey { throw 'must not access credential storage' }
+        $env:OPENCODE_GO_API_KEY = 'go-env-key'
+        $env:OPENCODE_API_KEY = 'shared-key'
+        $query = {
+            param($key)
+            $script:queriedKey = $key
+            [pscustomobject]@{ usage = [pscustomobject]@{} }
+        }
+
+        Get-OpencodeGoUsage -ApiKey 'explicit-key' -QueryInvoker $query | Out-Null
+
+        $script:queriedKey | Should -Be 'explicit-key'
+        Should -Invoke Get-AiApiKey -Times 0 -Exactly
+    }
+
+    It 'falls back to the CLI auth store when credential and shared keys are whitespace' {
+        Mock Get-AiApiKey { return ' ' }
+        Mock Test-Path { $true }
+        Mock Get-Content { '{"opencode-go":{"type":"api","key":"cli-key"}}' }
+        $env:OPENCODE_API_KEY = ' '
+        $query = {
+            param($key)
+            $script:queriedKey = $key
+            [pscustomobject]@{ usage = [pscustomobject]@{} }
+        }
+
+        Get-OpencodeGoUsage -ApiKey ' ' -QueryInvoker $query | Out-Null
+
+        $script:queriedKey | Should -Be 'cli-key'
+        Should -Invoke Get-AiApiKey -Times 1 -Exactly -ParameterFilter { $Name -eq 'OPENCODE_GO_API_KEY' }
     }
 
     It 'accepts the shared OPENCODE_API_KEY when no Go-specific key is set' {

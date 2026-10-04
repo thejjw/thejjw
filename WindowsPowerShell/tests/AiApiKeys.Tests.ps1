@@ -77,7 +77,7 @@ Describe 'AI API key credential helpers' {
             [void]$this.Removed.Add($credential)
         }
 
-        $script:processNames = @('KIMI_CODE_PLAN_API_KEY', 'TEST_GROUPED_API_KEY', 'TEST_OTHER_API_KEY')
+        $script:processNames = @('KIMI_CODE_PLAN_API_KEY', 'OPENCODE_GO_API_KEY', 'TEST_GROUPED_API_KEY', 'TEST_OTHER_API_KEY')
         $script:originalProcessValues = @{}
         foreach ($name in $script:processNames) {
             $script:originalProcessValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -115,6 +115,44 @@ Describe 'AI API key credential helpers' {
 
     It 'removes the deprecated Set-AiApiKeys command' {
         $script:deprecatedFunctionExists | Should -BeFalse
+    }
+
+    It 'stores the OpenCode Go key in the api-key credential group' {
+        Mock Read-Host {
+            if ($AsSecureString -and $Prompt -like 'Enter value for OPENCODE_GO_API_KEY*') {
+                return ConvertTo-SecureString 'test-go-key' -AsPlainText -Force
+            }
+            if ($AsSecureString) { return [System.Security.SecureString]::new() }
+            return 'n'
+        }
+
+        Set-AiApiKeysCS
+
+        $script:savedCredentials.Count | Should -Be 1
+        $script:savedCredentials[0].Resource | Should -Be 'OPENCODE_GO_API_KEY'
+        $script:savedCredentials[0].UserName | Should -Be 'api-key'
+        $script:savedCredentials[0].Password | Should -Be 'test-go-key'
+    }
+
+    It 'loads the stored OpenCode Go key into the process environment' {
+        $script:existingCredentials['OPENCODE_GO_API_KEY'] = 'stored-go-key'
+        [Environment]::SetEnvironmentVariable('OPENCODE_GO_API_KEY', $null, 'Process')
+
+        Load-AiApiKeysFromCS -Quiet
+
+        [Environment]::GetEnvironmentVariable('OPENCODE_GO_API_KEY', 'Process') | Should -Be 'stored-go-key'
+    }
+
+    It 'removes the grouped OpenCode Go credential and clears its process variable' {
+        $credential = [pscustomobject]@{ Resource = 'OPENCODE_GO_API_KEY'; UserName = 'api-key' }
+        [void]$script:vaultCredentials.Add($credential)
+        [Environment]::SetEnvironmentVariable('OPENCODE_GO_API_KEY', 'loaded-go-key', 'Process')
+
+        Remove-AiApiKeysFromCS -Confirm:$false
+
+        $script:removedCredentials.Count | Should -Be 1
+        $script:removedCredentials[0] | Should -Be $credential
+        [Environment]::GetEnvironmentVariable('OPENCODE_GO_API_KEY', 'Process') | Should -BeNullOrEmpty
     }
 
     It 'stores one Qwen input under both credential names without a Bailian prompt' {
