@@ -252,22 +252,20 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v unzip >/dev/null 2>&1; then
-  echo "Error: unzip is required but was not found on PATH." >&2
-  exit 1
-fi
-
-# Preflight: check if any selected pack requires 7z extraction
-NEEDS_7Z=0
+# Archive extraction runs through 7-Zip for BOTH zip and 7z packs: 7-Zip reads
+# zip natively, so one extractor covers every Kind except 'File'. That removes
+# the previous hard dependency on unzip.
+#
+# Preflight: does any selected pack need archive extraction at all?
+NEEDS_ARCHIVE_TOOL=0
 for i in "${SELECTED_INDICES[@]}"; do
-  if [ "${PACK_KIND[$i]}" = "7z" ]; then
-    NEEDS_7Z=1
-    break
-  fi
+  case "${PACK_KIND[$i]}" in
+    Zip|7z) NEEDS_ARCHIVE_TOOL=1; break ;;
+  esac
 done
 
 SEVENZ=""
-if [ "$NEEDS_7Z" -eq 1 ]; then
+if [ "$NEEDS_ARCHIVE_TOOL" -eq 1 ]; then
   if command -v 7zz >/dev/null 2>&1; then
     SEVENZ="7zz"
   elif command -v 7z >/dev/null 2>&1; then
@@ -275,7 +273,7 @@ if [ "$NEEDS_7Z" -eq 1 ]; then
   elif command -v 7za >/dev/null 2>&1; then
     SEVENZ="7za"
   else
-    echo "Error: Selected pack(s) require 7z archive extraction, but '7zz', '7z', or '7za' was not found on PATH." >&2
+    echo "Error: Selected pack(s) require archive extraction, but '7zz', '7z', or '7za' was not found on PATH." >&2
     echo "Install with Homebrew: brew install sevenzip" >&2
     exit 1
   fi
@@ -412,50 +410,31 @@ for i in "${SELECTED_INDICES[@]}"; do
         rm -f "$dl_file"
         continue
       fi
-    elif [ "$kind" = "Zip" ]; then
-      # Strip leading (?i) from .NET regex for BSD grep -Ei compatibility
+    elif [ "$kind" = "Zip" ] || [ "$kind" = "7z" ]; then
+      # Shared archive path for both Zip and 7z: 7-Zip reads either format, so a
+      # single listing/filter/extraction implementation serves both Kinds.
+      #
+      # Strip the leading (?i) so the catalog's .NET-flavoured regex matches under
+      # BSD grep -Ei.
       norm_regex="${include#(\?i)}"
 
-      # List entries in archive
-      if ! entry_list=$(unzip -Z1 "$dl_file" 2>&1); then
-        last_error="Corrupt ZIP archive ($entry_list)"
+      # List archive entries with 7z. A Windows-hosted 7z emits CRLF, so strip
+      # carriage returns: read -r would otherwise leave a trailing \r on every
+      # entry, and an anchored regex like '\.ttf$' could never match.
+      #
+      # Run 7z and test its own exit status separately -- piping straight into tr
+      # would make `if !` test tr's status and hide a corrupt archive.
+      if ! raw_listing=$("$SEVENZ" l -ba -slt "$dl_file" 2>&1); then
+        last_error="Corrupt $kind archive ($raw_listing)"
         rm -f "$dl_file"
         continue
       fi
+      listing=$(printf '%s\n' "$raw_listing" | tr -d '\r')
 
-      # Filter matching entries, rejecting __MACOSX and AppleDouble ._* sidecars
-      matched_entries=()
-      while IFS= read -r entry; do
-        [ -z "$entry" ] && continue
-        case "$entry" in
-          *__MACOSX*|*/._*|._*) continue ;;
-        esac
-        if printf '%s\n' "$entry" | grep -Ei "$norm_regex" >/dev/null 2>&1; then
-          escaped_entry=$(printf '%s\n' "$entry" | sed 's/\\/\\\\/g; s/\[/\\[/g; s/\]/\\]/g; s/\*/\\*/g; s/\?/\\?/g')
-          matched_entries+=("$escaped_entry")
-        fi
-      done <<< "$entry_list"
+      # Collect the archive members whose path matches the pack's Include regex.
+      # The original entry string is kept for the extraction call; a normalized
+      # copy is used for matching (see below).
 
-      # Check for extraction match
-      if [ "${#matched_entries[@]}" -gt 0 ]; then
-        if ! unzip -q -j -o "$dl_file" "${matched_entries[@]}" -d "$STAGED_DIR" >/dev/null 2>&1; then
-          last_error="Failed to extract matching files from ZIP"
-          rm -f "$dl_file"
-          continue
-        fi
-      fi
-    elif [ "$kind" = "7z" ]; then
-      # Strip leading (?i) from regex
-      norm_regex="${include#(\?i)}"
-
-      # List archive entries with 7z
-      if ! listing=$("$SEVENZ" l -ba -slt "$dl_file" 2>&1); then
-        last_error="Corrupt 7z archive ($listing)"
-        rm -f "$dl_file"
-        continue
-      fi
-
-      # Extract paths from Path = ... lines in 7z verbose listing
       matched_entries=()
       while IFS= read -r line; do
         if [[ "$line" =~ ^Path\ =\ (.*)$ ]]; then
@@ -463,15 +442,24 @@ for i in "${SELECTED_INDICES[@]}"; do
           case "$entry" in
             *__MACOSX*|*/._*|._*) continue ;;
           esac
-          if printf '%s\n' "$entry" | grep -Ei "$norm_regex" >/dev/null 2>&1; then
+          # 7-Zip emits '\' separators on Windows and '/' elsewhere; normalize
+          # to '/' so the catalog's '/'-separated Include regexes match on every
+          # platform. The original string is still what goes back to 7z.
+          normalized="${entry//\\//}"
+          # Directory records end in a separator; only files are installable.
+          case "$normalized" in
+            */) continue ;;
+          esac
+          if printf '%s\n' "$normalized" | grep -Ei "$norm_regex" >/dev/null 2>&1; then
             matched_entries+=("$entry")
           fi
         fi
       done <<< "$listing"
 
       if [ "${#matched_entries[@]}" -gt 0 ]; then
+        # 'e' flattens paths, matching the old 'unzip -j' staging behavior.
         if ! "$SEVENZ" e -y -o"$STAGED_DIR" "$dl_file" "${matched_entries[@]}" >/dev/null 2>&1; then
-          last_error="Failed to extract matching files from 7z"
+          last_error="Failed to extract matching files from $kind archive"
           rm -f "$dl_file"
           continue
         fi
