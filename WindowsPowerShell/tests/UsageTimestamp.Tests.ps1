@@ -60,7 +60,8 @@ Describe 'usage-query timestamps' {
             }, $true)
         )
 
-        $usageFunctions.Count | Should -Be 7
+        # One per provider usage function, including the Get-AllAiUsage aggregator.
+        $usageFunctions.Count | Should -Be 8
         foreach ($functionAst in $usageFunctions) {
             $functionAst.Body.EndBlock.Statements[0].Extent.Text |
                 Should -Be '$_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)'
