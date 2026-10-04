@@ -32,6 +32,17 @@ Describe 'AI API key credential helpers' {
         foreach ($functionName in $script:functionAsts.Keys) {
             . ([scriptblock]::Create($script:functionAsts[$functionName].Extent.Text))
         }
+
+        # The credential helpers read their key list from $_AiKeysInternal, so the
+        # configuration group has to be defined before the functions under test run.
+        $internalAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$_AiKeysInternal'
+        }, $true)
+        if (-not $internalAst) { throw 'Could not find $_AiKeysInternal in the profile.' }
+
+        . ([scriptblock]::Create($internalAst.Extent.Text))
     }
 
     BeforeEach {
@@ -209,24 +220,28 @@ Describe 'AI API key credential helpers' {
     }
 
     It 'loads the Bailian alias without adding it to the setter prompt list' {
+        $_AiKeysInternal.Names | Should -Not -Contain 'BAILIAN_TOKEN_PLAN_API_KEY'
+        $_AiKeysInternal.Aliases.Alias | Should -Contain 'BAILIAN_TOKEN_PLAN_API_KEY'
+
+        # The setter prompts for Names alone; only the loader folds the aliases in.
         $setterText = $script:functionAsts['Set-AiApiKeysCS'].Extent.Text
         $loaderText = $script:functionAsts['Load-AiApiKeysFromCS'].Extent.Text
+        $setterText | Should -Match '\$names\s*=\s*\$_AiKeysInternal\.Names'
+        $loaderText | Should -Match '\$_AiKeysInternal\.Aliases'
+    }
 
-        $setterNames = [regex]::Match($setterText, '\$names\s*=\s*@\(([^\r\n]+)\)').Groups[1].Value
-        $loaderNames = [regex]::Match($loaderText, '\$names\s*=\s*@\(([^\r\n]+)\)').Groups[1].Value
-        $setterNames | Should -Not -Match 'BAILIAN_TOKEN_PLAN_API_KEY'
-        $loaderNames | Should -Match 'BAILIAN_TOKEN_PLAN_API_KEY'
+    It 'registers every alias source as a managed key name' {
+        foreach ($alias in $_AiKeysInternal.Aliases) {
+            $_AiKeysInternal.Names | Should -Contain $alias.Source
+        }
     }
 
     It 'uses the dedicated Kimi Code plan credential name' {
-        $setterText = $script:functionAsts['Set-AiApiKeysCS'].Extent.Text
-        $loaderText = $script:functionAsts['Load-AiApiKeysFromCS'].Extent.Text
         $deprecatedKimiName = 'KIMI_' + 'API_KEY'
 
-        $setterText | Should -Match 'KIMI_CODE_PLAN_API_KEY'
-        $loaderText | Should -Match 'KIMI_CODE_PLAN_API_KEY'
-        $setterText | Should -Not -Match ([regex]::Escape($deprecatedKimiName))
-        $loaderText | Should -Not -Match ([regex]::Escape($deprecatedKimiName))
+        $_AiKeysInternal.Names | Should -Contain 'KIMI_CODE_PLAN_API_KEY'
+        ($_AiKeysInternal.Names -join ',') | Should -Not -Match ([regex]::Escape($deprecatedKimiName))
+        ($_AiKeysInternal.Aliases.Alias -join ',') | Should -Not -Match ([regex]::Escape($deprecatedKimiName))
     }
 
     It 'removes only grouped credentials and clears their process variables' {

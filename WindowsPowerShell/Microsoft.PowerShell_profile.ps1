@@ -613,6 +613,33 @@ If an MCP tool is unavailable or underperforming, inform the user and suggest al
 "@
 }
 
+# Internal configuration for the AI API key credential helpers (Set-AiApiKeysCS,
+# Load-AiApiKeysFromCS). Single source of truth: register a provider key once here
+# instead of editing a literal list inside each helper.
+$_AiKeysInternal = @{
+    # Every key shares one resource userName so they form a logical group in Credential
+    # Manager and can be enumerated/cleared together.
+    UserName = 'api-key'
+    # Keys Set-AiApiKeysCS prompts for and Load-AiApiKeysFromCS injects into the session.
+    Names    = @(
+        'DEEPSEEK_API_KEY'
+        'ZAI_API_KEY'
+        'MINIMAX_API_KEY'
+        'KIMI_CODE_PLAN_API_KEY'
+        'QWEN_TOKEN_PLAN_API_KEY'
+        'GEMINI_API_KEY'
+        'NVIDIA_API_KEY'
+        'OPENROUTER_API_KEY'
+        'OPENCODE_GO_API_KEY'
+        'AMDRC_API_KEY'
+    )
+    # Aliases stored alongside Names but never prompted for on their own: saving Source
+    # writes the same secret to Alias. Loaded like any other entry.
+    Aliases  = @(
+        @{ Alias = 'BAILIAN_TOKEN_PLAN_API_KEY'; Source = 'QWEN_TOKEN_PLAN_API_KEY' }
+    )
+}
+
 # Internal configuration for Install-AiTools and Invoke-AiUpgrade
 $_AiToolsInternal = @{
     PowerShellModules      = @(
@@ -8791,10 +8818,8 @@ function Set-AiApiKeysCS {
     # Windows PowerShell 5.1 and PowerShell 7+ on Windows.
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY', 'OPENCODE_GO_API_KEY', 'AMDRC_API_KEY')
-    # All keys share a single resource userName so they form a logical group in
-    # Credential Manager and can be enumerated/cleared together.
-    $userName = 'api-key'
+    $names = $_AiKeysInternal.Names
+    $userName = $_AiKeysInternal.UserName
 
     # Retrieve a stored key's plaintext value from vault
     function Get-StoredKey($n) {
@@ -8854,15 +8879,15 @@ function Set-AiApiKeysCS {
             $vault.Add($newCred)
             Write-Host "Successfully saved $n to Windows Credential Manager." -ForegroundColor Green
 
-            if ($n -eq 'QWEN_TOKEN_PLAN_API_KEY') {
+            # Aliases ride along with their source key instead of being prompted for.
+            foreach ($alias in @($_AiKeysInternal.Aliases | Where-Object { $_.Source -eq $n })) {
                 try {
-                    $bailianName = 'BAILIAN_TOKEN_PLAN_API_KEY'
-                    $bailianCred = New-Object Windows.Security.Credentials.PasswordCredential($bailianName, $userName, $plain)
-                    $vault.Add($bailianCred)
-                    Write-Host "Duplicated $n to $bailianName in Windows Credential Manager." -ForegroundColor Cyan
+                    $aliasCred = New-Object Windows.Security.Credentials.PasswordCredential($alias.Alias, $userName, $plain)
+                    $vault.Add($aliasCred)
+                    Write-Host "Duplicated $n to $($alias.Alias) in Windows Credential Manager." -ForegroundColor Cyan
                 }
                 catch {
-                    Write-Host "Failed to duplicate $n to BAILIAN_TOKEN_PLAN_API_KEY: $_" -ForegroundColor Red
+                    Write-Host "Failed to duplicate $n to $($alias.Alias): $_" -ForegroundColor Red
                 }
             }
         }
@@ -8903,8 +8928,8 @@ function Load-AiApiKeysFromCS {
     )
     [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
     $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $names = @('DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'MINIMAX_API_KEY', 'KIMI_CODE_PLAN_API_KEY', 'QWEN_TOKEN_PLAN_API_KEY', 'BAILIAN_TOKEN_PLAN_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'OPENROUTER_API_KEY', 'OPENCODE_GO_API_KEY', 'AMDRC_API_KEY')
-    $userName = 'api-key'
+    $names = @($_AiKeysInternal.Names) + @($_AiKeysInternal.Aliases | ForEach-Object { $_.Alias })
+    $userName = $_AiKeysInternal.UserName
 
     $loadedCount = 0
     foreach ($n in $names) {
