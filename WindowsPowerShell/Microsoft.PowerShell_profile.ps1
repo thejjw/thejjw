@@ -11085,10 +11085,14 @@ function Get-OpencodeGoUsage {
 .SYNOPSIS
     Queries OpenCode Go subscription usage windows (rolling, weekly, monthly).
 .DESCRIPTION
-    Calls https://opencode.ai/zen/go/v1/usage with the workspace API key in
-    Get-AiApiKey 'OPENCODE_GO_API_KEY' (process environment, Credential Manager,
-    then legacy User environment), falling back to $env:OPENCODE_API_KEY and then to
-    the "opencode-go" entry in the OpenCode CLI auth store (auth.json).
+    Calls https://opencode.ai/zen/go/v1/usage with a workspace API key.
+    An explicit -ApiKey takes precedence. Otherwise Get-AiApiKey resolves
+    OPENCODE_GO_API_KEY from the process environment, Windows Credential Manager,
+    then legacy User environment variables. If unavailable, falls back to
+    $env:OPENCODE_API_KEY, then the "opencode-go" entry in the OpenCode CLI
+    auth store (auth.json).
+    Save the Go key with Set-AiApiKeysCS. Load-AiApiKeysFromCS loads it into
+    the current process and runs automatically when the profile starts.
     Reports the upstream status, used percent, and local reset time for each
     window.
 
@@ -11188,7 +11192,7 @@ function Get-OpencodeGoUsage {
                 $status = [int]$_.Exception.Response.StatusCode
             }
             if ($status -eq 401) {
-                throw '[GoAuth] OpenCode Go rejected the API key. Run /connect in OpenCode and copy a fresh key from https://opencode.ai/auth.'
+                throw '[GoAuth] OpenCode Go rejected the API key. Get a fresh key from https://opencode.ai/auth. To replace a saved Go key, run Set-AiApiKeysCS -Force, then Load-AiApiKeysFromCS. If using -ApiKey, OPENCODE_API_KEY, or /connect credentials, update that source instead.'
             }
             if ($status -eq 403) {
                 throw '[GoSubscription] An OpenCode Go subscription is required for this key.'
