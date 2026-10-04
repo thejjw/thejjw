@@ -9543,7 +9543,9 @@ Set-Alias -Name aiu -Value Invoke-AiUpgrade
 # and run the currently loaded usage functions. Call the provider functions after
 # the vault credentials load further down (Load-AiApiKeysFromCS) so
 # $env:MINIMAX_API_KEY, $env:ZAI_API_KEY, $env:DEEPSEEK_API_KEY, and
-# $env:KIMI_CODE_PLAN_API_KEY are populated.
+# $env:KIMI_CODE_PLAN_API_KEY are populated. Get-OpencodeGoUsage is the
+# exception: its key comes from $env:OPENCODE_GO_API_KEY / $env:OPENCODE_API_KEY
+# or from the OpenCode CLI auth store, neither of which the vault loader touches.
 
 
 # --- Get-MinimaxUsage ------------------------------------------------------
@@ -11069,6 +11071,222 @@ function Get-AgyUsage {
                 Write-Host ('  - ' + $concern) -ForegroundColor Gray
             }
         }
+    }
+
+    return $resp
+}
+
+# --- Get-OpencodeGoUsage ---------------------------------------------------
+# Queries OpenCode Go's usage-window API with the workspace API key issued by
+# the OpenCode Console. Percentages are USED percent, so higher is worse.
+# Stashes the parsed response in $Global:opencodeGoLastQuery and returns it.
+
+function Get-OpencodeGoUsage {
+    <#
+.SYNOPSIS
+    Queries OpenCode Go subscription usage windows (rolling, weekly, monthly).
+.DESCRIPTION
+    Calls https://opencode.ai/zen/go/v1/usage with the workspace API key in
+    $env:OPENCODE_GO_API_KEY, falling back to $env:OPENCODE_API_KEY and then to
+    the "opencode-go" entry in the OpenCode CLI auth store (auth.json).
+    Reports the upstream status, used percent, and local reset time for each
+    window.
+
+    Percentages are USED percent, so higher is worse. OpenCode documents the
+    allowances as a 5-hour window worth 20% of the monthly limit, a weekly
+    window worth 50%, and the monthly window itself at 100%. The upstream
+    'rate-limited' status is reported as CRITICAL regardless of percent.
+
+    Stores the parsed response in $Global:opencodeGoLastQuery and returns it.
+.PARAMETER ApiKey
+    OpenCode Go workspace API key. Defaults to $env:OPENCODE_GO_API_KEY, then
+    $env:OPENCODE_API_KEY (shared with the Zen provider), then the OpenCode CLI
+    auth store.
+.PARAMETER TimeoutSec
+    HTTP request timeout in seconds. Defaults to 15.
+.PARAMETER LowPercent
+    Used-percent threshold at or above which a window is reported as LOW.
+.PARAMETER CriticalPercent
+    Used-percent threshold at or above which a window is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Report an informational concern when a window resets within this many hours.
+.PARAMETER All
+    When supplied, prints the raw API response inline. Otherwise the raw
+    response stays in $Global:opencodeGoLastQuery.
+.EXAMPLE
+    Get-OpencodeGoUsage
+.EXAMPLE
+    Get-OpencodeGoUsage -LowPercent 60 -CriticalPercent 85 -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+    Requires an active Go or Go Plus subscription; the API returns HTTP 403
+    otherwise. Upstream does not expose the credit balance on this endpoint
+    (anomalyco/opencode#44189), so only the three usage windows are reported.
+#>
+    [CmdletBinding()]
+    param(
+        [string]$ApiKey = $env:OPENCODE_GO_API_KEY,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 15,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 80,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 95,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$All,
+        [Parameter(DontShow = $true)]
+        [scriptblock]$QueryInvoker
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    # These are used-percent thresholds, so the critical level sits above the low
+    # level (the opposite ordering from the remaining-percent providers).
+    if ($CriticalPercent -lt $LowPercent) {
+        Write-Error 'CriticalPercent must be greater than or equal to LowPercent.'
+        return
+    }
+
+    # Resolve the key: explicit argument, then $env:OPENCODE_GO_API_KEY (the
+    # parameter default), then OpenCode's own $env:OPENCODE_API_KEY, then the key
+    # the OpenCode CLI stores when /connect is used. The auth store is only read,
+    # never written.
+    #
+    # OPENCODE_API_KEY is checked before the store even though it is shared with
+    # the Zen provider: an explicit session variable must win over a stored key,
+    # and the store read below is keyed to the "opencode-go" entry precisely.
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) { $ApiKey = $env:OPENCODE_API_KEY }
+
+    if (-not $ApiKey) {
+        $authFile = if ($env:XDG_DATA_HOME) {
+            Join-Path $env:XDG_DATA_HOME 'opencode\auth.json'
+        } else {
+            Join-Path $HOME '.local\share\opencode\auth.json'
+        }
+        if (Test-Path -LiteralPath $authFile) {
+            try {
+                $entry = (Get-Content -LiteralPath $authFile -Raw | ConvertFrom-Json).'opencode-go'
+                if ($entry -and $entry.type -eq 'api' -and $entry.key) { $ApiKey = [string]$entry.key }
+            } catch {
+                Write-Host ("  Could not read the OpenCode auth store: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        Write-Error 'No OpenCode Go API key found. Run /connect in OpenCode, or set OPENCODE_GO_API_KEY / OPENCODE_API_KEY; keys are issued at https://opencode.ai/auth.'
+        return
+    }
+
+    # Translate the documented HTTP failures into tagged messages so the caller
+    # can tell a bad key from a missing subscription from a transient fault.
+    function Invoke-OpencodeGoUsageQuery([string]$Key) {
+        try {
+            return Invoke-RestMethod -Uri 'https://opencode.ai/zen/go/v1/usage' -Headers @{ Authorization = "Bearer $Key"; Accept = 'application/json' } -Method GET -TimeoutSec $TimeoutSec -ErrorAction Stop
+        } catch [System.Threading.Tasks.TaskCanceledException] {
+            throw '[GoTransient] The OpenCode Go usage query timed out.'
+        } catch {
+            $status = $null
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                $status = [int]$_.Exception.Response.StatusCode
+            }
+            if ($status -eq 401) {
+                throw '[GoAuth] OpenCode Go rejected the API key. Run /connect in OpenCode and copy a fresh key from https://opencode.ai/auth.'
+            }
+            if ($status -eq 403) {
+                throw '[GoSubscription] An OpenCode Go subscription is required for this key.'
+            }
+            if ($null -ne $status) {
+                throw ("[GoTransient] The OpenCode Go usage query failed with HTTP {0}." -f $status)
+            }
+            throw ("[GoTransient] The OpenCode Go usage query failed: {0}" -f $_.Exception.Message)
+        }
+    }
+
+    try {
+        $resp = if ($QueryInvoker) { & $QueryInvoker $ApiKey } else { Invoke-OpencodeGoUsageQuery $ApiKey }
+    } catch {
+        Write-Error $_.Exception.Message
+        return
+    }
+
+    # Defensive: an intermediary can return HTTP 200 with an error envelope.
+    if ($null -eq $resp -or ($resp.PSObject.Properties['type'] -and $resp.type -eq 'error')) {
+        Write-Error 'OpenCode Go returned no usage payload.'
+        return
+    }
+
+    $Global:opencodeGoLastQuery = $resp
+
+    $_ProfileHelpers.WriteSection('Raw API response (OpenCode Go)')
+    if ($All) { $resp | ConvertTo-Json -Depth 8 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:opencodeGoLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $usage = if ($resp.PSObject.Properties['usage'] -and $resp.usage) { $resp.usage } else { $resp }
+
+    $_ProfileHelpers.WriteSection('Usage summary (OpenCode Go)')
+    $windowNames = [ordered]@{ Rolling = 'Rolling'; Weekly = 'Weekly'; Monthly = 'Monthly' }
+    $rows = New-Object System.Collections.Generic.List[object]
+    $concerns = New-Object System.Collections.Generic.List[string]
+    $now = Get-Date
+    foreach ($key in $windowNames.Keys) {
+        $window = $usage.$key
+        if ($null -eq $window) { continue }
+        $label = $windowNames[$key]
+
+        # percent arrives as a JSON number; parse tolerantly in case it is a string.
+        $percent = $null
+        if ($null -ne $window.percent) {
+            $parsed = 0.0
+            if ([double]::TryParse([string]$window.percent, [ref]$parsed)) { $percent = $parsed }
+        }
+        $status = if ($window.status) { [string]$window.status } else { 'unknown' }
+
+        $resetText = 'n/a'
+        $resetDelta = $null
+        if ($window.resetsAt) {
+            $resetDto = [DateTimeOffset]::MinValue
+            if ([DateTimeOffset]::TryParse([string]$window.resetsAt, [ref]$resetDto)) {
+                $resetLocal = $resetDto.ToLocalTime().LocalDateTime
+                $resetDelta = $resetLocal - $now
+                if ($resetDelta.TotalSeconds -gt 0) {
+                    $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
+                } else {
+                    $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+                }
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Window = $label
+            Status = $status
+            Used   = if ($null -ne $percent) { '{0:N1}%' -f $percent } else { 'n/a' }
+            Resets = $resetText
+        })
+
+        if ($status -eq 'rate-limited') {
+            $concerns.Add(('[CRITICAL] {0}: upstream reports rate-limited' -f $label))
+        } elseif ($null -ne $percent) {
+            if ($percent -ge $CriticalPercent) {
+                $concerns.Add(('[CRITICAL] {0}: {1:N1}% used (>= {2}%)' -f $label, $percent, $CriticalPercent))
+            } elseif ($percent -ge $LowPercent) {
+                $concerns.Add(('[LOW]      {0}: {1:N1}% used (>= {2}%)' -f $label, $percent, $LowPercent))
+            }
+        }
+        if ($null -ne $resetDelta -and $resetDelta.TotalSeconds -gt 0 -and $resetDelta.TotalHours -le $ResetWarnHours) {
+            $concerns.Add(('[INFO]     {0}: resets in {1}' -f $label, ($_ProfileHelpers.FormatDuration($resetDelta))))
+        }
+    }
+    if ($rows.Count -gt 0) { $rows | Format-Table -AutoSize -Wrap | Out-Host }
+    else { Write-Host '  (no usage windows returned)' -ForegroundColor DarkGray }
+
+    $_ProfileHelpers.WriteSection('Concerns (OpenCode Go)')
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) { Write-Host ('  - ' + $concern) -ForegroundColor Yellow }
     }
 
     return $resp
