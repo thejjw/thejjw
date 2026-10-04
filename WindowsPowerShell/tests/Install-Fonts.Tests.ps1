@@ -110,4 +110,50 @@ Describe 'Install-Fonts archive handling and catalog' {
             "SarasaMonoSC-Regular.ttf" -match $pack.Include | Should -BeFalse
         }
     }
+
+    It 'pins the Monoplex CJK Nerd Font pack to the v1.1.0 Nerd Fonts 3.5.1 release' {
+        $packs = @($_FontInstallInternal.Packs | Where-Object Name -like 'Monoplex*')
+
+        # Exactly one Monoplex generation: v0.0.2 also shipped a Nerd family, so
+        # leaving it pinned would install two competing sets of icon glyphs.
+        $packs.Count | Should -Be 1
+        $packs.Name | Should -Be 'MonoplexCJKNerd'
+        $packs.Kind | Should -Be 'Zip'
+        @($packs | Where-Object { $_.Extended }).Count | Should -Be 0
+        $packs.Fonts | Should -Be 16
+        $packs.Bytes | Should -Be 125695049
+        $packs.Probe | Should -Be 'MonoplexCJKNerdFont-Regular.ttf'
+        $packs.Url | Should -Be 'https://github.com/y-kim/monoplex/releases/download/monoplex-cjk-nerd-font-1.1.0/MonoplexCJKNerdFont_v1.1.0.zip'
+    }
+
+    It 'matches the sixteen Monoplex CJK Nerd styles and rejects non-TTF entries' {
+        $pack = $_FontInstallInternal.Packs | Where-Object Name -eq 'MonoplexCJKNerd'
+        # Real archive members. The Regular weight's italic is named
+        # 'MonoplexCJKNerdFont-Italic.ttf' upstream, not '-RegularItalic.ttf',
+        # so list the sixteen actual filenames rather than deriving them.
+        $styles = @(
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-Thin.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-ExtraLight.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-Light.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-Regular.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-Text.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-Medium.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-SemiBold.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-Bold.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-ThinItalic.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-ExtraLightItalic.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-LightItalic.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-Italic.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-TextItalic.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-MediumItalic.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-SemiBoldItalic.ttf'
+            'MonoplexCJKNerdFont/MonoplexCJKNerdFont-BoldItalic.ttf'
+        )
+        @($styles | Where-Object { $_ -match $pack.Include }).Count | Should -Be 16
+
+        # The archive also ships a LICENSE.md next to the fonts; it must not install.
+        'MonoplexCJKNerdFont/LICENSE.md' -match $pack.Include | Should -BeFalse
+        # A sibling release's fonts live in their own directory and must be excluded.
+        'MonoplexCJKNerdFontPropo/MonoplexCJKNerdFontPropo-Regular.ttf' -match $pack.Include | Should -BeFalse
+    }
 }
