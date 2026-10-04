@@ -8440,8 +8440,14 @@ function Install-AiTools {
     $null = Add-UserPathEntry -Path $wingetLinksDir
 
     $wingetListOutput = @()
+    Write-Host 'Checking Winget package inventory...' -ForegroundColor Cyan
     try {
-        $wingetListOutput = & winget list 2>$null
+        # Captured output hides source agreement prompts, so inventory queries
+        # must be noninteractive and use only the source managed by this setup.
+        $wingetListOutput = @(& winget list --source winget --accept-source-agreements --disable-interactivity 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw "winget list failed (exit code $LASTEXITCODE): $($wingetListOutput -join [Environment]::NewLine)"
+        }
     }
     catch {
         Write-Host "Failed to query winget package inventory: $_" -ForegroundColor Red
@@ -8510,7 +8516,17 @@ function Install-AiTools {
             catch { Write-Host "Failed to start winget for $($m): $_" -ForegroundColor Red }
         }
 
-        $wingetListOutput = & winget list 2>$null
+        Write-Host 'Rechecking Winget package inventory...' -ForegroundColor Cyan
+        try {
+            $wingetListOutput = @(& winget list --source winget --accept-source-agreements --disable-interactivity 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+                throw "winget list failed (exit code $LASTEXITCODE): $($wingetListOutput -join [Environment]::NewLine)"
+            }
+        }
+        catch {
+            Write-Host "Failed to verify winget package inventory: $_" -ForegroundColor Red
+            return
+        }
         $stillMissing = $missing | Where-Object { -not (Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $_) }
         if ($stillMissing) {
             Write-Host "The following packages failed to install:" -ForegroundColor Red

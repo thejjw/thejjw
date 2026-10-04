@@ -326,7 +326,7 @@ Describe 'Install-AiTools npm packages' {
             return $null
         }
         Mock Get-ItemPropertyValue { return (Join-Path $env:USERPROFILE '.local\bin') }
-        Mock winget { return @() }
+        Mock winget { $global:LASTEXITCODE = 0; return @() }
         Mock powershell {}
         Mock Install-QwenSettings {}
         Mock Install-KimiSettings {}
@@ -350,6 +350,63 @@ Describe 'Install-AiTools npm packages' {
 
     AfterAll {
         $_AiToolsInternal = $script:originalAiToolsConfigForNpm
+    }
+
+    It 'queries Winget inventory without interactive prompts before and after installation' {
+        $_AiToolsInternal.WingetPackages = @('Example.Inventory')
+        Mock Start-Process {}
+        $script:wingetCalls = @()
+        Mock winget {
+            param($ArgumentList)
+            $script:wingetCalls += [pscustomobject]@{ Args = @($ArgumentList) }
+            $global:LASTEXITCODE = 0
+            if ($script:wingetCalls.Count -gt 1) { return 'Example Example.Inventory 1.0 winget' }
+            return @()
+        }
+        $script:inventoryResponses.Enqueue([pscustomobject]@{
+            ExitCode = 0
+            Json = New-NpmInventoryJson $_AiToolsInternal.NpmPackages
+        })
+
+        Install-AiTools -Auto
+
+        $script:wingetCalls.Count | Should -Be 2
+        foreach ($call in $script:wingetCalls) {
+            $call.Args | Should -Be @('list', '--source', 'winget', '--accept-source-agreements', '--disable-interactivity')
+        }
+        Should -Invoke Start-Process -Times 1 -Exactly
+    }
+
+    It 'stops before installers when the initial Winget inventory fails' {
+        $_AiToolsInternal.WingetPackages = @('Example.Inventory')
+        Mock Start-Process {}
+        Mock winget { $global:LASTEXITCODE = 9; return 'source unavailable' }
+
+        Install-AiTools -Auto -Update
+
+        Should -Invoke winget -Times 1 -Exactly
+        Should -Invoke Start-Process -Times 0 -Exactly
+        $script:npmCalls.Count | Should -Be 0
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*inventory*9*' }
+    }
+
+    It 'stops after a failed Winget recheck instead of reporting successful installation' {
+        $_AiToolsInternal.WingetPackages = @('Example.Inventory')
+        Mock Start-Process {}
+        $script:wingetQueryCount = 0
+        Mock winget {
+            $script:wingetQueryCount++
+            $global:LASTEXITCODE = if ($script:wingetQueryCount -eq 1) { 0 } else { 9 }
+            return @()
+        }
+
+        Install-AiTools -Auto
+
+        Should -Invoke winget -Times 2 -Exactly
+        Should -Invoke Start-Process -Times 1 -Exactly
+        $script:npmCalls.Count | Should -Be 0
+        Should -Invoke Write-Host -Times 0 -Exactly -ParameterFilter { $Object -eq 'All packages installed successfully.' }
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*inventory*9*' }
     }
 
     It 'skips healthy packages even during an update run' {
