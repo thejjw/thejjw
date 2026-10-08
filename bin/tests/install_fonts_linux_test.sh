@@ -139,13 +139,13 @@ test_catalog_smoke_load() {
   INSTALL_FONTS_TARGET_DIR="${case_dir}/fonts" \
     "$INSTALLER" --list > "$out"
 
-  assert_contains '30 pack(s)' "$out" 'Standard list count'
+  assert_contains '31 pack(s)' "$out" 'Standard list count'
   assert_contains 'IntelOneMono' "$out"
 
   INSTALL_FONTS_TARGET_DIR="${case_dir}/fonts" \
     "$INSTALLER" --list --extended > "$out"
 
-  assert_contains '33 pack(s)' "$out" 'Extended list count'
+  assert_contains '34 pack(s)' "$out" 'Extended list count'
   assert_contains 'SourceHanSans' "$out"
 }
 

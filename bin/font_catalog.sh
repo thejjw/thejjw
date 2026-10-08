@@ -7,7 +7,7 @@
 # 2026 @thejjw
 #
 
-# Registers all 33 curated packs into caller's add_pack handler
+# Registers all 34 curated packs into caller's add_pack handler
 load_font_catalog() {
   add_pack "IntelOneMono" "https://github.com/intel/intel-one-mono/releases/download/V1.4.0/ttf.zip" 505443 8 "Zip" '(?i)^ttf/[^/]+\.ttf$' "IntelOneMono-Regular.ttf" 0 'Screen-optimized TTF, 4 weights with matching italics; family "Intel One Mono".'
   add_pack "GoormSansCode" "https://statics.goorm.io/fonts/GoormSansCode/v1.0.1/goorm-sans-code-1.0.1.zip" 4528715 1 "Zip" '(?i)^goorm sans code 2/Public/[^/]+\.ttf$' "goorm_Sans_Code_400.ttf" 0 'Coding sans (single weight).'
@@ -24,6 +24,7 @@ load_font_catalog() {
   add_pack "SourceHanSerif" "https://github.com/adobe-fonts/source-han-serif/releases/download/2.003R/02_SourceHanSerif-VF.zip" 750817685 1 "Zip" '(?i)^Variable/OTC/SourceHanSerif-VF\.ttf\.ttc$' "SourceHanSerif-VF.ttf.ttc" 1 'LARGE ~716 MB. Installs only the pan-CJK OTC variable collection.'
   add_pack "SourceHanMono" "https://github.com/adobe-fonts/source-han-mono/releases/download/1.002/SourceHanMono.ttc" 122117628 1 "File" "" "SourceHanMono.ttc" 1 'LARGE ~116 MB. Direct .ttc download (no archive).'
   add_pack "JetBrainsMono" "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip" 5622857 2 "Zip" '(?i)^fonts/variable/[^/]+\.ttf$' "JetBrainsMono[wght].ttf" 0 'Variable TTF (upright + italic); registers cleanly as "JetBrains Mono", so variable is kept over the static ttf/ set.'
+  add_pack "JetBrainsMonoNerdMono" "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.tar.xz" 7284244 16 "7z" '(?i)^JetBrainsMonoNerdFontMono-[^/]+\.ttf$' "JetBrainsMonoNerdFontMono-Regular.ttf" 0 'Nerd Fonts v3.5.1 patched build of JetBrains Mono 2.304 (icons + Powerline glyphs); JetBrains ships no Nerd build, so this comes from the upstream patch project. "Mono" keeps every icon one cell wide so the grid stays aligned; the -NF/-Propo variants and the -NL (no-ligature) set are skipped. The 7.3 MB .tar.xz is used instead of the 134 MB all-variant .zip, which holds the same files. Requires the 7z command.'
   add_pack "IBMPlexMono" "https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-mono%402.5.0/ibm-plex-mono.zip" 6940652 16 "Zip" '(?i)^ibm-plex-mono/fonts/complete/otf/[^/]+\.otf$' "IBMPlexMono-Regular.otf" 0 'OTF, all 16 weights incl. italics; skips ttf/woff/woff2.'
   add_pack "IBMPlexSansKR" "https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-sans-kr%401.1.0/ibm-plex-sans-kr.zip" 73268731 8 "Zip" '(?i)^ibm-plex-sans-kr/fonts/complete/otf/[^/]+\.otf$' "IBMPlexSansKR-Regular.otf" 0 'LARGE ~73 MB (full zip also bundles ttf/woff/woff2); installs OTF, all 8 Korean weights.'
   add_pack "MonaSans" "https://github.com/github/mona-sans/releases/download/v2.0.27/mona-sans-variable-v2.0.27.zip" 2674251 11 "Zip" '(?i)^fonts/variable/[^/]+\.ttf$' "MonaSansVF[opsz,wght].ttf" 0 'Variable-only distribution (multiple width/optical axes).'

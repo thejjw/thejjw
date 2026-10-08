@@ -109,7 +109,7 @@ with zipfile.ZipFile(zip_path, 'w') as z:
 " "$zip_path" "$@"
 }
 
-# Test 1: Full 33-pack catalog integrity and schema validation via shell contract
+# Test 1: Full 34-pack catalog integrity and schema validation via shell contract
 test_catalog_integrity() {
   local case_dir
   case_dir="$(new_case)"
@@ -152,26 +152,26 @@ test_catalog_integrity() {
     source "$1"
     load_font_catalog
 
-    if [ "$PACK_COUNT" -ne 33 ]; then
-      echo "Expected 33 packs, got $PACK_COUNT" >&2
+    if [ "$PACK_COUNT" -ne 34 ]; then
+      echo "Expected 34 packs, got $PACK_COUNT" >&2
       exit 1
     fi
 
     unique_names=$(printf "%s\n" "${NAMES[@]}" | sort -u | wc -l | tr -d " ")
-    if [ "$unique_names" -ne 33 ]; then
+    if [ "$unique_names" -ne 34 ]; then
       echo "Duplicate pack names detected" >&2
       exit 1
     fi
 
     unique_probes=$(printf "%s\n" "${PROBES[@]}" | sort -u | wc -l | tr -d " ")
-    if [ "$unique_probes" -ne 33 ]; then
+    if [ "$unique_probes" -ne 34 ]; then
       echo "Duplicate probe filenames detected" >&2
       exit 1
     fi
   ' bash "$CATALOG" > /dev/null 2> "$err" || fail "Catalog integrity failed: $(cat "$err")"
 }
 
-# Test 2: Verify all 33 catalog regex patterns are valid in BSD grep -Ei once (?i) is stripped
+# Test 2: Verify all 34 catalog regex patterns are valid in BSD grep -Ei once (?i) is stripped
 test_regex_normalization_bsd_grep() {
   local case_dir
   case_dir="$(new_case)"
@@ -254,14 +254,14 @@ test_list_without_7z() {
     INSTALL_FONTS_TARGET_DIR="${case_dir}/fonts" \
     "$INSTALLER" --list > "$out"
 
-  assert_contains '30 pack(s)' "$out" 'Standard list count'
+  assert_contains '31 pack(s)' "$out" 'Standard list count'
   assert_contains 'IntelOneMono' "$out"
   assert_contains 'SarasaGothicK' "$out"
   assert_contains 'SarasaMonoK' "$out"
   assert_not_contains 'SourceHanSans' "$out" 'Extended packs excluded by default'
 }
 
-# Test 4: --list --extended displays all 33 packs
+# Test 4: --list --extended displays all 34 packs
 test_list_extended() {
   local case_dir
   case_dir="$(new_case)"
@@ -271,7 +271,7 @@ test_list_extended() {
     INSTALL_FONTS_TARGET_DIR="${case_dir}/fonts" \
     "$INSTALLER" --list --extended > "$out"
 
-  assert_contains '33 pack(s)' "$out" 'Extended list count'
+  assert_contains '34 pack(s)' "$out" 'Extended list count'
   assert_contains 'SourceHanSans' "$out"
   assert_contains 'SourceHanSerif' "$out"
   assert_contains 'SourceHanMono' "$out"
@@ -935,11 +935,11 @@ EOF
 }
 
 # Run all test cases in sequence
-run_test 'Catalog integrity (33 packs, unique names/probes, schema)' test_catalog_integrity
+run_test 'Catalog integrity (34 packs, unique names/probes, schema)' test_catalog_integrity
 run_test 'Regex normalization compatibility with BSD grep -Ei' test_regex_normalization_bsd_grep
 run_test 'Regex validator rejects malformed patterns' test_regex_validator_rejects_malformed_pattern
 run_test '--list execution without 7z extractor' test_list_without_7z
-run_test '--list --extended displays all 33 packs' test_list_extended
+run_test '--list --extended displays all 34 packs' test_list_extended
 run_test 'Preflight hard failure when 7z missing on selected pack' test_preflight_fails_without_7z
 run_test 'Selective zip extraction, flattening, and AppleDouble rejection' test_selective_zip_extraction_and_appledouble_rejection
 run_test 'Pre-commit hard validation fails immediately on zero matches' test_precommit_hard_validation_zero_matches
