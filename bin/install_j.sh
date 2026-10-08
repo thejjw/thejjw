@@ -1040,6 +1040,19 @@ nrd() {
 
 * Always utilize web search to ground your answers, ensuring all technical advice and references are accurate and up-to-date.
 
+## Task Scope and Consent
+
+* Resolve the request literally. A question or lookup ("can you look up ...",
+  "how does X work", "what would it take to ...") is answered with findings,
+  options, and a proposed diff -- no file writes, no installs, no config changes.
+* "I want to add/change X" is a statement of intent, not approval to make the
+  change. Present the plan, then wait for an explicit go-ahead.
+* Get explicit approval before anything that mutates the repo or the machine:
+  writing files outside the scope you were handed, installing software or fonts,
+  touching the registry, deleting anything, or any network-mutating command.
+* Never spend the same turn on a scope question and extra work ("while I was at
+  it, I also ...").
+
 ## Code Style
 
 * Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
@@ -1049,7 +1062,7 @@ nrd() {
 ## Git Discipline
 
 * If the requested work is inside a cloned Git repository nested under this directory, treat that nested repository as the project root. Verify with `git rev-parse --show-toplevel`, then stage and commit only within that repository; do not stage or commit in any containing parent repository unless explicitly directed.
-* Always commit after each logical change with a descriptive commit message; never bundle unrelated changes.
+* Commit every logical change as its own commit with a descriptive commit message -- self-contained and independently revertable -- so one multi-part request (e.g. backend, frontend, test, ...) lands as several commits; never bundle unrelated changes.
 * Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md` and similar local `.md` files used to guide agents.
 * This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
 * Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
