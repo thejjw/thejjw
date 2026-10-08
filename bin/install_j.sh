@@ -927,7 +927,7 @@ else
 #   nrd                  random name in $PWD
 #   nrd -n my-project    explicit name        (or: nrd my-project)
 #   nrd -g               init git + synthetic identity
-#   nrd -a               create canonical AGENTS.md; requires -g
+#   nrd -a               create AGENTS.md + initial commit; requires -g
 #   nrd -t               use $TMPDIR as base
 #   nrd -v               verbose
 
@@ -1098,6 +1098,18 @@ nrd() {
   subagents to a smaller/faster model and reserve the main session for
   synthesis and architectural judgment.
 AGENT_EOF
+  fi
+
+  # Record the scaffold as the repository's first commit so the generated
+  # AGENTS.md is tracked from the start; the template tells agents never to
+  # commit agent-context files, so it would otherwise stay untracked.
+  if $use_git && $use_agents && [[ -f "$dir/AGENTS.md" ]] && command -v git &>/dev/null; then
+    if git -C "$dir" add -- AGENTS.md &&
+      git -C "$dir" commit -q -m 'chore: scaffold with AGENTS.md'; then
+      echo "initial commit: chore: scaffold with AGENTS.md"
+    else
+      echo "nrd: initial commit failed: $dir" >&2
+    fi
   fi
 
   cd "$dir" || return 1

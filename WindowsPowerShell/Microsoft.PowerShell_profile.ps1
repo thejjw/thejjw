@@ -3846,7 +3846,9 @@ not provided, a random human-readable name is generated. The command then
 changes the current location to the newly created directory.
 
 Optional switches allow initializing a git repository with a synthetic local
-identity and creating basic agent documentation files (AGENTS.md, etc).
+identity and creating basic agent documentation files (AGENTS.md, etc). With
+both -Git and -Agents, the generated AGENTS.md is recorded as the repository's
+initial commit.
 
 .PARAMETER BasePath
 The parent directory where the new directory will be created.
@@ -3860,7 +3862,8 @@ Initializes a git repository in the new directory and configures a local
 identity using the format: username@hostname.local.
 
 .PARAMETER Agents
-Creates canonical AGENTS.md template file in the directory.
+Creates canonical AGENTS.md template file in the directory and records it as
+the repository's first commit.
 Requires -Git.
 
 .PARAMETER Temp
@@ -3894,7 +3897,7 @@ and prints verbose output.
 .NOTES
 Alias: nrd
 Author: jjw(@thejjw)
-Last Edit: 2026-09
+Last Edit: 2026-10
 
 #>
     [CmdletBinding()]
@@ -3995,6 +3998,23 @@ Last Edit: 2026-09
         # Write canonical AGENTS.md using the template defined in global internal configuration
         $_NrdInternal.AgentsMarkdown | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
     }
+
+    # Record the scaffold as the repository's first commit so the generated
+    # AGENTS.md is tracked from the start; the template tells agents never to
+    # commit agent-context files, so it would otherwise stay untracked.
+    if ($Git -and $Agents -and $gitCmd -and (Test-Path -LiteralPath (Join-Path $Path 'AGENTS.md'))) {
+        & git -C $Path add -- AGENTS.md | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            & git -C $Path commit -q -m 'chore: scaffold with AGENTS.md' | Out-Null
+        }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Initial commit: chore: scaffold with AGENTS.md"
+        }
+        else {
+            Write-Warning "Initial commit failed: $Path"
+        }
+    }
+
     Write-Verbose "Changing location to: $Path"
     Set-Location -LiteralPath $Path
 
