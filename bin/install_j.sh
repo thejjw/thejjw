@@ -1020,7 +1020,6 @@ nrd() {
         echo "nrd: git setup failed: $dir" >&2
         return 1
       fi
-      echo "git identity: $user <$email>"
     fi
   fi
 
