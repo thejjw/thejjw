@@ -1,24 +1,44 @@
 /**
- * Editor-adjacent tok/s readout, one line: `⚡ live / ∑ turn-average`.
+ * Editor-adjacent tok/s readout, one line: `⚡ live / ∑ turn-average [t/s]`,
+ * with an optional trailing `(◈ ∑ n)` segment for this session's advisor.
  *
  * omp's built-in working-row readout (`composer.tokenRate`) is deliberately
  * off: it renders in the working row, which extensions cannot write into, so
  * its number could never share a line with the average. Keeping both values
- * on this widget line — directly above the editor — puts the pair adjacent:
- * one glyph each, the unit stated once.
+ * on this widget line -- directly above the editor -- puts the pair adjacent:
+ * one glyph each, the unit stated once, for both agents.
  *
  * `⚡` is a local rate over the last few paints of stream time. `∑` is the
  * turn average: a running average of the in-flight message while streaming,
  * then the provider's billed `usage.output / duration` at message end (local
- * count as fallback). At rest only the average remains —
+ * count as fallback). At rest only the average remains --
  * a live number would sit there reading as "0 tok/s right now".
+ *
+ * The advisor segment is a turn average only. The advisor is a separate
+ * `Agent` whose stream never reaches `message_update` handlers (only its
+ * `tool_call`/`tool_result` events cross into this session), and no
+ * extension hook carries mid-flight token counts: usage exists only once the
+ * advisor's message finalizes into `<session>/__advisor[.<slug>].jsonl`,
+ * whose `usage.output` + `duration` are tailed here. There is no `⚡` for
+ * the advisor and there cannot be one; do not fake it from the file.
+ *
+ * Staleness: the segment becomes `(◈ ∑ n?)`, dimmed in the TUI, once the
+ * primary transcript has advanced more than `ADVISOR_STALE_MS` past the
+ * advisor's last logged turn. `/advisor on|off` never touches the settings
+ * registry, so no setting can answer this; the transcript can. The last
+ * known average is never hidden -- the `?` marks uncertainty (e.g. a long
+ * `agent-end` reviewer between reviews), it is not a claim of "off".
  */
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 /** Instantaneous-rate glyph, matching omp's own throughput icon. */
 const LIVE_GLYPH = "⚡";
 /** Summation glyph: "total over the turn". `~` is the ASCII-safe stand-in. */
 const AVG_GLYPH = "∑";
+/** Advisor-average glyph; the advisor has no live counterpart. */
+const ADVISOR_GLYPH = "◈";
 /** Chars-per-token estimate for streamed deltas; billed usage supersedes it. */
 const CHARS_PER_TOKEN = 4;
 /** Widget repaint budget. */
@@ -29,12 +49,24 @@ const LIVE_SAMPLES = 8;
 const MIN_LIVE_SPAN_MS = 300;
 /** Sub-100ms spans produce garbage averages. */
 const MIN_SPAN_MS = 100;
+/** Cadence for tailing advisor transcripts. */
+const POLL_MS = 2000;
+/** Advisor turns averaged into the readout. */
+const ADVISOR_WINDOW = 5;
+/** Primary progress past the advisor's last logged turn before flagging `?`. */
+const ADVISOR_STALE_MS = 600_000;
+/** Advisor transcript names: `__advisor.jsonl` / `__advisor.<slug>.jsonl`. */
+const ADVISOR_TRANSCRIPT = /^__advisor(\.[^.]+)?\.jsonl$/;
 
 /** One in-flight provider response. A tool-loop turn therefore reports each
  * assistant message's own rate instead of one blurred turn-wide number. */
 type Span = { startedAt: number; localTokens: number };
 /** One paint in the live-rate window. */
 type Sample = { at: number; tokens: number };
+/** One parsed advisor assistant turn. */
+type AdvisorTurn = { at: number; tokens: number; ms: number };
+/** Incremental tail state for one advisor transcript file. */
+type Reader = { offset: number; buffer: string };
 
 export default function tpsExtension(pi: ExtensionAPI) {
   let span: Span | null = null;
@@ -42,22 +74,239 @@ export default function tpsExtension(pi: ExtensionAPI) {
   let lastLabel = "";
   let lastPaint = 0;
 
-  // Repaint gate + shared label shape: streaming, message end and the resume
-  // seed all publish through here and must not flicker or diverge in format.
-  const publish = (
-    ui: {
-      setWidget(
-        key: string,
-        content: string[] | undefined,
-        options?: { placement?: "aboveEditor" | "belowEditor" },
-      ): void;
-    },
-    text: string,
-  ) => {
-    if (text === lastLabel) return;
-    lastLabel = text;
-    ui.setWidget("tps", text === "" ? undefined : [text], { placement: "aboveEditor" });
+  // Two independent producers write one line: live stream events own
+  // `primaryPart`, the advisor poll owns `advisorInner`. `renderLine` is the
+  // only composer, so neither half can repaint alone with the other missing
+  // (no blinking advisor segment, no orphan advisor-only line).
+  let primaryPart = "";
+  let advisorInner = "";
+  let advisorStale = false;
+
+  // Advisor transcript tail state, keyed by file path. Maps, not records:
+  // the keys are discovered at runtime and both are mutated and iterated.
+  let readers = new Map<string, Reader>();
+  let series = new Map<string, AdvisorTurn[]>();
+  // Managed timers are unref'd and cleared automatically on session_shutdown;
+  // the flag only keeps the four session-boundary events from double-arming.
+  let pollArmed = false;
+  // Newest ctx seen. The poll interval reads the session through it, so a
+  // session switch (which rebinds managers) can never leave the timer
+  // polling the previous session's files.
+  let latestCtx: ExtensionContext | undefined;
+
+  /** Dim the advisor segment; a custom theme missing the token must not
+   *  throw inside the paint path -- plain text still carries the `?`. */
+  const dimAdvisor = (ctx: ExtensionContext, text: string): string => {
+    if (ctx.mode !== "tui") return text;
+    try {
+      return ctx.ui.theme.fg("dim", text);
+    } catch {
+      return text;
+    }
   };
+
+  const renderLine = (ctx: ExtensionContext) => {
+    // `advisorInner` is the segment body; the `?` belongs inside the parens.
+    const advisorText = advisorInner === "" ? "" : `(${advisorInner}${advisorStale ? "?" : ""})`;
+    const plain = [primaryPart, advisorText].filter(part => part !== "").join(" ");
+    const key = advisorStale ? `${plain}|stale` : plain;
+    if (key === lastLabel) return;
+    lastLabel = key;
+    if (plain === "") {
+      ctx.ui.setWidget("tps", undefined);
+      return;
+    }
+    // Colors are baked at paint time and do not re-resolve on a live theme
+    // switch. RPC forwards widget strings verbatim, so escapes are emitted
+    // in the TUI only and the `?` carries the signal everywhere else. Only
+    // the stale variant is dimmed; a fresh advisor segment stays plain.
+    const styled =
+      advisorText === "" || !advisorStale || ctx.mode !== "tui"
+        ? plain
+        : `${primaryPart === "" ? "" : `${primaryPart} `}${dimAdvisor(ctx, advisorText)}`;
+    ctx.ui.setWidget("tps", [`${styled} [t/s]`], { placement: "aboveEditor" });
+  };
+
+  const resetAdvisorState = () => {
+    readers = new Map();
+    series = new Map();
+    advisorInner = "";
+    advisorStale = false;
+  };
+
+  /** One advisor assistant entry, or null for anything not billable: headers,
+   *  user updates, tool results, zero-output quota/error rows. Narrowed from
+   *  `unknown` because the file is external data. */
+  const parseAdvisorTurn = (line: string): AdvisorTurn | null => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return null;
+    }
+    if (typeof parsed !== "object" || parsed === null) return null;
+    if (!("type" in parsed) || parsed.type !== "message") return null;
+    if (!("message" in parsed)) return null;
+    const message: unknown = parsed.message;
+    if (typeof message !== "object" || message === null) return null;
+    if (!("role" in message) || message.role !== "assistant") return null;
+    if (!("usage" in message) || !("duration" in message)) return null;
+    const usage: unknown = message.usage;
+    if (typeof usage !== "object" || usage === null) return null;
+    if (!("output" in usage)) return null;
+    const tokens: unknown = usage.output;
+    const ms: unknown = message.duration;
+    if (typeof tokens !== "number" || tokens <= 0) return null;
+    if (typeof ms !== "number" || ms < MIN_SPAN_MS) return null;
+    // Entry timestamps are ISO 8601 strings; an unparseable one sorts oldest.
+    const rawAt = "timestamp" in parsed ? parsed.timestamp : undefined;
+    const at = typeof rawAt === "string" ? Date.parse(rawAt) : NaN;
+    return { at: Number.isFinite(at) ? at : 0, tokens, ms };
+  };
+
+  const tailAdvisorFile = (file: string) => {
+    const size = fs.statSync(file).size;
+    let reader = readers.get(file);
+    if (reader === undefined) {
+      reader = { offset: 0, buffer: "" };
+      readers.set(file, reader);
+    }
+    if (size < reader.offset) {
+      // An atomic rewrite (temp file + rename) replaced the transcript.
+      // Re-read from the top; holding the old inode would read EOF forever.
+      reader.offset = 0;
+      reader.buffer = "";
+      series.delete(file);
+    }
+    if (size > reader.offset) {
+      // Open per tick for the same reason: a held descriptor keeps serving
+      // the pre-rename inode on Windows.
+      const fd = fs.openSync(file, "r");
+      try {
+        const length = size - reader.offset;
+        const chunk = Buffer.alloc(length);
+        const read = fs.readSync(fd, chunk, 0, length, reader.offset);
+        reader.offset += read;
+        reader.buffer += chunk.toString("utf8", 0, read);
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+    // Only whole lines are parsed. A torn final row stays buffered so the
+    // advisor turn it belongs to is not lost forever.
+    const lastBreak = reader.buffer.lastIndexOf("\n");
+    if (lastBreak < 0) return;
+    const complete = reader.buffer.slice(0, lastBreak + 1);
+    reader.buffer = reader.buffer.slice(lastBreak + 1);
+    for (const line of complete.split("\n")) {
+      if (line === "") continue;
+      const turn = parseAdvisorTurn(line);
+      if (turn === null) continue;
+      const turns = series.get(file);
+      if (turns === undefined) series.set(file, [turn]);
+      else turns.push(turn);
+    }
+  };
+
+  /** Stale = the primary transcript advanced past the advisor's last logged
+   *  turn by more than ADVISOR_STALE_MS. An idle session reads negative (the
+   *  advisor's review postdates the final yield) and stays fresh. A busy
+   *  `agent-end` reviewer can still trip this; the `?`, not hiding, is the
+   *  tolerance for that. */
+  const isAdvisorStale = (ctx: ExtensionContext, lastAdvisorAt: number): boolean => {
+    if (lastAdvisorAt <= 0) return false;
+    const branch = ctx.sessionManager.getBranch();
+    for (let i = branch.length - 1; i >= 0; i--) {
+      const entry = branch[i];
+      if (entry === undefined || entry.type !== "message") continue;
+      const at = Date.parse(entry.timestamp);
+      if (Number.isFinite(at) && at > 0) return at - lastAdvisorAt > ADVISOR_STALE_MS;
+    }
+    return false;
+  };
+
+  const refreshAdvisorPart = (ctx: ExtensionContext) => {
+    const turns: AdvisorTurn[] = [];
+    let newest = 0;
+    for (const fileTurns of series.values()) {
+      for (const turn of fileTurns) {
+        turns.push(turn);
+        if (turn.at > newest) newest = turn.at;
+      }
+    }
+    if (turns.length === 0) {
+      advisorInner = "";
+      advisorStale = false;
+      return;
+    }
+    // Per-file series merged here: append order in one file is not global
+    // order once a named-advisor roster interleaves transcripts.
+    turns.sort((left, right) => left.at - right.at);
+    const window = turns.slice(-ADVISOR_WINDOW);
+    const tokens = window.reduce((sum, turn) => sum + turn.tokens, 0);
+    const ms = window.reduce((sum, turn) => sum + turn.ms, 0);
+    advisorInner = `${ADVISOR_GLYPH} ${AVG_GLYPH} ${((tokens * 1000) / ms).toFixed(1)}`;
+    advisorStale = isAdvisorStale(ctx, newest);
+  };
+
+  const pollAdvisor = () => {
+    const ctx = latestCtx;
+    if (ctx === undefined) return;
+    try {
+      const sessionFile = ctx.sessionManager.getSessionFile();
+      // An unsaved session has no file yet: derive nothing. Core guards the
+      // same way -- slicing `undefined` would throw every tick.
+      const dir =
+        typeof sessionFile === "string" && sessionFile.endsWith(".jsonl")
+          ? sessionFile.slice(0, -".jsonl".length)
+          : undefined;
+      if (dir === undefined) {
+        resetAdvisorState();
+        renderLine(ctx);
+        return;
+      }
+      for (const name of fs.readdirSync(dir)) {
+        if (!ADVISOR_TRANSCRIPT.test(name)) continue;
+        tailAdvisorFile(path.join(dir, name));
+      }
+      refreshAdvisorPart(ctx);
+      renderLine(ctx);
+    } catch {
+      // One bad tick is skipped, never thrown: a transient fs error would
+      // otherwise repeat through the extension error channel every POLL_MS.
+    }
+  };
+
+  // Transcript state must be rebuilt on every boundary that replaces the
+  // conversation: session_start / session_switch / session_branch /
+  // session_tree (the set core's own extensions register). A lazy reset on
+  // the next poll tick would show a cross-session primary/advisor pair for
+  // up to POLL_MS.
+  const rebuildSession = (_event: unknown, ctx: ExtensionContext) => {
+    latestCtx = ctx;
+    resetAdvisorState();
+    primaryPart = "";
+    const branch = ctx.sessionManager.getBranch();
+    for (let i = branch.length - 1; i >= 0; i--) {
+      const entry = branch[i];
+      if (entry === undefined || entry.type !== "message") continue;
+      const message = entry.message;
+      if (message.role !== "assistant") continue;
+      if (message.duration === undefined || message.duration < MIN_SPAN_MS) continue;
+      if (message.usage.output <= 0) continue;
+      primaryPart = `${AVG_GLYPH} ${((message.usage.output * 1000) / message.duration).toFixed(1)}`;
+      break;
+    }
+    if (!pollArmed) {
+      pollArmed = true;
+      ctx.setInterval(pollAdvisor, POLL_MS);
+    }
+    renderLine(ctx);
+  };
+  pi.on("session_start", rebuildSession);
+  pi.on("session_switch", rebuildSession);
+  pi.on("session_branch", rebuildSession);
+  pi.on("session_tree", rebuildSession);
 
   pi.on("message_start", event => {
     if (event.message.role !== "assistant") return;
@@ -67,6 +316,7 @@ export default function tpsExtension(pi: ExtensionAPI) {
   });
 
   pi.on("message_update", (event, ctx) => {
+    latestCtx = ctx;
     if (span === null) return;
     const message = event.message;
     if (message.role !== "assistant") return;
@@ -104,41 +354,25 @@ export default function tpsExtension(pi: ExtensionAPI) {
     const elapsed = at - span.startedAt;
     if (elapsed < MIN_SPAN_MS || span.localTokens <= 0) return;
     const average = (span.localTokens * 1000) / elapsed;
-    publish(
-      ctx.ui,
+    primaryPart =
       live === null
-        ? `${AVG_GLYPH} ${average.toFixed(1)} tok/s`
-        : `${LIVE_GLYPH} ${live.toFixed(1)} / ${AVG_GLYPH} ${average.toFixed(1)} tok/s`,
-    );
+        ? `${AVG_GLYPH} ${average.toFixed(1)}`
+        : `${LIVE_GLYPH} ${live.toFixed(1)} / ${AVG_GLYPH} ${average.toFixed(1)}`;
+    renderLine(ctx);
   });
 
   pi.on("message_end", (event, ctx) => {
+    latestCtx = ctx;
     const message = event.message;
     if (message.role !== "assistant") return;
     const measured = span === null ? 0 : Date.now() - span.startedAt;
     const elapsed = message.duration !== undefined && message.duration > 0 ? message.duration : measured;
     const tokens = message.usage.output > 0 ? message.usage.output : (span?.localTokens ?? 0);
     if (elapsed >= MIN_SPAN_MS && tokens > 0) {
-      publish(ctx.ui, `${AVG_GLYPH} ${((tokens * 1000) / elapsed).toFixed(1)} tok/s`);
+      primaryPart = `${AVG_GLYPH} ${((tokens * 1000) / elapsed).toFixed(1)}`;
+      renderLine(ctx);
     }
     span = null;
     samples = [];
-  });
-
-  // Resumed sessions have no in-flight window; seed from the most recent
-  // assistant message so the readout shows the last turn's average instead of
-  // sitting blank until the next response.
-  pi.on("session_start", (_event, ctx) => {
-    const branch = ctx.sessionManager.getBranch();
-    for (let i = branch.length - 1; i >= 0; i--) {
-      const entry = branch[i];
-      if (entry === undefined || entry.type !== "message") continue;
-      const message = entry.message;
-      if (message.role !== "assistant") continue;
-      if (message.duration === undefined || message.duration < MIN_SPAN_MS) continue;
-      if (message.usage.output <= 0) continue;
-      publish(ctx.ui, `${AVG_GLYPH} ${((message.usage.output * 1000) / message.duration).toFixed(1)} tok/s`);
-      return;
-    }
   });
 }
