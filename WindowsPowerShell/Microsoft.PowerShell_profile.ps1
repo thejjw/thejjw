@@ -5387,6 +5387,7 @@ function Install-OmpSettings {
             return
         }
     }
+
     $configFile = Join-Path $OmpDir 'config.yml'
     if (-not (Test-Path -LiteralPath $configFile)) {
         New-Item -ItemType File -Path $configFile -Force | Out-Null
