@@ -8941,6 +8941,7 @@ function Install-AiTools {
     Write-Host " - agy (Antigravity CLI)"
     Write-Host " - claude (Claude CLI)"
     Write-Host " - codex (Codex CLI)"
+    Write-Host " - omp (oh-my-pi CLI)"
     Write-Host " - opencode (opencode CLI)"
     if ($MoreAi) {
         Write-Host " - kimi (Kimi Code CLI)"
