@@ -5346,21 +5346,23 @@ function Install-OmpSettings {
 
 .PARAMETER Force
     Bypass the sentinel check and the <16GB RAM prompt.
-
 .PARAMETER SkipDownload
     Update config.yml without invoking 'omp tiny-models download'.
+
+.PARAMETER OmpDir
+    Override the omp agent config directory (default ~/.omp/agent).
 #>
     [CmdletBinding()]
     param(
         [switch]$Force,
-        [switch]$SkipDownload
+        [switch]$SkipDownload,
+        [string]$OmpDir = (Join-Path $HOME '.omp\agent')
     )
 
-    $ompDir = Join-Path $HOME '.omp\agent'
-    $sentinel = Join-Path $ompDir '.config_setup_done'
+    $sentinel = Join-Path $OmpDir '.config_setup_done'
 
-    if (-not (Test-Path -LiteralPath $ompDir)) {
-        $null = New-Item -ItemType Directory -Path $ompDir -Force
+    if (-not (Test-Path -LiteralPath $OmpDir)) {
+        $null = New-Item -ItemType Directory -Path $OmpDir -Force
     }
 
     $sentinelExists = Test-Path -LiteralPath $sentinel
@@ -5381,7 +5383,7 @@ function Install-OmpSettings {
         }
     }
 
-    $configFile = Join-Path $ompDir 'config.yml'
+    $configFile = Join-Path $OmpDir 'config.yml'
     if (-not (Test-Path -LiteralPath $configFile)) {
         New-Item -ItemType File -Path $configFile -Force | Out-Null
     }
@@ -5394,8 +5396,10 @@ function Install-OmpSettings {
         [string[]]($content -split "`r?`n")
     }
 
-    $updated = [System.Collections.Generic.List[string]]::new($lines)
-
+    $updated = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in $lines) {
+        $updated.Add($line)
+    }
     # Note [2026-10-09]: Uses LFM2-1.2B because omp's tiny-model registry
     # (packages/coding-agent/src/tiny/models.ts) only whitelists:
     # lfm2.5-230m, lfm2.5-350m, falcon-h1-90m, qwen3-1.7b, llama3.2:3b,
@@ -8593,6 +8597,7 @@ function Install-AiTools {
     Write-Host " - agy (Antigravity CLI)"
     Write-Host " - claude (Claude CLI)"
     Write-Host " - codex (Codex CLI)"
+    Write-Host " - omp (oh-my-pi CLI)"
     Write-Host " - opencode (opencode CLI)"
     if ($MoreAi) {
         Write-Host " - kimi (Kimi Code CLI)"
@@ -8972,6 +8977,11 @@ function Install-AiTools {
         Install-CodexSettings
     }
 
+
+    # If omp is present (installed via npm package @oh-my-pi/pi-coding-agent), ensure it's configured with the default settings
+    if (Get-Command omp -ErrorAction SilentlyContinue) {
+        Install-OmpSettings
+    }
     # Install opencode via npm (not winget) so the package is managed by npm
     # and the native `opencode upgrade` command works as upstream intended.
     if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
