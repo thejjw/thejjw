@@ -5367,7 +5367,7 @@ function Install-OmpSettings {
     $sentinel = Join-Path $OmpDir '.config_setup_done'
 
     if (-not (Test-Path -LiteralPath $OmpDir)) {
-        $null = New-Item -ItemType Directory -Path $OmpDir -Force
+        $null = New-Item -ItemType Directory -Path $OmpDir -Force -Verbose
     }
 
     $sentinelExists = Test-Path -LiteralPath $sentinel
@@ -5390,7 +5390,7 @@ function Install-OmpSettings {
 
     $configFile = Join-Path $OmpDir 'config.yml'
     if (-not (Test-Path -LiteralPath $configFile)) {
-        New-Item -ItemType File -Path $configFile -Force | Out-Null
+        New-Item -ItemType File -Path $configFile -Force -Verbose | Out-Null
     }
 
     $content = Get-Content -LiteralPath $configFile -Raw
