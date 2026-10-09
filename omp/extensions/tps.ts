@@ -66,7 +66,7 @@ type Sample = { at: number; tokens: number };
 /** One parsed advisor assistant turn. */
 type AdvisorTurn = { at: number; tokens: number; ms: number };
 /** Incremental tail state for one advisor transcript file. */
-type Reader = { offset: number; buffer: string };
+type Reader = { offset: number; buffer: string; birthtimeMs: number };
 
 export default function tpsExtension(pi: ExtensionAPI) {
   let span: Span | null = null;
@@ -86,6 +86,12 @@ export default function tpsExtension(pi: ExtensionAPI) {
   // the keys are discovered at runtime and both are mutated and iterated.
   let readers = new Map<string, Reader>();
   let series = new Map<string, AdvisorTurn[]>();
+  // Directory the current session's advisor transcripts live in. Tracked
+  // separately from resetAdvisorState: the poll is the safety net for moves
+  // no session event announces (lease sibling, /move, re-rooting), and the
+  // series are keyed by absolute path, so a stale directory's turns would
+  // otherwise keep merging into the readout forever.
+  let advisorDir = "";
   // Managed timers are unref'd and cleared automatically on session_shutdown;
   // the flag only keeps the four session-boundary events from double-arming.
   let pollArmed = false;
@@ -165,17 +171,23 @@ export default function tpsExtension(pi: ExtensionAPI) {
   };
 
   const tailAdvisorFile = (file: string) => {
-    const size = fs.statSync(file).size;
+    const stat = fs.statSync(file);
+    const size = stat.size;
     let reader = readers.get(file);
     if (reader === undefined) {
-      reader = { offset: 0, buffer: "" };
+      reader = { offset: 0, buffer: "", birthtimeMs: stat.birthtimeMs };
       readers.set(file, reader);
     }
-    if (size < reader.offset) {
-      // An atomic rewrite (temp file + rename) replaced the transcript.
-      // Re-read from the top; holding the old inode would read EOF forever.
+    // An atomic rewrite (temp file + rename) replaces the file. The new one
+    // can be LONGER than the old offset, which a size-only check would read
+    // as an append of garbage and silently mis-parse every later line, so
+    // the replace is detected by birthtime (0 on platforms that do not
+    // report it, where only the size reset applies). Re-opening per tick
+    // already keeps Windows from serving the pre-rename inode.
+    if (size < reader.offset || stat.birthtimeMs !== reader.birthtimeMs) {
       reader.offset = 0;
       reader.buffer = "";
+      reader.birthtimeMs = stat.birthtimeMs;
       series.delete(file);
     }
     if (size > reader.offset) {
@@ -265,9 +277,16 @@ export default function tpsExtension(pi: ExtensionAPI) {
         renderLine(ctx);
         return;
       }
-      for (const name of fs.readdirSync(dir)) {
-        if (!ADVISOR_TRANSCRIPT.test(name)) continue;
-        tailAdvisorFile(path.join(dir, name));
+      if (dir !== advisorDir) {
+        advisorDir = dir;
+        resetAdvisorState();
+      }
+      // withFileTypes + isFile: a directory matching the transcript name
+      // would make openSync throw and stall every later tick (the catch
+      // swallows it), so it is skipped rather than fatal.
+      for (const dirent of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!dirent.isFile() || !ADVISOR_TRANSCRIPT.test(dirent.name)) continue;
+        tailAdvisorFile(path.join(dir, dirent.name));
       }
       refreshAdvisorPart(ctx);
       renderLine(ctx);
