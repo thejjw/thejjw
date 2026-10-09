@@ -266,6 +266,9 @@ function Get-ProviderBlock {
 function Get-ProviderInsertIndex {
     param([string[]]$Lines)
 
+    $Lines = @($Lines)
+    if ($Lines.Count -eq 0) { return -1 }
+
     $root = -1
     for ($i = 0; $i -lt $Lines.Count; $i++) {
         if ($Lines[$i] -match '^providers\s*:\s*$') { $root = $i; break }
@@ -288,6 +291,8 @@ function Get-ProviderInsertIndex {
 function Merge-ProviderBlock {
     param([string[]]$Lines, [string[]]$Block)
 
+    $Lines = @($Lines)
+    $Block = @($Block)
     $pattern = Get-ProviderKeyPattern
     $updated = [System.Collections.Generic.List[string]]::new()
     $start = -1
@@ -301,11 +306,12 @@ function Merge-ProviderBlock {
             foreach ($line in $Lines) { $updated.Add($line) }
             if ($updated.Count -gt 0 -and $updated[$updated.Count - 1].Trim() -ne '') { $updated.Add('') }
             $updated.Add('providers:')
-            $at = $updated.Count
+            foreach ($line in $Block) { $updated.Add($line) }
+            return $updated.ToArray()
         }
         for ($i = 0; $i -lt $at; $i++) { $updated.Add($Lines[$i]) }
         foreach ($line in $Block) { $updated.Add($line) }
-        $updated.Add('')
+        if ($at -lt $Lines.Count) { $updated.Add('') }
         for ($i = $at; $i -lt $Lines.Count; $i++) { $updated.Add($Lines[$i]) }
         return $updated.ToArray()
     }
@@ -342,6 +348,7 @@ function Merge-ProviderBlock {
 function Test-HasProviderBlock {
     param([string[]]$Lines)
 
+    $Lines = @($Lines)
     return @($Lines | Where-Object { $_ -match (Get-ProviderKeyPattern) }).Count -gt 0
 }
 
@@ -502,9 +509,14 @@ function Invoke-InstallOmpRadeonProvider {
     $configPath = Get-OmpModelConfigPath $agentDir
     $content = if (Test-Path -LiteralPath $configPath) { Get-Content -LiteralPath $configPath -Raw } else { '' }
     $newline = if ($content -match "`r`n") { "`r`n" } else { "`n" }
-    $lines = if ([string]::IsNullOrEmpty($content)) { [string[]]@() } else { [string[]]($content -split "`r?`n") }
+    $lines = @()
+    if (-not [string]::IsNullOrEmpty($content)) {
+        $lines = @($content -split "`r?`n")
+    }
 
-    if (Test-HasProviderBlock $lines) {
+    $hasExistingConfig = Test-Path -LiteralPath $configPath
+    $hasExistingBlock = Test-HasProviderBlock $lines
+    if ($hasExistingConfig) {
         # Bump the existing file out of the way so a bad rewrite stays recoverable.
         $stale = @(Get-ChildItem -LiteralPath $agentDir -File -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -like 'models.yml.*.bak' -or $_.Name -like 'models.yaml.*.bak' })
@@ -516,7 +528,8 @@ function Invoke-InstallOmpRadeonProvider {
                 Write-Host ("  {0}  ({1})" -f $f.Name, $f.LastWriteTime.ToString('yyyy-MM-dd HH:mm')) -ForegroundColor DarkGray
             }
         }
-        if (-not $PSCmdlet.ShouldProcess($configPath, 'Back up and rewrite the amd-radeon provider block')) { return }
+        $actionDesc = if ($hasExistingBlock) { 'Back up and rewrite the amd-radeon provider block' } else { 'Back up existing config and add the amd-radeon provider block' }
+        if (-not $PSCmdlet.ShouldProcess($configPath, $actionDesc)) { return }
         $backupPath = '{0}.{1}.bak' -f $configPath, (Get-Date -Format 'yyyyMMddHHmmss')
         Copy-Item -LiteralPath $configPath -Destination $backupPath -Force
         Write-Host "Backed up existing config to $backupPath" -ForegroundColor DarkGray
