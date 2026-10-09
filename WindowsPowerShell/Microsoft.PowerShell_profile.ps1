@@ -5328,6 +5328,226 @@ function Install-GrokSettings {
     Write-Host "grok: config setup complete" -ForegroundColor Green
 }
 
+function Install-OmpSettings {
+    <#
+.SYNOPSIS
+    Configures local judge and title models for omp (oh-my-pi).
+
+.DESCRIPTION
+    Ensures ~/.omp/agent/config.yml routes prompt difficulty judgments and session
+    titling to a shared local on-device model (local/lfm2-1.2b). Seals the judge
+    fallback chain to prevent unexpected cloud fallthrough, and ensures the 'find'
+    tool is explicitly enabled. Preserves existing user settings (themes, composers,
+    and active default/advisor roles).
+
+    Checks total system RAM and prompts for confirmation if total RAM is under 16GB
+    (defaults to No). Prefetches model weights using 'omp tiny-models download' if
+    the omp CLI is available.
+
+.PARAMETER Force
+    Bypass the sentinel check and the <16GB RAM prompt.
+
+.PARAMETER SkipDownload
+    Update config.yml without invoking 'omp tiny-models download'.
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Force,
+        [switch]$SkipDownload
+    )
+
+    $ompDir = Join-Path $HOME '.omp\agent'
+    $sentinel = Join-Path $ompDir '.config_setup_done'
+
+    if (-not (Test-Path -LiteralPath $ompDir)) {
+        $null = New-Item -ItemType Directory -Path $ompDir -Force
+    }
+
+    $sentinelExists = Test-Path -LiteralPath $sentinel
+    if ($sentinelExists -and -not $Force) {
+        Write-Host "omp: config setup already done -- skipping"
+        return
+    }
+
+    # Hardware RAM Gate: Check total physical memory
+    $totalRamGb = [Math]::Round(((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB), 1)
+    if ($totalRamGb -lt 16 -and -not $Force) {
+        Write-Warning "System RAM is ${totalRamGb}GB (< 16GB)."
+        Write-Host "Running local on-device models (e.g. lfm2-1.2b) incurs background worker memory usage." -ForegroundColor Yellow
+        $confirm = Read-Host "Do you want to continue with local model setup anyway? [y/N]"
+        if ($confirm -notmatch '^(?i:y|yes)$') {
+            Write-Host "omp: local model setup aborted by user (RAM < 16GB)" -ForegroundColor Gray
+            return
+        }
+    }
+
+    $configFile = Join-Path $ompDir 'config.yml'
+    if (-not (Test-Path -LiteralPath $configFile)) {
+        New-Item -ItemType File -Path $configFile -Force | Out-Null
+    }
+
+    $content = Get-Content -LiteralPath $configFile -Raw
+    $newline = if ($content -match "`r`n") { "`r`n" } else { "`n" }
+    $lines = if ([string]::IsNullOrEmpty($content)) {
+        [string[]]@()
+    } else {
+        [string[]]($content -split "`r?`n")
+    }
+
+    $updated = [System.Collections.Generic.List[string]]::new($lines)
+
+    # Note [2026-10-09]: Uses LFM2-1.2B because omp's tiny-model registry
+    # (packages/coding-agent/src/tiny/models.ts) only whitelists:
+    # lfm2.5-230m, lfm2.5-350m, falcon-h1-90m, qwen3-1.7b, llama3.2:3b,
+    # gemma-3-1b, qwen2.5-1.5b, and lfm2-1.2b.
+    # While LiquidAI/LFM2.5-1.2B-Instruct-ONNX is published on Hugging Face,
+    # omp rejects unregistered keys at runtime with "Unknown tiny local model".
+    # Pointers to check in future omp releases for LFM2.5-1.2B support:
+    # - Run `omp tiny-models list`
+    # - Check packages/coding-agent/src/tiny/models.ts (TINY_LOCAL_MODELS)
+    # - Check packages/catalog/src/compat/rules/providers/local.kdl
+    $rolesToAdd = [ordered]@{
+        judge = 'local/lfm2-1.2b'
+        tiny  = 'local/lfm2-1.2b'
+    }
+
+    # 1. Ensure modelRoles block contains judge and tiny pointing to local/lfm2-1.2b
+    $modelRolesIdx = -1
+    for ($i = 0; $i -lt $updated.Count; $i++) {
+        if ($updated[$i] -match '^\s*modelRoles\s*:\s*$') {
+            $modelRolesIdx = $i
+            break
+        }
+    }
+
+    if ($modelRolesIdx -lt 0) {
+        if ($updated.Count -gt 0 -and $updated[$updated.Count - 1].Trim() -ne '') {
+            $updated.Add('')
+        }
+        $updated.Add('modelRoles:')
+        foreach ($r in $rolesToAdd.Keys) {
+            $updated.Add("  $r`: $($rolesToAdd[$r])")
+        }
+    } else {
+        $rolesEnd = $updated.Count
+        for ($i = $modelRolesIdx + 1; $i -lt $updated.Count; $i++) {
+            if ($updated[$i] -match '^\S') { $rolesEnd = $i; break }
+        }
+
+        foreach ($r in $rolesToAdd.Keys) {
+            $found = $false
+            for ($i = $modelRolesIdx + 1; $i -lt $rolesEnd; $i++) {
+                if ($updated[$i] -match ("^\s{2,4}" + [regex]::Escape($r) + "\s*:")) {
+                    $updated[$i] = "  $r`: $($rolesToAdd[$r])"
+                    $found = $true
+                    break
+                }
+            }
+            if (-not $found) {
+                $updated.Insert($modelRolesIdx + 1, "  $r`: $($rolesToAdd[$r])")
+                $rolesEnd++
+            }
+        }
+    }
+
+    # 2. Ensure retry.fallbackChains.judge: []
+    $retryIdx = -1
+    for ($i = 0; $i -lt $updated.Count; $i++) {
+        if ($updated[$i] -match '^\s*retry\s*:\s*$') { $retryIdx = $i; break }
+    }
+
+    if ($retryIdx -lt 0) {
+        if ($updated.Count -gt 0 -and $updated[$updated.Count - 1].Trim() -ne '') {
+            $updated.Add('')
+        }
+        $updated.Add('retry:')
+        $updated.Add('  fallbackChains:')
+        $updated.Add('    judge: []')
+    } else {
+        $retryEnd = $updated.Count
+        for ($i = $retryIdx + 1; $i -lt $updated.Count; $i++) {
+            if ($updated[$i] -match '^\S') { $retryEnd = $i; break }
+        }
+
+        $fcIdx = -1
+        for ($i = $retryIdx + 1; $i -lt $retryEnd; $i++) {
+            if ($updated[$i] -match '^\s{2,4}fallbackChains\s*:\s*$') { $fcIdx = $i; break }
+        }
+
+        if ($fcIdx -lt 0) {
+            $updated.Insert($retryIdx + 1, '  fallbackChains:')
+            $updated.Insert($retryIdx + 2, '    judge: []')
+        } else {
+            $fcEnd = $retryEnd
+            for ($i = $fcIdx + 1; $i -lt $retryEnd; $i++) {
+                if ($updated[$i] -match '^\s{1,2}\S') { $fcEnd = $i; break }
+            }
+            $judgeFound = $false
+            for ($i = $fcIdx + 1; $i -lt $fcEnd; $i++) {
+                if ($updated[$i] -match '^\s{4,6}judge\s*:') {
+                    $updated[$i] = '    judge: []'
+                    $judgeFound = $true
+                    break
+                }
+            }
+            if (-not $judgeFound) {
+                $updated.Insert($fcIdx + 1, '    judge: []')
+            }
+        }
+    }
+
+    # 3. Ensure find.enabled: on
+    $findIdx = -1
+    for ($i = 0; $i -lt $updated.Count; $i++) {
+        if ($updated[$i] -match '^\s*find\s*:\s*$') { $findIdx = $i; break }
+    }
+
+    if ($findIdx -lt 0) {
+        if ($updated.Count -gt 0 -and $updated[$updated.Count - 1].Trim() -ne '') {
+            $updated.Add('')
+        }
+        $updated.Add('find:')
+        $updated.Add('  enabled: on')
+    } else {
+        $findEnd = $updated.Count
+        for ($i = $findIdx + 1; $i -lt $updated.Count; $i++) {
+            if ($updated[$i] -match '^\S') { $findEnd = $i; break }
+        }
+        $enabledFound = $false
+        for ($i = $findIdx + 1; $i -lt $findEnd; $i++) {
+            if ($updated[$i] -match '^\s{2,4}enabled\s*:') {
+                $updated[$i] = '  enabled: on'
+                $enabledFound = $true
+                break
+            }
+        }
+        if (-not $enabledFound) {
+            $updated.Insert($findIdx + 1, '  enabled: on')
+        }
+    }
+
+    [IO.File]::WriteAllText($configFile, (($updated -join $newline).TrimEnd() + $newline), [Text.UTF8Encoding]::new($false))
+    Write-Host "omp: configuration updated in $configFile" -ForegroundColor Green
+
+    # 4. Model prefetch (single download covers both judge and tiny)
+    if (-not $SkipDownload) {
+        $ompCmd = Get-Command omp -ErrorAction SilentlyContinue
+        if ($ompCmd) {
+            Write-Host "omp: prefetching local model (lfm2-1.2b)..." -ForegroundColor Cyan
+            try {
+                & $ompCmd tiny-models download lfm2-1.2b
+            } catch {
+                Write-Warning "omp: model download failed ($($_)). Run 'omp tiny-models download lfm2-1.2b' manually."
+            }
+        } else {
+            Write-Host "omp: CLI not in PATH; model weights will download on first run or via 'omp tiny-models download lfm2-1.2b'" -ForegroundColor DarkGray
+        }
+    }
+
+    $null = New-Item -ItemType File -Path $sentinel -Force
+    Write-Host "omp: local judge and title setup complete" -ForegroundColor Green
+}
+
 function Install-ClaudezSetup {
     <#
 .SYNOPSIS
