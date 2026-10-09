@@ -5915,17 +5915,35 @@ OUTPUT FORMAT: a single JSON array of strings with ONLY the IDs that are NOT tex
         foreach ($existingLine in ($modelsContent -split "`r?`n")) { $modelsLines.Add($existingLine) }
     }
 
-    $start = -1
+    # Replace every qwencloud-payg stanza (plus each one's leading 2-space comment
+    # header) with the freshly built block. Duplicate stanzas from an earlier bug are
+    # collapsed in the same pass, so the function is self-healing.
+    $keyIdxs = [System.Collections.Generic.List[int]]::new()
     for ($i = 0; $i -lt $modelsLines.Count; $i++) {
-        if ($modelsLines[$i] -match '^\s{2}qwencloud-payg\s*:\s*$') { $start = $i; break }
+        if ($modelsLines[$i] -match '^\s{2}qwencloud-payg\s*:\s*$') { $keyIdxs.Add($i) }
     }
-    if ($start -ge 0) {
-        $end = $modelsLines.Count
-        for ($i = $start + 1; $i -lt $modelsLines.Count; $i++) {
-            if ($modelsLines[$i] -match '^\s{2}\S') { $end = $i; break }
+    if ($keyIdxs.Count -gt 0) {
+        $ranges = [System.Collections.Generic.List[object]]::new()
+        foreach ($key in $keyIdxs) {
+            $headerStart = $key
+            while ($headerStart -gt 0 -and $modelsLines[$headerStart - 1] -match '^\s{2,4}#') { $headerStart-- }
+            # Body ends at the next sibling provider key (2-space indent, not a comment).
+            $bodyEnd = $modelsLines.Count
+            for ($i = $key + 1; $i -lt $modelsLines.Count; $i++) {
+                if ($modelsLines[$i] -match '^\s{2}[A-Za-z0-9_.\-]+\s*:\s*$') { $bodyEnd = $i; break }
+            }
+            if ($ranges.Count -gt 0 -and $headerStart -le $ranges[$ranges.Count - 1].End) {
+                $ranges[$ranges.Count - 1].End = [Math]::Max($ranges[$ranges.Count - 1].End, $bodyEnd)
+            }
+            else {
+                $ranges.Add([pscustomobject]@{ Start = $headerStart; End = $bodyEnd })
+            }
         }
-        $modelsLines.RemoveRange($start, $end - $start)
-        foreach ($blockLine in ($blockText -split "`r?`n")) { $modelsLines.Insert($start, $blockLine); $start++ }
+        $insertAt = $ranges[0].Start
+        for ($r = $ranges.Count - 1; $r -ge 0; $r--) {
+            $modelsLines.RemoveRange($ranges[$r].Start, $ranges[$r].End - $ranges[$r].Start)
+        }
+        foreach ($blockLine in ($blockText -split "`r?`n")) { $modelsLines.Insert($insertAt, $blockLine); $insertAt++ }
     }
     else {
         $hasRoot = $false
