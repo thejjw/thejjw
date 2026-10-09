@@ -9130,12 +9130,33 @@ function Set-AiApiKeysCS {
         Write-Host " - $($n) : $(MaskValue $v)"
     }
 
+    # Show aliases too, so a missing alias is visible instead of silently desynced.
+    foreach ($alias in @($_AiKeysInternal.Aliases)) {
+        $found[$alias.Alias] = Get-StoredKey $alias.Alias
+        Write-Host " - $($alias.Alias) : $(MaskValue $found[$alias.Alias]) (alias of $($alias.Source))"
+    }
+
     Write-Host ""
     Write-Host "You can press Enter to skip setting a key. To keep an existing value, leave it blank when prompted." -ForegroundColor Yellow
 
     foreach ($n in $names) {
         $current = $found[$n]
         if ($current -and -not $Force) {
+            # Backfill a missing alias from the stored source value so a key set
+            # before the alias existed gets repaired without prompting (aliases
+            # are otherwise only written as a side effect of saving the source).
+            foreach ($alias in @($_AiKeysInternal.Aliases | Where-Object { $_.Source -eq $n })) {
+                if (-not $found[$alias.Alias]) {
+                    try {
+                        $aliasCred = New-Object Windows.Security.Credentials.PasswordCredential($alias.Alias, $userName, $current)
+                        $vault.Add($aliasCred)
+                        Write-Host "Backfilled $($alias.Alias) from existing $n." -ForegroundColor Cyan
+                    }
+                    catch {
+                        Write-Host "Failed to backfill $($alias.Alias): $_" -ForegroundColor Red
+                    }
+                }
+            }
             Write-Host "Skipping $n (already set in vault). Use -Force to overwrite." -ForegroundColor DarkGray
             continue
         }
