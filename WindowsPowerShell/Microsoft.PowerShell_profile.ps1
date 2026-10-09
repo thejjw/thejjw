@@ -779,6 +779,7 @@ $_AiToolsInternal = @{
         CursorCli     = 'https://cursor.com/install?win32=true'
         CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
+        OmpTps        = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
     }
     NpmPackages            = @(
         '@earendil-works/pi-coding-agent',
@@ -5341,6 +5342,9 @@ function Install-OmpSettings {
     tool is explicitly enabled. Preserves existing user settings (themes, composers,
     and active default/advisor roles).
 
+    Also provisions the tok/s readout extension (extensions/tps.ts) from this
+    repository, tracking upstream updates while preserving local edits.
+
     Checks total system RAM and prompts for confirmation if total RAM is under 16GB
     (defaults to No). Prefetches model weights using 'omp tiny-models download' if
     the omp CLI is available.
@@ -5618,7 +5622,79 @@ function Install-OmpSettings {
     # Curated static roster for qwencloud-payg (no-op without the PAYG key).
     Sync-OmpQwenCloudPaygRoster -OmpDir $OmpDir | Out-Null
 
-    # 5. Model prefetch (single download covers both judge and tiny)
+    # 5. Ensure the tok/s readout extension (<agentDir>/extensions/tps.ts).
+    #    Fetched from this repository (UTF-8 there, so the profile itself stays
+    #    ASCII) and picked up by omp's extensions/ auto-discovery -- no config.yml
+    #    entry is needed and composer.tokenRate keeps its default off. The
+    #    recorded SHA-256 separates a stale copy of what we installed from a
+    #    locally edited one: managed copies track upstream silently, local edits
+    #    survive unless -Force is passed (timestamped backup taken first).
+    $extDir    = Join-Path $OmpDir 'extensions'
+    $extFile   = Join-Path $extDir 'tps.ts'
+    $stateFile = Join-Path $OmpDir '.tps-extension.hash'
+
+    $fetched    = Join-Path $env:TEMP ("omp-tps-" + [guid]::NewGuid().ToString('N') + '.ts')
+    $fetchedOk  = $false
+    $fetchError = ''
+    try {
+        Invoke-RestMethod -Uri $_AiToolsInternal.Urls.OmpTps -OutFile $fetched -ErrorAction Stop
+        # Sanity gate: a 404 or captive-portal body must never land in extensions/.
+        if ([IO.File]::ReadAllText($fetched) -match 'export default function tpsExtension') {
+            $fetchedOk = $true
+        } else {
+            $fetchError = 'downloaded content is not the tps extension'
+        }
+    } catch {
+        $fetchError = $_.Exception.Message
+    }
+
+    if (-not $fetchedOk) {
+        if (Test-Path -LiteralPath $fetched) { Remove-Item -LiteralPath $fetched -Force -ErrorAction SilentlyContinue }
+        $why = if ($fetchError) { " ($fetchError)" } else { '' }
+        if (-not (Test-Path -LiteralPath $extFile)) {
+            Write-Warning "omp: could not fetch tps.ts$why -- tok/s readout extension not installed."
+        } else {
+            Write-Warning "omp: tps.ts fetch failed$why, keeping the existing file."
+        }
+    }
+    else {
+        $fetchedHash = (Get-FileHash -LiteralPath $fetched -Algorithm SHA256).Hash
+        $recorded    = if (Test-Path -LiteralPath $stateFile) { (Get-Content -LiteralPath $stateFile -Raw).Trim() } else { $null }
+        $currentHash = if (Test-Path -LiteralPath $extFile) { (Get-FileHash -LiteralPath $extFile -Algorithm SHA256).Hash } else { $null }
+
+        if ($null -eq $currentHash) {
+            # Fresh machine: create the directory first, then install and record.
+            if (-not (Test-Path -LiteralPath $extDir)) { $null = New-Item -ItemType Directory -Path $extDir -Force }
+            Move-Item -LiteralPath $fetched -Destination $extFile -Force
+            [IO.File]::WriteAllText($stateFile, $fetchedHash)
+            Write-Host "omp: tps.ts extension installed at $extFile" -ForegroundColor Green
+        }
+        elseif ($currentHash -eq $fetchedHash) {
+            # Unchanged (also adopts an already-correct install on first run).
+            if ($recorded -ne $fetchedHash) { [IO.File]::WriteAllText($stateFile, $fetchedHash) }
+            Write-Host "omp: tps.ts extension already current -- skipping" -ForegroundColor DarkGray
+        }
+        elseif ($currentHash -eq $recorded) {
+            # Ours, untouched, upstream moved: silent update.
+            Move-Item -LiteralPath $fetched -Destination $extFile -Force
+            [IO.File]::WriteAllText($stateFile, $fetchedHash)
+            Write-Host "omp: tps.ts extension updated from upstream" -ForegroundColor Green
+        }
+        elseif ($Force) {
+            # Locally modified and diverged from upstream: never clobber silently.
+            $extStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+            Copy-Item -LiteralPath $extFile -Destination "$extFile.$extStamp.bak" -Force
+            Move-Item -LiteralPath $fetched -Destination $extFile -Force
+            [IO.File]::WriteAllText($stateFile, $fetchedHash)
+            Write-Host "omp: tps.ts re-provisioned over a local edit (backup: $extFile.$extStamp.bak)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "omp: tps.ts differs from upstream and from the last provisioned copy -- leaving the local edit alone (-Force overwrites, backup first)" -ForegroundColor Yellow
+        }
+        if (Test-Path -LiteralPath $fetched) { Remove-Item -LiteralPath $fetched -Force -ErrorAction SilentlyContinue }
+    }
+
+    # 6. Model prefetch (single download covers both judge and tiny)
     if (-not $SkipDownload) {
         $ompCmd = Get-Command omp -ErrorAction SilentlyContinue
         if ($ompCmd) {
@@ -5634,7 +5710,7 @@ function Install-OmpSettings {
     }
 
     $null = New-Item -ItemType File -Path $sentinel -Force
-    Write-Host "omp: local judge and title setup complete" -ForegroundColor Green
+    Write-Host "omp: local judge, title, and tok/s readout setup complete" -ForegroundColor Green
 }
 
 function Sync-OmpQwenCloudPaygRoster {
