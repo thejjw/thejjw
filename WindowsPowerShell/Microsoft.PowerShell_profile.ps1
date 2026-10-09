@@ -652,6 +652,7 @@ $_AiKeysInternal = @{
         'OPENROUTER_API_KEY'
         'OPENCODE_GO_API_KEY'
         'AMDRC_API_KEY'
+        'QWENCLOUD_PAYG_API_KEY'
     )
     # Aliases stored alongside Names but never prompted for on their own: saving Source
     # writes the same secret to Alias. Loaded like any other entry.
@@ -5538,7 +5539,79 @@ function Install-OmpSettings {
     [IO.File]::WriteAllText($configFile, (($updated -join $newline).TrimEnd() + $newline), [Text.UTF8Encoding]::new($false))
     Write-Host "omp: configuration updated in $configFile" -ForegroundColor Green
 
-    # 4. Model prefetch (single download covers both judge and tiny)
+    # 4. Ensure the QwenCloud pay-as-you-go provider exists in models.yml.
+    #    Separate provider id from `alibaba-token-plan`: the plan key (sk-sp-) only
+    #    authenticates on token-plan.<region>.maas.aliyuncs.com, so the PAYG key
+    #    must never be stored under that provider. The roster is discovered from
+    #    {baseUrl}/models, so no hand-written model list is needed. The key comes
+    #    from $env:QWENCLOUD_PAYG_API_KEY (see $_AiKeysInternal.Names); omp treats
+    #    the apiKey value as an env-var name first and only falls back to the
+    #    literal string, so an unset name shows up as a bare HTTP 401.
+    #    Idempotent: existing provider blocks are left untouched.
+    $modelsFile = Join-Path $OmpDir 'models.yml'
+    if (-not (Test-Path -LiteralPath $modelsFile)) {
+        New-Item -ItemType File -Path $modelsFile -Force | Out-Null
+    }
+
+    $modelsContent = Get-Content -LiteralPath $modelsFile -Raw
+    $modelsNewline = if ($modelsContent -match "`r`n") { "`r`n" } else { "`n" }
+    $modelsLines = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrEmpty($modelsContent)) {
+        foreach ($existingLine in ($modelsContent -split "`r?`n")) { $modelsLines.Add($existingLine) }
+    }
+
+    $paygPresent = $false
+    foreach ($line in $modelsLines) {
+        if ($line -match '^\s{2}qwencloud-payg\s*:\s*$') { $paygPresent = $true; break }
+    }
+
+    if ($paygPresent) {
+        Write-Host "omp: qwencloud-payg provider already present in $modelsFile -- skipping" -ForegroundColor DarkGray
+    }
+    else {
+        $modelsStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        Copy-Item -LiteralPath $modelsFile -Destination "$modelsFile.$modelsStamp.bak" -Force
+
+        $paygBlock = @'
+  # QwenCloud pay-as-you-go channel (sk-ws- key). Separate provider id from
+  # `alibaba-token-plan` on purpose: the plan key (sk-sp-) only authenticates on
+  # token-plan.<region>.maas.aliyuncs.com, so the PAYG key must never be stored
+  # under that provider id. Calls draw the Free Tier token grants first and then
+  # pay-as-you-go; the console's "auto-stop when free quota runs out" switch
+  # blocks calls instead of billing once a grant is exhausted.
+  # Roster is discovered from `GET {baseUrl}/models`; the path already ends in
+  # /v1, so discovery keeps it verbatim and appends /models. Key resolves from
+  # the environment variable named below (loaded by Load-AiApiKeysFromCS).
+  qwencloud-payg:
+    baseUrl: https://maas.qwencloudapi.com/compatible-mode/v1
+    api: openai-completions
+    apiKey: QWENCLOUD_PAYG_API_KEY # env-var name; falls back to this literal string if unset
+    authHeader: true
+    discovery:
+      type: openai-models-list
+      timeoutMs: 15000
+'@
+
+        $hasProvidersRoot = $false
+        foreach ($line in $modelsLines) {
+            if ($line -match '^\s{0,2}providers\s*:\s*$') { $hasProvidersRoot = $true; break }
+        }
+
+        if ($modelsLines.Count -gt 0 -and $modelsLines[$modelsLines.Count - 1].Trim() -ne '') {
+            $modelsLines.Add('')
+        }
+        if (-not $hasProvidersRoot) {
+            $modelsLines.Add('providers:')
+        }
+        foreach ($blockLine in ($paygBlock -split "`r?`n")) {
+            $modelsLines.Add($blockLine)
+        }
+
+        [IO.File]::WriteAllText($modelsFile, (($modelsLines -join $modelsNewline).TrimEnd() + $modelsNewline), [Text.UTF8Encoding]::new($false))
+        Write-Host "omp: qwencloud-payg provider added to $modelsFile (backup: $modelsFile.$modelsStamp.bak)" -ForegroundColor Green
+    }
+
+    # 5. Model prefetch (single download covers both judge and tiny)
     if (-not $SkipDownload) {
         $ompCmd = Get-Command omp -ErrorAction SilentlyContinue
         if ($ompCmd) {
