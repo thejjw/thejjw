@@ -5346,6 +5346,10 @@ function Install-OmpSettings {
 
 .PARAMETER Force
     Bypass the sentinel check and the <16GB RAM prompt.
+
+.PARAMETER NoPrompt
+    Suppress interactive confirmation prompts (e.g. the <16GB RAM check) during automated runs.
+
 .PARAMETER SkipDownload
     Update config.yml without invoking 'omp tiny-models download'.
 
@@ -5355,6 +5359,7 @@ function Install-OmpSettings {
     [CmdletBinding()]
     param(
         [switch]$Force,
+        [switch]$NoPrompt,
         [switch]$SkipDownload,
         [string]$OmpDir = (Join-Path $HOME '.omp\agent')
     )
@@ -5373,7 +5378,7 @@ function Install-OmpSettings {
 
     # Hardware RAM Gate: Check total physical memory
     $totalRamGb = [Math]::Round(((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB), 1)
-    if ($totalRamGb -lt 16 -and -not $Force) {
+    if ($totalRamGb -lt 16 -and -not $Force -and -not $NoPrompt) {
         Write-Warning "System RAM is ${totalRamGb}GB (< 16GB)."
         Write-Host "Running local on-device models (e.g. lfm2-1.2b) incurs background worker memory usage." -ForegroundColor Yellow
         $confirm = Read-Host "Do you want to continue with local model setup anyway? [y/N]"
@@ -5382,7 +5387,6 @@ function Install-OmpSettings {
             return
         }
     }
-
     $configFile = Join-Path $OmpDir 'config.yml'
     if (-not (Test-Path -LiteralPath $configFile)) {
         New-Item -ItemType File -Path $configFile -Force | Out-Null
@@ -8980,7 +8984,7 @@ function Install-AiTools {
 
     # If omp is present (installed via npm package @oh-my-pi/pi-coding-agent), ensure it's configured with the default settings
     if (Get-Command omp -ErrorAction SilentlyContinue) {
-        $ompArgs = if ($Auto) { @{ Force = $true; SkipDownload = $true } } else { @{} }
+        $ompArgs = if ($Auto) { @{ SkipDownload = $true; NoPrompt = $true } } else { @{} }
         Install-OmpSettings @ompArgs
     }
 
