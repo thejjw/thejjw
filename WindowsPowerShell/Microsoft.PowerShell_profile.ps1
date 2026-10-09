@@ -5496,6 +5496,13 @@ function Install-OmpSettings {
             for ($i = $fcIdx + 1; $i -lt $fcEnd; $i++) {
                 if ($updated[$i] -match '^\s{4,6}judge\s*:') {
                     $updated[$i] = '    judge: []'
+                    # Inlining the value orphans a following block-sequence `[]`
+                    # line, and that leftover is invalid YAML (omp quarantines the
+                    # file and falls back to defaults). Drop it when present.
+                    if ($i + 1 -lt $fcEnd -and $updated[$i + 1] -match '^\s*\[\]\s*$') {
+                        $updated.RemoveAt($i + 1)
+                        $fcEnd--
+                    }
                     $judgeFound = $true
                     break
                 }
