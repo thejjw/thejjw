@@ -55,8 +55,10 @@ const POLL_MS = 2000;
 const ADVISOR_WINDOW = 5;
 /** Primary progress past the advisor's last logged turn before flagging `?`. */
 const ADVISOR_STALE_MS = 600_000;
-/** Advisor transcript names: `__advisor.jsonl` / `__advisor.<slug>.jsonl`. */
-const ADVISOR_TRANSCRIPT = /^__advisor(\.[^.]+)?\.jsonl$/;
+/** Advisor transcript names, mirroring core's isAdvisorTranscriptName:
+ *  `__advisor.jsonl` or anything `__advisor.*.jsonl` (dotted slugs included). */
+const ADVISOR_TRANSCRIPT = (name: string): boolean =>
+  name === "__advisor.jsonl" || (name.startsWith("__advisor.") && name.endsWith(".jsonl"));
 
 /** One in-flight provider response. A tool-loop turn therefore reports each
  * assistant message's own rate instead of one blurred turn-wide number. */
@@ -66,7 +68,7 @@ type Sample = { at: number; tokens: number };
 /** One parsed advisor assistant turn. */
 type AdvisorTurn = { at: number; tokens: number; ms: number };
 /** Incremental tail state for one advisor transcript file. */
-type Reader = { offset: number; buffer: string; birthtimeMs: number };
+type Reader = { offset: number; buffer: string; birthtimeMs: number; mtimeMs: number };
 
 export default function tpsExtension(pi: ExtensionAPI) {
   let span: Span | null = null;
@@ -113,9 +115,10 @@ export default function tpsExtension(pi: ExtensionAPI) {
 
   const renderLine = (ctx: ExtensionContext) => {
     // `advisorInner` is the segment body; the `?` belongs inside the parens.
+    // It also mutates the composed text, so the dedupe key needs no stale flag.
     const advisorText = advisorInner === "" ? "" : `(${advisorInner}${advisorStale ? "?" : ""})`;
     const plain = [primaryPart, advisorText].filter(part => part !== "").join(" ");
-    const key = advisorStale ? `${plain}|stale` : plain;
+    const key = plain;
     if (key === lastLabel) return;
     lastLabel = key;
     if (plain === "") {
@@ -175,7 +178,7 @@ export default function tpsExtension(pi: ExtensionAPI) {
     const size = stat.size;
     let reader = readers.get(file);
     if (reader === undefined) {
-      reader = { offset: 0, buffer: "", birthtimeMs: stat.birthtimeMs };
+      reader = { offset: 0, buffer: "", birthtimeMs: stat.birthtimeMs, mtimeMs: stat.mtimeMs };
       readers.set(file, reader);
     }
     // An atomic rewrite (temp file + rename) replaces the file. The new one
@@ -184,12 +187,22 @@ export default function tpsExtension(pi: ExtensionAPI) {
     // the replace is detected by birthtime (0 on platforms that do not
     // report it, where only the size reset applies). Re-opening per tick
     // already keeps Windows from serving the pre-rename inode.
-    if (size < reader.offset || stat.birthtimeMs !== reader.birthtimeMs) {
+    //
+    // The mtime term covers an in-place rewrite of equal byte length: the
+    // offset would not move, the bytes would not be re-read, and superseded
+    // turns would keep counting. An append always changes the size, so this
+    // term never re-parses an unchanged file.
+    if (
+      size < reader.offset ||
+      stat.birthtimeMs !== reader.birthtimeMs ||
+      (size === reader.offset && stat.mtimeMs !== reader.mtimeMs)
+    ) {
       reader.offset = 0;
       reader.buffer = "";
-      reader.birthtimeMs = stat.birthtimeMs;
       series.delete(file);
     }
+    reader.birthtimeMs = stat.birthtimeMs;
+    reader.mtimeMs = stat.mtimeMs;
     if (size > reader.offset) {
       // Open per tick for the same reason: a held descriptor keeps serving
       // the pre-rename inode on Windows.
@@ -285,7 +298,7 @@ export default function tpsExtension(pi: ExtensionAPI) {
       // would make openSync throw and stall every later tick (the catch
       // swallows it), so it is skipped rather than fatal.
       for (const dirent of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (!dirent.isFile() || !ADVISOR_TRANSCRIPT.test(dirent.name)) continue;
+        if (!dirent.isFile() || !ADVISOR_TRANSCRIPT(dirent.name)) continue;
         tailAdvisorFile(path.join(dir, dirent.name));
       }
       refreshAdvisorPart(ctx);
