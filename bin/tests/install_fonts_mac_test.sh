@@ -254,7 +254,7 @@ test_list_without_7z() {
     INSTALL_FONTS_TARGET_DIR="${case_dir}/fonts" \
     "$INSTALLER" --list > "$out"
 
-  assert_contains '31 pack(s)' "$out" 'Standard list count'
+  assert_contains '30 pack(s)' "$out" 'Standard list count'
   assert_contains 'IntelOneMono' "$out"
   assert_contains 'SarasaGothicK' "$out"
   assert_contains 'SarasaMonoK' "$out"
@@ -867,8 +867,8 @@ test_bracketed_filename_extraction() {
   local mock_zip="${case_dir}/work/mock.zip"
 
   create_mock_zip "$mock_zip" \
-    "fonts/variable/JetBrainsMono[wght].ttf=variable_data" \
-    "fonts/variable/JetBrainsMono-Italic[wght].ttf=italic_data"
+    "fonts/variable/MonaSansVF[opsz,wght].ttf=variable_data" \
+    "fonts/variable/MonaSansVF-Italic[opsz,wght].ttf=italic_data"
 
   cat <<'EOF' > "${case_dir}/bin/curl"
 #!/usr/bin/env bash
@@ -880,15 +880,19 @@ EOF
   chmod +x "${case_dir}/bin/curl"
 
   local out="${case_dir}/out.txt"
+  # --name is a substring filter, so JetBrainsMono cannot be used here: it also
+  # selects the JetBrainsMonoNerdMono pack, whose Include matches nothing in this
+  # mock archive. MonaSans has no such collision, and its real variable filenames
+  # carry brackets just like the ones mocked above.
   MOCK_ZIP="$mock_zip" \
     PATH="${case_dir}/bin:/usr/bin:/bin" \
     INSTALL_FONTS_TARGET_DIR="${case_dir}/fonts" \
-    "$INSTALLER" -y --name JetBrainsMono > "$out"
+    "$INSTALLER" -y --name MonaSans > "$out"
 
   assert_contains 'installed 2 font file(s)' "$out" 'Bracketed files extracted and installed'
-  [ -f "${case_dir}/fonts/JetBrainsMono[wght].ttf" ] || fail 'JetBrainsMono[wght].ttf was not installed'
-  [ -f "${case_dir}/fonts/JetBrainsMono-Italic[wght].ttf" ] || fail 'JetBrainsMono-Italic[wght].ttf was not installed'
-  assert_eq "variable_data" "$(cat "${case_dir}/fonts/JetBrainsMono[wght].ttf")"
+  [ -f "${case_dir}/fonts/MonaSansVF[opsz,wght].ttf" ] || fail 'MonaSansVF[opsz,wght].ttf was not installed'
+  [ -f "${case_dir}/fonts/MonaSansVF-Italic[opsz,wght].ttf" ] || fail 'MonaSansVF-Italic[opsz,wght].ttf was not installed'
+  assert_eq "variable_data" "$(cat "${case_dir}/fonts/MonaSansVF[opsz,wght].ttf")"
 }
 
 # Test 20: A font stored with a restrictive mode still installs user-readable.

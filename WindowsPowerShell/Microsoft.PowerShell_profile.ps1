@@ -835,7 +835,8 @@ $_AiToolsInternal = @{
 #            target Fonts folder, the whole pack is skipped (no download) unless
 #            -Force is passed. This is the cheap pre-download idempotency check.
 #   Extended $true packs are skipped unless -Extended is passed. This keeps the
-#            especially large Source Han CJK downloads explicitly opt-in.
+#            especially large Source Han CJK downloads, and superseded entries
+#            kept only as a fallback (e.g. JetBrainsMono), explicitly opt-in.
 #   Note     Optional freeform note shown in -ListOnly output.
 $_FontInstallInternal = @{
     # Per-user (no admin) install target and its font-registration registry key.
@@ -860,7 +861,10 @@ $_FontInstallInternal = @{
         [pscustomobject]@{ Name = 'SourceHanSans';       Url = 'https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/02_SourceHanSans-VF.zip'; Bytes = 888816761; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSans-VF\.ttf\.ttc$'; Probe = 'SourceHanSans-VF.ttf.ttc';       Extended = $true;  Note = 'LARGE ~848 MB. Installs only the pan-CJK OTC variable collection.' }
         [pscustomobject]@{ Name = 'SourceHanSerif';      Url = 'https://github.com/adobe-fonts/source-han-serif/releases/download/2.003R/02_SourceHanSerif-VF.zip'; Bytes = 750817685; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSerif-VF\.ttf\.ttc$'; Probe = 'SourceHanSerif-VF.ttf.ttc';   Extended = $true;  Note = 'LARGE ~716 MB. Installs only the pan-CJK OTC variable collection.' }
         [pscustomobject]@{ Name = 'SourceHanMono';       Url = 'https://github.com/adobe-fonts/source-han-mono/releases/download/1.002/SourceHanMono.ttc'; Bytes = 122117628; Fonts = 1; Kind = 'File'; Include = $null;                              Probe = 'SourceHanMono.ttc';                      Extended = $true;  Note = 'LARGE ~116 MB. Direct .ttc download (no archive).' }
-        [pscustomobject]@{ Name = 'JetBrainsMono';       Url = 'https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip'; Bytes = 5622857; Fonts = 2; Kind = 'Zip'; Include = '(?i)^fonts/variable/[^/]+\.ttf$';         Probe = 'JetBrainsMono[wght].ttf';                Extended = $false; Note = 'Variable TTF (upright + italic); registers cleanly as "JetBrains Mono", so variable is kept over the static ttf/ set.' }
+        # Opt-in fallback: the default set installs JetBrainsMonoNerdMono, the same
+        # typeface plus the Nerd icon glyphs. Restore Extended = $false below if
+        # JetBrainsMonoNerdMono ever ceases to exist upstream.
+        [pscustomobject]@{ Name = 'JetBrainsMono';       Url = 'https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip'; Bytes = 5622857; Fonts = 2; Kind = 'Zip'; Include = '(?i)^fonts/variable/[^/]+\.ttf$';         Probe = 'JetBrainsMono[wght].ttf';                Extended = $true;  Note = 'FALLBACK (opt-in): official variable TTF (upright + italic); registers cleanly as "JetBrains Mono", so variable is kept over the static ttf/ set. Superseded in the default set by JetBrainsMonoNerdMono.' }
         [pscustomobject]@{ Name = 'JetBrainsMonoNerdMono'; Url = 'https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.tar.xz';     Bytes = 7284244; Fonts = 16; Kind = '7z'; Include = '(?i)^JetBrainsMonoNerdFontMono-[^/]+\.ttf$'; Probe = 'JetBrainsMonoNerdFontMono-Regular.ttf'; Extended = $false; Note = 'Nerd Fonts v3.5.1 patched build of JetBrains Mono 2.304 (icons + Powerline glyphs); JetBrains ships no Nerd build, so this comes from the upstream patch project. "Mono" keeps every icon one cell wide so the grid stays aligned; the -NF/-Propo variants and the -NL (no-ligature) set are skipped. The 7.3 MB .tar.xz is used instead of the 134 MB all-variant .zip, which holds the same files.' }
         [pscustomobject]@{ Name = 'IBMPlexMono';         Url = 'https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-mono%402.5.0/ibm-plex-mono.zip'; Bytes = 6940652; Fonts = 16; Kind = 'Zip'; Include = '(?i)^ibm-plex-mono/fonts/complete/otf/[^/]+\.otf$'; Probe = 'IBMPlexMono-Regular.otf';        Extended = $false; Note = 'OTF, all 16 weights incl. italics; skips ttf/woff/woff2.' }
         [pscustomobject]@{ Name = 'IBMPlexSansKR';       Url = 'https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-sans-kr%401.1.0/ibm-plex-sans-kr.zip'; Bytes = 73268731; Fonts = 8; Kind = 'Zip'; Include = '(?i)^ibm-plex-sans-kr/fonts/complete/otf/[^/]+\.otf$'; Probe = 'IBMPlexSansKR-Regular.otf';    Extended = $false; Note = 'LARGE ~73 MB (full zip also bundles ttf/woff/woff2); installs OTF, all 8 Korean weights.' }
@@ -11817,7 +11821,8 @@ function Install-Fonts {
     Install machine-wide instead of per-user. Requires an elevated (admin) shell.
 .PARAMETER Extended
     Also process the extended (opt-in) packs marked Extended=$true in the catalog,
-    including the large Adobe Source Han families.
+    such as the large Adobe Source Han families and the superseded JetBrainsMono
+    fallback.
 .PARAMETER ListOnly
     Print the catalog (names, sizes, extended state, notes) and the estimated
     download total, then exit without downloading or installing anything.
