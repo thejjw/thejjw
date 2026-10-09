@@ -5553,8 +5553,9 @@ function Install-OmpSettings {
     # 4. Ensure the QwenCloud pay-as-you-go provider exists in models.yml.
     #    Separate provider id from `alibaba-token-plan`: the plan key (sk-sp-) only
     #    authenticates on token-plan.<region>.maas.aliyuncs.com, so the PAYG key
-    #    must never be stored under that provider. The roster is discovered from
-    #    {baseUrl}/models, so no hand-written model list is needed. The key comes
+    #    must never be stored under that provider. The models roster is a curated
+    #    static list written by Sync-OmpQwenCloudPaygRoster below -- discovered ids
+    #    are filtered, not copied verbatim. The key comes
     #    from $env:QWENCLOUD_PAYG_API_KEY (see $_AiKeysInternal.Names); omp treats
     #    the apiKey value as an env-var name first and only falls back to the
     #    literal string, so an unset name shows up as a bare HTTP 401.
@@ -5723,17 +5724,23 @@ function Sync-OmpQwenCloudPaygRoster {
         with no capability metadata, so omp discovery surfaces all of them as chat models.
         This regenerates a curated static roster instead:
 
-        1. Non-text denylist: the same prefixes oh-my-pi ships for this catalog family
+        1. Live roster from the pay-as-you-go endpoint, gated on the PAYG key.
+        2. Curated metadata harvested through a throwaway discovery provider, so the shipped
+           stanza can stay static; omp's bundled catalog fills the gaps the endpoint leaves.
+        3. Non-text denylist: the same prefixes oh-my-pi ships for this catalog family
            (compat/rules/runtime/behavior.kdl exclude-models for alibaba-token-plan) plus the
-           non-text families observed live.
-        2. Curated-only: ids still on discovery's 128K/32K fallback are unknown to the bundled
-           omp catalog and are skipped, so new upstream releases appear once the catalog knows
-           them, never as unclassified junk.
-        3. Ambiguous remainder: curated ids whose provider prefix is not a known LLM family
+           non-text families observed live. The 128K/32K fallback and the 500K context floor
+           then drop ids unknown to the bundled catalog, so new upstream releases appear once
+           the catalog knows them, never as unclassified junk.
+        4. Ambiguous remainder: curated ids whose provider prefix is not a known LLM family
            go to one LLM classification call, using the newest qwen chat model the account
            offers (major.minor descending, then plus > max > flash > coder). Only ids that
            call marks non-text are dropped.
-        4. Rewrites the qwencloud-payg stanza in models.yml as a static models list carrying
+        5. Generic aliases: qwen-max, qwen-plus and qwen-flash are live ids unknown to the bundled
+           omp catalog, so discovery returns the generic 128K/32K fallback and curation drops them.
+           They are appended with curated limits instead (maxTokens re-verified live where quota
+           allows; ids retired upstream drop out), never from harvested rows.
+        6. Rewrites the qwencloud-payg stanza in models.yml as a static models list carrying
            curated limits, reasoning flag and effort ladder.
 
         Idempotent: the emitted block is hashed to <agent dir>/.qwencloud-payg.roster.sha256
@@ -5931,7 +5938,6 @@ OUTPUT FORMAT: a single JSON array of strings with ONLY the IDs that are NOT tex
         }
     }
 
-    # 5. Emit the static provider stanza.
     $kept = [System.Collections.Generic.List[string]]::new()
     foreach ($id in $candidates) { if ($drop -notcontains $id) { $kept.Add($id) } }
     if ($kept.Count -eq 0) {
@@ -5939,6 +5945,84 @@ OUTPUT FORMAT: a single JSON array of strings with ONLY the IDs that are NOT tex
         return $false
     }
 
+    # 5. Top up the generic aliases the curated pipeline cannot see.
+    #    qwen-max / qwen-plus / qwen-flash are live ids omp's bundled catalog does
+    #    not know, so discovery hands them back with the generic 128K/32K fallback
+    #    and step 3's curated-only rule drops them. They resolve on the gateway, so
+    #    they are appended with the curated limits below -- never from the harvested
+    #    rows, which carry that junk fallback (measured 2026-10-09: 128000/32768,
+    #    reasoning false). maxTokens is re-verified per alias with one out-of-range
+    #    max_tokens request: the gateway rejects it with "Range of max_tokens
+    #    should be [1, N]" before any token is spent. A gone/retired reply drops the
+    #    id, so an alias withdrawn upstream self-heals; every other reply keeps the
+    #    curated value but reports whether it was verified. contextWindow has no
+    #    cheap probe and stays static; qwen-max mirrors qwen-plus on the max>=plus
+    #    assumption because the exhausted free tier blocks its probe. The effort ladders
+    #    are assumed too, copied from the versioned Qwen3 siblings (qwen3.8-plus,
+    #    qwen3.8-flash) since the gateway exposes no ladder probe.
+    $aliasModels = @(
+        [pscustomobject]@{ Id = 'qwen-max';   ContextWindow = 1000000; MaxTokens = 32768; Reasoning = $true; Input = 'text, image'; Efforts = @('minimal', 'low', 'medium', 'high') }
+        [pscustomobject]@{ Id = 'qwen-plus';  ContextWindow = 1000000; MaxTokens = 32768; Reasoning = $true; Input = 'text, image'; Efforts = @('minimal', 'low', 'medium', 'high') }
+        [pscustomobject]@{ Id = 'qwen-flash'; ContextWindow = 1000000; MaxTokens = 32768; Reasoning = $true; Input = 'text';          Efforts = @('minimal', 'low', 'medium', 'high') }
+    )
+    $aliasSpec = @{}
+    foreach ($alias in $aliasModels) {
+        if ($kept -contains $alias.Id) { continue }
+        $verified = $false
+        try {
+            $null = Invoke-RestMethod -Uri "$baseUrl/chat/completions" -Method Post -Headers $authHeaders -ContentType 'application/json' -TimeoutSec 60 -ErrorAction Stop -Body (@{
+                model      = $alias.Id
+                messages   = @(@{ role = 'user'; content = 'x' })
+                max_tokens = $alias.MaxTokens + 1
+            } | ConvertTo-Json -Depth 6)
+            # Accepted: the real cap is at least the requested value, so the static
+            # number is only a floor and may be too low.
+            Write-Warning "omp: $($alias.Id) accepted max_tokens $($alias.MaxTokens + 1); curated cap $($alias.MaxTokens) is a floor."
+        }
+        catch {
+            # Windows PowerShell 5.1 leaves ErrorDetails empty on a WebException,
+            # so the gateway's reason comes off the failed response instead.
+            $detail = "$($_.ErrorDetails.Message)"
+            if (-not $detail.Trim()) {
+                try {
+                    $failed = $_.Exception.Response
+                    if ($failed) {
+                        $stream = $failed.GetResponseStream()
+                        if ($stream) {
+                            if ($stream.CanSeek) { $stream.Position = 0 }
+                            $reader = New-Object System.IO.StreamReader($stream)
+                            try { $detail = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                        }
+                    }
+                }
+                catch { }
+            }
+            if (-not $detail.Trim()) { $detail = "$($_.Exception.Message)" }
+            if ($detail -match 'model[_ ]not[_ ](found|exist)|does not exist') {
+                Write-Warning "omp: $($alias.Id) no longer exists on QwenCloud PAYG; skipped."
+                continue
+            }
+            # Both wordings seen in the wild: the QwenCloud range error and
+            # DashScope's "requested > cap" form.
+            $cap = [regex]::Match($detail, 'Range of max_tokens should be \[1, (\d+)\]|max_tokens:\s*\d+\s*>\s*(\d+)')
+            if ($cap.Success) {
+                $capValue = if ($cap.Groups[1].Success) { $cap.Groups[1].Value } else { $cap.Groups[2].Value }
+                $alias.MaxTokens = [int]$capValue
+                $verified = $true
+            }
+            elseif ($detail -match '(?i)quota|rate.?limit|timed out|timeout') {
+                Write-Verbose "omp: $($alias.Id) cap not probed (quota/rate/transient); keeping curated value."
+            }
+            else {
+                Write-Warning "omp: $($alias.Id) cap could not be read from the gateway reply; keeping curated value $($alias.MaxTokens)."
+            }
+        }
+        $aliasSpec[$alias.Id] = $alias
+        $kept.Add($alias.Id)
+        Write-Verbose "omp: alias $($alias.Id) topped up (context $($alias.ContextWindow), max $($alias.MaxTokens), verified $verified)"
+    }
+
+    # 6. Emit the static provider stanza.
     $block = [System.Collections.Generic.List[string]]::new()
     $block.Add('  # QwenCloud pay-as-you-go channel (sk-ws- key). Separate provider id from')
     $block.Add('  # `alibaba-token-plan` on purpose: the plan key (sk-sp-) only authenticates on')
@@ -5951,11 +6035,25 @@ OUTPUT FORMAT: a single JSON array of strings with ONLY the IDs that are NOT tex
     $block.Add("    authHeader: true")
     $block.Add("    models:")
     foreach ($id in $kept) {
-        $row = $meta[$id]
         $display = ($id -replace '[-_/]+', ' ').Trim()
         $display = (Get-Culture).TextInfo.ToTitleCase($display.ToLowerInvariant())
         $block.Add("      - id: `"$id`"")
         $block.Add("        name: `"$display`"")
+        $alias = $aliasSpec[$id]
+        if ($alias) {
+            # Aliases carry curated limits from the table above; never read the
+            # harvested row, which holds discovery's generic 128K/32K fallback.
+            $block.Add("        contextWindow: $($alias.ContextWindow)")
+            $block.Add("        maxTokens: $($alias.MaxTokens)")
+            $block.Add("        reasoning: $(if ($alias.Reasoning) { 'true' } else { 'false' })")
+            $block.Add("        input: [$($alias.Input)]")
+            if ($alias.Efforts.Count -gt 0) {
+                $ladder = ($alias.Efforts | ForEach-Object { "`"$_`"" }) -join ', '
+                $block.Add("        thinking: { mode: effort, efforts: [$ladder] }")
+            }
+            continue
+        }
+        $row = $meta[$id]
         $block.Add("        contextWindow: $($row.contextWindow)")
         $block.Add("        maxTokens: $($row.maxTokens)")
         $block.Add("        reasoning: $(if ($row.reasoning) { 'true' } else { 'false' })")
