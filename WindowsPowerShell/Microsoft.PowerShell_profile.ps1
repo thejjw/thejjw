@@ -5769,6 +5769,9 @@ providers:
         if (-not $row) { continue }
         # discovery's generic fallback: unknown to the catalog -> skip until catalogued
         if ($row.contextWindow -eq 128000 -and $row.maxTokens -eq 32768) { continue }
+        # Long-context floor: current-generation chat models all clear 500K; smaller
+        # rows are legacy snapshots, not usable advisor candidates.
+        if ($row.contextWindow -lt 500000) { continue }
         $candidates.Add($id)
     }
     Write-Verbose "omp: $($candidates.Count) curated text-LLM candidates after denylist"
