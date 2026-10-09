@@ -8977,11 +8977,12 @@ function Install-AiTools {
         Install-CodexSettings
     }
 
-
     # If omp is present (installed via npm package @oh-my-pi/pi-coding-agent), ensure it's configured with the default settings
     if (Get-Command omp -ErrorAction SilentlyContinue) {
-        Install-OmpSettings
+        $ompArgs = if ($Auto) { @{ Force = $true; SkipDownload = $true } } else { @{} }
+        Install-OmpSettings @ompArgs
     }
+
     # Install opencode via npm (not winget) so the package is managed by npm
     # and the native `opencode upgrade` command works as upstream intended.
     if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
