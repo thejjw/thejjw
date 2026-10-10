@@ -1049,6 +1049,19 @@ $_AiSkillsInternal = @{
     )
 }
 
+# Internal configuration for Install-OpenCodeSettings (the oc-advisor plugin).
+# PluginPath is a git pathspec, so it keeps forward slashes; the remaining
+# entries are filesystem paths.
+$_OpenCodeInternal = @{
+    RepoUrl         = 'https://github.com/thejjw/thejjw.git'
+    PluginPath      = 'oc/plugins/oc-advisor'
+    InstallerRel    = 'scripts\install.mjs'
+    ConfigDir       = '.config\opencode'
+    CopyRel         = '.config\opencode\plugins\oc-advisor'
+    DefaultRef      = 'main'
+    DefaultCloneDir = Join-Path ([System.IO.Path]::GetTempPath()) 'opencode\oc-advisor-clone'
+}
+
 # Internal configuration for Install-ClaudeCCRSetup (Claude Code Router).
 # Underscore prefix hides it from Get-Variable default scope per PowerShell convention.
 # Endpoint URLs, model lists, and router role mappings are the only literals that need to
@@ -5449,6 +5462,167 @@ function Install-GrokSettings {
     Write-Host "grok: config setup complete" -ForegroundColor Green
 }
 
+function Install-OpenCodeSettings {
+    <#
+.SYNOPSIS
+    Installs or refreshes the oc-advisor OpenCode plugin from the thejjw repository.
+.DESCRIPTION
+    Fetches only the plugin directory with a shallow, sparse, blobless clone into
+    a temporary directory, runs the plugin's own Node installer in its default
+    copy mode, reports the installed state and verifies the copied files by hash,
+    then removes the temporary clone unless -KeepClone is supplied.
+    Idempotent: the installer compares file contents, so re-running is safe.
+.PARAMETER Ref
+    Branch or tag to clone. Defaults to 'main'.
+.PARAMETER CloneDir
+    Directory the temporary clone is created in, replaced on every run. Defaults
+    to %TEMP%\opencode\oc-advisor-clone.
+.PARAMETER DryRun
+    Pass --dry-run to the installer: report what would change and write nothing.
+.PARAMETER SkipValidate
+    Pass --skip-validate to the installer (skips its `opencode --version` check).
+    Applied automatically when the opencode CLI is not on PATH.
+.PARAMETER KeepClone
+    Keep the temporary clone after the run for inspection.
+.EXAMPLE
+    Install-OpenCodeSettings
+.EXAMPLE
+    Install-OpenCodeSettings -Ref v0.2.0 -KeepClone
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        [string]$Ref = $_OpenCodeInternal.DefaultRef,
+        [string]$CloneDir = $_OpenCodeInternal.DefaultCloneDir,
+        [switch]$DryRun,
+        [switch]$SkipValidate,
+        [switch]$KeepClone
+    )
+
+    # git fetches the plugin; node runs the plugin's own installer.
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        throw 'git is required to install the oc-advisor plugin but was not found in PATH.'
+    }
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        throw 'node is required to install the oc-advisor plugin but was not found in PATH.'
+    }
+
+    $nodeVersion = (& node --version 2>$null)
+    if ($nodeVersion -match '^v(\d+)\.' -and [int]$Matches[1] -lt 18) {
+        Write-Warning "oc-advisor declares Node.js 18 or newer in package.json engines; found $nodeVersion."
+    }
+
+    # install.mjs validates itself by running `opencode --version` and fails when
+    # the CLI is absent, which is expected on a machine that installs the plugin
+    # before the CLI. Skip that step instead of surfacing a confusing exit code.
+    if (-not $SkipValidate -and -not (Get-Command opencode -ErrorAction SilentlyContinue)) {
+        Write-Host 'opencode CLI not found; passing --skip-validate to the installer.' -ForegroundColor DarkGray
+        $SkipValidate = $true
+    }
+
+    $pluginDir = Join-Path $CloneDir ($_OpenCodeInternal.PluginPath -replace '/', '\')
+    $installerPath = Join-Path $pluginDir $_OpenCodeInternal.InstallerRel
+    $cloneParent = Split-Path -Parent $CloneDir
+    if ($cloneParent -and -not (Test-Path -LiteralPath $cloneParent)) {
+        $null = New-Item -ItemType Directory -Path $cloneParent -Force
+    }
+
+    # Never reuse a previous clone: a fresh clone guarantees a single commit and
+    # makes the run idempotent whatever happened last time.
+    if (Test-Path -LiteralPath $CloneDir) {
+        Write-Verbose "Removing previous clone: $CloneDir"
+        Remove-Item -LiteralPath $CloneDir -Recurse -Force
+    }
+
+    $originalEnvVars = Save-ProcessEnvVars @('GIT_TERMINAL_PROMPT')
+    $env:GIT_TERMINAL_PROMPT = '0'
+    try {
+        $cloneArgs = @(
+            'clone', '--depth', '1', '--single-branch', '--no-tags', '--branch', $Ref,
+            '--filter=blob:none', '--sparse', $_OpenCodeInternal.RepoUrl, $CloneDir
+        )
+        Write-Host ("git {0}" -f ($cloneArgs -join ' ')) -ForegroundColor DarkGray
+        & git @cloneArgs
+        if ($LASTEXITCODE -ne 0) {
+            # Servers without partial-clone support reject --filter; retry plain.
+            Write-Host 'Clone with --filter=blob:none failed; retrying without --filter.' -ForegroundColor Yellow
+            if (Test-Path -LiteralPath $CloneDir) {
+                Remove-Item -LiteralPath $CloneDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            & git clone --depth 1 --single-branch --no-tags --branch $Ref --sparse $_OpenCodeInternal.RepoUrl $CloneDir
+            if ($LASTEXITCODE -ne 0) {
+                throw "git clone failed for $($_OpenCodeInternal.RepoUrl) (ref '$Ref')."
+            }
+        }
+
+        # --no-cone keeps the checkout to exactly the plugin subtree; cone mode
+        # would also materialize files sitting directly under the repo root.
+        & git -C $CloneDir sparse-checkout set --no-cone $_OpenCodeInternal.PluginPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "git sparse-checkout failed for '$($_OpenCodeInternal.PluginPath)'."
+        }
+
+        foreach ($required in @('index.ts', $_OpenCodeInternal.InstallerRel, 'src\advisor.ts', 'commands\advisor.md')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $pluginDir $required))) {
+                throw "Clone is missing '$required' under '$($_OpenCodeInternal.PluginPath)'."
+            }
+        }
+        # The index always lists the whole tree, so `ls-files -t` marks
+        # non-materialized paths 'S' (skip-worktree); the rest is what actually
+        # landed on disk, which is the plugin subtree only.
+        $sparsePattern = @(& git -C $CloneDir sparse-checkout list) -join ', '
+        Write-Host ("sparse-checkout: {0}" -f $sparsePattern) -ForegroundColor DarkGray
+        $materialized = @(
+            & git -C $CloneDir ls-files -t |
+                Where-Object { $_ -and $_ -notmatch '^S ' } |
+                ForEach-Object { $_ -replace '^[A-Z]+\s+', '' }
+        )
+        Write-Host ("clone materialized {0} file(s):" -f $materialized.Count) -ForegroundColor DarkGray
+        foreach ($file in $materialized) { Write-Host "  $file" -ForegroundColor DarkGray }
+
+        $installerArgs = @($installerPath)
+        if ($DryRun) { $installerArgs += '--dry-run' }
+        if ($SkipValidate) { $installerArgs += '--skip-validate' }
+        Write-Host ("node {0}" -f ($installerArgs -join ' ')) -ForegroundColor DarkGray
+        & node @installerArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "The oc-advisor installer failed with exit code $LASTEXITCODE."
+        }
+
+        if (-not $DryRun) {
+            Write-Host '-- installed state --' -ForegroundColor DarkGray
+            & node $installerPath --status
+
+            $installedAdvisor = Join-Path $env:USERPROFILE (Join-Path $_OpenCodeInternal.CopyRel 'src\advisor.ts')
+            $clonedAdvisor = Join-Path $pluginDir 'src\advisor.ts'
+            if (Test-Path -LiteralPath $installedAdvisor) {
+                $cloneHash = (Get-FileHash -LiteralPath $clonedAdvisor -Algorithm SHA256).Hash
+                $installedHash = (Get-FileHash -LiteralPath $installedAdvisor -Algorithm SHA256).Hash
+                $verdict = if ($cloneHash -eq $installedHash) { 'MATCH' } else { 'DIFFERS' }
+                $verdictColor = if ($cloneHash -eq $installedHash) { 'Green' } else { 'Yellow' }
+                Write-Host ("advisor.ts: {0}" -f $verdict) -ForegroundColor $verdictColor
+                Write-Host ("  clone:     {0}" -f $clonedAdvisor) -ForegroundColor DarkGray
+                Write-Host ("  installed: {0}" -f $installedAdvisor) -ForegroundColor DarkGray
+            }
+            else {
+                Write-Host ("advisor.ts: not installed at {0}" -f $installedAdvisor) -ForegroundColor Yellow
+            }
+        }
+    }
+    finally {
+        Restore-ProcessEnvVars $originalEnvVars
+        if ($KeepClone) {
+            Write-Host "Clone kept: $CloneDir" -ForegroundColor Cyan
+        }
+        elseif (Test-Path -LiteralPath $CloneDir) {
+            Write-Verbose "Removing temporary clone: $CloneDir"
+            Remove-Item -LiteralPath $CloneDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Install-OmpSettings {
     <#
 .SYNOPSIS
@@ -9753,6 +9927,17 @@ function Install-AiTools {
         & npm install -g '@opencode/cli'
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Failed to install @opencode/cli with npm exit code $LASTEXITCODE."
+        }
+    }
+
+    # Install/refresh the oc-advisor plugin when the opencode CLI is available.
+    # A plugin failure must not abort the rest of the setup run.
+    if (Get-Command opencode -ErrorAction SilentlyContinue) {
+        try {
+            Install-OpenCodeSettings
+        }
+        catch {
+            Write-Warning "oc-advisor plugin installation failed: $($_.Exception.Message)"
         }
     }
 
