@@ -113,10 +113,13 @@ node scripts/install.mjs --dry-run   # inspect what would change
 node scripts/install.mjs             # write global entry + command file
 ```
 
-The installer writes a plain path entry into the `plugins` array of your
+The installer writes the plugin directory into the `plugins` array of your
 `opencode.json(c)` and copies `commands/advisor.md` into the global
-commands dir. A legacy v1 `plugin` tuple for this plugin is migrated to
-the v2 entry automatically.
+commands dir. A v2 config entry must be a directory: local directories
+resolve at the package root, so the package ships a root `index.ts` that
+re-exports `src/advisor.ts` (a `package.json` `main` is ignored, and a
+file-path entry is rejected by the server). A legacy v1 `plugin` tuple
+for this plugin is migrated to the v2 entry automatically.
 
 Then restart opencode and try `/advisor status` in a session.
 

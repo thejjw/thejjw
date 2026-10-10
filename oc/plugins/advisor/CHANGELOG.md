@@ -24,8 +24,11 @@
 - Advisor subcall uses transient `session.generate` (no history) with the
   model+variant set at `session.create`; server failures return an
   `Error:` message instead of propagating an exception.
-- Installer targets the v2 `plugins` array with a plain path entry and
-  migrates a legacy v1 `plugin` tuple automatically.
+- Installer targets the v2 `plugins` array with the package directory entry
+  (a root `index.ts` re-exports `src/advisor.ts`: v2 rejects file-path
+  entries with "configured plugin path must be a directory" and ignores
+  `package.json` `main` for local dirs) and migrates a legacy v1 `plugin`
+  tuple automatically.
 - Dev: `@types/node` so `tsc` is clean.
 
 ## 0.1.0

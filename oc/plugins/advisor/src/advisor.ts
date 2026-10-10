@@ -22,11 +22,6 @@ import path from "node:path";
 // Version of this copy. Reported by advisor_ctl status.
 const VERSION = "0.2.0";
 
-// Suffix identifying our own plugin entry in opencode.json(c). The
-// installer records a file:// URL ending in this path, so matching on the
-// suffix keeps working no matter where this repo is cloned.
-const PLUGIN_ENTRY_SUFFIX = "oc/plugins/advisor/src/advisor.ts";
-
 // Persisted settings. model "auto" means: reuse the calling session's
 // active model. thinking "auto" means: mirror the calling session's
 // variant when the model is also followed, else use the catalog default

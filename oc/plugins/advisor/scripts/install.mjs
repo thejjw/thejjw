@@ -7,16 +7,20 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(scriptDir, "..");
-const entryFile = path.join(pluginDir, "src", "advisor.ts");
+const entryFile = path.join(pluginDir, "index.ts");
+const implFile = path.join(pluginDir, "src", "advisor.ts");
 const commandSrc = path.join(pluginDir, "commands", "advisor.md");
 
 const globalDir = path.join(os.homedir(), ".config", "opencode");
 const commandsDir = path.join(globalDir, "commands");
 const commandDest = path.join(commandsDir, "advisor.md");
 
-// Must match PLUGIN_ENTRY_SUFFIX in src/advisor.ts. Searched with forward
-// slashes because the installer records the entry as a file:// URL.
-const entrySuffix = "oc/plugins/advisor/src/advisor.ts";
+// Substring identifying our own plugin entry in opencode.json(c). Searched
+// with forward slashes because the installer records the entry as a file://
+// URL. Matches both the v2 directory entry and a legacy file entry (which
+// contains this path as a prefix), so migration keeps working no matter
+// where this repo is cloned.
+const entrySuffix = "oc/plugins/advisor";
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -32,9 +36,10 @@ main().catch((error) => {
 
 async function main() {
   requireFiles();
-  const entryUrl = pathToFileURL(entryFile).href;
-  // V2 plugins entries: plain path string (settings live in plugin
-  // storage, seeded from options only when options are given).
+  // V2 config entries must be directories: local dirs resolve at the
+  // package root index.ts (package.json main is ignored, file entries are
+  // rejected). Settings live in plugin storage, so no entry options.
+  const entryUrl = pathToFileURL(pluginDir).href;
   const entryText = `"${entryUrl}"`;
   const configPath = userConfigPath();
 
@@ -57,7 +62,7 @@ async function main() {
 
 // Fails fast when the repo copy is incomplete.
 function requireFiles() {
-  for (const file of [entryFile, commandSrc]) {
+  for (const file of [entryFile, implFile, commandSrc]) {
     if (!fs.existsSync(file)) {
       throw new Error(`Missing plugin file: ${file}`);
     }
@@ -267,22 +272,31 @@ function install(configPath, entryText, dryRun) {
   } else {
     let span = findTuple(text);
     if (span && isLegacyTuple(text, span)) {
-      // Legacy v1 tuple: drop it here; the v2 entry is added to the
-      // "plugins" array below (migration).
+      // Legacy v1 tuple: excise it (comma-safe), then add the v2 entry
+      // to the "plugins" array below.
+      const was = text.slice(span.open, Math.min(span.close + 1, span.open + 120));
       text = excise(text, span);
-      console.log("Migrated legacy v1 plugin entry to v2.");
+      console.log(`Migrated legacy v1 plugin entry to v2 (was: ${was}).`);
       span = null;
     }
-    if (span) {
+    if (span && text.slice(span.open, span.close + 1) === entryText) {
       console.log("Plugin entry already configured.");
     } else {
-      const arr = findPluginArray(text);
-      if (!arr) {
-        text = insertPluginKey(text, entryText);
-      } else if (skipIgnored(text, arr.open + 1) === arr.close) {
-        text = `${text.slice(0, arr.open + 1)}\n    ${entryText}\n  ${text.slice(arr.close)}`;
+      if (span) {
+        // Outdated entry (e.g. a file path the server rejects): swap the
+        // bare string in place; surrounding commas are unaffected.
+        const was = text.slice(span.open, Math.min(span.close + 1, span.open + 120));
+        text = text.slice(0, span.open) + entryText + text.slice(span.close + 1);
+        console.log(`Updated plugin entry (was: ${was}).`);
       } else {
-        text = `${text.slice(0, arr.close)},\n    ${entryText}\n  ${text.slice(arr.close)}`;
+        const arr = findPluginArray(text);
+        if (!arr) {
+          text = insertPluginKey(text, entryText);
+        } else if (skipIgnored(text, arr.open + 1) === arr.close) {
+          text = `${text.slice(0, arr.open + 1)}\n    ${entryText}\n  ${text.slice(arr.close)}`;
+        } else {
+          text = `${text.slice(0, arr.close)},\n    ${entryText}\n  ${text.slice(arr.close)}`;
+        }
       }
       changed = true;
     }
