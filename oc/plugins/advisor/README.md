@@ -111,3 +111,19 @@ before every write.
 
 See `CHANGELOG.md`. Version `0.1.0` matches upstream advisor behavior plus
 the follow-session default and the `/advisor` command.
+
+## License
+See [LICENSE](LICENSE).
+
+## Attribution
+
+This plugin is a local port of `@u007/opencode-advisor` (u007, [opencode-advisor on GitHub](https://github.com/u007/opencode-advisor)), reworked for local-only use with no hardcoded models.
+
+---
+
+## Author
+- Jaewoo Jeon [@thejjw](https://github.com/thejjw)
+
+If you find this plugin helpful, consider supporting its development via GitHub Sponsors (one-time or monthly), or Buy Me a Coffee:
+
+[![Buy Me A Coffee](https://cdn.buymeacoffee.com/buttons/default-yellow.png)](https://www.buymeacoffee.com/thejjw) 
