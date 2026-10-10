@@ -710,10 +710,13 @@ export default Plugin.define({
           if (typeof args.prompt !== "string" || args.prompt.trim().length === 0) {
             return { content: "Error: advisor prompt is required and must not be empty." };
           }
+          // A literal "auto" variant means catalog default: omit it rather
+          // than sending an id no model defines.
+          const rawVariant = typeof args.variant === "string" ? args.variant : "";
           const over = {
             providerID: typeof args.providerID === "string" && args.providerID.length > 0 ? args.providerID : undefined,
             modelID: typeof args.modelID === "string" && args.modelID.length > 0 ? args.modelID : undefined,
-            variant: typeof args.variant === "string" && args.variant.length > 0 ? args.variant : undefined,
+            variant: rawVariant.length > 0 && rawVariant.toLowerCase() !== "auto" ? rawVariant : undefined,
           };
           const resolved = await resolveModel(ctx, context?.sessionID, over, live);
           if ("error" in resolved) return { content: `Error: ${resolved.error}` };
