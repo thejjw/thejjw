@@ -31,12 +31,16 @@ type AdvisorSettings = {
   enabled: boolean;
   model: string;
   thinking: string;
+  watch: boolean;
+  reviewInterval: number;
 };
 
 const DEFAULT_SETTINGS: AdvisorSettings = {
   enabled: true,
   model: "auto",
   thinking: "auto",
+  watch: false,
+  reviewInterval: 1,
 };
 
 const STORAGE_KEY = "settings";
@@ -119,6 +123,11 @@ async function currentSettings(ctx: any): Promise<AdvisorSettings> {
         model: typeof r.model === "string" && r.model.length > 0 ? r.model : DEFAULT_SETTINGS.model,
         thinking:
           typeof r.thinking === "string" && r.thinking.length > 0 ? r.thinking : DEFAULT_SETTINGS.thinking,
+        watch: typeof r.watch === "boolean" ? r.watch : DEFAULT_SETTINGS.watch,
+        reviewInterval:
+          typeof r.reviewInterval === "number" && Number.isInteger(r.reviewInterval) && r.reviewInterval >= 1
+            ? r.reviewInterval
+            : DEFAULT_SETTINGS.reviewInterval,
       };
     }
   } catch {
@@ -132,6 +141,11 @@ async function currentSettings(ctx: any): Promise<AdvisorSettings> {
       typeof opts.thinking === "string" && (opts.thinking as string).length > 0
         ? (opts.thinking as string)
         : DEFAULT_SETTINGS.thinking,
+    watch: typeof opts.watch === "boolean" ? opts.watch : DEFAULT_SETTINGS.watch,
+    reviewInterval:
+      typeof opts.reviewInterval === "number" && Number.isInteger(opts.reviewInterval) && (opts.reviewInterval as number) >= 1
+        ? (opts.reviewInterval as number)
+        : DEFAULT_SETTINGS.reviewInterval,
   };
 }
 
@@ -153,9 +167,11 @@ function describeSettings(settings: AdvisorSettings, env: { providerID: string; 
 }
 
 function statusText(settings: AdvisorSettings, env: { providerID: string; modelID: string; variant?: string } | null): string {
-  return [`Advisor ${VERSION}: ${settings.enabled ? "enabled" : "disabled"}.`, `Model: ${describeSettings(settings, env)}.`].join(
-    "\n",
-  );
+  return [
+    `Advisor ${VERSION}: ${settings.enabled ? "enabled" : "disabled"}.`,
+    `Model: ${describeSettings(settings, env)}.`,
+    `Watch: ${settings.watch ? `on (every ${settings.reviewInterval === 1 ? "turn" : `${settings.reviewInterval} turns`})` : "off"}.`,
+  ].join("\n");
 }
 
 function usageText(): string {
@@ -166,11 +182,13 @@ function usageText(): string {
     "  status   Show current state.",
     "  models   Write available models to a file and recommend 4-5.",
     "  thinking List valid thinking variants for the advisor model.",
-    "  configure [model=<id|name|auto>] [thinking=<variant|auto>] [enabled=on|off]",
+    "  configure [model=<id|name|auto>] [thinking=<variant|auto>] [enabled=on|off] [watch=on|off] [reviewInterval=N]",
     "           model accepts an exact provider/model id, a display name,",
     "           or a substring (unambiguous match applies, else a pick",
     "           list). Empty model means auto. thinking accepts a variant",
-    "           id valid for the resolved model, or auto.",
+    "           id valid for the resolved model, or auto. watch enables",
+    "           automatic turn-boundary reviews; reviewInterval reviews",
+    "           every Nth turn (default 1).",
   ].join("\n");
 }
 
@@ -286,6 +304,242 @@ function modelsSummary(candidates: ModelCandidate[], executor: string | null, fi
     `Read ${file} and recommend 4-5 as the advisor model: give one-line`,
     "reasons and exact ids ready for /advisor configure model=<id>.",
   ].join("\n");
+}
+
+// --- Push-style auto-review (watch mode) ---
+//
+// While the pull-style advisor tool waits to be called, watch mode reviews
+// primary turn boundaries on its own: execution-end events snapshot the
+// transcript delta since the last review into an ephemeral sidecar review,
+// then deliver severity-tagged notes back (nits as record-only synthetic
+// messages, concerns/blockers as new turns).
+
+// Turn-terminal events that end a reviewable unit of primary work.
+const TURN_END_EVENTS = new Set([
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+]);
+
+// Prefix marking advisor-delivered turns, for the cascade guard: a
+// boundary whose newest user message carries it is captured but never
+// scheduled, so deliveries cannot re-wake reviewers in a loop.
+const DELIVERY_MARKER = "[advisor-note] ";
+
+// Sidecar sessions created by this process. Their own execution events
+// are ignored so reviews never review themselves.
+const sidecarSessions = new Set<string>();
+
+type WatchCursor = { count: number; turns: number };
+
+function cursorKey(sessionID: string): string {
+  return `watch:${sessionID}`;
+}
+
+async function readCursor(ctx: any, sessionID: string): Promise<WatchCursor> {
+  try {
+    const raw = (await ctx.storage.get(cursorKey(sessionID))) as Record<string, unknown> | undefined;
+    if (raw && typeof raw === "object") {
+      const count = typeof raw.count === "number" && raw.count >= 0 ? Math.floor(raw.count) : 0;
+      const turns = typeof raw.turns === "number" && raw.turns >= 0 ? Math.floor(raw.turns) : 0;
+      return { count, turns };
+    }
+  } catch {
+    // Ignored: start from zero.
+  }
+  return { count: 0, turns: 0 };
+}
+
+async function writeCursor(ctx: any, sessionID: string, cursor: WatchCursor): Promise<void> {
+  try {
+    await ctx.storage.set(cursorKey(sessionID), { ...cursor });
+  } catch {
+    // Ignored: next boundary re-derives from zero.
+  }
+}
+
+// Best-effort text of the newest user message, for the cascade guard.
+function newestUserText(messages: any[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m && m.type === "user" && typeof m.text === "string") return m.text;
+  }
+  return null;
+}
+
+// Renders transcript messages into reviewable text: user text plus
+// assistant text, tool calls with inputs, and tool results (truncated).
+// Unknown message shapes are skipped rather than guessed at.
+function renderDelta(messages: any[]): string {
+  const perMessage = 1500;
+  const totalCap = 12000;
+  const out: string[] = [];
+  let total = 0;
+  const push = (line: string) => {
+    if (total >= totalCap) return;
+    const clipped = line.length > perMessage ? line.slice(0, perMessage) + " […]" : line;
+    total += clipped.length;
+    out.push(clipped);
+  };
+  const textOf = (part: any): string | null => {
+    if (part && (part.type === "text" || part.type === "reasoning") && typeof part.text === "string") return part.text;
+    return null;
+  };
+  for (const m of messages) {
+    if (!m || typeof m !== "object") continue;
+    if (m.type === "user" && typeof m.text === "string") {
+      push(`User: ${m.text}`);
+    } else if (m.type === "assistant" && Array.isArray(m.content)) {
+      for (const part of m.content) {
+        const text = textOf(part);
+        if (text) {
+          push(`Assistant: ${text}`);
+        } else if (part && part.type === "tool" && typeof part.name === "string") {
+          const state = part.state;
+          const status = state && typeof state.status === "string" ? state.status : "unknown";
+          push(`Tool ${part.name} (${status})`);
+          if (state && state.input && typeof state.input === "object") {
+            const input = JSON.stringify(state.input);
+            push(`  input: ${input.length > 300 ? input.slice(0, 300) + " […]" : input}`);
+          }
+          if (state && Array.isArray(state.content)) {
+            for (const c of state.content) {
+              if (c && c.type === "text" && typeof c.text === "string" && c.text.length > 0) {
+                push(`  result: ${c.text}`);
+              }
+            }
+          }
+          if (state && state.status === "error") {
+            push(`  error: ${JSON.stringify(state.error ?? state).slice(0, 300)}`);
+          }
+        }
+      }
+    }
+  }
+  return out.join("\n").slice(0, totalCap);
+}
+
+// Severity of a review reply: null means silence (NO_CONCERNS sentinel or
+// empty). Untagged findings default to nit, matching omp's omitted level.
+function parseSeverity(text: string): "nit" | "concern" | "blocker" | null {
+  const trimmed = (text || "").trim();
+  if (trimmed.length === 0 || trimmed === "NO_CONCERNS") return null;
+  if (/\bblocker\b/i.test(trimmed)) return "blocker";
+  if (/\bconcern\b/i.test(trimmed)) return "concern";
+  return "nit";
+}
+
+// Handles one turn-terminal event. Never throws; failures skip the review
+// without advancing the cursor so the next boundary retries.
+async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean): Promise<void> {
+  const live = await currentSettings(ctx);
+  if (!live.enabled || !live.watch) return;
+  if (sidecarSessions.has(sessionID)) return;
+  let messages: any[];
+  try {
+    const res = await ctx.session.context({ sessionID });
+    messages = Array.isArray(res) ? res : (res?.data ?? []);
+  } catch {
+    return;
+  }
+  if (!Array.isArray(messages)) return;
+  let cursor = await readCursor(ctx, sessionID);
+  if (messages.length < cursor.count) {
+    // Transcript rewritten (e.g. compaction): reseed, no replay.
+    await writeCursor(ctx, sessionID, { count: messages.length, turns: 0 });
+    return;
+  }
+  const fresh = messages.slice(cursor.count);
+  if (fresh.length === 0) return;
+  const turns = cursor.turns + 1;
+  const interval = live.reviewInterval >= 1 ? live.reviewInterval : 1;
+  // Capture-but-skip: our own delivery must never schedule a review.
+  const newest = newestUserText(messages);
+  if (newest && newest.startsWith(DELIVERY_MARKER)) {
+    await writeCursor(ctx, sessionID, { count: messages.length, turns });
+    return;
+  }
+  if (turns % interval !== 0) {
+    // Cadence skip: count the turn but hold the delta for the next
+    // scheduled review (cursor stays).
+    await writeCursor(ctx, sessionID, { count: cursor.count, turns });
+    return;
+  }
+  const delta = renderDelta(fresh);
+  if (delta.trim().length === 0) {
+    await writeCursor(ctx, sessionID, { count: messages.length, turns });
+    return;
+  }
+  const resolved = await resolveModel(ctx, sessionID, {}, live);
+  if ("error" in resolved) return;
+  const model: { id: string; providerID: string; variant?: string } = {
+    id: resolved.modelID,
+    providerID: resolved.providerID,
+  };
+  if (resolved.variant) model.variant = resolved.variant;
+  let directory: string | null = await sessionDirectory(ctx, sessionID);
+  if (!directory && typeof ctx?.location?.directory === "string" && ctx.location.directory.length > 0) {
+    directory = ctx.location.directory;
+  }
+  let sidecar: string | null = null;
+  try {
+    const session = await ctx.session.create({
+      title: "advisor-review",
+      model,
+      ...(directory ? { location: { directory } } : {}),
+    });
+    sidecar = typeof session?.id === "string" && session.id.length > 0 ? session.id : null;
+    if (!sidecar) return;
+    sidecarSessions.add(sidecar);
+    const response = await ctx.session.generate({
+      sessionID: sidecar,
+      prompt: `${SYSTEM_PROMPT}\n\n--- TRANSCRIPT DELTA ---\n\n${delta}`,
+    });
+    const severity = parseSeverity(response?.text ?? "");
+    await writeCursor(ctx, sessionID, { count: messages.length, turns });
+    if (!severity) return;
+    const note = response.text.trim();
+    if (severity === "nit" || interrupted) {
+      // Record-only: never wake the agent (resume defaults to waking).
+      await ctx.session.synthetic({ sessionID, text: `[advisor ${severity}]\n${note}`, resume: false }).catch(() => {});
+    } else {
+      await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}[advisor ${severity}]\n${note}` }).catch(() => {});
+    }
+  } catch {
+    // Sidecar, model, or delivery failure: cursor stays, next boundary
+    // retries. No throw: the event loop must survive.
+  } finally {
+    if (sidecar) {
+      sidecarSessions.delete(sidecar);
+      await ctx.session.remove({ sessionID: sidecar }).catch(() => {});
+    }
+  }
+}
+
+// Subscribes to turn-terminal events for the process lifetime. Returns a
+// cleanup that stops the loop (run on plugin unload so hot reloads never
+// double-subscribe).
+function startWatchLoop(ctx: any): () => void {
+  const controller = new AbortController();
+  void (async () => {
+    try {
+      for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+        try {
+          const type = (event as any)?.type;
+          if (typeof type !== "string" || !TURN_END_EVENTS.has(type)) continue;
+          const data = (event as any)?.data ?? {};
+          const sessionID = typeof data.sessionID === "string" ? data.sessionID : (event as any)?.sessionID;
+          if (typeof sessionID !== "string" || sessionID.length === 0) continue;
+          await handleTurnEnd(ctx, sessionID, type === "session.execution.interrupted");
+        } catch {
+          // Per-event failure: never break the loop.
+        }
+      }
+    } catch {
+      // Aborted on cleanup.
+    }
+  })();
+  return () => controller.abort();
 }
 
 // Resolves free-typed model input to a "provider/model" id (or "auto").
@@ -548,7 +802,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
     if (!argStr) return `${statusText(live, env)}\n\n${usageText()}`;
     const next = { ...live };
     let rest = argStr;
-    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled)\s*=\s*\S+|$)/i.exec(argStr);
+    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval)\s*=\s*\S+|$)/i.exec(argStr);
     if (modelMatch) {
       rest = rest.replace(modelMatch[0], " ");
       const resolved = await resolveModelInput(ctx, (modelMatch[1] || "").trim());
@@ -595,29 +849,59 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
       else if (value === "off") next.enabled = false;
       else return `Bad enabled value "${enabledMatch[1]}". Use on or off.\n\n${usageText()}`;
     }
+    const watchMatch = /(?:^|\s)watch\s*=\s*(\S+)/i.exec(argStr);
+    if (watchMatch) {
+      rest = rest.replace(watchMatch[0], " ");
+      const value = watchMatch[1].toLowerCase();
+      if (value === "on") next.watch = true;
+      else if (value === "off") next.watch = false;
+      else return `Bad watch value "${watchMatch[1]}". Use on or off.\n\n${usageText()}`;
+    }
+    const intervalMatch = /(?:^|\s)reviewInterval\s*=\s*(\S+)/i.exec(argStr);
+    if (intervalMatch) {
+      rest = rest.replace(intervalMatch[0], " ");
+      const n = Number(intervalMatch[1]);
+      if (!Number.isInteger(n) || n < 1) {
+        return `Bad reviewInterval "${intervalMatch[1]}". Use a positive integer.\n\n${usageText()}`;
+      }
+      next.reviewInterval = n;
+    }
     if (rest.trim().length > 0) return `Unknown option "${rest.trim()}".\n\n${usageText()}`;
     const err = await writeSettings(ctx, next);
     if (err) return `Error: not saved: ${err}`;
+    // Enabling watch seeds the cursor at the current transcript length so
+    // the first review covers only new turns, never old history.
+    if (next.watch && !live.watch && typeof sessionID === "string" && sessionID.length > 0) {
+      try {
+        const res = await ctx.session.context({ sessionID });
+        const messages = Array.isArray(res) ? res : (res?.data ?? []);
+        if (Array.isArray(messages)) await writeCursor(ctx, sessionID, { count: messages.length, turns: 0 });
+      } catch {
+        // Ignored: cursor starts from zero on first boundary.
+      }
+    }
     return `Saved.\n${statusText(next, env)}`;
   }
   return usageText();
 }
 
-const SYSTEM_PROMPT = `You are a strategic advisor for a coding agent. Read the context below and provide a concise plan or course correction.
+const SYSTEM_PROMPT = `You are a strategic advisor for a coding agent: a peer reviewer shadowing a capable executor. You receive the executor's context and return a concise plan or course correction.
 
-Your advice must be actionable — tell the executor:
-- What to do next
-- What order to proceed in
+Silence first: if the executor is on track with no material risk, reply with exactly NO_CONCERNS and nothing else. Never manufacture advice to fill space; vague unease is not a finding.
+
+When you do advise, be actionable — tell the executor:
+- What to do next, and in what order
 - What to watch out for
 - What not to do
 
-Key heuristics:
-- Prefer the simplest approach that meets the spec
-- Flag approaches that create maintenance burden
-- If the executor is stuck or looping, suggest a different approach
-- If tests or evidence contradict an assumption, say so explicitly
+Tag each finding with severity: [nit] (cleanup, consider later), [concern] (may be heading wrong; executor decides), [blocker] (stop: contradicts explicit instruction, fundamentally unsound, or declares done what was never verified).
 
-Respond in under 300 words. Use enumerated steps. Do NOT write code — only advise.`;
+Rules:
+- Cite only evidence in the context or your own verified reasoning; never assert values you cannot see.
+- Never restate errors, diagnostics, or facts the executor already shows it knows. Never repeat advice already given.
+- Prefer the simplest approach that meets the spec; flag maintenance burden and stuck/looping patterns explicitly.
+- Do not second-guess decisions the executor understands and commits to unless you are certain. Large diffs and ambitious rewrites are not problems by themselves.
+- Keep it succinct: at most 4 findings, or under 300 words, whichever binds first. Do NOT write code — only advise.`;
 
 const TOOL_DESCRIPTION = `Consult a strategic advisor (a second model giving a concise plan or course correction; defaults to reusing your own active model unless configured otherwise) that requires all context necessary for the advisor tool and provides a concise plan or course correction.
 
@@ -634,7 +918,9 @@ Optional tool args \`providerID\` and \`modelID\` (plus \`variant\`) override th
 
 Required tool arg \`prompt\` must include all context the advisor needs for this call.
 
-Give the advice serious weight. Only override if you have primary-source evidence that contradicts a specific claim. Surface conflicts in another advisor call rather than silently switching approaches.`;
+Give the advice serious weight. Only override if you have primary-source evidence that contradicts a specific claim. Surface conflicts in another advisor call rather than silently switching approaches.
+
+When watch mode is on (/advisor status shows it), turn-boundary reviews also arrive automatically as advisor notes; this tool remains for on-demand checks. Reply NO_CONCERNS when there is nothing material to say.`;
 
 export default Plugin.define({
   id: "advisor",
@@ -656,11 +942,22 @@ export default Plugin.define({
             typeof opts.thinking === "string" && (opts.thinking as string).length > 0
               ? (opts.thinking as string)
               : DEFAULT_SETTINGS.thinking,
+          watch: typeof opts.watch === "boolean" ? opts.watch : DEFAULT_SETTINGS.watch,
+          reviewInterval:
+            typeof opts.reviewInterval === "number" &&
+            Number.isInteger(opts.reviewInterval) &&
+            (opts.reviewInterval as number) >= 1
+              ? (opts.reviewInterval as number)
+              : DEFAULT_SETTINGS.reviewInterval,
         });
       }
     } catch {
       // Storage unavailable: settings fall back to options/defaults per call.
     }
+
+    // Push-style auto-review: one process-lifetime subscription. The
+    // cleanup stops it so hot reloads never double-subscribe.
+    const stopWatch = startWatchLoop(ctx);
 
     await ctx.tool.transform((editor) => {
       // Programmatic control surface for the /advisor command template.
@@ -754,5 +1051,7 @@ export default Plugin.define({
         },
       });
     });
+
+    return () => stopWatch();
   },
 });

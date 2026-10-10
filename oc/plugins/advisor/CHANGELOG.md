@@ -24,6 +24,13 @@
 - Advisor subcall uses transient `session.generate` (no history) with the
   model+variant set at `session.create`; server failures return an
   `Error:` message instead of propagating an exception.
+- New `watch` mode: automatic turn-boundary reviews via execution-end
+  events (transcript delta → ephemeral sidecar → severity-tagged
+  delivery: nits record-only, concerns/blockers as new turns).
+  `configure watch=` / `reviewInterval=`, cursor reseeds on enable and
+  compaction, cascade guard via delivery marker.
+- New `SYSTEM_PROMPT`: silence-first (`NO_CONCERNS`), severity tags,
+  anti-nag and evidence rules.
 - Catalog reads unwrap the `{ location, data }` envelope returned by
   `model.list()`/`model.default()` (a bare array is also tolerated).
   The `models` listing is location-scoped to the calling session.
