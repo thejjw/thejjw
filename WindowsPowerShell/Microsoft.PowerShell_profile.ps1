@@ -910,7 +910,13 @@ $_AiSkillsInternal = @{
     AntigravityAppSkillsPath = '.gemini\config\skills'
     AntigravityCliSkillsPath = '.gemini\antigravity-cli\skills'
     CodexSkillsPath       = 'skills'
-    OpenCodeConfigPath    = '.config\opencode\opencode.json'
+    # OpenCode reads whichever global config exists (it merges config.json ->
+    # opencode.json -> opencode.jsonc, last wins) and oc-advisor's install.mjs
+    # prefers an existing opencode.jsonc. Resolve the same way here so the
+    # profile and the plugin installer never write two different config files.
+    OpenCodeConfigDir     = '.config\opencode'
+    OpenCodeConfigNames   = @('opencode.jsonc', 'opencode.json')
+    OpenCodeConfigNew     = 'opencode.jsonc'
 
     # External skill sources installed into EVERY tool's skill directory in
     # addition to the internal lists above. Each source is shallow-cloned to its
@@ -8506,8 +8512,17 @@ function Install-AiSkills {
     )
     $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
     $codexSkillsDir = Join-Path $codexHome $_AiSkillsInternal.CodexSkillsPath
-    $openCodeConfigFile = Join-Path $env:USERPROFILE $_AiSkillsInternal.OpenCodeConfigPath
-    $openCodeConfigDir = Split-Path -Parent $openCodeConfigFile
+    $openCodeConfigDir = Join-Path $env:USERPROFILE $_AiSkillsInternal.OpenCodeConfigDir
+    # Prefer an existing config (opencode.jsonc, then opencode.json); only fall
+    # back to creating the docs-recommended opencode.jsonc when neither exists.
+    $openCodeConfigFile = $null
+    foreach ($openCodeConfigName in $_AiSkillsInternal.OpenCodeConfigNames) {
+        $openCodeCandidate = Join-Path $openCodeConfigDir $openCodeConfigName
+        if (Test-Path -LiteralPath $openCodeCandidate) { $openCodeConfigFile = $openCodeCandidate; break }
+    }
+    if (-not $openCodeConfigFile) {
+        $openCodeConfigFile = Join-Path $openCodeConfigDir $_AiSkillsInternal.OpenCodeConfigNew
+    }
 
     function Test-ChildPath {
         param(

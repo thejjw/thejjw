@@ -221,7 +221,7 @@ Describe 'Install-AiSkills' {
 
         { Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main } | Should -Throw '*Claude copy failed*'
 
-        $configPath = Join-Path $env:USERPROFILE '.config\opencode\opencode.json'
+        $configPath = Join-Path $env:USERPROFILE '.config\opencode\opencode.jsonc'
         $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
         foreach ($skill in $_AiSkillsInternal.OpenCodeClaudeSkills) {
             $config.permission.skill.$skill | Should -Be 'allow'
@@ -264,5 +264,35 @@ Describe 'Install-AiSkills' {
         $config.permission.skill.'*' | Should -Be 'deny'
         $config.model | Should -Be 'test/model'
         $config.permission.skill.'deep-research' | Should -Be 'allow'
+    }
+
+    It 'creates opencode.jsonc when no OpenCode config exists' {
+        Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main
+
+        $configDir = Join-Path $env:USERPROFILE '.config\opencode'
+        $jsoncPath = Join-Path $configDir 'opencode.jsonc'
+        $jsonPath = Join-Path $configDir 'opencode.json'
+        Test-Path -LiteralPath $jsoncPath | Should -BeTrue
+        Test-Path -LiteralPath $jsonPath | Should -BeFalse
+
+        $config = Get-Content -LiteralPath $jsoncPath -Raw | ConvertFrom-Json
+        $config.permission.skill.'deep-research' | Should -Be 'allow'
+    }
+
+    It 'prefers an existing opencode.jsonc over opencode.json' {
+        $configDir = Join-Path $env:USERPROFILE '.config\opencode'
+        $null = New-Item -ItemType Directory -Path $configDir -Force
+        $jsonPath = Join-Path $configDir 'opencode.json'
+        $jsoncPath = Join-Path $configDir 'opencode.jsonc'
+        $jsonText = '{"model":"from-json"}'
+        [IO.File]::WriteAllText($jsonPath, $jsonText, [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($jsoncPath, '{"model":"from-jsonc"}', [Text.UTF8Encoding]::new($false))
+
+        Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main
+
+        $configJsonc = Get-Content -LiteralPath $jsoncPath -Raw | ConvertFrom-Json
+        $configJsonc.model | Should -Be 'from-jsonc'
+        $configJsonc.permission.skill.'deep-research' | Should -Be 'allow'
+        Get-Content -LiteralPath $jsonPath -Raw | Should -BeExactly $jsonText
     }
 }
