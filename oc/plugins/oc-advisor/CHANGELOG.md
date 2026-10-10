@@ -2,6 +2,16 @@
 
 ## 0.2.0
 
+- Watch reviews now fire on **quiescence**: a per-session timer
+  (`watchQuietMs`, default 8000; 0 = immediate) coalesces a fast burst
+  into one settled review, so "review then fall behind then restart" no
+  longer thrashes. `reviewInterval` counts quiet batches.
+- Large backlogs render as a combined per-turn digest with an
+  `N message(s) omitted` marker, keeping the reviewed-span label honest
+  instead of silently clipping at the cap.
+- Watch cursors/timers are cleaned up on unload; a per-session in-flight
+  guard prevents a fired timer overlapping a running review.
+
 - Watch activity counters: `/advisor status` reports `N reviews —
   D delivered, S silent, F failed, X stale`, so a quiet watch is
   distinguishable from an idle or broken one. README explains each

@@ -135,15 +135,22 @@ delivery record live in the same storage.
 ## Watch mode (automatic reviews)
 
 The pull-style `oc-advisor` tool waits to be called. Watch mode instead
-reviews primary turn boundaries on its own: when a turn ends, the plugin
-snapshots the new transcript delta into an ephemeral investigative
-sidecar — a short tool loop with read/grep/glob under deny-by-default
-session permissions, so findings are verified against the workspace —
-then delivers severity-tagged notes back: `[nit]` findings as
-record-only notes that never wake the agent, `[concern]`/`[blocker]`
-as new turns — except on user-interrupted turns, where everything
-stays record-only (never re-wake a user who just stopped the agent).
-Silence (`NO_CONCERNS`) delivers nothing.
+reviews on its own: after the session goes quiet for `watchQuietMs`
+(default 8s), the plugin snapshots the accumulated transcript delta into
+an ephemeral investigative sidecar — a short tool loop with
+read/grep/glob under deny-by-default session permissions, so findings are
+verified against the workspace — then delivers severity-tagged notes
+back: `[nit]` findings as record-only notes that never wake the agent,
+`[concern]`/`[blocker]` as new turns — except on user-interrupted turns,
+where everything stays record-only (never re-wake a user who just
+stopped the agent). Silence (`NO_CONCERNS`) delivers nothing.
+
+Reviewing at quiescence is deliberate: a fast burst of turns coalesces
+into one settled review instead of a lagging chain of reviews about
+bygone turns. A large backlog renders as a **combined digest**
+(per-turn, tool I/O dropped) prefixed with a marker and an
+`N message(s) omitted` note when the cap is hit, so a long window stays
+one reviewable chunk and the reviewed-span label stays honest.
 
 An emission guard (normalization, noise-phrase filter, rank-aware
 dedupe where escalations re-admit, budget of 4 non-blocker findings per
@@ -165,15 +172,19 @@ returns to the interrupted work instead of stopping after the note.
 - `/advisor configure watch=on|off` — enabling seeds the cursor at the
   current transcript length, so the first review covers only new turns.
   Default `off`.
-- `/advisor configure reviewInterval=N` — review every Nth turn (default
-  1); skipped turns accumulate into the next scheduled review.
-- `/advisor configure watchStaleMessages=N` — a note reviewed while the
-  primary is more than N messages ahead rides record-only and is labelled
-  with the reviewed span (default 6; 0 disables).
+- `/advisor configure watchQuietMs=N` — a review only runs after the
+  session has been quiet for N ms (default 8000); `0` reviews
+  immediately on each turn.
+- `/advisor configure reviewInterval=N` — review every Nth quiet batch
+  (default 1); skipped batches accumulate into the next review.
+- `/advisor configure watchStaleMessages=N` — a review that falls more
+  than N messages behind the primary is interrupted (counted `stale`),
+  and a delivered note that far behind rides record-only; labelled with
+  the reviewed span (default 6; 0 disables).
 
-Watch multiplies model calls (one per reviewed turn): prefer a
-subscription provider, and keep `reviewInterval` above 1 on edit-heavy
-sessions if cost matters.
+Watch multiplies model calls (one per reviewed batch): prefer a
+subscription provider, and raise `watchQuietMs` or `reviewInterval` on
+edit-heavy sessions if cost matters.
 
 ### Interpreting watch activity
 

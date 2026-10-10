@@ -36,6 +36,7 @@ type AdvisorSettings = {
   reviewInterval: number;
   fallback: string[];
   watchStaleMessages: number;
+  watchQuietMs: number;
 };
 
 const DEFAULT_SETTINGS: AdvisorSettings = {
@@ -46,6 +47,7 @@ const DEFAULT_SETTINGS: AdvisorSettings = {
   reviewInterval: 1,
   fallback: [],
   watchStaleMessages: 6,
+  watchQuietMs: 8_000,
 };
 
 const STORAGE_KEY = "settings";
@@ -164,6 +166,10 @@ async function currentSettings(ctx: any): Promise<AdvisorSettings> {
           typeof r.watchStaleMessages === "number" && Number.isInteger(r.watchStaleMessages) && r.watchStaleMessages >= 0
             ? r.watchStaleMessages
             : DEFAULT_SETTINGS.watchStaleMessages,
+        watchQuietMs:
+          typeof r.watchQuietMs === "number" && Number.isInteger(r.watchQuietMs) && r.watchQuietMs >= 0
+            ? r.watchQuietMs
+            : DEFAULT_SETTINGS.watchQuietMs,
       };
     }
   } catch {
@@ -192,6 +198,12 @@ async function currentSettings(ctx: any): Promise<AdvisorSettings> {
       (opts.watchStaleMessages as number) >= 0
         ? (opts.watchStaleMessages as number)
         : DEFAULT_SETTINGS.watchStaleMessages,
+    watchQuietMs:
+      typeof opts.watchQuietMs === "number" &&
+      Number.isInteger(opts.watchQuietMs) &&
+      (opts.watchQuietMs as number) >= 0
+        ? (opts.watchQuietMs as number)
+        : DEFAULT_SETTINGS.watchQuietMs,
   };
 }
 
@@ -228,6 +240,7 @@ function statusText(
     `Watch: ${settings.watch ? "on" : "off"} (default: ${DEFAULT_SETTINGS.watch ? "on" : "off"}).`,
     `Review interval: ${settings.reviewInterval} (default: ${DEFAULT_SETTINGS.reviewInterval}).`,
     `Stale messages: ${settings.watchStaleMessages} (default: ${DEFAULT_SETTINGS.watchStaleMessages}; 0 disables).`,
+    `Quiet window: ${settings.watchQuietMs}ms (default: ${DEFAULT_SETTINGS.watchQuietMs}).`,
   ];
   if (stats && stats.reviews > 0) {
     const age = stats.lastAt > 0 ? ` (last ${relAge(stats.lastAt)})` : "";
@@ -250,17 +263,18 @@ function usageText(): string {
     "  status   Show current state.",
     "  models   Write available models to a file and recommend 4-5.",
     "  thinking List valid thinking variants for the advisor model.",
-    "  configure [model=<id|name|auto>] [thinking=<variant|auto>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [watchStaleMessages=N] [fallback=<id>,...|none]",
+    "  configure [model=<id|name|auto>] [thinking=<variant|auto>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [watchStaleMessages=N] [watchQuietMs=N] [fallback=<id>,...|none]",
     "           model accepts an exact provider/model id, a display name,",
     "           or a substring (unambiguous match applies, else a pick",
     "           list). Empty model means auto. thinking accepts a variant",
     "           id valid for the resolved model, or auto. watch enables",
-    "           automatic turn-boundary reviews; reviewInterval reviews",
-    "           every Nth turn (default 1); watchStaleMessages drops a note to",
-    "           record-only when the primary advanced more messages than that",
-    "           since the review started (default 2, 0 disables). fallback",
-    "           lists models tried in order when the configured model is",
-    "           stale.",
+    "           automatic reviews: a review runs after the session is quiet",
+    "           for watchQuietMs (default 8000; 0 = immediate), and",
+    "           reviewInterval reviews every Nth quiet batch (default 1).",
+    "           watchStaleMessages kills/downgrades a review when the primary",
+    "           advanced more messages than that (default 6, 0 disables).",
+    "           fallback lists models tried in order when the configured",
+    "           model is stale.",
   ].join("\n");
 }
 
@@ -860,19 +874,23 @@ function newestUserText(messages: any[]): string | null {
   return null;
 }
 
-// Renders transcript messages into reviewable text: user text plus
-// assistant text, tool calls with inputs, and tool results (truncated).
-// Unknown message shapes are skipped rather than guessed at.
-function renderDelta(messages: any[]): string {
-  const perMessage = 1500;
-  const totalCap = 12000;
+// Renders transcript messages into reviewable text. Small deltas get full
+// detail (tool inputs + results); large deltas switch to a compact
+// per-turn digest (tool names only) so a backlog stays one reviewable
+// chunk. A truncation marker keeps the label honest instead of silently
+// clipping content.
+const DELTA_DIGEST_THRESHOLD = 40;
+
+function renderDelta(messages: any[], digest: boolean): string {
+  const perMessage = digest ? 600 : 1500;
+  const totalCap = digest ? 8000 : 12000;
   const out: string[] = [];
   let total = 0;
-  const push = (line: string) => {
-    if (total >= totalCap) return;
+  let omitted = 0;
+  const emit = (line: string) => {
     const clipped = line.length > perMessage ? line.slice(0, perMessage) + " […]" : line;
-    total += clipped.length;
     out.push(clipped);
+    total += clipped.length;
   };
   const textOf = (part: any): string | null => {
     if (part && (part.type === "text" || part.type === "reasoning") && typeof part.text === "string") return part.text;
@@ -880,36 +898,45 @@ function renderDelta(messages: any[]): string {
   };
   for (const m of messages) {
     if (!m || typeof m !== "object") continue;
+    if (total >= totalCap) {
+      omitted++;
+      continue;
+    }
     if (m.type === "user" && typeof m.text === "string") {
-      push(`User: ${m.text}`);
+      emit(`User: ${m.text}`);
     } else if (m.type === "assistant" && Array.isArray(m.content)) {
       for (const part of m.content) {
         const text = textOf(part);
         if (text) {
-          push(`Assistant: ${text}`);
+          emit(`Assistant: ${text}`);
         } else if (part && part.type === "tool" && typeof part.name === "string") {
           const state = part.state;
           const status = state && typeof state.status === "string" ? state.status : "unknown";
-          push(`Tool ${part.name} (${status})`);
-          if (state && state.input && typeof state.input === "object") {
-            const input = JSON.stringify(state.input);
-            push(`  input: ${input.length > 300 ? input.slice(0, 300) + " […]" : input}`);
-          }
-          if (state && Array.isArray(state.content)) {
-            for (const c of state.content) {
-              if (c && c.type === "text" && typeof c.text === "string" && c.text.length > 0) {
-                push(`  result: ${c.text}`);
+          emit(`Tool ${part.name} (${status})`);
+          // Digest mode drops tool I/O; the sidecar can re-read files.
+          if (!digest) {
+            if (state && state.input && typeof state.input === "object") {
+              const input = JSON.stringify(state.input);
+              emit(`  input: ${input.length > 300 ? input.slice(0, 300) + " […]" : input}`);
+            }
+            if (state && Array.isArray(state.content)) {
+              for (const c of state.content) {
+                if (c && c.type === "text" && typeof c.text === "string" && c.text.length > 0) {
+                  emit(`  result: ${c.text}`);
+                }
               }
             }
-          }
-          if (state && state.status === "error") {
-            push(`  error: ${JSON.stringify(state.error ?? state).slice(0, 300)}`);
+            if (state && state.status === "error") {
+              emit(`  error: ${JSON.stringify(state.error ?? state).slice(0, 300)}`);
+            }
           }
         }
       }
     }
   }
-  return out.join("\n").slice(0, totalCap);
+  const head = digest ? "(combined digest of the backlog; re-read files as needed)\n" : "";
+  const tail = omitted > 0 ? `\n… (${omitted} message(s) omitted)` : "";
+  return head + out.join("\n") + tail;
 }
 
 // Handles one turn-terminal event. Never throws; resolve failures skip
@@ -951,7 +978,8 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
     await writeCursor(ctx, sessionID, { count: cursor.count, turns });
     return;
   }
-  const delta = renderDelta(fresh);
+  const digest = fresh.length > DELTA_DIGEST_THRESHOLD;
+  const delta = renderDelta(fresh, digest);
   if (delta.trim().length === 0) {
     await writeCursor(ctx, sessionID, { count: messages.length, turns });
     return;
@@ -1051,9 +1079,51 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
   }
 }
 
+// Debounce state: one pending timer per primary session, plus in-flight
+// and pending-review markers so a fired timer can never overlap a running
+// review for the same session (the guard the sidecar self-event filter
+// does not provide).
+const quietTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const reviewing = new Set<string>();
+const reviewQueued = new Set<string>();
+
+// Runs the review for one session unless one is already running; if so,
+// marks it queued and re-runs once the current review finishes.
+async function runScheduledReview(ctx: any, sessionID: string, interrupted: boolean): Promise<void> {
+  if (reviewing.has(sessionID)) {
+    reviewQueued.add(sessionID);
+    return;
+  }
+  reviewing.add(sessionID);
+  try {
+    await handleTurnEnd(ctx, sessionID, interrupted);
+  } catch {
+    // handleTurnEnd never throws; belt and braces.
+  } finally {
+    reviewing.delete(sessionID);
+    if (reviewQueued.delete(sessionID)) void runScheduledReview(ctx, sessionID, false);
+  }
+}
+
+// (Re)arms the quiet timer for a session; the review fires only once the
+// session has been quiet for watchQuietMs, so a fast burst becomes one
+// settled review instead of a lagging chain.
+async function scheduleReview(ctx: any, sessionID: string, interrupted: boolean): Promise<void> {
+  const live = await currentSettings(ctx);
+  if (!live.enabled || !live.watch) return;
+  const existing = quietTimers.get(sessionID);
+  if (existing) clearTimeout(existing);
+  const quietMs = live.watchQuietMs > 0 ? live.watchQuietMs : 0;
+  const timer = setTimeout(() => {
+    quietTimers.delete(sessionID);
+    void runScheduledReview(ctx, sessionID, interrupted);
+  }, quietMs);
+  quietTimers.set(sessionID, timer);
+}
+
 // Subscribes to turn-terminal events for the process lifetime. Returns a
-// cleanup that stops the loop (run on plugin unload so hot reloads never
-// double-subscribe).
+// cleanup that stops the loop and clears pending timers (run on unload so
+// hot reloads never double-subscribe or fire against a dead ctx).
 function startWatchLoop(ctx: any): () => void {
   const controller = new AbortController();
   void (async () => {
@@ -1065,7 +1135,11 @@ function startWatchLoop(ctx: any): () => void {
           const data = (event as any)?.data ?? {};
           const sessionID = typeof data.sessionID === "string" ? data.sessionID : (event as any)?.sessionID;
           if (typeof sessionID !== "string" || sessionID.length === 0) continue;
-          await handleTurnEnd(ctx, sessionID, type === "session.execution.interrupted");
+          // Ignore the sidecar sessions' own turn-ends up front.
+          if (sidecarSessions.has(sessionID)) continue;
+          // Debounce: arm/reset the quiet timer; the review runs when the
+          // session settles (or immediately when watchQuietMs is 0).
+          scheduleReview(ctx, sessionID, type === "session.execution.interrupted").catch(() => {});
         } catch {
           // Per-event failure: never break the loop.
         }
@@ -1074,7 +1148,11 @@ function startWatchLoop(ctx: any): () => void {
       // Aborted on cleanup.
     }
   })();
-  return () => controller.abort();
+  return () => {
+    controller.abort();
+    for (const timer of quietTimers.values()) clearTimeout(timer);
+    quietTimers.clear();
+  };
 }
 
 // Resolves free-typed model input to a "provider/model" id (or "auto").
@@ -1352,7 +1430,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
     if (!argStr) return usageText();
     const next = { ...live };
     let rest = argStr;
-    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval|watchStaleMessages|fallback)\s*=\s*\S+|$)/i.exec(argStr);
+    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval|watchStaleMessages|watchQuietMs|fallback)\s*=\s*\S+|$)/i.exec(argStr);
     if (modelMatch) {
       rest = rest.replace(modelMatch[0], " ");
       const resolved = await resolveModelInput(ctx, (modelMatch[1] || "").trim());
@@ -1424,6 +1502,15 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
         return `Bad watchStaleMessages "${staleMatch[1]}". Use a non-negative integer (0 disables).\n\n${usageText()}`;
       }
       next.watchStaleMessages = n;
+    }
+    const quietMatch = /(?:^|\s)watchQuietMs\s*=\s*(\S+)/i.exec(argStr);
+    if (quietMatch) {
+      rest = rest.replace(quietMatch[0], " ");
+      const n = Number(quietMatch[1]);
+      if (!Number.isInteger(n) || n < 0) {
+        return `Bad watchQuietMs "${quietMatch[1]}". Use a non-negative integer (milliseconds; 0 reviews immediately).\n\n${usageText()}`;
+      }
+      next.watchQuietMs = n;
     }
     const fallbackMatch = /(?:^|\s)fallback\s*=\s*(\S+)/i.exec(argStr);
     if (fallbackMatch) {
@@ -1553,6 +1640,12 @@ export default Plugin.define({
             (opts.watchStaleMessages as number) >= 0
               ? (opts.watchStaleMessages as number)
               : DEFAULT_SETTINGS.watchStaleMessages,
+          watchQuietMs:
+            typeof opts.watchQuietMs === "number" &&
+            Number.isInteger(opts.watchQuietMs) &&
+            (opts.watchQuietMs as number) >= 0
+              ? (opts.watchQuietMs as number)
+              : DEFAULT_SETTINGS.watchQuietMs,
         });
       }
     } catch {
