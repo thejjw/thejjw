@@ -1,23 +1,15 @@
 # Changelog
 
-## 0.1.2
-
-- New `advisor_ctl` tool: /advisor parsing, validation, and config edits
-  run in code; the command template only relays the tool result.
-- The model no longer edits the config file itself.
-
-- Removed command-output interception: hook-set output is ignored for
-  TUI-invoked commands, so `/advisor` is now a plain model-executed
-  template that reads/edits our tuple directly.
-- The tool re-reads settings from disk on every call; `/advisor` changes
-  apply with no restart.
-
 ## 0.1.0
 
-- Initial local copy. Behavior matches `@u007/opencode-advisor` 1.2.3 except:
+- Initial local copy, based on `@u007/opencode-advisor` 1.2.3 behavior.
 - No hardcoded default model: with no advisor model configured, the tool
   reuses the calling session's active model.
-- New `/advisor [on|off|status|configure]` command; settings persist in the
-  existing user opencode config, no extra files.
+- New `advisor_ctl` tool: /advisor parsing, validation, and config edits
+  run in code; the `/advisor` command template only relays the tool
+  result. (A command-output hook was tried first; hook output is ignored
+  for TUI-invoked commands on current opencode, so the hook was removed.)
+- Settings re-read from disk on every tool call; control changes apply
+  with no restart.
 - Installer rewritten as plain Node.js (no bun), minimal scope.
 - Dropped: `/btw` command, mempalace, bundled prompt templates.

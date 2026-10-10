@@ -7,13 +7,25 @@ import path from "node:path";
 // guidance) plus the advisor_ctl tool (programmatic management: status,
 // on/off/configure, implemented in code). /advisor is a thin command
 // template (commands/advisor.md) that tells the model to call advisor_ctl
-// and relay its result: hook-set command output is ignored for TUI-invoked
-// commands in current opencode, so all /advisor logic lives in the tool,
-// not in a hook. The advisor tool re-reads settings from disk on every
+// and relay its result.
+//
+// Why not intercept the command from the plugin? command.execute.before
+// DOES fire for TUI-invoked slash commands, but its output is ignored:
+// traced live on opencode 1.18.35, the hook ran to completion, built the
+// exact 72-byte status reply, assigned output.parts without error, and the
+// default template path ran anyway. Upstream confirms the gap: the hook can
+// only mutate parts, never skip the following LLM turn (anomalyco/opencode
+// issues 25916, 28292, 18554; noReply plumbing PR 46579 still open). The
+// only workaround is throwing a sentinel error, which surfaces as a bogus
+// command failure, so we do not use it. If a later opencode honors hook
+// output, a 5-line hook calling applyCommand() restores interception; the
+// logic is already shaped for it.
+//
+// Consequences of the above: the tool re-reads settings from disk on every
 // call, so control changes apply without a restart.
 
 // Version of this copy. Reported by advisor_ctl status.
-const VERSION = "0.1.2";
+const VERSION = "0.1.0";
 
 // Suffix identifying our own plugin tuple in opencode.json(c). The installer
 // writes a file:// URL ending in this path, so matching on the suffix keeps
@@ -353,6 +365,8 @@ export const AdvisorPlugin: Plugin = async ({ client }, options) => {
       }
     },
     tool: {
+      // Programmatic control surface. A custom tool (not a command hook)
+      // because hook output cannot steer TUI-invoked commands (see header).
       advisor_ctl: tool({
         description:
           "Control the oc advisor plugin itself (status, on/off, configure). This manages the advisor; it is not the advisor. Call it when the user invokes /advisor, passing the words after /advisor as the action (empty means status), and relay its result back verbatim without adding anything.",
