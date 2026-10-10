@@ -27,11 +27,13 @@
 - Catalog reads unwrap the `{ location, data }` envelope returned by
   `model.list()`/`model.default()` (a bare array is also tolerated).
   The `models` listing is location-scoped to the calling session.
-- Installer targets the v2 `plugins` array with the package directory entry
-  (a root `index.ts` re-exports `src/advisor.ts`: v2 rejects file-path
-  entries with "configured plugin path must be a directory" and ignores
-  `package.json` `main` for local dirs) and migrates a legacy v1 `plugin`
-  tuple automatically.
+- Installer defaults to copy mode (snapshot into the global discovery
+  dir, no config entry, repo need not stay cloned) with `--reference`
+  for a live dev loop via a `plugins` entry; the two are mutually
+  exclusive. A root `index.ts` re-exports `src/advisor.ts` because v2
+  rejects file-path entries ("configured plugin path must be a
+  directory") and ignores `package.json` `main` for local dirs. Migrates
+  a legacy v1 `plugin` tuple automatically.
 - Dev: `@types/node` so `tsc` is clean.
 
 ## 0.1.0
