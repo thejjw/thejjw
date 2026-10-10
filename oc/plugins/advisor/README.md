@@ -1,17 +1,20 @@
 # oc advisor plugin
 
-Local OpenCode plugin that adds an `advisor` tool: a second model the
-executor can consult for a concise plan or course correction.
+Local OpenCode plugin that adds two tools: `advisor`, a second model the
+executor can consult for a concise plan or course correction, and
+`advisor_ctl`, which manages the plugin itself
+(status/on/off/models/thinking/watch/configure).
 
 Based on `@u007/opencode-advisor` (https://github.com/u007/opencode-advisor).
 Everything below describes this copy.
 
 ## How it works
 
-The plugin registers one tool, `advisor`, alongside the built-in tools. The
-executor decides on its own when to call it, following the timing rules in
-the tool description: before substantive work, when stuck, when changing
-approach, and before declaring done.
+The plugin registers two tools, `advisor` and `advisor_ctl`, alongside
+the built-in tools. The executor decides on its own when to call
+`advisor`, following the timing rules in the tool description: before
+substantive work, when stuck, when changing approach, and before
+declaring done. `advisor_ctl` backs the `/advisor` command.
 
 Each pull call creates an ephemeral `advisor-subcall` session, prompts
 the advisor model with a short reviewer system prompt plus the
@@ -38,13 +41,15 @@ src/advisor.ts        The whole plugin: tools, watch loop, settings
 commands/advisor.md   /advisor command template (installed globally)
 scripts/install.mjs   Minimal installer (plain Node.js)
 README.md / CHANGELOG.md
+PLAN.md               Design/planning notes (working doc, not a spec)
 ```
 
 ## Model selection
 
 With no advisor model configured, the tool reuses the calling session's
 active model (read directly from the session, so a mid-session `/models`
-switch is honored). There is no built-in default model.
+switch is honored). There is no advisor-specific default model; the last
+resort is the global default model.
 
 `/advisor configure model=` accepts an exact `provider/model` id, a
 display name as shown in `/models`, a substring of either, or `auto`.
@@ -159,7 +164,9 @@ sessions if cost matters.
 
 A `WATCHDOG.md` file is advisor-only guidance: review priorities,
 project traps, and quality bars too noisy for the main executor. The
-plugin walks from the session directory up to the git root (plus a
+plugin walks from the session directory up to the git root (stopping at
+the git root or home, checking both `WATCHDOG.md` and
+`.opencode/WATCHDOG.md` at each level; plus a
 user-level `~/.config/opencode/WATCHDOG.md`), appending what it finds
 to the advisor prompt as `<attention>` blocks. It never enters the
 executor's context. Files over 8KB are skipped (at most 6 files);
