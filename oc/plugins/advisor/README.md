@@ -39,6 +39,13 @@ active model (read from the newest message carrying model info, so a
 mid-session `/models` switch is honored). There is no built-in default
 model.
 
+`/advisor configure model=` accepts an exact `provider/model` id, a
+display name as shown in `/models` (e.g. `DeepSeek V4.1 Flash`), a
+substring of either, or `auto`. Matching runs in code against every
+configured provider: an unambiguous match applies, multiple matches
+return a pick list, and no match names `opencode models` for exact ids.
+`enabled=` accepts `on`/`off` in any order relative to `model=`.
+
 Precedence for one call, lowest to highest:
 
 1. Calling session's active model, else the global default model.

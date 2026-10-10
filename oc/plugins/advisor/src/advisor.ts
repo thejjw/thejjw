@@ -191,15 +191,75 @@ function usageText(): string {
     "  on       Enable the advisor.",
     "  off      Disable the advisor (the tool answers with a disabled notice).",
     "  status   Show current state.",
-    "  configure [model=<provider/model|auto>] [enabled=on|off]",
-    "           With no args, shows current settings. Empty model means auto.",
+    "  configure [model=<id|name|auto>] [enabled=on|off]",
+    "           model accepts an exact provider/model id, a display name,",
+    "           or a substring (unambiguous match applies, else a pick",
+    "           list). Empty model means auto.",
   ].join("\n");
+}
+
+// One configured model candidate: provider/model id plus the display name
+// the TUI shows (e.g. "Muse Spark 1.3 Free"), so users can type either.
+type ModelCandidate = { providerID: string; modelID: string; name: string };
+
+// All models of all configured providers, via client.config.providers().
+// Empty when unreachable (caller falls back to verbatim input).
+async function listModels(client: any): Promise<ModelCandidate[]> {
+  try {
+    const res = await client.config.providers();
+    const providers = res?.data?.providers ?? res?.providers ?? [];
+    const out: ModelCandidate[] = [];
+    for (const provider of providers) {
+      const models = provider?.models ?? {};
+      for (const [key, model] of Object.entries(models) as Array<[string, any]>) {
+        out.push({
+          providerID: provider.id ?? model?.providerID ?? "",
+          modelID: model?.id ?? key,
+          name: model?.name ?? "",
+        });
+      }
+    }
+    return out.filter((m) => m.providerID && m.modelID);
+  } catch {
+    return [];
+  }
+}
+
+// Resolves free-typed model input to a "provider/model" id (or "auto").
+// Exact ids apply directly; anything else fuzzy-matches id and display
+// name case-insensitively. Returns the id to store, or an error message
+// (with a pick list when ambiguous). Never throws.
+async function resolveModelInput(client: any, value: string): Promise<{ id: string } | { error: string }> {
+  const text = (value || "").trim();
+  if (text.length === 0 || text.toLowerCase() === "auto") return { id: "auto" };
+  const candidates = await listModels(client);
+  const lower = text.toLowerCase();
+  const exact = candidates.find((m) => `${m.providerID}/${m.modelID}`.toLowerCase() === lower);
+  if (exact) return { id: `${exact.providerID}/${exact.modelID}` };
+  if (candidates.length === 0) {
+    // Provider list unreachable: accept verbatim rather than blocking.
+    if (text.includes("/")) return { id: text };
+    return { error: `Bad model "${text}". Use provider/model or auto.` };
+  }
+  const hits = candidates.filter(
+    (m) => `${m.providerID}/${m.modelID}`.toLowerCase().includes(lower) || m.name.toLowerCase().includes(lower),
+  );
+  if (hits.length === 1) return { id: `${hits[0].providerID}/${hits[0].modelID}` };
+  if (hits.length > 1) {
+    const shown = hits
+      .slice(0, 8)
+      .map((m) => `  ${m.providerID}/${m.modelID}${m.name ? ` (${m.name})` : ""}`)
+      .join("\n");
+    const more = hits.length > 8 ? `\n  ...and ${hits.length - 8} more` : "";
+    return { error: `"${text}" matches ${hits.length} models, be more specific:\n${shown}${more}` };
+  }
+  return { error: `No model matches "${text}". Run \`opencode models\` for exact provider/model ids, or use auto.` };
 }
 
 // Applies one control command (on|off|status|configure ...) in code and
 // returns the exact reply text. This backs the advisor_ctl tool, which the
 // /advisor template invokes.
-function applyCommand(rawArgs: string): string {
+async function applyCommand(client: any, rawArgs: string): Promise<string> {
   const tokens = (rawArgs || "")
     .trim()
     .split(/\s+/)
@@ -218,31 +278,30 @@ function applyCommand(rawArgs: string): string {
   }
   if (sub === "status") return statusText(live);
   if (sub === "configure") {
-    if (tokens.length === 1) return `${statusText(live)}\n\n${usageText()}`;
+    // Rejoin: display names contain spaces, so model= consumes everything
+    // up to an enabled= clause or the end, in any order.
+    const argStr = tokens.slice(1).join(" ");
+    if (!argStr) return `${statusText(live)}\n\n${usageText()}`;
     const next = { ...live };
-    for (const token of tokens.slice(1)) {
-      const eq = token.indexOf("=");
-      if (eq === -1) return `Unknown option "${token}".\n\n${usageText()}`;
-      const key = token.slice(0, eq).toLowerCase();
-      const value = token.slice(eq + 1);
-      if (key === "model") {
-        if (value.length === 0 || value.toLowerCase() === "auto") {
-          next.model = "auto";
-        } else if (value.includes("/")) {
-          next.model = value;
-        } else {
-          return `Bad model "${value}". Use provider/model or auto.\n\n${usageText()}`;
-        }
-      } else if (key === "enabled") {
-        if (value.toLowerCase() === "on") next.enabled = true;
-        else if (value.toLowerCase() === "off") next.enabled = false;
-        else return `Bad enabled value "${value}". Use on or off.\n\n${usageText()}`;
-      } else {
-        return `Unknown option "${key}".\n\n${usageText()}`;
-      }
+    let rest = argStr;
+    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+enabled\s*=\s*\S+|$)/i.exec(argStr);
+    if (modelMatch) {
+      rest = rest.replace(modelMatch[0], " ");
+      const resolved = await resolveModelInput(client, (modelMatch[1] || "").trim());
+      if ("error" in resolved) return `${resolved.error}\n\n${usageText()}`;
+      next.model = resolved.id;
     }
+    const enabledMatch = /(?:^|\s)enabled\s*=\s*(\S+)/i.exec(argStr);
+    if (enabledMatch) {
+      rest = rest.replace(enabledMatch[0], " ");
+      const value = enabledMatch[1].toLowerCase();
+      if (value === "on") next.enabled = true;
+      else if (value === "off") next.enabled = false;
+      else return `Bad enabled value "${enabledMatch[1]}". Use on or off.\n\n${usageText()}`;
+    }
+    if (rest.trim().length > 0) return `Unknown option "${rest.trim()}".\n\n${usageText()}`;
     const err = writeOwnOptions(next);
-    if (err) return `Not saved: ${err}\n\n${usageText()}`;
+    if (err) return `Error: not saved: ${err}`;
     return `Saved.\n${statusText(next)}`;
   }
   return usageText();
@@ -374,7 +433,7 @@ export const AdvisorPlugin: Plugin = async ({ client }, options) => {
           action: tool.schema.string().default(""),
         },
         async execute(args: any) {
-          return applyCommand(typeof args.action === "string" ? args.action : "");
+          return applyCommand(client, typeof args.action === "string" ? args.action : "");
         },
       }),
       advisor: tool({
