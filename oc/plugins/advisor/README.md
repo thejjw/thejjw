@@ -13,20 +13,28 @@ executor decides on its own when to call it, following the timing rules in
 the tool description: before substantive work, when stuck, when changing
 approach, and before declaring done.
 
-Each call creates an ephemeral `advisor-subcall` session, prompts the
-advisor model with a short reviewer system prompt plus the caller-supplied
-context, returns the text answer as the tool result, then deletes the
-session. A recursion guard stops the advisor model from calling back into
-the tool.
+Each pull call creates an ephemeral `advisor-subcall` session, prompts
+the advisor model with a short reviewer system prompt plus the
+caller-supplied context, returns the text answer as the tool result,
+then deletes the session. A recursion guard stops the advisor model
+from calling back into the tool.
 
-Nothing watches in the background. There are no hardcoded agent names and
-no dependency on the routing config in `oc/opencode-routing`.
+Separately, watch mode reviews primary turn boundaries on its own
+(see Watch mode below): execution-end events snapshot the transcript
+delta into an ephemeral investigative sidecar, which reports back as
+severity-tagged notes. Pull and push share the model resolution,
+thinking, fallback, and guidance machinery.
+
+There are no hardcoded agent names and no dependency on the routing
+config in `oc/opencode-routing`.
 
 ## Layout
 
 ```
 package.json          Local package (private, never published)
-src/advisor.ts        The whole plugin: tool, /advisor command, settings
+index.ts              V2 package entrypoint (re-exports src/advisor.ts;
+                      local dirs resolve at the package root)
+src/advisor.ts        The whole plugin: tools, watch loop, settings
 commands/advisor.md   /advisor command template (installed globally)
 scripts/install.mjs   Minimal installer (plain Node.js)
 README.md / CHANGELOG.md
@@ -54,7 +62,8 @@ Precedence for one call, lowest to highest:
 
 1. Calling session's active model (plus its variant when thinking is
    `auto`), else the global default model.
-2. Advisor settings (`/advisor configure model=... thinking=...`).
+2. Advisor settings (`/advisor configure model=... thinking=...`); a
+   stale configured model walks `fallback` in order before failing.
 3. Environment (`OPENCODE_ADVISOR_MODEL` as `provider/model[#variant]`,
    or `OPENCODE_ADVISOR_PROVIDER` plus `OPENCODE_ADVISOR_MODEL`, plus
    optional `OPENCODE_ADVISOR_VARIANT`).
@@ -97,12 +106,22 @@ listing) runs in code inside the tool — the model only relays or, for
 - `/advisor thinking` — lists valid thinking variants for the advisor model.
 - `/advisor on` / `/advisor off` — set `"enabled"`. While disabled the
   advisor tool stays registered but answers with a disabled notice
-  instead of calling a model (no cost).
-- `/advisor configure [model=<...>] [thinking=<...>] [enabled=on|off]` —
+  instead of calling a model (no cost). Watch reviews are also gated
+  on `enabled`.
+- `/advisor configure [model=<...>] [thinking=<...>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [fallback=<id>,...|none]` —
   invalid input is rejected with usage and changes nothing.
 
 `advisor_ctl` is a regular plugin tool, so it also works wherever tools
 work.
+
+## Settings
+
+Settings live in plugin storage (durable, scoped to this plugin), seeded
+once from the plugin options on first run. Afterwards `/advisor configure`
+is the source of truth; editing config options directly has no effect
+until storage is cleared. No settings are written into `opencode.json(c)`
+beyond the plugin entry itself. Watch cursors, cooldowns, and the last
+delivery record live in the same storage.
 
 ## Watch mode (automatic reviews)
 
@@ -113,7 +132,9 @@ sidecar — a short tool loop with read/grep/glob under deny-by-default
 session permissions, so findings are verified against the workspace —
 then delivers severity-tagged notes back: `[nit]` findings as
 record-only notes that never wake the agent, `[concern]`/`[blocker]`
-as new turns. Silence (`NO_CONCERNS`) delivers nothing.
+as new turns — except on user-interrupted turns, where everything
+stays record-only (never re-wake a user who just stopped the agent).
+Silence (`NO_CONCERNS`) delivers nothing.
 
 An emission guard (normalization, noise-phrase filter, rank-aware
 dedupe where escalations re-admit, budget of 4 non-blocker findings per
@@ -141,8 +162,8 @@ project traps, and quality bars too noisy for the main executor. The
 plugin walks from the session directory up to the git root (plus a
 user-level `~/.config/opencode/WATCHDOG.md`), appending what it finds
 to the advisor prompt as `<attention>` blocks. It never enters the
-executor's context. Files over 8KB are skipped; `@`-imports are not
-expanded.
+executor's context. Files over 8KB are skipped (at most 6 files);
+`@`-imports are not expanded.
 
 ## Model fallback chain
 
@@ -156,12 +177,6 @@ you to reconfigure.
 
 - `/advisor configure fallback=<id>,...` — validated like `model=`;
   `fallback=none` clears the chain.
-
-Settings live in plugin storage (durable, scoped to this plugin), seeded
-once from the plugin options on first run. Afterwards `/advisor configure`
-is the source of truth; editing config options directly has no effect
-until storage is cleared. No settings are written into `opencode.json(c)`
-beyond the plugin entry itself.
 
 ## Install
 
@@ -181,8 +196,9 @@ in `--status`), removes any config entry for mutual exclusion, and copies
 `commands/advisor.md` into the global commands dir.
 
 `--reference` instead writes a config `plugins` entry pointing at this
-repo for a live dev loop (repo edits go live on restart, no reinstall).
-A legacy v1 `plugin` tuple is migrated automatically in either mode.
+repo for a live dev loop (repo edits go live via hot reload or restart,
+no reinstall). A legacy v1 `plugin` tuple is migrated automatically in
+either mode.
 
 A v2 config entry must be a directory: local dirs resolve at the package
 root, so the package ships a root `index.ts` that re-exports
@@ -198,8 +214,9 @@ before every write.
 ## Versioning
 
 See `CHANGELOG.md`. Version `0.2.0` ports the plugin to the OpenCode v2
-plugin API (`@opencode/plugin`, `Plugin.define`) and adds thinking-level
-support via catalog variants. The v1 implementation (OpenCode 1.x,
+plugin API (`@opencode/plugin`, `Plugin.define`), adds thinking-level
+support via catalog variants, and adds push-style watch-mode reviews
+alongside the pull-style tool. The v1 implementation (OpenCode 1.x,
 `@opencode-ai/*`) is preserved in git history.
 
 ## License

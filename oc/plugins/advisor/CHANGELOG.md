@@ -38,6 +38,10 @@
   budget of 4 non-blockers per review (blockers exempt).
 - Post-steer cooldown: concerns ride record-only for 3 turns
   (blockers exempt).
+- `/advisor status` reports the last auto-review delivery (time,
+  severity, first-line preview) from plugin storage.
+- A literal per-call `variant=auto` normalizes to omitted (catalog
+  default) instead of reaching the request as an unknown variant id.
 - Reviewer-only `WATCHDOG.md` guidance (session dir up to git root plus
   user level, `<attention>` blocks, executor never sees it).
 - Model `fallback` chain for stale configured models (ordered,

@@ -1,5 +1,5 @@
 ---
-description: Manage the oc advisor plugin (on/off/status/models/thinking/configure).
+description: Manage the oc advisor plugin (on/off/status/models/thinking/watch/configure).
 ---
 
 Call the advisor_ctl tool with the words after /advisor as its action
