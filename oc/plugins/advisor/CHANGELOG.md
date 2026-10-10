@@ -24,6 +24,9 @@
 - Advisor subcall uses transient `session.generate` (no history) with the
   model+variant set at `session.create`; server failures return an
   `Error:` message instead of propagating an exception.
+- Catalog reads unwrap the `{ location, data }` envelope returned by
+  `model.list()`/`model.default()` (a bare array is also tolerated).
+  The `models` listing is location-scoped to the calling session.
 - Installer targets the v2 `plugins` array with the package directory entry
   (a root `index.ts` re-exports `src/advisor.ts`: v2 rejects file-path
   entries with "configured plugin path must be a directory" and ignores

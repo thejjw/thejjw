@@ -174,10 +174,14 @@ function usageText(): string {
   ].join("\n");
 }
 
-// All catalog models via ctx.model.list(). Empty when unreachable.
-async function listModels(ctx: any): Promise<ModelCandidate[]> {
+// All catalog models via ctx.model.list(). The call returns a
+// { location, data } envelope (a bare array is also tolerated). Empty
+// when unreachable. A model counts as free when its name mentions free
+// or every cost tier is zero input+output.
+async function listModels(ctx: any, directory?: string): Promise<ModelCandidate[]> {
   try {
-    const models = await ctx.model.list();
+    const res = directory ? await ctx.model.list({ location: { directory } }) : await ctx.model.list();
+    const models = Array.isArray(res) ? res : (res?.data ?? []);
     const out: ModelCandidate[] = [];
     for (const model of models ?? []) {
       const costs = Array.isArray(model?.cost) ? model.cost : [];
@@ -459,7 +463,8 @@ async function resolveModel(
     }
   }
   try {
-    const def = await ctx.model.default();
+    const res = await ctx.model.default();
+    const def = res?.data ?? res;
     if (def && def.providerID && def.modelID) {
       return { providerID: def.providerID, modelID: def.modelID, source: "global default model" };
     }
@@ -491,17 +496,19 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
   }
   if (sub === "status") return statusText(live, env);
   if (sub === "models") {
-    const candidates = await listModels(ctx);
     let executor: string | null = null;
+    let dir: string | null = null;
     if (typeof sessionID === "string" && sessionID.length > 0) {
       const active = await sessionModelRef(ctx, sessionID);
       if (active) executor = `${active.providerID}/${active.modelID}${active.variant ? `#${active.variant}` : ""}`;
+      dir = await sessionDirectory(ctx, sessionID);
     }
+    // Location-scoped catalog: list models visible at the calling
+    // session's directory so the pick matches what the advisor can use.
+    const candidates = await listModels(ctx, dir ?? undefined);
     if (candidates.length === 0) return modelsDumpFallback();
     // Calling session directory first, plugin location next, cwd last. A
     // failed write falls back to the model-run dump.
-    let dir: string | null = null;
-    if (typeof sessionID === "string" && sessionID.length > 0) dir = await sessionDirectory(ctx, sessionID);
     if (!dir && typeof ctx?.location?.directory === "string" && ctx.location.directory.length > 0) {
       dir = ctx.location.directory;
     }
