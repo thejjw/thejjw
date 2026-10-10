@@ -9570,13 +9570,13 @@ function Install-AiTools {
         Install-OmpSettings @ompArgs
     }
 
-    # Install opencode via npm (not winget) so the package is managed by npm
+    # Install opencode via npm (@opencode/cli, not winget) so the package is managed by npm
     # and the native `opencode upgrade` command works as upstream intended.
     if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
-        Write-Host "opencode CLI not found; installing via 'npm install -g opencode-ai'..." -ForegroundColor Yellow
-        & npm install -g opencode-ai
+        Write-Host "opencode CLI not found; installing via 'npm install -g @opencode/cli'..." -ForegroundColor Yellow
+        & npm install -g '@opencode/cli'
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Failed to install opencode-ai with npm exit code $LASTEXITCODE."
+            Write-Warning "Failed to install @opencode/cli with npm exit code $LASTEXITCODE."
         }
     }
 
@@ -10347,7 +10347,7 @@ function Invoke-AiUpgrade {
 
     # npm stage: update all npm-installed managed packages in one command.
     # Candidates come from the Install-AiTools npm lists (single source of
-    # truth). opencode-ai is deliberately excluded: the native
+    # truth). @opencode/cli is deliberately excluded: the native
     # 'opencode upgrade' command above owns its updates.
     if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
         Write-Host '>>> npm: skipped (npm is not available).' -ForegroundColor Yellow

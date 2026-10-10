@@ -559,12 +559,12 @@ Describe 'Install-AiTools npm packages' {
                 $global:LASTEXITCODE = $response.ExitCode
                 return $response.Json
             }
-            $global:LASTEXITCODE = if ($callArgs -contains 'opencode-ai') { 8 } else { 0 }
+            $global:LASTEXITCODE = if ($callArgs -contains '@opencode/cli') { 8 } else { 0 }
         }
 
         Install-AiTools -Auto
 
-        Should -Invoke Write-Warning -ParameterFilter { $Message -eq 'Failed to install opencode-ai with npm exit code 8.' }
+        Should -Invoke Write-Warning -ParameterFilter { $Message -eq 'Failed to install @opencode/cli with npm exit code 8.' }
     }
 
     It 'removes interactively entered package ids from the pending lists' {
