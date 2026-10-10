@@ -1056,7 +1056,6 @@ $_OpenCodeInternal = @{
     RepoUrl         = 'https://github.com/thejjw/thejjw.git'
     PluginPath      = 'oc/plugins/oc-advisor'
     InstallerRel    = 'scripts\install.mjs'
-    ConfigDir       = '.config\opencode'
     CopyRel         = '.config\opencode\plugins\oc-advisor'
     DefaultRef      = 'main'
     DefaultCloneDir = Join-Path ([System.IO.Path]::GetTempPath()) 'opencode\oc-advisor-clone'
