@@ -58,15 +58,19 @@ Precedence for one call, lowest to highest:
 
 `/advisor` is a thin template (`commands/advisor.md`): it tells the model
 to call the `advisor_ctl` tool with the words after `/advisor` and relay
-the result verbatim. All logic (parsing, validation, config edit) runs in
-code inside the tool — the model only relays. (An earlier revision tried
+the result verbatim (unless the result itself asks for a recommendation,
+as `models` does). All logic (parsing, validation, config edit, model
+listing) runs in code inside the tool — the model only relays or, for
+`models`, recommends per the returned criteria. (An earlier revision tried
 intercepting the command from the plugin, but hook-set command output is
 ignored for TUI-invoked commands, so the interception was removed.)
 
 - `/advisor` or `/advisor status` — report enabled/disabled and model.
-- `/advisor models` — handled by the command template, not the tool:
-  dumps `opencode models` to `models_<timestamp>.txt` in the workspace
-  and recommends 4-5, preferring compatibility-tested providers.
+- `/advisor models` — handled by the tool: writes available models to
+  `models_<timestamp>.txt` in the workspace via the provider API (falling
+  back to an `opencode models` dump run by the model when unreachable),
+  then reads the file back and recommends 4-5. You browse the file and
+  decide; the recommendation is input, not the decision.
 - `/advisor on` / `/advisor off` — set `"enabled"`. While disabled the
   advisor tool stays registered but answers with a disabled notice
   instead of calling a model (no cost).

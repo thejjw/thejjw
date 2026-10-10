@@ -53,6 +53,10 @@ let initOptions: { enabled?: boolean; model?: string } = {};
 // Last resort when nothing else resolves a model.
 let globalDefaultModel = "";
 
+// Workspace directory captured at plugin init. Fallback for the models
+// dump file when the tool call carries no per-call directory.
+let workspaceDir = "";
+
 // Guard against the advisor model calling back into the advisor tool.
 let inAdvisorCall = false;
 
@@ -191,8 +195,7 @@ function usageText(): string {
     "  on       Enable the advisor.",
     "  off      Disable the advisor (the tool answers with a disabled notice).",
     "  status   Show current state.",
-    "  models   Handled by the command template (dumps opencode models to",
-    "           a file, model recommends 4-5). Not a tool action.",
+    "  models   List available models and recommend 4-5 as the advisor model.",
     "  configure [model=<id|name|auto>] [enabled=on|off]",
     "           model accepts an exact provider/model id, a display name,",
     "           or a substring (unambiguous match applies, else a pick",
@@ -202,10 +205,20 @@ function usageText(): string {
 
 // One configured model candidate: provider/model id plus the display name
 // the TUI shows (e.g. "Muse Spark 1.3 Free"), so users can type either.
-type ModelCandidate = { providerID: string; modelID: string; name: string };
+// Cost, reasoning, context and status feed the /advisor models pick.
+type ModelCandidate = {
+  providerID: string;
+  modelID: string;
+  name: string;
+  free: boolean;
+  reasoning: boolean;
+  context: number;
+  status: string;
+};
 
 // All models of all configured providers, via client.config.providers().
-// Empty when unreachable (caller falls back to verbatim input).
+// Empty when unreachable (callers fall back). A model counts as free when
+// its name mentions free or its input+output cost is zero.
 async function listModels(client: any): Promise<ModelCandidate[]> {
   try {
     const res = await client.config.providers();
@@ -214,10 +227,18 @@ async function listModels(client: any): Promise<ModelCandidate[]> {
     for (const provider of providers) {
       const models = provider?.models ?? {};
       for (const [key, model] of Object.entries(models) as Array<[string, any]>) {
+        const cost = model?.cost ?? {};
+        const input = typeof cost.input === "number" ? cost.input : NaN;
+        const output = typeof cost.output === "number" ? cost.output : NaN;
+        const name = model?.name ?? "";
         out.push({
           providerID: provider.id ?? model?.providerID ?? "",
           modelID: model?.id ?? key,
-          name: model?.name ?? "",
+          name,
+          free: /free/i.test(name) || (input === 0 && output === 0),
+          reasoning: model?.capabilities?.reasoning === true,
+          context: typeof model?.limit?.context === "number" ? model.limit.context : 0,
+          status: typeof model?.status === "string" ? model.status : "",
         });
       }
     }
@@ -225,6 +246,94 @@ async function listModels(client: any): Promise<ModelCandidate[]> {
   } catch {
     return [];
   }
+}
+
+// Pick criteria for /advisor models, moved here from the old command
+// template so every other /advisor call stays terse. Shared by the file
+// dump fallback and the compact summary.
+const MODELS_CRITERIA: string[] = [
+  "What makes a good advisor: it must rank at or above the main executor",
+  "model, so it catches what the doer rushes past. Strong reasoning and",
+  "instruction-following matter more than speed, and occasional use keeps",
+  "a premium model still affordable. For providers, prefer opencode-go",
+  "first (subscription, use-or-waste), then consider opencode/ providers",
+  "(compatibility-tested). Include one or two free models when available.",
+];
+
+// Timestamp like 20261010-201500 for the models dump filename.
+function dumpTimestamp(): string {
+  const now = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+}
+
+// Candidates grouped by provider, one header per provider plus one line
+// per model. Used for the dump file the user browses.
+function formatModelLines(candidates: ModelCandidate[]): string[] {
+  const byProvider = new Map<string, ModelCandidate[]>();
+  for (const m of candidates) {
+    const list = byProvider.get(m.providerID) ?? [];
+    list.push(m);
+    byProvider.set(m.providerID, list);
+  }
+  const lines: string[] = [];
+  for (const [providerID, list] of [...byProvider.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    lines.push(`${providerID} (${list.length}):`);
+    for (const m of list.sort((a, b) => a.modelID.localeCompare(b.modelID))) {
+      const tags: string[] = [];
+      if (m.name && m.name !== m.modelID) tags.push(m.name);
+      if (m.free) tags.push("free");
+      if (m.reasoning) tags.push("reasoning");
+      if (m.status && m.status !== "active") tags.push(m.status);
+      lines.push(`  ${m.providerID}/${m.modelID}${tags.length > 0 ? ` (${tags.join(", ")})` : ""}`);
+    }
+  }
+  return lines;
+}
+
+// Full text of the models dump file: counts stay out of the chat, detail
+// lives in the file for the user to investigate.
+function modelsFileText(candidates: ModelCandidate[]): string {
+  return [`Available models (${candidates.length}):`, ...formatModelLines(candidates)].join("\n");
+}
+
+// Per-provider counts on one line, e.g. "google (38), opencode-go (31)".
+function modelsCounts(candidates: ModelCandidate[]): string {
+  const counts = new Map<string, number>();
+  for (const m of candidates) counts.set(m.providerID, (counts.get(m.providerID) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([id, n]) => `${id} (${n})`).join(", ");
+}
+
+// Fallback when the provider API is unreachable or the dump file cannot
+// be written: the calling model runs the dump itself, same as the old
+// template behavior.
+function modelsDumpFallback(): string {
+  return [
+    "Could not list models via the provider API.",
+    "Run `opencode models > models_<timestamp>.txt` in the workspace root",
+    "(timestamp like 20261010-201500 from the current date and time), read",
+    "the file back, and recommend 4-5 as the advisor model.",
+    "",
+    ...MODELS_CRITERIA,
+    "Present your picks with one-line reasons and exact ids ready",
+    "for /advisor configure model=<id>.",
+  ].join("\n");
+}
+
+// Compact /advisor models reply: file path, counts, executor baseline and
+// criteria, plus an instruction to read the file. Detail lines stay out so
+// the model actually reads the file and the transcript stays terse.
+function modelsSummary(candidates: ModelCandidate[], executor: string | null, file: string): string {
+  return [
+    `Wrote ${candidates.length} models to ${file}.`,
+    `By provider: ${modelsCounts(candidates)}.`,
+    ...(executor ? [`Current executor model: ${executor}.`] : []),
+    "",
+    ...MODELS_CRITERIA,
+    "",
+    `Read ${file} and recommend 4-5 as the advisor model: give one-line`,
+    "reasons and exact ids ready for /advisor configure model=<id>.",
+  ].join("\n");
 }
 
 // Resolves free-typed model input to a "provider/model" id (or "auto").
@@ -258,10 +367,11 @@ async function resolveModelInput(client: any, value: string): Promise<{ id: stri
   return { error: `No model matches "${text}". Run \`opencode models\` for exact provider/model ids, or use auto.` };
 }
 
-// Applies one control command (on|off|status|configure ...) in code and
-// returns the exact reply text. This backs the advisor_ctl tool, which the
-// /advisor template invokes.
-async function applyCommand(client: any, rawArgs: string): Promise<string> {
+// Applies one control command (on|off|status|models|configure ...) in code
+// and returns the exact reply text. This backs the advisor_ctl tool, which
+// the /advisor template invokes. Context is optional and only used to
+// resolve the executor baseline for the models pick.
+async function applyCommand(client: any, rawArgs: string, context?: any): Promise<string> {
   const tokens = (rawArgs || "")
     .trim()
     .split(/\s+/)
@@ -279,6 +389,30 @@ async function applyCommand(client: any, rawArgs: string): Promise<string> {
     return "Advisor disabled. The advisor tool will answer with a disabled notice until /advisor on.";
   }
   if (sub === "status") return statusText(live);
+  if (sub === "models") {
+    const candidates = await listModels(client);
+    let executor: string | null = null;
+    const sessionID = context?.sessionID;
+    if (typeof sessionID === "string" && sessionID.length > 0) {
+      const active = await sessionModel(client, sessionID);
+      if (active) executor = `${active.providerID}/${active.modelID}`;
+    }
+    if (candidates.length === 0) return modelsDumpFallback();
+    // Per-call session directory first, init-captured directory next,
+    // process.cwd() last. Never assume any of them exists: a failed write
+    // falls back to the model-run dump.
+    const dir =
+      typeof context?.directory === "string" && context.directory.length > 0
+        ? context.directory
+        : workspaceDir || (typeof process !== "undefined" && process.cwd ? process.cwd() : ".");
+    const file = path.join(dir, `models_${dumpTimestamp()}.txt`);
+    try {
+      fs.writeFileSync(file, modelsFileText(candidates), "utf8");
+    } catch {
+      return modelsDumpFallback();
+    }
+    return modelsSummary(candidates, executor, file);
+  }
   if (sub === "configure") {
     // Rejoin: display names contain spaces, so model= consumes everything
     // up to an enabled= clause or the end, in any order.
@@ -401,7 +535,8 @@ Required tool arg \`prompt\` must include all context the advisor needs for this
 
 Give the advice serious weight. Only override if you have primary-source evidence that contradicts a specific claim. Surface conflicts in another advisor call rather than silently switching approaches.`;
 
-export const AdvisorPlugin: Plugin = async ({ client }, options) => {
+export const AdvisorPlugin: Plugin = async ({ client, directory }, options) => {
+  if (typeof directory === "string" && directory.length > 0) workspaceDir = directory;
   if (options && typeof options === "object") {
     applyOptions(options as Record<string, unknown>);
   }
@@ -430,12 +565,12 @@ export const AdvisorPlugin: Plugin = async ({ client }, options) => {
       // because hook output cannot steer TUI-invoked commands (see header).
       advisor_ctl: tool({
         description:
-          "Control the oc advisor plugin itself (status, on/off, configure). This manages the advisor; it is not the advisor. Call it when the user invokes /advisor, passing the words after /advisor as the action (empty means status), and relay its result back verbatim without adding anything.",
+          "Control the oc advisor plugin itself (status, on/off, models, configure). This manages the advisor; it is not the advisor. Call it when the user invokes /advisor, passing the words after /advisor as the action (empty means status), and relay its result back verbatim without adding anything, unless the result itself asks for a recommendation (models) - then follow it.",
         args: {
           action: tool.schema.string().default(""),
         },
-        async execute(args: any) {
-          return applyCommand(client, typeof args.action === "string" ? args.action : "");
+        async execute(args: any, context: any) {
+          return applyCommand(client, typeof args.action === "string" ? args.action : "", context);
         },
       }),
       advisor: tool({
