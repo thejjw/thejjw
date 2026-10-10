@@ -3859,9 +3859,8 @@ not provided, a random human-readable name is generated. The command then
 changes the current location to the newly created directory.
 
 Optional switches allow initializing a git repository with a synthetic local
-identity and creating basic agent documentation files (AGENTS.md, etc). With
-both -Git and -Agents, the generated AGENTS.md is recorded as the repository's
-initial commit.
+identity and writing the canonical AGENTS.md file. With both -Git and -Agents,
+the generated AGENTS.md is recorded as the repository's initial commit.
 
 .PARAMETER BasePath
 The parent directory where the new directory will be created.
@@ -3869,6 +3868,8 @@ Defaults to the current location.
 
 .PARAMETER Name
 Explicit name for the directory. If omitted, a random name is generated.
+Must be a simple directory name: path separators and trailing dots/spaces
+are rejected so the new directory stays a direct child of the base path.
 
 .PARAMETER Git
 Initializes a git repository in the new directory and configures a local
@@ -3881,10 +3882,10 @@ Requires -Git.
 
 .PARAMETER Temp
 Uses the user temp directory ($env:TEMP) as the base path instead of
-the current location.
+the current location. Takes precedence over -BasePath.
 
 .PARAMETER MaxAttempts
-Maximum number of attempts when generating a random directory name.
+Maximum number of attempts (1-500) when generating a random directory name.
 
 .EXAMPLE
 nrd
@@ -3920,6 +3921,7 @@ Last Edit: 2026-10
         [switch]$Git,
         [switch]$Agents,
         [switch]$Temp,
+        [ValidateRange(1, 500)]
         [int]$MaxAttempts = 50
     )
 
@@ -3963,11 +3965,21 @@ Last Edit: 2026-10
 
     $Path = Join-Path $BasePath $Name
 
+    # Keep the directory a direct child of BasePath: reject separators ("a/b"),
+    # parent hops ("../x"), and Windows-reserved trailing dots/spaces.
+    if ($Name -match '[\\/:]' -or $Name -match '[. ]$') {
+        throw "Name must be a simple directory name: $Name"
+    }
+
     if (Test-Path -LiteralPath $Path) {
         throw "Directory already exists: $Path"
     }
     Write-Verbose "Creating directory: $Path"
-    $null = New-Item -ItemType Directory -Path $Path
+    $null = New-Item -ItemType Directory -LiteralPath $Path
+
+    # A throw below (e.g. git setup failure) leaves the created directory in
+    # place for inspection; the working directory only changes once every step
+    # has succeeded.
 
     if ($Git) {
         $gitCmd = Get-Command git -ErrorAction SilentlyContinue
@@ -4008,8 +4020,15 @@ Last Edit: 2026-10
     if ($Agents) {
         Write-Verbose "Creating AGENTS.md (canonical)"
 
-        # Write canonical AGENTS.md using the template defined in global internal configuration
-        $_NrdInternal.AgentsMarkdown | Set-Content -LiteralPath (Join-Path $Path 'AGENTS.md') -Encoding UTF8
+        # Write canonical AGENTS.md using the template defined in global internal
+        # configuration. Windows PowerShell 5.1's -Encoding UTF8 emits a BOM, so
+        # write BOM-free to match the profile's other file writers; the trailing
+        # newline preserves the previous Set-Content line ending.
+        [System.IO.File]::WriteAllText(
+            (Join-Path $Path 'AGENTS.md'),
+            $_NrdInternal.AgentsMarkdown + [Environment]::NewLine,
+            [System.Text.UTF8Encoding]::new($false)
+        )
     }
 
     # Record the scaffold as the repository's first commit so the generated
