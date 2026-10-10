@@ -412,6 +412,99 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         }
     }
 
+    # Strips JSONC extras (comments and trailing commas) so a hand-edited
+    # opencode.jsonc can still be parsed by ConvertFrom-Json, which is strict on
+    # Windows PowerShell 5.1 (System.Web.Script.Serialization rejects both).
+    # Returns the normalized text plus flags describing what was removed, so the
+    # caller can keep a backup when user comments would otherwise be lost.
+    function GetJsoncText {
+        param([string]$Text)
+
+        if ([string]::IsNullOrEmpty($Text)) {
+            return [pscustomobject]@{ Text = $Text; CommentsRemoved = $false; TrailingCommasRemoved = $false }
+        }
+
+        $commentsRemoved = $false
+        $commasRemoved = $false
+
+        # Pass 1: drop // line comments and /* block comments. Newlines inside a
+        # removed block comment are kept so a later parse error still reports a
+        # sane line number. Quoted strings are copied verbatim, escapes included.
+        $stripped = [System.Text.StringBuilder]::new()
+        $i = 0
+        $length = $Text.Length
+        $inString = $false
+        while ($i -lt $length) {
+            $ch = $Text[$i]
+            if ($inString) {
+                [void]$stripped.Append($ch)
+                if ($ch -eq '\') {
+                    if ($i + 1 -lt $length) { [void]$stripped.Append($Text[$i + 1]); $i++ }
+                }
+                elseif ($ch -eq '"') { $inString = $false }
+                $i++
+                continue
+            }
+            if ($ch -eq '"') { $inString = $true; [void]$stripped.Append($ch); $i++; continue }
+            if ($ch -eq '/' -and $i + 1 -lt $length -and $Text[$i + 1] -eq '/') {
+                $commentsRemoved = $true
+                $i += 2
+                while ($i -lt $length -and $Text[$i] -ne "`r" -and $Text[$i] -ne "`n") { $i++ }
+                continue
+            }
+            if ($ch -eq '/' -and $i + 1 -lt $length -and $Text[$i + 1] -eq '*') {
+                $commentsRemoved = $true
+                $i += 2
+                while ($i -lt $length -and -not ($Text[$i] -eq '*' -and $i + 1 -lt $length -and $Text[$i + 1] -eq '/')) {
+                    if ($Text[$i] -eq "`r" -or $Text[$i] -eq "`n") { [void]$stripped.Append($Text[$i]) }
+                    $i++
+                }
+                if ($i -lt $length) { $i += 2 }
+                continue
+            }
+            [void]$stripped.Append($ch)
+            $i++
+        }
+
+        # Pass 2: drop a comma whose next significant character is } or ], so
+        # trailing commas (legal in JSONC, rejected by ConvertFrom-Json) survive.
+        $commentFree = $stripped.ToString()
+        $normalized = [System.Text.StringBuilder]::new()
+        $i = 0
+        $length = $commentFree.Length
+        $inString = $false
+        while ($i -lt $length) {
+            $ch = $commentFree[$i]
+            if ($inString) {
+                [void]$normalized.Append($ch)
+                if ($ch -eq '\') {
+                    if ($i + 1 -lt $length) { [void]$normalized.Append($commentFree[$i + 1]); $i++ }
+                }
+                elseif ($ch -eq '"') { $inString = $false }
+                $i++
+                continue
+            }
+            if ($ch -eq '"') { $inString = $true; [void]$normalized.Append($ch); $i++; continue }
+            if ($ch -eq ',') {
+                $j = $i + 1
+                while ($j -lt $length -and [char]::IsWhiteSpace($commentFree[$j])) { $j++ }
+                if ($j -lt $length -and ($commentFree[$j] -eq '}' -or $commentFree[$j] -eq ']')) {
+                    $commasRemoved = $true
+                    $i++
+                    continue
+                }
+            }
+            [void]$normalized.Append($ch)
+            $i++
+        }
+
+        return [pscustomobject]@{
+            Text                  = $normalized.ToString()
+            CommentsRemoved       = $commentsRemoved
+            TrailingCommasRemoved = $commasRemoved
+        }
+    }
+
     $profileHelperFunctions = @(
         'ResolveWUResultCode',
         'ResolveWUHResult',
@@ -424,6 +517,7 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         'GetSeriesStats',
         'GetSpikes',
         'UnwrapZaiData',
+        'GetJsoncText',
         'ShowFontArchive',
         'Expand7ZipArchive',
         'NewTemporarySshIdentity',
@@ -8644,17 +8738,29 @@ function Install-AiSkills {
             $null = New-Item -ItemType Directory -Path $openCodeConfigDir -Force
         }
 
-        if (-not (Test-Path -LiteralPath $openCodeConfigFile)) {
+        $configExisted = Test-Path -LiteralPath $openCodeConfigFile
+        if (-not $configExisted) {
             Write-Verbose "Creating OpenCode config file: $openCodeConfigFile"
             [IO.File]::WriteAllText($openCodeConfigFile, '{}', [Text.UTF8Encoding]::new($false))
         }
 
         Write-Verbose "Reading OpenCode config: $openCodeConfigFile"
+        $rawConfig = Get-Content -LiteralPath $openCodeConfigFile -Raw
+        $jsoncInfo = $null
         try {
-            $config = Get-Content -LiteralPath $openCodeConfigFile -Raw | ConvertFrom-Json
+            $config = $rawConfig | ConvertFrom-Json
         }
         catch {
-            throw "OpenCode config is not valid JSON: $openCodeConfigFile"
+            # opencode.jsonc may legitimately carry comments and trailing commas;
+            # ConvertFrom-Json (strict on Windows PowerShell 5.1) rejects both.
+            # Normalize once and retry before declaring the file invalid.
+            $jsoncInfo = $_ProfileHelpers.GetJsoncText($rawConfig)
+            try {
+                $config = $jsoncInfo.Text | ConvertFrom-Json
+            }
+            catch {
+                throw "OpenCode config is not valid JSON: $openCodeConfigFile"
+            }
         }
 
         if (-not $config) {
@@ -8698,18 +8804,54 @@ function Install-AiSkills {
             throw "OpenCode config 'permission.skill' has unexpected type: $($skillProp.Value.GetType().Name)"
         }
 
+        # Collect only the permissions that are actually missing or wrong, so a
+        # config that is already correct is left byte-for-byte untouched (no
+        # needless write and no backup litter on every run).
+        $namesToAllow = New-Object System.Collections.Generic.List[string]
         foreach ($skill in $SkillNames) {
-            Write-Verbose "Allowing OpenCode skill permission: $skill"
-            $config.permission.skill | Add-Member -NotePropertyName $skill -NotePropertyValue 'allow' -Force
+            $candidates = @($skill)
             # 'taste-skill' uses 'design-taste-frontend' as its canonical skill/install name in OpenCode.
             # Explicitly allow 'design-taste-frontend' so permissions apply under both identifiers.
-            if ($skill -eq 'taste-skill') {
-                $config.permission.skill | Add-Member -NotePropertyName 'design-taste-frontend' -NotePropertyValue 'allow' -Force
+            if ($skill -eq 'taste-skill') { $candidates += 'design-taste-frontend' }
+            foreach ($candidate in $candidates) {
+                $existing = $config.permission.skill.PSObject.Properties[$candidate]
+                if (-not $existing -or $existing.Value -ne 'allow') { $namesToAllow.Add($candidate) }
             }
+        }
+        if ($namesToAllow.Count -eq 0) {
+            Write-Verbose 'OpenCode skill permissions are already configured; leaving the config untouched.'
+            return
+        }
+
+        # Back up the previous file before rewriting. ConvertTo-Json cannot
+        # round-trip JSONC comments, so the backup is kept (with a warning) when
+        # comments are present and discarded when the file had none.
+        $backupPath = $null
+        if ($configExisted) {
+            $backupPath = '{0}.backup-{1}' -f $openCodeConfigFile, (Get-Date -Format 'yyyyMMddHHmmss')
+            Copy-Item -LiteralPath $openCodeConfigFile -Destination $backupPath -Force
+        }
+
+        foreach ($nameToAllow in $namesToAllow) {
+            Write-Verbose "Allowing OpenCode skill permission: $nameToAllow"
+            $config.permission.skill | Add-Member -NotePropertyName $nameToAllow -NotePropertyValue 'allow' -Force
         }
 
         Write-Verbose "Writing updated OpenCode config: $openCodeConfigFile"
         [IO.File]::WriteAllText($openCodeConfigFile, ($config | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+
+        if ($jsoncInfo -and $jsoncInfo.CommentsRemoved) {
+            if ($backupPath) {
+                Write-Warning "OpenCode config contained comments, which this update cannot preserve. Review the backup: $backupPath"
+            }
+            else {
+                Write-Warning 'OpenCode config contained comments, which this update cannot preserve.'
+            }
+        }
+        elseif ($backupPath -and (Test-Path -LiteralPath $backupPath)) {
+            Write-Verbose "OpenCode config had no comments; discarded backup: $backupPath"
+            Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+        }
         Write-Host "[info] Updated OpenCode skill permissions."
     }
 

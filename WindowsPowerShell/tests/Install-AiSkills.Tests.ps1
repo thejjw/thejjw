@@ -20,11 +20,19 @@ Describe 'Install-AiSkills' {
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
                 $node.Name -eq 'Install-AiSkills'
         }, $true)
-        if (-not $runConfigAst -or -not $runInstallerAst) {
+        # Set-OpenCodeSkillPermissions delegates JSONC normalization to
+        # $_ProfileHelpers, so the helper module has to be loaded too.
+        $runHelpersAst = $runAst.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$_ProfileHelpers'
+        }, $true)
+        if (-not $runConfigAst -or -not $runInstallerAst -or -not $runHelpersAst) {
             throw 'Could not load Install-AiSkills and its configuration from the profile.'
         }
         . ([scriptblock]::Create($runConfigAst.Extent.Text))
         . ([scriptblock]::Create($runInstallerAst.Extent.Text))
+        . ([scriptblock]::Create($runHelpersAst.Extent.Text))
         $script:productionExternalSources = $_AiSkillsInternal.ExternalSources
         $_AiSkillsInternal.ExternalSources = @()
         $script:copyItemCommand = Get-Command Copy-Item -CommandType Cmdlet
@@ -294,5 +302,64 @@ Describe 'Install-AiSkills' {
         $configJsonc.model | Should -Be 'from-jsonc'
         $configJsonc.permission.skill.'deep-research' | Should -Be 'allow'
         Get-Content -LiteralPath $jsonPath -Raw | Should -BeExactly $jsonText
+    }
+
+    It 'normalizes JSONC comments and trailing commas, and keeps the backup' {
+        $configDir = Join-Path $env:USERPROFILE '.config\opencode'
+        $null = New-Item -ItemType Directory -Path $configDir -Force
+        $configPath = Join-Path $configDir 'opencode.jsonc'
+        $jsonc = @'
+{
+  // commenting like a human
+  "model": "test/model", /* trailing block comment */
+  "permission": { "skill": { "existing": "allow", } },
+}
+'@
+        [IO.File]::WriteAllText($configPath, $jsonc, [Text.UTF8Encoding]::new($false))
+
+        $warnings = @()
+        Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main -WarningVariable warnings
+
+        $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        $config.model | Should -Be 'test/model'
+        $config.permission.skill.existing | Should -Be 'allow'
+        $config.permission.skill.'deep-research' | Should -Be 'allow'
+        @($warnings).Count | Should -BeGreaterThan 0
+        @(Get-ChildItem -LiteralPath $configDir -Filter 'opencode.jsonc.backup-*').Count | Should -Be 1
+    }
+
+    It 'discards the backup when the config has no comments' {
+        $configDir = Join-Path $env:USERPROFILE '.config\opencode'
+        $null = New-Item -ItemType Directory -Path $configDir -Force
+        $configPath = Join-Path $configDir 'opencode.json'
+        [IO.File]::WriteAllText($configPath, '{"model":"test/model","permission":{"skill":{"existing":"allow"},},}', [Text.UTF8Encoding]::new($false))
+
+        $warnings = @()
+        Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main -WarningVariable warnings
+
+        $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        $config.permission.skill.existing | Should -Be 'allow'
+        $config.permission.skill.'deep-research' | Should -Be 'allow'
+        @($warnings).Count | Should -Be 0
+        @(Get-ChildItem -LiteralPath $configDir -Filter 'opencode.json.backup-*').Count | Should -Be 0
+    }
+
+    It 'leaves an already-configured file untouched' {
+        $configDir = Join-Path $env:USERPROFILE '.config\opencode'
+        $null = New-Item -ItemType Directory -Path $configDir -Force
+        $configPath = Join-Path $configDir 'opencode.jsonc'
+        $skillPermissions = @{}
+        foreach ($skill in $_AiSkillsInternal.OpenCodeClaudeSkills) {
+            $skillPermissions[$skill] = 'allow'
+            if ($skill -eq 'taste-skill') { $skillPermissions['design-taste-frontend'] = 'allow' }
+        }
+        $existing = [pscustomobject]@{ permission = [pscustomobject]@{ skill = [pscustomobject]$skillPermissions } }
+        $existingText = $existing | ConvertTo-Json -Depth 10
+        [IO.File]::WriteAllText($configPath, $existingText, [Text.UTF8Encoding]::new($false))
+
+        Install-AiSkills -RepoUrl $script:fixtureRepo -Branch main
+
+        Get-Content -LiteralPath $configPath -Raw | Should -BeExactly $existingText
+        @(Get-ChildItem -LiteralPath $configDir -Filter 'opencode.jsonc.backup-*').Count | Should -Be 0
     }
 }
