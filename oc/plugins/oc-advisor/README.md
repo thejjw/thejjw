@@ -197,7 +197,7 @@ node scripts/install.mjs             # write global entry + command file
 
 The installer defaults to copy mode: it snapshots `index.ts` and
 `src/advisor.ts` into the global discovery dir
-(`<config>/plugins/advisor/`), which the host loads with no config entry,
+(`<config>/plugins/oc-advisor/`), which the host loads with no config entry,
 so the repo need not stay cloned. It re-copies on every run (drift shows
 in `--status`), removes any config entry for mutual exclusion, and copies
 `commands/advisor.md` into the global commands dir.

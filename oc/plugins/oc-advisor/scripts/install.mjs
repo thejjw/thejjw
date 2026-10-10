@@ -16,7 +16,7 @@ const commandsDir = path.join(globalDir, "commands");
 const commandDest = path.join(commandsDir, "advisor.md");
 // Discovery layout: <global-config>/plugins/<name>/... The host loads
 // these with no config entry and resolves @opencode/plugin at runtime.
-const pluginDestDir = path.join(globalDir, "plugins", "advisor");
+const pluginDestDir = path.join(globalDir, "plugins", "oc-advisor");
 // Repo files copied in copy mode, as paths relative to the package root.
 const pluginFiles = ["index.ts", path.join("src", "advisor.ts")];
 
@@ -25,7 +25,7 @@ const pluginFiles = ["index.ts", path.join("src", "advisor.ts")];
 // URL. Matches both the v2 directory entry and a legacy file entry (which
 // contains this path as a prefix), so migration keeps working no matter
 // where this repo is cloned.
-const entrySuffix = "oc/plugins/advisor";
+const entrySuffix = "oc/plugins/oc-advisor";
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -118,7 +118,7 @@ function printHelp() {
   console.log(`Install the local oc advisor plugin into your OpenCode config.
 
 Default (copy) mode snapshots the plugin into the global discovery dir
-(<config>/plugins/advisor/), so the repo need not stay cloned. Devs can
+(<config>/plugins/oc-advisor/), so the repo need not stay cloned. Devs can
 pass --reference to run the repo copy in place via a config entry instead.
 
 Usage:
