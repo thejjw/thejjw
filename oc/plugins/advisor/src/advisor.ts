@@ -348,6 +348,14 @@ function modelsSummary(candidates: ModelCandidate[], executor: string | null, fi
 // transcript delta since the last review into an ephemeral sidecar review,
 // then deliver severity-tagged notes back (nits as record-only synthetic
 // messages, concerns/blockers as new turns).
+//
+// Phase 2 sidecar: instead of a single transient generation, the sidecar
+// runs a short tool loop (read/grep/glob under deny-by-default session
+// permissions) so findings are verified against the workspace, then the
+// final verdict text is parsed for severity. An emission guard (ported
+// from omp's AdvisorEmissionGuard, adapted to one reply per review)
+// suppresses noise, repeats, and over-budget findings; a cooldown
+// downgrades concerns after a steered delivery.
 
 // Turn-terminal events that end a reviewable unit of primary work.
 const TURN_END_EVENTS = new Set([
@@ -364,6 +372,228 @@ const DELIVERY_MARKER = "[advisor-note] ";
 // Sidecar sessions created by this process. Their own execution events
 // are ignored so reviews never review themselves.
 const sidecarSessions = new Set<string>();
+
+// Sandbox permissions for the investigative sidecar: deny everything,
+// then allow read-only discovery. Last matching rule wins.
+const SIDECAR_PERMISSIONS = [
+  { action: "*", resource: "*", effect: "deny" },
+  { action: "read", resource: "*", effect: "allow" },
+  { action: "glob", resource: "*", effect: "allow" },
+  { action: "grep", resource: "*", effect: "allow" },
+] as const;
+
+// Upper bound for one sidecar tool loop. A timeout aborts the review
+// rather than blocking later boundaries behind it.
+const SIDECAR_TIMEOUT_MS = 3 * 60 * 1000;
+
+// Turns after a steered concern/blocker during which new concerns ride
+// as record-only notes instead of waking the agent. Blockers are exempt.
+const IMMUNE_TURNS = 3;
+
+// --- Emission guard (omp AdvisorEmissionGuard, adapted) ---
+//
+// One sidecar reply may hold several severity-tagged findings. The guard
+// splits the reply into sections, drops noise and repeats (rank-aware:
+// escalation re-admits), and caps non-blocker sections per review.
+
+const SEVERITY_RANK = { nit: 1, concern: 2, blocker: 3 } as const;
+type Severity = keyof typeof SEVERITY_RANK;
+
+// Short content-free phrases that carry no finding.
+const NOISE_PHRASES = new Set([
+  "stop",
+  "halt",
+  "done",
+  "complete",
+  "lgtm",
+  "no issue",
+  "no issues",
+  "nothing to add",
+  "no concerns",
+  "looks good",
+  "continue",
+  "proceed",
+]);
+
+function normalizeNote(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+type Finding = { severity: Severity; text: string };
+
+// Splits a review reply into severity-tagged findings. Lines starting
+// with [nit]/[concern]/[blocker] open a section; untagged leading text
+// becomes one nit finding (omp's omitted-severity default). Returns null
+// for silence (NO_CONCERNS sentinel or empty).
+function splitFindings(reply: string): Finding[] | null {
+  const trimmed = (reply || "").trim();
+  if (trimmed.length === 0 || trimmed === "NO_CONCERNS") return null;
+  const findings: Finding[] = [];
+  let current: Finding | null = null;
+  for (const line of trimmed.split("\n")) {
+    const m = /^\[(nit|concern|blocker)\]\s*(.*)$/i.exec(line.trim());
+    if (m) {
+      current = { severity: m[1].toLowerCase() as Severity, text: m[2] };
+      findings.push(current);
+    } else if (current) {
+      current.text += `\n${line}`;
+    } else if (line.trim().length > 0) {
+      current = { severity: "nit", text: line };
+      findings.push(current);
+    }
+  }
+  const cleaned = findings
+    .map((f) => ({ severity: f.severity, text: f.text.trim() }))
+    .filter((f) => f.text.length > 0);
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+// Per-primary-session guard state (in-memory; resets on reload, which is
+// safe: worst case a repeat is delivered once after a restart).
+type GuardState = { seen: Map<string, number>; order: string[] };
+const guardStates = new Map<string, GuardState>();
+
+function guardFor(sessionID: string): GuardState {
+  let state = guardStates.get(sessionID);
+  if (!state) {
+    state = { seen: new Map(), order: [] };
+    guardStates.set(sessionID, state);
+  }
+  return state;
+}
+
+function guardReset(sessionID: string): void {
+  guardStates.delete(sessionID);
+}
+
+// Admits reply findings through noise filter, rank-aware dedupe, and the
+// per-review non-blocker budget (default 4, omp parity; blockers exempt).
+// Returns the deliverable text, or null when nothing survives.
+function guardAdmit(sessionID: string, reply: string, budget = 4): string | null {
+  const findings = splitFindings(reply);
+  if (!findings) return null;
+  const state = guardFor(sessionID);
+  const admitted: Finding[] = [];
+  let nonBlockers = 0;
+  for (const f of findings) {
+    const key = normalizeNote(f.text);
+    if (key.length === 0 || NOISE_PHRASES.has(key)) continue;
+    const seenRank = state.seen.get(key) ?? 0;
+    const rank = SEVERITY_RANK[f.severity];
+    if (rank <= seenRank) continue;
+    if (f.severity !== "blocker") {
+      if (nonBlockers >= budget) continue;
+      nonBlockers++;
+    }
+    state.seen.set(key, rank);
+    state.order.push(key);
+    if (state.order.length > 4096) {
+      const oldest = state.order.shift();
+      if (oldest) state.seen.delete(oldest);
+    }
+    admitted.push(f);
+  }
+  if (admitted.length === 0) return null;
+  return admitted.map((f) => `[${f.severity}] ${f.text}`).join("\n\n");
+}
+
+// Overall severity of admitted text: highest tag present.
+function overallSeverity(text: string): Severity {
+  if (/\bblocker\b/i.test(text)) return "blocker";
+  if (/\bconcern\b/i.test(text)) return "concern";
+  return "nit";
+}
+
+// Cooldown after a steered delivery: remaining turns during which new
+// concerns ride record-only instead of waking the agent. Blockers exempt.
+function immuneKey(sessionID: string): string {
+  return `immune:${sessionID}`;
+}
+
+async function readImmune(ctx: any, sessionID: string): Promise<number> {
+  try {
+    const raw = await ctx.storage.get(immuneKey(sessionID));
+    if (typeof raw === "number" && raw > 0) return Math.floor(raw);
+    if (raw && typeof raw === "object" && typeof (raw as any).turns === "number" && (raw as any).turns > 0) {
+      return Math.floor((raw as any).turns);
+    }
+  } catch {
+    // Ignored.
+  }
+  return 0;
+}
+
+async function writeImmune(ctx: any, sessionID: string, turns: number): Promise<void> {
+  try {
+    if (turns <= 0) await ctx.storage.remove(immuneKey(sessionID));
+    else await ctx.storage.set(immuneKey(sessionID), { turns });
+  } catch {
+    // Ignored: cooldown is best-effort.
+  }
+}
+
+// Last assistant text in a transcript (skips tool-only messages). The
+// sidecar's verdict; null when absent.
+function lastAssistantText(messages: any[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m || m.type !== "assistant" || !Array.isArray(m.content)) continue;
+    const text = m.content
+      .filter((p: any) => p && (p.type === "text" || p.type === "reasoning") && typeof p.text === "string")
+      .map((p: any) => p.text)
+      .join("\n")
+      .trim();
+    if (text.length > 0) return text;
+  }
+  return null;
+}
+
+// Runs one investigative sidecar review: prompt (tool loop under the
+// sandbox permissions), bounded wait, then read the verdict. Returns the
+// verdict text, or null on timeout/failure. Never throws.
+async function runSidecarReview(
+  ctx: any,
+  model: { id: string; providerID: string; variant?: string },
+  directory: string | null,
+  promptText: string,
+): Promise<string | null> {
+  let sidecar: string | null = null;
+  try {
+    const session = await ctx.session.create({
+      title: "advisor-review",
+      model,
+      ...(directory ? { location: { directory } } : {}),
+      permissions: [...SIDECAR_PERMISSIONS],
+    });
+    sidecar = typeof session?.id === "string" && session.id.length > 0 ? session.id : null;
+    if (!sidecar) return null;
+    sidecarSessions.add(sidecar);
+    await ctx.session.prompt({ sessionID: sidecar, text: promptText });
+    const settled = await Promise.race([
+      ctx.session.wait({ sessionID: sidecar }).then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), SIDECAR_TIMEOUT_MS)),
+    ]);
+    if (!settled) {
+      await ctx.session.interrupt({ sessionID: sidecar, continue: false }).catch(() => {});
+      return null;
+    }
+    const res = await ctx.session.context({ sessionID: sidecar });
+    const messages = Array.isArray(res) ? res : (res?.data ?? []);
+    if (!Array.isArray(messages)) return null;
+    return lastAssistantText(messages);
+  } catch {
+    return null;
+  } finally {
+    if (sidecar) {
+      sidecarSessions.delete(sidecar);
+      await ctx.session.remove({ sessionID: sidecar }).catch(() => {});
+    }
+  }
+}
 
 type WatchCursor = { count: number; turns: number };
 
@@ -454,18 +684,9 @@ function renderDelta(messages: any[]): string {
   return out.join("\n").slice(0, totalCap);
 }
 
-// Severity of a review reply: null means silence (NO_CONCERNS sentinel or
-// empty). Untagged findings default to nit, matching omp's omitted level.
-function parseSeverity(text: string): "nit" | "concern" | "blocker" | null {
-  const trimmed = (text || "").trim();
-  if (trimmed.length === 0 || trimmed === "NO_CONCERNS") return null;
-  if (/\bblocker\b/i.test(trimmed)) return "blocker";
-  if (/\bconcern\b/i.test(trimmed)) return "concern";
-  return "nit";
-}
-
-// Handles one turn-terminal event. Never throws; failures skip the review
-// without advancing the cursor so the next boundary retries.
+// Handles one turn-terminal event. Never throws; resolve failures skip
+// without advancing (cheap retry next boundary), execution failures
+// advance (no retry storm).
 async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean): Promise<void> {
   const live = await currentSettings(ctx);
   if (!live.enabled || !live.watch) return;
@@ -480,7 +701,9 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
   if (!Array.isArray(messages)) return;
   let cursor = await readCursor(ctx, sessionID);
   if (messages.length < cursor.count) {
-    // Transcript rewritten (e.g. compaction): reseed, no replay.
+    // Transcript rewritten (e.g. compaction): reseed, no replay. Guard
+    // state resets with it so re-primed findings can re-raise.
+    guardReset(sessionID);
     await writeCursor(ctx, sessionID, { count: messages.length, turns: 0 });
     return;
   }
@@ -516,41 +739,46 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
   if (!directory && typeof ctx?.location?.directory === "string" && ctx.location.directory.length > 0) {
     directory = ctx.location.directory;
   }
-  let sidecar: string | null = null;
-  try {
-    const session = await ctx.session.create({
-      title: "advisor-review",
-      model,
-      ...(directory ? { location: { directory } } : {}),
-    });
-    sidecar = typeof session?.id === "string" && session.id.length > 0 ? session.id : null;
-    if (!sidecar) return;
-    sidecarSessions.add(sidecar);
-    const response = await ctx.session.generate({
-      sessionID: sidecar,
-      prompt: `${SYSTEM_PROMPT}\n\n--- TRANSCRIPT DELTA ---\n\n${delta}`,
-    });
-    const severity = parseSeverity(response?.text ?? "");
-    await writeCursor(ctx, sessionID, { count: messages.length, turns });
-    if (!severity) return;
-    const note = response.text.trim();
-    let delivered = false;
-    if (severity === "nit" || interrupted) {
-      // Record-only: never wake the agent (resume defaults to waking).
-      try {
-        await ctx.session.synthetic({ sessionID, text: `[advisor ${severity}]\n${note}`, resume: false });
-        delivered = true;
-      } catch {
-        // Delivery failure: cursor already advanced, next boundary retries.
-      }
-    } else {
-      try {
-        await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}[advisor ${severity}]\n${note}` });
-        delivered = true;
-      } catch {
-        // Delivery failure: cursor already advanced, next boundary retries.
-      }
+  // Cooldown tick: every processed boundary ages the immune window.
+  const immune = await readImmune(ctx, sessionID);
+  if (immune > 0) await writeImmune(ctx, sessionID, immune - 1);
+  const verdict = await runSidecarReview(
+    ctx,
+    model,
+    directory,
+    `${WATCH_SYSTEM_PROMPT}\n\n--- TRANSCRIPT DELTA ---\n\n${delta}`,
+  );
+  // Execution failure (timeout, model error, sandbox refusal): advance the
+  // cursor so one bad review cannot retry-storm every later boundary.
+  await writeCursor(ctx, sessionID, { count: messages.length, turns });
+  if (!verdict) return;
+  const admitted = guardAdmit(sessionID, verdict);
+  if (!admitted) return;
+  let severity = overallSeverity(admitted);
+  const note = admitted;
+  let delivered = false;
+  // Interrupted primaries and immune-window concerns never wake the agent;
+  // blockers always steer.
+  const recordOnly = severity === "nit" || interrupted || (severity === "concern" && immune > 0);
+  if (recordOnly) {
+    // Record-only: never wake the agent (resume defaults to waking).
+    try {
+      await ctx.session.synthetic({ sessionID, text: `[advisor ${severity}]\n${note}`, resume: false });
+      delivered = true;
+    } catch {
+      // Delivery failure: cursor already advanced, next boundary retries.
     }
+  } else {
+    try {
+      await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}[advisor ${severity}]\n${note}` });
+      delivered = true;
+      // Steering restarts the cooldown (blockers exempt from aging it,
+      // but a steered blocker still re-arms it for later concerns).
+      await writeImmune(ctx, sessionID, IMMUNE_TURNS);
+    } catch {
+      // Delivery failure: cursor already advanced, next boundary retries.
+    }
+  }
     if (delivered) {
       const firstLine = note.split("\n", 1)[0] ?? "";
       try {
@@ -564,15 +792,6 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
         // Observability only: never fail a review over it.
       }
     }
-  } catch {
-    // Sidecar, model, or delivery failure: cursor stays, next boundary
-    // retries. No throw: the event loop must survive.
-  } finally {
-    if (sidecar) {
-      sidecarSessions.delete(sidecar);
-      await ctx.session.remove({ sessionID: sidecar }).catch(() => {});
-    }
-  }
 }
 
 // Subscribes to turn-terminal events for the process lifetime. Returns a
@@ -935,6 +1154,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
         const res = await ctx.session.context({ sessionID });
         const messages = Array.isArray(res) ? res : (res?.data ?? []);
         if (Array.isArray(messages)) await writeCursor(ctx, sessionID, { count: messages.length, turns: 0 });
+        guardReset(sessionID);
       } catch {
         // Ignored: cursor starts from zero on first boundary.
       }
@@ -944,7 +1164,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
   return usageText();
 }
 
-const SYSTEM_PROMPT = `You are a strategic advisor for a coding agent: a peer reviewer shadowing a capable executor. You receive the executor's context and return a concise plan or course correction.
+const SYSTEM_PROMPT_BASE = `You are a strategic advisor for a coding agent: a peer reviewer shadowing a capable executor. You receive the executor's context and return a concise plan or course correction.
 
 Silence first: if the executor is on track with no material risk, reply with exactly NO_CONCERNS and nothing else. Never manufacture advice to fill space; vague unease is not a finding.
 
@@ -961,6 +1181,14 @@ Rules:
 - Prefer the simplest approach that meets the spec; flag maintenance burden and stuck/looping patterns explicitly.
 - Do not second-guess decisions the executor understands and commits to unless you are certain. Large diffs and ambitious rewrites are not problems by themselves.
 - Keep it succinct: at most 4 findings, or under 300 words, whichever binds first. Do NOT write code — only advise.`;
+
+// Pull-style on-demand calls run tool-free (transient generation).
+const SYSTEM_PROMPT = SYSTEM_PROMPT_BASE;
+
+// Watch-mode sidecars run a read-only tool loop before verdicting.
+const WATCH_SYSTEM_PROMPT = `${SYSTEM_PROMPT_BASE}
+
+You have read, grep, and glob tools. Verify suspicions against the workspace with a few targeted calls first; never edit, run, or change anything. Then give your final verdict with severity tags — or exactly NO_CONCERNS when there is nothing material.`;
 
 const TOOL_DESCRIPTION = `Consult a strategic advisor (a second model giving a concise plan or course correction; defaults to reusing your own active model unless configured otherwise) that requires all context necessary for the advisor tool and provides a concise plan or course correction.
 

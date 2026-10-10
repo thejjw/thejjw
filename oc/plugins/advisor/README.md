@@ -108,14 +108,21 @@ work.
 
 The pull-style `advisor` tool waits to be called. Watch mode instead
 reviews primary turn boundaries on its own: when a turn ends, the plugin
-snapshots the new transcript delta into an ephemeral sidecar review and
-delivers severity-tagged notes back — `[nit]` findings as record-only
-notes that never wake the agent, `[concern]`/`[blocker]` as new turns.
-Silence (`NO_CONCERNS`) delivers nothing. Deliveries carry an
-`[advisor-note]` marker so they are captured but never re-scheduled
-(no advisor→primary→advisor loops); sidecar sessions are ignored by the
-watcher, and a rewritten transcript (e.g. compaction) reseeds the
-cursor instead of replaying.
+snapshots the new transcript delta into an ephemeral investigative
+sidecar — a short tool loop with read/grep/glob under deny-by-default
+session permissions, so findings are verified against the workspace —
+then delivers severity-tagged notes back: `[nit]` findings as
+record-only notes that never wake the agent, `[concern]`/`[blocker]`
+as new turns. Silence (`NO_CONCERNS`) delivers nothing.
+
+An emission guard (normalization, noise-phrase filter, rank-aware
+dedupe where escalations re-admit, budget of 4 non-blocker findings per
+review with blockers exempt) keeps repeat runs quiet. After a steered
+delivery, new concerns ride record-only for 3 turns (blockers exempt).
+Deliveries carry an `[advisor-note]` marker so they are captured but
+never re-scheduled (no advisor→primary→advisor loops); sidecar sessions
+are ignored by the watcher, and a rewritten transcript (e.g. compaction)
+reseeds the cursor instead of replaying.
 
 - `/advisor configure watch=on|off` — enabling seeds the cursor at the
   current transcript length, so the first review covers only new turns.

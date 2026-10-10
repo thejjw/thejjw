@@ -29,6 +29,15 @@
   delivery: nits record-only, concerns/blockers as new turns).
   `configure watch=` / `reviewInterval=`, cursor reseeds on enable and
   compaction, cascade guard via delivery marker.
+- Watch sidecars run an investigative tool loop (read/grep/glob under
+  deny-by-default session permissions) before verdicting; a bounded
+  wait with interrupt caps runaway loops, and execution failures
+  advance the cursor instead of retry-storming.
+- Emission guard (omp-inspired): finding sections split by severity
+  tag, noise-phrase filter, rank-aware dedupe with escalation,
+  budget of 4 non-blockers per review (blockers exempt).
+- Post-steer cooldown: concerns ride record-only for 3 turns
+  (blockers exempt).
 - New `SYSTEM_PROMPT`: silence-first (`NO_CONCERNS`), severity tags,
   anti-nag and evidence rules.
 - Catalog reads unwrap the `{ location, data }` envelope returned by
