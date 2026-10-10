@@ -11,11 +11,11 @@ run `opencode models > models_<timestamp>.txt` in the workspace root
 (timestamp like 20261010-201500 from the current date and time), read
 the file back, and recommend 4-5 as the advisor model.
 
-What makes a good advisor: the model must rank at or above the main
+What makes a good advisor: the advisor model must rank at or above the main
 executor model, so it catches what the doer rushes past — strong
 reasoning and instruction-following matter more than speed, and
-occasional use keeps a premium model affordable. For providers, prefer
+occasional use keeps a premium model still affordable. For providers, prefer
 opencode-go first (subscription, use-or-waste), then consider opencode/
-providers (compatibility-tested). Include one or two `-free` models when
+providers (compatibility-tested). Include one or two "free" models when
 available. Present your picks with one-line reasons and exact ids ready
 for `/advisor configure model=<id>`.
