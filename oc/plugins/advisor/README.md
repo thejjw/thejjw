@@ -86,7 +86,9 @@ as `models` does). All logic (parsing, validation, settings, model
 listing) runs in code inside the tool — the model only relays or, for
 `models`, recommends per the returned criteria.
 
-- `/advisor` or `/advisor status` — report enabled/disabled, model, thinking.
+- `/advisor` or `/advisor status` — report enabled/disabled, model,
+  thinking, watch state, and the last auto-review delivery (time,
+  severity, preview) when watch has delivered at least once.
 - `/advisor models` — handled by the tool: writes available models to
   `models_<timestamp>.txt` in the workspace via the model catalog (falling
   back to an `opencode models` dump run by the model when unreachable),

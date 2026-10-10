@@ -44,6 +44,32 @@ const DEFAULT_SETTINGS: AdvisorSettings = {
 };
 
 const STORAGE_KEY = "settings";
+const LAST_REVIEW_KEY = "lastReview";
+
+// Summary of the most recent auto-review delivery, for /advisor status.
+type LastReview = {
+  time: number;
+  sessionID: string;
+  severity: "nit" | "concern" | "blocker";
+  preview: string;
+};
+
+async function readLastReview(ctx: any): Promise<LastReview | null> {
+  try {
+    const raw = (await ctx.storage.get(LAST_REVIEW_KEY)) as Record<string, unknown> | undefined;
+    if (raw && typeof raw === "object" && typeof raw.time === "number" && typeof raw.sessionID === "string") {
+      return {
+        time: raw.time,
+        sessionID: raw.sessionID,
+        severity: raw.severity === "blocker" || raw.severity === "concern" ? raw.severity : "nit",
+        preview: typeof raw.preview === "string" ? raw.preview : "",
+      };
+    }
+  } catch {
+    // Ignored.
+  }
+  return null;
+}
 
 // Guard against the advisor model calling back into the advisor tool.
 let inAdvisorCall = false;
@@ -166,12 +192,21 @@ function describeSettings(settings: AdvisorSettings, env: { providerID: string; 
   return `${model}, thinking ${thinking} (from advisor settings)`;
 }
 
-function statusText(settings: AdvisorSettings, env: { providerID: string; modelID: string; variant?: string } | null): string {
-  return [
+function statusText(
+  settings: AdvisorSettings,
+  env: { providerID: string; modelID: string; variant?: string } | null,
+  last: LastReview | null,
+): string {
+  const lines = [
     `Advisor ${VERSION}: ${settings.enabled ? "enabled" : "disabled"}.`,
     `Model: ${describeSettings(settings, env)}.`,
     `Watch: ${settings.watch ? `on (every ${settings.reviewInterval === 1 ? "turn" : `${settings.reviewInterval} turns`})` : "off"}.`,
-  ].join("\n");
+  ];
+  if (last) {
+    const when = new Date(last.time).toLocaleString();
+    lines.push(`Last review: [${last.severity}] ${when}${last.preview ? ` — ${last.preview}` : ""}`);
+  }
+  return lines.join("\n");
 }
 
 function usageText(): string {
@@ -499,11 +534,35 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
     await writeCursor(ctx, sessionID, { count: messages.length, turns });
     if (!severity) return;
     const note = response.text.trim();
+    let delivered = false;
     if (severity === "nit" || interrupted) {
       // Record-only: never wake the agent (resume defaults to waking).
-      await ctx.session.synthetic({ sessionID, text: `[advisor ${severity}]\n${note}`, resume: false }).catch(() => {});
+      try {
+        await ctx.session.synthetic({ sessionID, text: `[advisor ${severity}]\n${note}`, resume: false });
+        delivered = true;
+      } catch {
+        // Delivery failure: cursor already advanced, next boundary retries.
+      }
     } else {
-      await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}[advisor ${severity}]\n${note}` }).catch(() => {});
+      try {
+        await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}[advisor ${severity}]\n${note}` });
+        delivered = true;
+      } catch {
+        // Delivery failure: cursor already advanced, next boundary retries.
+      }
+    }
+    if (delivered) {
+      const firstLine = note.split("\n", 1)[0] ?? "";
+      try {
+        await ctx.storage.set(LAST_REVIEW_KEY, {
+          time: Date.now(),
+          sessionID,
+          severity,
+          preview: firstLine.length > 120 ? firstLine.slice(0, 120) + " [...]" : firstLine,
+        });
+      } catch {
+        // Observability only: never fail a review over it.
+      }
     }
   } catch {
     // Sidecar, model, or delivery failure: cursor stays, next boundary
@@ -748,7 +807,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
     if (err) return `Error: not saved: ${err}`;
     return "Advisor disabled. The advisor tool will answer with a disabled notice until /advisor on.";
   }
-  if (sub === "status") return statusText(live, env);
+  if (sub === "status") return statusText(live, env, await readLastReview(ctx));
   if (sub === "models") {
     let executor: string | null = null;
     let dir: string | null = null;
@@ -799,7 +858,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
     // Rejoin: display names contain spaces, so model= consumes everything
     // up to a thinking=/enabled= clause or the end, in any order.
     const argStr = tokens.slice(1).join(" ");
-    if (!argStr) return `${statusText(live, env)}\n\n${usageText()}`;
+    if (!argStr) return `${statusText(live, env, await readLastReview(ctx))}\n\n${usageText()}`;
     const next = { ...live };
     let rest = argStr;
     const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval)\s*=\s*\S+|$)/i.exec(argStr);
@@ -880,7 +939,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
         // Ignored: cursor starts from zero on first boundary.
       }
     }
-    return `Saved.\n${statusText(next, env)}`;
+    return `Saved.\n${statusText(next, env, await readLastReview(ctx))}`;
   }
   return usageText();
 }
