@@ -3,7 +3,7 @@
 ## 0.2.0
 
 - Port to the OpenCode v2 plugin API (`@opencode/plugin`,
-  `Plugin.define` with `id: "advisor"`). V1 implementations do not run on
+  `Plugin.define` with `id: "oc-advisor"`). V1 implementations do not run on
   v2 hosts. The v1 implementation is preserved in git history.
 - Tools registered via `ctx.tool.transform` with JSON Schema inputs;
   executors return `{ content }`.
@@ -42,7 +42,7 @@
   severity, first-line preview) from plugin storage.
 - A literal per-call `variant=auto` normalizes to omitted (catalog
   default) instead of reaching the request as an unknown variant id.
-- Reviewer-only `WATCHDOG.md` guidance (session dir up to git root plus
+- Reviewer-only `OC-WATCHDOG.md` guidance (session dir up to git root plus
   user level, `<attention>` blocks, executor never sees it).
 - Model `fallback` chain for stale configured models (ordered,
   thinking kept when valid, else catalog default; exhausted chain
@@ -61,6 +61,13 @@
   directory") and ignores `package.json` `main` for local dirs. Migrates
   a legacy v1 `plugin` tuple automatically.
 - Dev: `@types/node` so `tsc` is clean.
+- `oc-` namespace: plugin id `oc-advisor`, tools `oc-advisor` /
+  `oc-advisor_ctl`, delivery marker `[oc-advisor-note]`, reviewer
+  guidance `OC-WATCHDOG.md` (directory + `.opencode/` + user level).
+  Keeps identifiers distinct from the omp/pi advisor sharing the
+  workspace and makes advisor artifacts unambiguous in-session. The
+  slash command stays `/advisor`; existing settings reset once (storage
+  keys derive from the plugin id).
 
 ## 0.1.0
 

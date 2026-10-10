@@ -3,11 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// oc advisor plugin (v2 API): registers the advisor tool (pull-style
-// second-model guidance) plus the advisor_ctl tool (programmatic
-// management: status, on/off, models, thinking, configure). /advisor is a
-// thin command template (commands/advisor.md) that tells the model to call
-// advisor_ctl and relay its result.
+// oc-advisor plugin (v2 API): registers the oc-advisor tool (pull-style
+// second-model guidance) plus the oc-advisor_ctl tool (programmatic
+// management: status, on/off, models, thinking, watch, configure). /advisor
+// is a thin command template (commands/advisor.md) that tells the model to
+// call oc-advisor_ctl and relay its result.
 //
 // Ported from the v1 implementation (see git history). V1 code does not
 // run on v2 hosts, so the scaffolding is rewritten against @opencode/plugin
@@ -20,7 +20,7 @@ import path from "node:path";
 // - settings live in plugin storage (ctx.storage), seeded once from plugin
 //   options; no hand-edited config surgery.
 
-// Version of this copy. Reported by advisor_ctl status.
+// Version of this copy. Reported by oc-advisor_ctl status.
 const VERSION = "0.2.0";
 
 // Persisted settings. model "auto" means: reuse the calling session's
@@ -353,7 +353,7 @@ function modelsSummary(candidates: ModelCandidate[], executor: string | null, fi
 
 // Reviewer-only project guidance (omp WATCHDOG.md, slimmed): walks from
 // the session directory up to the git root (or home), collecting
-// WATCHDOG.md files, plus a user-level one. Appended to the advisor
+// OC-WATCHDOG.md files, plus a user-level one. Appended to the advisor
 // prompt only — never the executor's. No @-import expansion (noted
 // limitation vs omp). Best-effort sync reads; failures yield "".
 function loadWatchdogGuidance(startDir: string | null): string {
@@ -369,7 +369,7 @@ function loadWatchdogGuidance(startDir: string | null): string {
     }
   };
   try {
-    const userText = readFile(path.join(os.homedir(), ".config", "opencode", "WATCHDOG.md"));
+    const userText = readFile(path.join(os.homedir(), ".config", "opencode", "OC-WATCHDOG.md"));
     if (userText) blocks.push(userText);
   } catch {
     // Ignored.
@@ -379,7 +379,7 @@ function loadWatchdogGuidance(startDir: string | null): string {
       let dir = path.resolve(startDir);
       const home = path.resolve(os.homedir());
       for (let depth = 0; depth < 25; depth++) {
-        for (const name of ["WATCHDOG.md", path.join(".opencode", "WATCHDOG.md")]) {
+        for (const name of ["OC-WATCHDOG.md", path.join(".opencode", "OC-WATCHDOG.md")]) {
           const text = readFile(path.join(dir, name));
           if (text) blocks.push(text);
           if (blocks.length >= 6) return formatWatchdog(blocks);
@@ -427,7 +427,7 @@ const TURN_END_EVENTS = new Set([
 // Prefix marking advisor-delivered turns, for the cascade guard: a
 // boundary whose newest user message carries it is captured but never
 // scheduled, so deliveries cannot re-wake reviewers in a loop.
-const DELIVERY_MARKER = "[advisor-note] ";
+const DELIVERY_MARKER = "[oc-advisor-note] ";
 
 // Sidecar sessions created by this process. Their own execution events
 // are ignored so reviews never review themselves.
@@ -624,7 +624,7 @@ async function runSidecarReview(
   let sidecar: string | null = null;
   try {
     const session = await ctx.session.create({
-      title: "advisor-review",
+      title: "oc-advisor-review",
       model,
       ...(directory ? { location: { directory } } : {}),
       permissions: [...SIDECAR_PERMISSIONS],
@@ -824,14 +824,14 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
   if (recordOnly) {
     // Record-only: never wake the agent (resume defaults to waking).
     try {
-      await ctx.session.synthetic({ sessionID, text: `[advisor ${severity}]\n${note}`, resume: false });
+      await ctx.session.synthetic({ sessionID, text: `[oc-advisor ${severity}]\n${note}`, resume: false });
       delivered = true;
     } catch {
       // Delivery failure: cursor already advanced, next boundary retries.
     }
   } else {
     try {
-      await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}[advisor ${severity}]\n${note}` });
+      await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}[oc-advisor ${severity}]\n${note}` });
       delivered = true;
       // Steering restarts the cooldown (blockers exempt from aging it,
       // but a steered blocker still re-arms it for later concerns).
@@ -1083,7 +1083,7 @@ async function resolveModel(
 }
 
 // Applies one control command and returns the exact reply text. Backs the
-// advisor_ctl tool, which the /advisor template invokes.
+// oc-advisor_ctl tool, which the /advisor template invokes.
 async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Promise<string> {
   const tokens = (rawArgs || "")
     .trim()
@@ -1312,7 +1312,7 @@ Give the advice serious weight. Only override if you have primary-source evidenc
 When watch mode is on (/advisor status shows it), turn-boundary reviews also arrive automatically as advisor notes; this tool remains for on-demand checks. Reply NO_CONCERNS when there is nothing material to say.`;
 
 export default Plugin.define({
-  id: "advisor",
+  id: "oc-advisor",
   async setup(ctx) {
     // Seed storage from plugin options on first run only; afterwards the
     // stored settings (written by /advisor configure) are the source of
@@ -1355,9 +1355,9 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       // Programmatic control surface for the /advisor command template.
       editor.add({
-        name: "advisor_ctl",
+        name: "oc-advisor_ctl",
         description:
-          "Control the oc advisor plugin itself (status, on/off, models, thinking, configure). This manages the advisor; it is not the advisor. Call it when the user invokes /advisor, passing the words after /advisor as the action (empty means status), and relay its result back verbatim without adding anything, unless the result itself asks for a recommendation (models) - then follow it.",
+          "Control the oc-advisor plugin itself (status, on/off, models, thinking, configure). This manages the advisor; it is not the advisor. Call it when the user invokes /advisor, passing the words after /advisor as the action (empty means status), and relay its result back verbatim without adding anything, unless the result itself asks for a recommendation (models) - then follow it.",
         input: {
           type: "object",
           properties: {
@@ -1373,7 +1373,7 @@ export default Plugin.define({
         },
       });
       editor.add({
-        name: "advisor",
+        name: "oc-advisor",
         description: TOOL_DESCRIPTION,
         input: {
           type: "object",
@@ -1419,7 +1419,7 @@ export default Plugin.define({
             };
             if (resolved.variant) model.variant = resolved.variant;
             const session = await ctx.session.create({
-              title: "advisor-subcall",
+              title: "oc-advisor-subcall",
               model,
             });
             subcall = { sessionID: session.id };

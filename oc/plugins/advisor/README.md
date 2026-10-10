@@ -1,8 +1,8 @@
-# oc advisor plugin
+# oc-advisor plugin
 
-Local OpenCode plugin that adds two tools: `advisor`, a second model the
-executor can consult for a concise plan or course correction, and
-`advisor_ctl`, which manages the plugin itself
+Local OpenCode plugin that adds two tools: `oc-advisor`, a second model
+the executor can consult for a concise plan or course correction, and
+`oc-advisor_ctl`, which manages the plugin itself
 (status/on/off/models/thinking/watch/configure).
 
 Based on `@u007/opencode-advisor` (https://github.com/u007/opencode-advisor).
@@ -10,13 +10,13 @@ Everything below describes this copy.
 
 ## How it works
 
-The plugin registers two tools, `advisor` and `advisor_ctl`, alongside
-the built-in tools. The executor decides on its own when to call
-`advisor`, following the timing rules in the tool description: before
-substantive work, when stuck, when changing approach, and before
-declaring done. `advisor_ctl` backs the `/advisor` command.
+The plugin registers two tools, `oc-advisor` and `oc-advisor_ctl`,
+alongside the built-in tools. The executor decides on its own when to
+call `oc-advisor`, following the timing rules in the tool description:
+before substantive work, when stuck, when changing approach, and before
+declaring done. `oc-advisor_ctl` backs the `/advisor` command.
 
-Each pull call creates an ephemeral `advisor-subcall` session, prompts
+Each pull call creates an ephemeral `oc-advisor-subcall` session, prompts
 the advisor model with a short reviewer system prompt plus the
 caller-supplied context, returns the text answer as the tool result,
 then deletes the session. A recursion guard stops the advisor model
@@ -94,7 +94,7 @@ mirrored. A session variant is never carried onto a different model.
 ## /advisor command
 
 `/advisor` is a thin template (`commands/advisor.md`): it tells the model
-to call the `advisor_ctl` tool with the words after `/advisor` and relay
+to call the `oc-advisor_ctl` tool with the words after `/advisor` and relay
 the result verbatim (unless the result itself asks for a recommendation,
 as `models` does). All logic (parsing, validation, settings, model
 listing) runs in code inside the tool — the model only relays or, for
@@ -110,13 +110,13 @@ listing) runs in code inside the tool — the model only relays or, for
   decide; the recommendation is input, not the decision.
 - `/advisor thinking` — lists valid thinking variants for the advisor model.
 - `/advisor on` / `/advisor off` — set `"enabled"`. While disabled the
-  advisor tool stays registered but answers with a disabled notice
+  `oc-advisor` tool stays registered but answers with a disabled notice
   instead of calling a model (no cost). Watch reviews are also gated
   on `enabled`.
 - `/advisor configure [model=<...>] [thinking=<...>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [fallback=<id>,...|none]` —
   invalid input is rejected with usage and changes nothing.
 
-`advisor_ctl` is a regular plugin tool, so it also works wherever tools
+`oc-advisor_ctl` is a regular plugin tool, so it also works wherever tools
 work.
 
 ## Settings
@@ -130,7 +130,7 @@ delivery record live in the same storage.
 
 ## Watch mode (automatic reviews)
 
-The pull-style `advisor` tool waits to be called. Watch mode instead
+The pull-style `oc-advisor` tool waits to be called. Watch mode instead
 reviews primary turn boundaries on its own: when a turn ends, the plugin
 snapshots the new transcript delta into an ephemeral investigative
 sidecar — a short tool loop with read/grep/glob under deny-by-default
@@ -145,7 +145,7 @@ An emission guard (normalization, noise-phrase filter, rank-aware
 dedupe where escalations re-admit, budget of 4 non-blocker findings per
 review with blockers exempt) keeps repeat runs quiet. After a steered
 delivery, new concerns ride record-only for 3 turns (blockers exempt).
-Deliveries carry an `[advisor-note]` marker so they are captured but
+Deliveries carry an `[oc-advisor-note]` marker so they are captured but
 never re-scheduled (no advisor→primary→advisor loops); sidecar sessions
 are ignored by the watcher, and a rewritten transcript (e.g. compaction)
 reseeds the cursor instead of replaying.
@@ -160,14 +160,14 @@ Watch multiplies model calls (one per reviewed turn): prefer a
 subscription provider, and keep `reviewInterval` above 1 on edit-heavy
 sessions if cost matters.
 
-## Reviewer guidance (WATCHDOG.md)
+## Reviewer guidance (OC-WATCHDOG.md)
 
-A `WATCHDOG.md` file is advisor-only guidance: review priorities,
+An `OC-WATCHDOG.md` file is advisor-only guidance: review priorities,
 project traps, and quality bars too noisy for the main executor. The
 plugin walks from the session directory up to the git root (stopping at
-the git root or home, checking both `WATCHDOG.md` and
-`.opencode/WATCHDOG.md` at each level; plus a
-user-level `~/.config/opencode/WATCHDOG.md`), appending what it finds
+the git root or home, checking both `OC-WATCHDOG.md` and
+`.opencode/OC-WATCHDOG.md` at each level; plus a
+user-level `~/.config/opencode/OC-WATCHDOG.md`), appending what it finds
 to the advisor prompt as `<attention>` blocks. It never enters the
 executor's context. Files over 8KB are skipped (at most 6 files);
 `@`-imports are not expanded.
