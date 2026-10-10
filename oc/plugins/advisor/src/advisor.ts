@@ -1,5 +1,6 @@
 import { Plugin } from "@opencode/plugin";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 // oc advisor plugin (v2 API): registers the advisor tool (pull-style
@@ -33,6 +34,7 @@ type AdvisorSettings = {
   thinking: string;
   watch: boolean;
   reviewInterval: number;
+  fallback: string[];
 };
 
 const DEFAULT_SETTINGS: AdvisorSettings = {
@@ -41,6 +43,7 @@ const DEFAULT_SETTINGS: AdvisorSettings = {
   thinking: "auto",
   watch: false,
   reviewInterval: 1,
+  fallback: [],
 };
 
 const STORAGE_KEY = "settings";
@@ -154,6 +157,7 @@ async function currentSettings(ctx: any): Promise<AdvisorSettings> {
           typeof r.reviewInterval === "number" && Number.isInteger(r.reviewInterval) && r.reviewInterval >= 1
             ? r.reviewInterval
             : DEFAULT_SETTINGS.reviewInterval,
+        fallback: Array.isArray(r.fallback) ? r.fallback.filter((f): f is string => typeof f === "string" && f.length > 0) : [],
       };
     }
   } catch {
@@ -172,6 +176,10 @@ async function currentSettings(ctx: any): Promise<AdvisorSettings> {
       typeof opts.reviewInterval === "number" && Number.isInteger(opts.reviewInterval) && (opts.reviewInterval as number) >= 1
         ? (opts.reviewInterval as number)
         : DEFAULT_SETTINGS.reviewInterval,
+    fallback:
+      Array.isArray(opts.fallback)
+        ? (opts.fallback as unknown[]).filter((f): f is string => typeof f === "string" && f.length > 0)
+        : DEFAULT_SETTINGS.fallback,
   };
 }
 
@@ -189,7 +197,8 @@ function describeSettings(settings: AdvisorSettings, env: { providerID: string; 
   if (env) return `${env.providerID}/${env.modelID}${env.variant ? `#${env.variant}` : ""} (from environment)`;
   const model = settings.model === "auto" ? "auto (follows the calling session model)" : settings.model;
   const thinking = settings.thinking === "auto" ? "auto" : settings.thinking;
-  return `${model}, thinking ${thinking} (from advisor settings)`;
+  const fallback = settings.fallback.length > 0 ? `, fallback ${settings.fallback.join(", ")}` : "";
+  return `${model}, thinking ${thinking}${fallback} (from advisor settings)`;
 }
 
 function statusText(
@@ -217,13 +226,14 @@ function usageText(): string {
     "  status   Show current state.",
     "  models   Write available models to a file and recommend 4-5.",
     "  thinking List valid thinking variants for the advisor model.",
-    "  configure [model=<id|name|auto>] [thinking=<variant|auto>] [enabled=on|off] [watch=on|off] [reviewInterval=N]",
+    "  configure [model=<id|name|auto>] [thinking=<variant|auto>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [fallback=<id>,...|none]",
     "           model accepts an exact provider/model id, a display name,",
     "           or a substring (unambiguous match applies, else a pick",
     "           list). Empty model means auto. thinking accepts a variant",
     "           id valid for the resolved model, or auto. watch enables",
     "           automatic turn-boundary reviews; reviewInterval reviews",
-    "           every Nth turn (default 1).",
+    "           every Nth turn (default 1). fallback lists models tried in",
+    "           order when the configured model is stale.",
   ].join("\n");
 }
 
@@ -339,6 +349,56 @@ function modelsSummary(candidates: ModelCandidate[], executor: string | null, fi
     `Read ${file} and recommend 4-5 as the advisor model: give one-line`,
     "reasons and exact ids ready for /advisor configure model=<id>.",
   ].join("\n");
+}
+
+// Reviewer-only project guidance (omp WATCHDOG.md, slimmed): walks from
+// the session directory up to the git root (or home), collecting
+// WATCHDOG.md files, plus a user-level one. Appended to the advisor
+// prompt only — never the executor's. No @-import expansion (noted
+// limitation vs omp). Best-effort sync reads; failures yield "".
+function loadWatchdogGuidance(startDir: string | null): string {
+  const blocks: string[] = [];
+  const readFile = (file: string): string | null => {
+    try {
+      const stat = fs.statSync(file);
+      if (!stat.isFile() || stat.size > 8000) return null;
+      const text = fs.readFileSync(file, "utf8").trim();
+      return text.length > 0 ? text : null;
+    } catch {
+      return null;
+    }
+  };
+  try {
+    const userText = readFile(path.join(os.homedir(), ".config", "opencode", "WATCHDOG.md"));
+    if (userText) blocks.push(userText);
+  } catch {
+    // Ignored.
+  }
+  if (startDir) {
+    try {
+      let dir = path.resolve(startDir);
+      const home = path.resolve(os.homedir());
+      for (let depth = 0; depth < 25; depth++) {
+        for (const name of ["WATCHDOG.md", path.join(".opencode", "WATCHDOG.md")]) {
+          const text = readFile(path.join(dir, name));
+          if (text) blocks.push(text);
+          if (blocks.length >= 6) return formatWatchdog(blocks);
+        }
+        if (fs.existsSync(path.join(dir, ".git"))) break;
+        const parent = path.dirname(dir);
+        if (parent === dir || dir === home) break;
+        dir = parent;
+      }
+    } catch {
+      // Ignored.
+    }
+  }
+  return formatWatchdog(blocks);
+}
+
+function formatWatchdog(blocks: string[]): string {
+  if (blocks.length === 0) return "";
+  return blocks.map((b) => `Especially pay attention to:\n<attention>\n${b}\n</attention>`).join("\n\n");
 }
 
 // --- Push-style auto-review (watch mode) ---
@@ -742,11 +802,12 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
   // Cooldown tick: every processed boundary ages the immune window.
   const immune = await readImmune(ctx, sessionID);
   if (immune > 0) await writeImmune(ctx, sessionID, immune - 1);
+  const watchdog = loadWatchdogGuidance(directory);
   const verdict = await runSidecarReview(
     ctx,
     model,
     directory,
-    `${WATCH_SYSTEM_PROMPT}\n\n--- TRANSCRIPT DELTA ---\n\n${delta}`,
+    `${WATCH_SYSTEM_PROMPT}${watchdog ? `\n\n${watchdog}` : ""}\n\n--- TRANSCRIPT DELTA ---\n\n${delta}`,
   );
   // Execution failure (timeout, model error, sandbox refusal): advance the
   // cursor so one bad review cannot retry-storm every later boundary.
@@ -966,7 +1027,22 @@ async function resolveModel(
       return { error: `Bad model "${settings.model}" in advisor settings. Use provider/model or auto.` };
     }
     if (!known(parsed.providerID, parsed.modelID)) {
-      return { error: `Unknown model ${settings.model} in advisor settings. Run /advisor models for exact ids.` };
+      // Stale configured model: walk the fallback chain before failing.
+      for (const fb of settings.fallback) {
+        const fbParsed = splitModel(fb);
+        if (!fbParsed || !known(fbParsed.providerID, fbParsed.modelID)) continue;
+        let variant: string | undefined;
+        if (settings.thinking !== "auto") {
+          const valid = variantsOf(fbParsed.providerID, fbParsed.modelID);
+          if (valid && valid.includes(settings.thinking)) variant = settings.thinking;
+        }
+        return { ...fbParsed, variant, source: "advisor settings fallback" };
+      }
+      const hint =
+        settings.fallback.length > 0
+          ? " (fallbacks exhausted too)"
+          : " (set fallbacks via /advisor configure fallback=<id>,... )";
+      return { error: `Unknown model ${settings.model} in advisor settings${hint}. Run /advisor models for exact ids.` };
     }
     // An explicit variant wins; thinking "auto" with an explicitly chosen
     // model means the catalog default (never the session's variant, which
@@ -1080,7 +1156,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
     if (!argStr) return `${statusText(live, env, await readLastReview(ctx))}\n\n${usageText()}`;
     const next = { ...live };
     let rest = argStr;
-    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval)\s*=\s*\S+|$)/i.exec(argStr);
+    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval|fallback)\s*=\s*\S+|$)/i.exec(argStr);
     if (modelMatch) {
       rest = rest.replace(modelMatch[0], " ");
       const resolved = await resolveModelInput(ctx, (modelMatch[1] || "").trim());
@@ -1143,6 +1219,32 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
         return `Bad reviewInterval "${intervalMatch[1]}". Use a positive integer.\n\n${usageText()}`;
       }
       next.reviewInterval = n;
+    }
+    const fallbackMatch = /(?:^|\s)fallback\s*=\s*(\S+)/i.exec(argStr);
+    if (fallbackMatch) {
+      rest = rest.replace(fallbackMatch[0], " ");
+      const value = fallbackMatch[1];
+      if (value.toLowerCase() === "none") {
+        next.fallback = [];
+      } else {
+        const ids = value
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        if (ids.length === 0) return `Bad fallback "${fallbackMatch[1]}". Use comma-separated provider/model ids, or none.\n\n${usageText()}`;
+        for (const id of ids) {
+          const parsed = splitModel(id);
+          if (!parsed) return `Bad fallback "${id}". Use provider/model ids separated by commas.\n\n${usageText()}`;
+          const candidates = await listModels(ctx);
+          if (
+            candidates.length > 0 &&
+            !candidates.some((m) => m.providerID === parsed.providerID && m.modelID === parsed.modelID)
+          ) {
+            return `Unknown fallback model "${id}". Run /advisor models for exact ids.\n\n${usageText()}`;
+          }
+        }
+        next.fallback = ids;
+      }
     }
     if (rest.trim().length > 0) return `Unknown option "${rest.trim()}".\n\n${usageText()}`;
     const err = await writeSettings(ctx, next);
@@ -1236,6 +1338,10 @@ export default Plugin.define({
             (opts.reviewInterval as number) >= 1
               ? (opts.reviewInterval as number)
               : DEFAULT_SETTINGS.reviewInterval,
+          fallback:
+            Array.isArray(opts.fallback)
+              ? (opts.fallback as unknown[]).filter((f): f is string => typeof f === "string" && f.length > 0)
+              : DEFAULT_SETTINGS.fallback,
         });
       }
     } catch {
@@ -1323,9 +1429,17 @@ export default Plugin.define({
           }
           try {
             // Transient generation: no history, returns text directly.
+            // Reviewer-only project guidance rides along when present.
+            let promptText = `${SYSTEM_PROMPT}\n\n--- CONTEXT ---\n\n${args.prompt.trim()}`;
+            const callerDir =
+              typeof context?.sessionID === "string" && context.sessionID.length > 0
+                ? await sessionDirectory(ctx, context.sessionID)
+                : null;
+            const watchdog = loadWatchdogGuidance(callerDir);
+            if (watchdog) promptText = `${SYSTEM_PROMPT}\n\n${watchdog}\n\n--- CONTEXT ---\n\n${args.prompt.trim()}`;
             const response = await ctx.session.generate({
               sessionID: subcall.sessionID,
-              prompt: `${SYSTEM_PROMPT}\n\n--- CONTEXT ---\n\n${args.prompt.trim()}`,
+              prompt: promptText,
             });
             const text = response?.text;
             return { content: text || "Advisor returned no advice." };

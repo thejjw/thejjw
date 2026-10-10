@@ -38,6 +38,12 @@
   budget of 4 non-blockers per review (blockers exempt).
 - Post-steer cooldown: concerns ride record-only for 3 turns
   (blockers exempt).
+- Reviewer-only `WATCHDOG.md` guidance (session dir up to git root plus
+  user level, `<attention>` blocks, executor never sees it).
+- Model `fallback` chain for stale configured models (ordered,
+  thinking kept when valid, else catalog default; exhausted chain
+  stays a hard error). Stale-result eviction is N/A by design: every
+  review runs in a fresh sidecar that is removed afterwards.
 - New `SYSTEM_PROMPT`: silence-first (`NO_CONCERNS`), severity tags,
   anti-nag and evidence rules.
 - Catalog reads unwrap the `{ location, data }` envelope returned by

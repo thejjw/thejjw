@@ -134,6 +134,29 @@ Watch multiplies model calls (one per reviewed turn): prefer a
 subscription provider, and keep `reviewInterval` above 1 on edit-heavy
 sessions if cost matters.
 
+## Reviewer guidance (WATCHDOG.md)
+
+A `WATCHDOG.md` file is advisor-only guidance: review priorities,
+project traps, and quality bars too noisy for the main executor. The
+plugin walks from the session directory up to the git root (plus a
+user-level `~/.config/opencode/WATCHDOG.md`), appending what it finds
+to the advisor prompt as `<attention>` blocks. It never enters the
+executor's context. Files over 8KB are skipped; `@`-imports are not
+expanded.
+
+## Model fallback chain
+
+When the configured advisor model goes stale (removed from the
+catalog), each call first walks `fallback` in order instead of failing:
+the first listed model still in the catalog wins, keeping the
+configured thinking when valid for it, else the catalog default. Only
+the settings tier falls back; environment and per-call values stay
+loud on error, and an exhausted chain is still a hard error telling
+you to reconfigure.
+
+- `/advisor configure fallback=<id>,...` — validated like `model=`;
+  `fallback=none` clears the chain.
+
 Settings live in plugin storage (durable, scoped to this plugin), seeded
 once from the plugin options on first run. Afterwards `/advisor configure`
 is the source of truth; editing config options directly has no effect
