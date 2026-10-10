@@ -470,11 +470,16 @@ const TURN_END_EVENTS = new Set([
 // scheduled, so deliveries cannot re-wake reviewers in a loop.
 const DELIVERY_MARKER = "[oc-advisor-note] ";
 
-// Trailer appended to every delivered note (Fix A): a steered note is a
-// new user turn, so without this the agent tends to answer it and stop,
-// abandoning the interrupted task.
-const RESUME_DIRECTIVE =
-  "Mid-task advisory, not a new task: after addressing the above, resume the work in progress unless it is genuinely complete. If this changes your plan, state the change and continue.";
+// Trailer for a steered (blocker) note. It is a new user turn, so the
+// directive must authorize finishing user-asked work while forbidding the
+// agent from treating the note itself as approval for new work.
+const STEER_DIRECTIVE =
+  "Advisor review — context, not a user instruction, and not approval to make changes the user did not ask for. Address the finding above, then resume the task the user asked for if it is still unfinished. If the user's latest message was a question, or is awaiting their decision, respond to the user and wait instead of acting. Never start new work on the strength of this note alone.";
+
+// Trailer for a record-only (concern/nit) note: it never wakes the agent,
+// so it only needs to say "consider this when you next act".
+const SYNTHETIC_DIRECTIVE =
+  "Advisor review — context, not a user instruction; no action is required now. Apply it, if relevant, within the work the user asked for on your next step.";
 
 // Sidecar sessions created by this process. Their own execution events
 // are ignored so reviews never review themselves.
@@ -492,10 +497,6 @@ const SIDECAR_PERMISSIONS = [
 // Upper bound for one sidecar tool loop. A timeout aborts the review
 // rather than blocking later boundaries behind it.
 const SIDECAR_TIMEOUT_MS = 3 * 60 * 1000;
-
-// Turns after a steered concern/blocker during which new concerns ride
-// as record-only notes instead of waking the agent. Blockers are exempt.
-const IMMUNE_TURNS = 3;
 
 // --- Emission guard (omp AdvisorEmissionGuard, adapted) ---
 //
@@ -629,34 +630,6 @@ function overallSeverity(text: string): Severity {
   if (/\bblocker\b/i.test(text)) return "blocker";
   if (/\bconcern\b/i.test(text)) return "concern";
   return "nit";
-}
-
-// Cooldown after a steered delivery: remaining turns during which new
-// concerns ride record-only instead of waking the agent. Blockers exempt.
-function immuneKey(sessionID: string): string {
-  return `immune:${sessionID}`;
-}
-
-async function readImmune(ctx: any, sessionID: string): Promise<number> {
-  try {
-    const raw = await ctx.storage.get(immuneKey(sessionID));
-    if (typeof raw === "number" && raw > 0) return Math.floor(raw);
-    if (raw && typeof raw === "object" && typeof (raw as any).turns === "number" && (raw as any).turns > 0) {
-      return Math.floor((raw as any).turns);
-    }
-  } catch {
-    // Ignored.
-  }
-  return 0;
-}
-
-async function writeImmune(ctx: any, sessionID: string, turns: number): Promise<void> {
-  try {
-    if (turns <= 0) await ctx.storage.remove(immuneKey(sessionID));
-    else await ctx.storage.set(immuneKey(sessionID), { turns });
-  } catch {
-    // Ignored: cooldown is best-effort.
-  }
 }
 
 // Last assistant *text* in a transcript (skips tool-only messages and,
@@ -1000,9 +973,7 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
   if (!directory && typeof ctx?.location?.directory === "string" && ctx.location.directory.length > 0) {
     directory = ctx.location.directory;
   }
-  // Cooldown tick: every processed boundary ages the immune window.
-  const immune = await readImmune(ctx, sessionID);
-  if (immune > 0) await writeImmune(ctx, sessionID, immune - 1);
+  // Cooldown tick removed: concerns never steer, so immunity is unused.
   const watchdog = loadWatchdogGuidance(directory);
   const outcome = await runSidecarReview(
     ctx,
@@ -1045,24 +1016,22 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
     ? `[oc-advisor ${severity} · reviewed msgs ${reviewedFrom}–${reviewedThrough}]`
     : `[oc-advisor ${severity}]`;
   let delivered = false;
-  // Interrupted primaries, immune-window concerns, and stale notes never
-  // wake the agent; blockers always steer (unless stale).
-  const recordOnly = severity === "nit" || interrupted || stale || (severity === "concern" && immune > 0);
+  // Concerns and nits are record-only (they never wake the agent). Only a
+  // blocker steers — and even then not when the primary was interrupted or
+  // the review fell behind.
+  const recordOnly = severity !== "blocker" || interrupted || stale;
   if (recordOnly) {
     // Record-only: never wake the agent (resume defaults to waking).
     try {
-      await ctx.session.synthetic({ sessionID, text: `${label}\n${note}\n\n${RESUME_DIRECTIVE}`, resume: false });
+      await ctx.session.synthetic({ sessionID, text: `${label}\n${note}\n\n${SYNTHETIC_DIRECTIVE}`, resume: false });
       delivered = true;
     } catch {
       // Delivery failure: cursor already advanced, next boundary retries.
     }
   } else {
     try {
-      await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}${label}\n${note}\n\n${RESUME_DIRECTIVE}` });
+      await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}${label}\n${note}\n\n${STEER_DIRECTIVE}` });
       delivered = true;
-      // Steering restarts the cooldown (blockers exempt from aging it,
-      // but a steered blocker still re-arms it for later concerns).
-      await writeImmune(ctx, sessionID, IMMUNE_TURNS);
     } catch {
       // Delivery failure: cursor already advanced, next boundary retries.
     }

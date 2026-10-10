@@ -132,8 +132,8 @@ Settings live in plugin storage (durable, scoped to this plugin), seeded
 once from the plugin options on first run. Afterwards `/advisor configure`
 is the source of truth; editing config options directly has no effect
 until storage is cleared. No settings are written into `opencode.json(c)`
-beyond the plugin entry itself. Watch cursors, cooldowns, and the last
-delivery record live in the same storage.
+beyond the plugin entry itself. Watch cursors, activity counters, and the
+last delivery record live in the same storage.
 
 ## Watch mode (automatic reviews)
 
@@ -143,10 +143,14 @@ reviews on its own: after the session goes quiet for `watchQuietMs`
 an ephemeral investigative sidecar — a short tool loop with
 read/grep/glob under deny-by-default session permissions, so findings are
 verified against the workspace — then delivers severity-tagged notes
-back: `[nit]` findings as record-only notes that never wake the agent,
-`[concern]`/`[blocker]` as new turns — except on user-interrupted turns,
-where everything stays record-only (never re-wake a user who just
-stopped the agent). Silence (`NO_CONCERNS`) delivers nothing.
+back. Only a `[blocker]` **steers** (a new turn, prefixed
+`[oc-advisor-note]`); `[nit]` and `[concern]` are **record-only**
+(`synthetic`, `resume:false`) — they never wake the agent, so advisor
+feedback cannot trigger work on its own. A steered blocker carries a
+directive to finish the user's in-flight task but not to treat the note
+as approval for new work. Interrupted turns and stale reviews stay
+record-only even for blockers (never re-wake a user who just stopped the
+agent). Silence (`NO_CONCERNS`) delivers nothing.
 
 Reviewing at quiescence is deliberate: a fast burst of turns coalesces
 into one settled review instead of a lagging chain of reviews about
@@ -166,9 +170,8 @@ An emission guard (normalization, noise-phrase filter, rank-aware
 dedupe where escalations re-admit, budget of 4 non-blocker findings per
 review with blockers exempt) keeps repeat runs quiet. A reply that
 merely reasons toward `NO_CONCERNS` is silence — the sentinel only
-loses to an explicit `[nit]`/`[concern]`/`[blocker]` finding. After a
-steered delivery, new concerns ride record-only for 3 turns (blockers
-exempt). A note whose review started more than `watchStaleMessages`
+loses to an explicit `[nit]`/`[concern]`/`[blocker]` finding. A note whose
+review started more than `watchStaleMessages`
 messages ago (default 6; 0 disables) is stale: it always rides
 record-only, labelled with the reviewed message span, so it never
 interrupts work that has moved on.
