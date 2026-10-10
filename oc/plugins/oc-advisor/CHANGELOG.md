@@ -78,7 +78,8 @@
   tag, noise-phrase filter, rank-aware dedupe with escalation,
   budget of 4 non-blockers per review (blockers exempt).
 - Delivery routing: only `[blocker]` steers (a new turn); `[nit]` and
-  `[concern]` are record-only (`synthetic`, `resume:false`) so advisor
+  `[concern]` are record-only (a visible, non-waking user message sent
+  via `prompt` with `resume:false`) so advisor
   feedback cannot trigger work on its own. A steered blocker's directive
   scopes the agent to finishing user-asked work and forbids treating the
   note as approval for new work. (Replaces the earlier post-steer

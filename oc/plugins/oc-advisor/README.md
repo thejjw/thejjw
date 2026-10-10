@@ -145,7 +145,8 @@ read/grep/glob under deny-by-default session permissions, so findings are
 verified against the workspace — then delivers severity-tagged notes
 back. Only a `[blocker]` **steers** (a new turn, prefixed
 `[oc-advisor-note]`); `[nit]` and `[concern]` are **record-only**
-(`synthetic`, `resume:false`) — they never wake the agent, so advisor
+(visible user messages sent with `resume:false`) — they never wake the
+agent, so advisor
 feedback cannot trigger work on its own. A steered blocker carries a
 directive to finish the user's in-flight task but not to treat the note
 as approval for new work. Interrupted turns and stale reviews stay

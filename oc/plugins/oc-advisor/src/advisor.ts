@@ -476,9 +476,10 @@ const DELIVERY_MARKER = "[oc-advisor-note] ";
 const STEER_DIRECTIVE =
   "Advisor review — context, not a user instruction, and not approval to make changes the user did not ask for. Address the finding above, then resume the task the user asked for if it is still unfinished. If the user's latest message was a question, or is awaiting their decision, respond to the user and wait instead of acting. Never start new work on the strength of this note alone.";
 
-// Trailer for a record-only (concern/nit) note: it never wakes the agent,
-// so it only needs to say "consider this when you next act".
-const SYNTHETIC_DIRECTIVE =
+// Trailer for a record-only (concern/nit) note. It is delivered as a
+// non-waking user message (prompt with resume:false) so it is fully
+// visible but starts no turn.
+const RECORD_ONLY_DIRECTIVE =
   "Advisor review — context, not a user instruction; no action is required now. Apply it, if relevant, within the work the user asked for on your next step.";
 
 // Sidecar sessions created by this process. Their own execution events
@@ -879,6 +880,8 @@ function renderDelta(messages: any[], digest: boolean): string {
       continue;
     }
     if (m.type === "user" && typeof m.text === "string") {
+      // Skip our own delivered notes so the advisor never re-reads them.
+      if (m.text.startsWith(DELIVERY_MARKER)) continue;
       emit(`User: ${m.text}`);
     } else if (m.type === "assistant" && Array.isArray(m.content)) {
       for (const part of m.content) {
@@ -1016,14 +1019,14 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
     ? `[oc-advisor ${severity} · reviewed msgs ${reviewedFrom}–${reviewedThrough}]`
     : `[oc-advisor ${severity}]`;
   let delivered = false;
-  // Concerns and nits are record-only (they never wake the agent). Only a
-  // blocker steers — and even then not when the primary was interrupted or
-  // the review fell behind.
+  // Concerns and nits are record-only: a visible (non-waking) user message
+  // via prompt + resume:false. Only a blocker wakes a turn — and not when
+  // the primary was interrupted or the review fell behind.
   const recordOnly = severity !== "blocker" || interrupted || stale;
   if (recordOnly) {
-    // Record-only: never wake the agent (resume defaults to waking).
+    // Visible but non-waking: admitted to the transcript, no execution.
     try {
-      await ctx.session.synthetic({ sessionID, text: `${label}\n${note}\n\n${SYNTHETIC_DIRECTIVE}`, resume: false });
+      await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}${label}\n${note}\n\n${RECORD_ONLY_DIRECTIVE}`, resume: false });
       delivered = true;
     } catch {
       // Delivery failure: cursor already advanced, next boundary retries.
