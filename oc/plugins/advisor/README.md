@@ -64,8 +64,9 @@ intercepting the command from the plugin, but hook-set command output is
 ignored for TUI-invoked commands, so the interception was removed.)
 
 - `/advisor` or `/advisor status` — report enabled/disabled and model.
-- `/advisor models` — list every `provider/model` id with display names,
-  for use with `configure model=`.
+- `/advisor models` — handled by the command template, not the tool:
+  dumps `opencode models` to `models_<timestamp>.txt` in the workspace
+  and recommends 4-5, preferring compatibility-tested providers.
 - `/advisor on` / `/advisor off` — set `"enabled"`. While disabled the
   advisor tool stays registered but answers with a disabled notice
   instead of calling a model (no cost).
