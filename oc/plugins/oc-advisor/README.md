@@ -113,7 +113,7 @@ listing) runs in code inside the tool — the model only relays or, for
   `oc-advisor` tool stays registered but answers with a disabled notice
   instead of calling a model (no cost). Watch reviews are also gated
   on `enabled`.
-- `/advisor configure [model=<...>] [thinking=<...>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [fallback=<id>,...|none]` —
+- `/advisor configure [model=<...>] [thinking=<...>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [watchStaleTurns=N] [fallback=<id>,...|none]` —
   invalid input is rejected with usage and changes nothing.
 
 `oc-advisor_ctl` is a regular plugin tool, so it also works wherever tools
@@ -143,18 +143,29 @@ Silence (`NO_CONCERNS`) delivers nothing.
 
 An emission guard (normalization, noise-phrase filter, rank-aware
 dedupe where escalations re-admit, budget of 4 non-blocker findings per
-review with blockers exempt) keeps repeat runs quiet. After a steered
-delivery, new concerns ride record-only for 3 turns (blockers exempt).
+review with blockers exempt) keeps repeat runs quiet. A reply that
+merely reasons toward `NO_CONCERNS` is silence — the sentinel only
+loses to an explicit `[nit]`/`[concern]`/`[blocker]` finding. After a
+steered delivery, new concerns ride record-only for 3 turns (blockers
+exempt). A note whose review started more than `watchStaleTurns` turns
+ago (default 2; 0 disables) is stale: it always rides record-only,
+labelled with the reviewed message span, so it never interrupts work
+that has moved on.
 Deliveries carry an `[oc-advisor-note]` marker so they are captured but
 never re-scheduled (no advisor→primary→advisor loops); sidecar sessions
 are ignored by the watcher, and a rewritten transcript (e.g. compaction)
-reseeds the cursor instead of replaying.
+reseeds the cursor instead of replaying. Every delivered note ends with
+a resume directive telling the agent it is a mid-task advisory, so it
+returns to the interrupted work instead of stopping after the note.
 
 - `/advisor configure watch=on|off` — enabling seeds the cursor at the
   current transcript length, so the first review covers only new turns.
   Default `off`.
 - `/advisor configure reviewInterval=N` — review every Nth turn (default
   1); skipped turns accumulate into the next scheduled review.
+- `/advisor configure watchStaleTurns=N` — a note reviewed while the
+  primary is more than N turns ahead rides record-only and is labelled
+  with the reviewed span (default 2; 0 disables).
 
 Watch multiplies model calls (one per reviewed turn): prefer a
 subscription provider, and keep `reviewInterval` above 1 on edit-heavy

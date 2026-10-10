@@ -35,6 +35,7 @@ type AdvisorSettings = {
   watch: boolean;
   reviewInterval: number;
   fallback: string[];
+  watchStaleTurns: number;
 };
 
 const DEFAULT_SETTINGS: AdvisorSettings = {
@@ -44,6 +45,7 @@ const DEFAULT_SETTINGS: AdvisorSettings = {
   watch: false,
   reviewInterval: 1,
   fallback: [],
+  watchStaleTurns: 2,
 };
 
 const STORAGE_KEY = "settings";
@@ -158,6 +160,10 @@ async function currentSettings(ctx: any): Promise<AdvisorSettings> {
             ? r.reviewInterval
             : DEFAULT_SETTINGS.reviewInterval,
         fallback: Array.isArray(r.fallback) ? r.fallback.filter((f): f is string => typeof f === "string" && f.length > 0) : [],
+        watchStaleTurns:
+          typeof r.watchStaleTurns === "number" && Number.isInteger(r.watchStaleTurns) && r.watchStaleTurns >= 0
+            ? r.watchStaleTurns
+            : DEFAULT_SETTINGS.watchStaleTurns,
       };
     }
   } catch {
@@ -180,6 +186,12 @@ async function currentSettings(ctx: any): Promise<AdvisorSettings> {
       Array.isArray(opts.fallback)
         ? (opts.fallback as unknown[]).filter((f): f is string => typeof f === "string" && f.length > 0)
         : DEFAULT_SETTINGS.fallback,
+    watchStaleTurns:
+      typeof opts.watchStaleTurns === "number" &&
+      Number.isInteger(opts.watchStaleTurns) &&
+      (opts.watchStaleTurns as number) >= 0
+        ? (opts.watchStaleTurns as number)
+        : DEFAULT_SETTINGS.watchStaleTurns,
   };
 }
 
@@ -226,14 +238,17 @@ function usageText(): string {
     "  status   Show current state.",
     "  models   Write available models to a file and recommend 4-5.",
     "  thinking List valid thinking variants for the advisor model.",
-    "  configure [model=<id|name|auto>] [thinking=<variant|auto>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [fallback=<id>,...|none]",
+    "  configure [model=<id|name|auto>] [thinking=<variant|auto>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [watchStaleTurns=N] [fallback=<id>,...|none]",
     "           model accepts an exact provider/model id, a display name,",
     "           or a substring (unambiguous match applies, else a pick",
     "           list). Empty model means auto. thinking accepts a variant",
     "           id valid for the resolved model, or auto. watch enables",
     "           automatic turn-boundary reviews; reviewInterval reviews",
-    "           every Nth turn (default 1). fallback lists models tried in",
-    "           order when the configured model is stale.",
+    "           every Nth turn (default 1); watchStaleTurns drops a note to",
+    "           record-only when the primary advanced more turns than that",
+    "           since the review started (default 2, 0 disables). fallback",
+    "           lists models tried in order when the configured model is",
+    "           stale.",
   ].join("\n");
 }
 
@@ -429,6 +444,12 @@ const TURN_END_EVENTS = new Set([
 // scheduled, so deliveries cannot re-wake reviewers in a loop.
 const DELIVERY_MARKER = "[oc-advisor-note] ";
 
+// Trailer appended to every delivered note (Fix A): a steered note is a
+// new user turn, so without this the agent tends to answer it and stop,
+// abandoning the interrupted task.
+const RESUME_DIRECTIVE =
+  "Mid-task advisory, not a new task: after addressing the above, resume the work in progress unless it is genuinely complete. If this changes your plan, state the change and continue.";
+
 // Sidecar sessions created by this process. Their own execution events
 // are ignored so reviews never review themselves.
 const sidecarSessions = new Set<string>();
@@ -485,30 +506,46 @@ function normalizeNote(text: string): string {
 
 type Finding = { severity: Severity; text: string };
 
-// Splits a review reply into severity-tagged findings. Lines starting
-// with [nit]/[concern]/[blocker] open a section; untagged leading text
-// becomes one nit finding (omp's omitted-severity default). Returns null
-// for silence (NO_CONCERNS sentinel or empty).
+// Splits a review reply into severity-tagged findings. Explicit
+// [nit]/[concern]/[blocker] lines win; a standalone NO_CONCERNS line
+// means silence even amid prose that merely mentions concerns; untagged
+// text otherwise becomes one nit finding (omp's omitted-severity
+// default). Returns null for silence.
 function splitFindings(reply: string): Finding[] | null {
   const trimmed = (reply || "").trim();
-  if (trimmed.length === 0 || trimmed === "NO_CONCERNS") return null;
+  if (trimmed.length === 0) return null;
+  const lines = trimmed.split("\n");
   const findings: Finding[] = [];
   let current: Finding | null = null;
-  for (const line of trimmed.split("\n")) {
-    const m = /^\[(nit|concern|blocker)\]\s*(.*)$/i.exec(line.trim());
+  let sawTagged = false;
+  let hadSentinel = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    const m = /^\[(nit|concern|blocker)\]\s*(.*)$/i.exec(line);
     if (m) {
+      sawTagged = true;
       current = { severity: m[1].toLowerCase() as Severity, text: m[2] };
       findings.push(current);
-    } else if (current) {
-      current.text += `\n${line}`;
-    } else if (line.trim().length > 0) {
-      current = { severity: "nit", text: line };
+      continue;
+    }
+    if (/^NO_CONCERNS$/i.test(line)) {
+      // A bare sentinel line is a verdict, not a finding.
+      hadSentinel = true;
+      continue;
+    }
+    if (current) {
+      current.text += `\n${raw}`;
+    } else if (line.length > 0) {
+      current = { severity: "nit", text: raw };
       findings.push(current);
     }
   }
   const cleaned = findings
     .map((f) => ({ severity: f.severity, text: f.text.trim() }))
     .filter((f) => f.text.length > 0);
+  // Silence when nothing explicit was tagged and a sentinel appeared:
+  // prose that reasons toward NO_CONCERNS must not become a nit/concern.
+  if (!sawTagged && hadSentinel) return null;
   return cleaned.length > 0 ? cleaned : null;
 }
 
@@ -788,6 +825,8 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
     await writeCursor(ctx, sessionID, { count: messages.length, turns });
     return;
   }
+  const reviewedFrom = cursor.count + 1;
+  const reviewedThrough = messages.length;
   const resolved = await resolveModel(ctx, sessionID, {}, live);
   if ("error" in resolved) return;
   const model: { id: string; providerID: string; variant?: string } = {
@@ -815,23 +854,40 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
   if (!verdict) return;
   const admitted = guardAdmit(sessionID, verdict);
   if (!admitted) return;
-  let severity = overallSeverity(admitted);
+  const severity = overallSeverity(admitted);
   const note = admitted;
+  // Delivery freshness (Fix B / B-refinement): if the primary advanced
+  // past N turns since this review started, the note is stale — force
+  // record-only so it never interrupts, and label the reviewed span.
+  let stale = false;
+  const staleTurns = live.watchStaleTurns;
+  if (staleTurns > 0) {
+    try {
+      const res = await ctx.session.context({ sessionID });
+      const current = Array.isArray(res) ? res : (res?.data ?? []);
+      if (Array.isArray(current) && current.length - reviewedThrough > staleTurns) stale = true;
+    } catch {
+      // Ignored: treat as fresh.
+    }
+  }
+  const label = stale
+    ? `[oc-advisor ${severity} · reviewed msgs ${reviewedFrom}–${reviewedThrough}]`
+    : `[oc-advisor ${severity}]`;
   let delivered = false;
-  // Interrupted primaries and immune-window concerns never wake the agent;
-  // blockers always steer.
-  const recordOnly = severity === "nit" || interrupted || (severity === "concern" && immune > 0);
+  // Interrupted primaries, immune-window concerns, and stale notes never
+  // wake the agent; blockers always steer (unless stale).
+  const recordOnly = severity === "nit" || interrupted || stale || (severity === "concern" && immune > 0);
   if (recordOnly) {
     // Record-only: never wake the agent (resume defaults to waking).
     try {
-      await ctx.session.synthetic({ sessionID, text: `[oc-advisor ${severity}]\n${note}`, resume: false });
+      await ctx.session.synthetic({ sessionID, text: `${label}\n${note}\n\n${RESUME_DIRECTIVE}`, resume: false });
       delivered = true;
     } catch {
       // Delivery failure: cursor already advanced, next boundary retries.
     }
   } else {
     try {
-      await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}[oc-advisor ${severity}]\n${note}` });
+      await ctx.session.prompt({ sessionID, text: `${DELIVERY_MARKER}${label}\n${note}\n\n${RESUME_DIRECTIVE}` });
       delivered = true;
       // Steering restarts the cooldown (blockers exempt from aging it,
       // but a steered blocker still re-arms it for later concerns).
@@ -840,19 +896,19 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
       // Delivery failure: cursor already advanced, next boundary retries.
     }
   }
-    if (delivered) {
-      const firstLine = note.split("\n", 1)[0] ?? "";
-      try {
-        await ctx.storage.set(LAST_REVIEW_KEY, {
-          time: Date.now(),
-          sessionID,
-          severity,
-          preview: firstLine.length > 120 ? firstLine.slice(0, 120) + " [...]" : firstLine,
-        });
-      } catch {
-        // Observability only: never fail a review over it.
-      }
+  if (delivered) {
+    const firstLine = note.split("\n", 1)[0] ?? "";
+    try {
+      await ctx.storage.set(LAST_REVIEW_KEY, {
+        time: Date.now(),
+        sessionID,
+        severity,
+        preview: firstLine.length > 120 ? firstLine.slice(0, 120) + " [...]" : firstLine,
+      });
+    } catch {
+      // Observability only: never fail a review over it.
     }
+  }
 }
 
 // Subscribes to turn-terminal events for the process lifetime. Returns a
@@ -1156,7 +1212,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
     if (!argStr) return `${statusText(live, env, await readLastReview(ctx))}\n\n${usageText()}`;
     const next = { ...live };
     let rest = argStr;
-    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval|fallback)\s*=\s*\S+|$)/i.exec(argStr);
+    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval|watchStaleTurns|fallback)\s*=\s*\S+|$)/i.exec(argStr);
     if (modelMatch) {
       rest = rest.replace(modelMatch[0], " ");
       const resolved = await resolveModelInput(ctx, (modelMatch[1] || "").trim());
@@ -1219,6 +1275,15 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
         return `Bad reviewInterval "${intervalMatch[1]}". Use a positive integer.\n\n${usageText()}`;
       }
       next.reviewInterval = n;
+    }
+    const staleMatch = /(?:^|\s)watchStaleTurns\s*=\s*(\S+)/i.exec(argStr);
+    if (staleMatch) {
+      rest = rest.replace(staleMatch[0], " ");
+      const n = Number(staleMatch[1]);
+      if (!Number.isInteger(n) || n < 0) {
+        return `Bad watchStaleTurns "${staleMatch[1]}". Use a non-negative integer (0 disables).\n\n${usageText()}`;
+      }
+      next.watchStaleTurns = n;
     }
     const fallbackMatch = /(?:^|\s)fallback\s*=\s*(\S+)/i.exec(argStr);
     if (fallbackMatch) {
@@ -1342,6 +1407,12 @@ export default Plugin.define({
             Array.isArray(opts.fallback)
               ? (opts.fallback as unknown[]).filter((f): f is string => typeof f === "string" && f.length > 0)
               : DEFAULT_SETTINGS.fallback,
+          watchStaleTurns:
+            typeof opts.watchStaleTurns === "number" &&
+            Number.isInteger(opts.watchStaleTurns) &&
+            (opts.watchStaleTurns as number) >= 0
+              ? (opts.watchStaleTurns as number)
+              : DEFAULT_SETTINGS.watchStaleTurns,
         });
       }
     } catch {

@@ -2,6 +2,15 @@
 
 ## 0.2.0
 
+- Silence is content-aware: a reply that reasons toward `NO_CONCERNS`
+  is silence, and an explicit severity-tagged finding always wins over
+  the sentinel.
+- Stale-review guard: `watchStaleTurns` (default 2, 0 disables) forces a
+  note to record-only and labels the reviewed span when the primary
+  advanced past it during the review.
+- Delivered notes end with a resume directive so the agent returns to
+  the interrupted task instead of stopping after the note.
+
 - Port to the OpenCode v2 plugin API (`@opencode/plugin`,
   `Plugin.define` with `id: "oc-advisor"`). V1 implementations do not run on
   v2 hosts. The v1 implementation is preserved in git history.
