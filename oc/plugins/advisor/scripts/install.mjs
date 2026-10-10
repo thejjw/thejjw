@@ -33,7 +33,9 @@ main().catch((error) => {
 async function main() {
   requireFiles();
   const entryUrl = pathToFileURL(entryFile).href;
-  const tupleText = `["${entryUrl}", { "enabled": true, "model": "auto" }]`;
+  // V2 plugins entries: plain path string (settings live in plugin
+  // storage, seeded from options only when options are given).
+  const entryText = `"${entryUrl}"`;
   const configPath = userConfigPath();
 
   if (args.status) {
@@ -46,7 +48,7 @@ async function main() {
     return;
   }
 
-  install(configPath, tupleText, args["dry-run"]);
+  install(configPath, entryText, args["dry-run"]);
 
   if (!args["dry-run"] && !args["skip-validate"]) {
     validateWithOpenCode();
@@ -161,11 +163,11 @@ function findMatching(text, openIdx) {
   throw new Error("unbalanced brackets in opencode config");
 }
 
-// Span of the top-level "plugin" array, or null when there is no such key.
-// The key must follow { or , (skipping whitespace) so a "plugin" string
+// Span of the top-level "plugins" array, or null when there is no such key.
+// The key must follow { or , (skipping whitespace) so a "plugins" string
 // inside a value cannot match.
 function findPluginArray(text) {
-  const re = /"plugin"\s*:/g;
+  const re = /"plugins"\s*:/g;
   let m;
   while ((m = re.exec(text)) !== null) {
     let j = m.index - 1;
@@ -178,20 +180,37 @@ function findPluginArray(text) {
   return null;
 }
 
-// True when our plugin tuple is already recorded in the config text.
+// True when our plugin entry is already recorded in the config text.
 function hasTuple(text) {
   return text.includes(entrySuffix);
 }
 
-// Span of our whole plugin tuple [...], or null when absent.
+// Span of our plugin entry: either the v2 plain "file://..." string or a
+// legacy v1 tuple [...]. Returns null when absent. The discriminator: in a
+// v1 tuple the URL string is followed by `, {`, in v2 by `,`/`]`/end.
 function findTuple(text) {
   const at = text.indexOf(entrySuffix);
   if (at === -1) return null;
-  const urlQuote = text.lastIndexOf('"', at);
-  if (urlQuote === -1) return null;
-  const open = text.lastIndexOf("[", urlQuote);
+  const open = text.lastIndexOf('"', at);
   if (open === -1) return null;
-  return { open, close: findMatching(text, open) };
+  let end = at;
+  while (end < text.length && text[end] !== '"') {
+    if (text[end] === "\\") end++;
+    end++;
+  }
+  if (end >= text.length) return null;
+  let k = skipIgnored(text, end + 1);
+  if (text[k] === ",") {
+    k = skipIgnored(text, k + 1);
+    if (text[k] === "{") {
+      // Legacy v1 tuple ["url", {...}]: remove the whole tuple. Its "["
+      // is the nearest one before our string.
+      const tupleOpen = text.lastIndexOf("[", open);
+      if (tupleOpen === -1) return null;
+      return { open: tupleOpen, close: findMatching(text, tupleOpen) };
+    }
+  }
+  return { open, close: end };
 }
 
 function timestamp() {
@@ -228,29 +247,45 @@ function showStatus(configPath, entryUrl) {
   console.log(`Command:  ${cmdExists ? (cmdCurrent ? "installed" : "differs") : "not installed"} → ${commandDest}`);
 }
 
-function freshConfig(tupleText) {
-  return `{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": [\n    ${tupleText}\n  ]\n}\n`;
+function freshConfig(entryText) {
+  return `{\n  "$schema": "https://opencode.ai/config.json",\n  "plugins": [\n    ${entryText}\n  ]\n}\n`;
 }
 
-function install(configPath, tupleText, dryRun) {
-  let text = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : freshConfig(tupleText);
+// True when the span is a legacy v1 tuple ["url", {...}] rather than a
+// v2 plain "url" string.
+function isLegacyTuple(text, span) {
+  return text[span.open] === "[";
+}
+
+function install(configPath, entryText, dryRun) {
+  let text = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : freshConfig(entryText);
   const existed = fs.existsSync(configPath);
   let changed = false;
 
   if (!existed) {
     changed = true;
-  } else if (hasTuple(text)) {
-    console.log("Plugin entry already configured.");
   } else {
-    const arr = findPluginArray(text);
-    if (!arr) {
-      text = insertPluginKey(text, tupleText);
-    } else if (skipIgnored(text, arr.open + 1) === arr.close) {
-      text = `${text.slice(0, arr.open + 1)}\n    ${tupleText}\n  ${text.slice(arr.close)}`;
-    } else {
-      text = `${text.slice(0, arr.close)},\n    ${tupleText}\n  ${text.slice(arr.close)}`;
+    let span = findTuple(text);
+    if (span && isLegacyTuple(text, span)) {
+      // Legacy v1 tuple: drop it here; the v2 entry is added to the
+      // "plugins" array below (migration).
+      text = excise(text, span);
+      console.log("Migrated legacy v1 plugin entry to v2.");
+      span = null;
     }
-    changed = true;
+    if (span) {
+      console.log("Plugin entry already configured.");
+    } else {
+      const arr = findPluginArray(text);
+      if (!arr) {
+        text = insertPluginKey(text, entryText);
+      } else if (skipIgnored(text, arr.open + 1) === arr.close) {
+        text = `${text.slice(0, arr.open + 1)}\n    ${entryText}\n  ${text.slice(arr.close)}`;
+      } else {
+        text = `${text.slice(0, arr.close)},\n    ${entryText}\n  ${text.slice(arr.close)}`;
+      }
+      changed = true;
+    }
   }
 
   const cmdWanted = fs.readFileSync(commandSrc, "utf8");
@@ -258,7 +293,7 @@ function install(configPath, tupleText, dryRun) {
 
   if (dryRun) {
     console.log(`Target:   ${configPath}`);
-    console.log(`Entry:    ${tupleText}`);
+    console.log(`Entry:    ${entryText}`);
     console.log(`Command:  ${commandDest} (${cmdCurrent === cmdWanted ? "up to date" : "would write"})`);
     console.log(`\nDry run only. Resulting config:\n\n${text}`);
     return;
@@ -280,18 +315,34 @@ function install(configPath, tupleText, dryRun) {
   }
 }
 
-// Inserts a "plugin" key before the root object's closing brace. Handles
+// Inserts a "plugins" key before the root object's closing brace. Handles
 // both empty and non-empty root objects.
-function insertPluginKey(text, tupleText) {
+function insertPluginKey(text, entryText) {
   const rootOpen = skipIgnored(text, 0);
   if (text[rootOpen] !== "{") throw new Error("config has no root object");
   const rootClose = findMatching(text, rootOpen);
   const innerEmpty = skipIgnored(text, rootOpen + 1) === rootClose;
-  const key = `"plugin": [\n    ${tupleText}\n  ]`;
+  const key = `"plugins": [\n    ${entryText}\n  ]`;
   if (innerEmpty) {
     return `${text.slice(0, rootOpen + 1)}\n  ${key}\n${text.slice(rootClose)}`;
   }
   return `${text.slice(0, rootClose)},\n  ${key}\n${text.slice(rootClose)}`;
+}
+
+// Removes the span plus one adjacent comma (trailing preferred) so the
+// surrounding array stays valid.
+function excise(text, span) {
+  let start = span.open;
+  let end = span.close + 1;
+  const after = skipIgnored(text, end);
+  if (text[after] === ",") {
+    end = after + 1;
+  } else {
+    let k = start - 1;
+    while (k >= 0 && " \t\r\n".includes(text[k])) k--;
+    if (text[k] === ",") start = k;
+  }
+  return text.slice(0, start) + text.slice(end);
 }
 
 function remove(configPath, entryUrl, dryRun) {
@@ -303,18 +354,7 @@ function remove(configPath, entryUrl, dryRun) {
     if (!span) {
       console.log("Plugin entry not found.");
     } else {
-      // Swallow one adjacent comma (trailing preferred) so the array stays valid.
-      let start = span.open;
-      let end = span.close + 1;
-      const after = skipIgnored(text, end);
-      if (text[after] === ",") {
-        end = after + 1;
-      } else {
-        let k = start - 1;
-        while (k >= 0 && " \t\r\n".includes(text[k])) k--;
-        if (text[k] === ",") start = k;
-      }
-      const next = text.slice(0, start) + text.slice(end);
+      const next = excise(text, span);
       if (dryRun) {
         console.log(`Would remove plugin entry from ${configPath}.`);
       } else {
@@ -340,14 +380,14 @@ function remove(configPath, entryUrl, dryRun) {
 }
 
 function validateWithOpenCode() {
-  console.log("\nValidating with: opencode debug config");
-  const result = spawnSync("opencode", ["debug", "config"], {
+  console.log("\nValidating with: opencode --version");
+  const result = spawnSync("opencode", ["--version"], {
     encoding: "utf8",
     shell: process.platform === "win32",
   });
 
   if (result.error) {
-    console.warn(`Warning: unable to run opencode debug config: ${result.error.message}`);
+    console.warn(`Warning: unable to run opencode --version: ${result.error.message}`);
     return;
   }
 
@@ -355,6 +395,7 @@ function validateWithOpenCode() {
   if (result.stderr.trim()) console.error(result.stderr.trim());
 
   if (result.status !== 0) {
-    throw new Error(`opencode debug config failed with exit code ${result.status}`);
+    throw new Error(`opencode --version failed with exit code ${result.status}`);
   }
+  console.log("Next: restart opencode, then run /advisor status in a session.");
 }

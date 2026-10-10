@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.0
+
+- Port to the OpenCode v2 plugin API (`@opencode/plugin`,
+  `Plugin.define` with `id: "advisor"`). V1 implementations do not run on
+  v2 hosts. The v1 implementation is preserved in git history.
+- Tools registered via `ctx.tool.transform` with JSON Schema inputs;
+  executors return `{ content }`.
+- Settings moved from hand-edited `opencode.json(c)` plugin-tuple options
+  to plugin storage (`ctx.storage`), seeded once from plugin options.
+  `/advisor configure` is the source of truth afterwards.
+- Session model/variant read directly from the session (`session.get`),
+  replacing the v1 transcript scan. Thinking `auto` mirrors the session
+  variant when the model is also followed.
+- New `thinking` setting: per-model catalog variant, default `auto`.
+  `/advisor thinking` lists valid variant ids for the advisor model;
+  `configure thinking=` validates against the catalog and rejects unknown
+  ids with the valid list. `configure model=` accepts a `#variant`
+  shorthand. Per-call tool args gain `variant`.
+- Call-time validation: a stale configured model or variant is a hard
+  error naming the fix (no silent fallback). Session/default lookup
+  failures still fall through gracefully.
+- Advisor subcall uses transient `session.generate` (no history) with the
+  model+variant set at `session.create`; server failures return an
+  `Error:` message instead of propagating an exception.
+- Installer targets the v2 `plugins` array with a plain path entry and
+  migrates a legacy v1 `plugin` tuple automatically.
+- Dev: `@types/node` so `tsc` is clean.
+
 ## 0.1.0
 
 - Initial local copy, based on `@u007/opencode-advisor` 1.2.3 behavior.
