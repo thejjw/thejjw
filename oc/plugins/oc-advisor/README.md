@@ -115,7 +115,7 @@ listing) runs in code inside the tool — the model only relays or, for
   `oc-advisor` tool stays registered but answers with a disabled notice
   instead of calling a model (no cost). Watch reviews are also gated
   on `enabled`.
-- `/advisor configure [model=<...>] [thinking=<...>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [watchStaleTurns=N] [fallback=<id>,...|none]` —
+- `/advisor configure [model=<...>] [thinking=<...>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [watchStaleMessages=N] [fallback=<id>,...|none]` —
   invalid input is rejected with usage and changes nothing. A bare
   `/advisor configure` (no options) prints the usage block, which lists
   every attachable option.
@@ -151,10 +151,10 @@ review with blockers exempt) keeps repeat runs quiet. A reply that
 merely reasons toward `NO_CONCERNS` is silence — the sentinel only
 loses to an explicit `[nit]`/`[concern]`/`[blocker]` finding. After a
 steered delivery, new concerns ride record-only for 3 turns (blockers
-exempt). A note whose review started more than `watchStaleTurns` turns
-ago (default 2; 0 disables) is stale: it always rides record-only,
-labelled with the reviewed message span, so it never interrupts work
-that has moved on.
+exempt). A note whose review started more than `watchStaleMessages`
+messages ago (default 6; 0 disables) is stale: it always rides
+record-only, labelled with the reviewed message span, so it never
+interrupts work that has moved on.
 Deliveries carry an `[oc-advisor-note]` marker so they are captured but
 never re-scheduled (no advisor→primary→advisor loops); sidecar sessions
 are ignored by the watcher, and a rewritten transcript (e.g. compaction)
@@ -167,13 +167,34 @@ returns to the interrupted work instead of stopping after the note.
   Default `off`.
 - `/advisor configure reviewInterval=N` — review every Nth turn (default
   1); skipped turns accumulate into the next scheduled review.
-- `/advisor configure watchStaleTurns=N` — a note reviewed while the
-  primary is more than N turns ahead rides record-only and is labelled
-  with the reviewed span (default 2; 0 disables).
+- `/advisor configure watchStaleMessages=N` — a note reviewed while the
+  primary is more than N messages ahead rides record-only and is labelled
+  with the reviewed span (default 6; 0 disables).
 
 Watch multiplies model calls (one per reviewed turn): prefer a
 subscription provider, and keep `reviewInterval` above 1 on edit-heavy
 sessions if cost matters.
+
+### Interpreting watch activity
+
+`/advisor status` shows a `Watch activity:` line once watch has run at
+least once, e.g. `12 reviews — 5 delivered, 6 silent, 0 failed, 1 stale`.
+Each review attempt lands in exactly one bucket:
+
+- **delivered** — the review produced a note (a `[nit]` as a non-waking
+  record, or a `[concern]`/`[blocker]` as a turn). The only bucket that
+  interrupted you.
+- **silent** — the review finished and concluded nothing material
+  (`NO_CONCERNS`, or every finding was filtered as noise/duplicate/over
+  budget). A healthy watch is mostly this.
+- **failed** — the review errored or timed out with no verdict; a
+  climbing count points at a provider or model problem.
+- **stale** — the review was killed because the primary raced ahead of
+  it; a climbing count means reviews are slower than your pace — raise
+  `watchStaleMessages`, or accept that watch skips fast stretches.
+
+Read it as: `silent` high is good; `failed` climbing is a fault; `stale`
+climbing is a speed mismatch; `delivered` is what actually reached you.
 
 ## Reviewer guidance (OC-WATCHDOG.md)
 

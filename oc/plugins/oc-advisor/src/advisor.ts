@@ -35,7 +35,7 @@ type AdvisorSettings = {
   watch: boolean;
   reviewInterval: number;
   fallback: string[];
-  watchStaleTurns: number;
+  watchStaleMessages: number;
 };
 
 const DEFAULT_SETTINGS: AdvisorSettings = {
@@ -45,7 +45,7 @@ const DEFAULT_SETTINGS: AdvisorSettings = {
   watch: false,
   reviewInterval: 1,
   fallback: [],
-  watchStaleTurns: 2,
+  watchStaleMessages: 6,
 };
 
 const STORAGE_KEY = "settings";
@@ -160,10 +160,10 @@ async function currentSettings(ctx: any): Promise<AdvisorSettings> {
             ? r.reviewInterval
             : DEFAULT_SETTINGS.reviewInterval,
         fallback: Array.isArray(r.fallback) ? r.fallback.filter((f): f is string => typeof f === "string" && f.length > 0) : [],
-        watchStaleTurns:
-          typeof r.watchStaleTurns === "number" && Number.isInteger(r.watchStaleTurns) && r.watchStaleTurns >= 0
-            ? r.watchStaleTurns
-            : DEFAULT_SETTINGS.watchStaleTurns,
+        watchStaleMessages:
+          typeof r.watchStaleMessages === "number" && Number.isInteger(r.watchStaleMessages) && r.watchStaleMessages >= 0
+            ? r.watchStaleMessages
+            : DEFAULT_SETTINGS.watchStaleMessages,
       };
     }
   } catch {
@@ -186,12 +186,12 @@ async function currentSettings(ctx: any): Promise<AdvisorSettings> {
       Array.isArray(opts.fallback)
         ? (opts.fallback as unknown[]).filter((f): f is string => typeof f === "string" && f.length > 0)
         : DEFAULT_SETTINGS.fallback,
-    watchStaleTurns:
-      typeof opts.watchStaleTurns === "number" &&
-      Number.isInteger(opts.watchStaleTurns) &&
-      (opts.watchStaleTurns as number) >= 0
-        ? (opts.watchStaleTurns as number)
-        : DEFAULT_SETTINGS.watchStaleTurns,
+    watchStaleMessages:
+      typeof opts.watchStaleMessages === "number" &&
+      Number.isInteger(opts.watchStaleMessages) &&
+      (opts.watchStaleMessages as number) >= 0
+        ? (opts.watchStaleMessages as number)
+        : DEFAULT_SETTINGS.watchStaleMessages,
   };
 }
 
@@ -212,6 +212,7 @@ function statusText(
   settings: AdvisorSettings,
   env: { providerID: string; modelID: string; variant?: string } | null,
   last: LastReview | null,
+  stats: WatchStats | null,
 ): string {
   const model = env
     ? `${env.providerID}/${env.modelID}${env.variant ? `#${env.variant}` : ""} (from environment)`
@@ -226,8 +227,14 @@ function statusText(
     `Fallback: ${fallback}.`,
     `Watch: ${settings.watch ? "on" : "off"} (default: ${DEFAULT_SETTINGS.watch ? "on" : "off"}).`,
     `Review interval: ${settings.reviewInterval} (default: ${DEFAULT_SETTINGS.reviewInterval}).`,
-    `Stale turns: ${settings.watchStaleTurns} (default: ${DEFAULT_SETTINGS.watchStaleTurns}; 0 disables).`,
+    `Stale messages: ${settings.watchStaleMessages} (default: ${DEFAULT_SETTINGS.watchStaleMessages}; 0 disables).`,
   ];
+  if (stats && stats.reviews > 0) {
+    const age = stats.lastAt > 0 ? ` (last ${relAge(stats.lastAt)})` : "";
+    lines.push(
+      `Watch activity: ${stats.reviews} reviews — ${stats.delivered} delivered, ${stats.silent} silent, ${stats.failed} failed, ${stats.stale} stale${age}.`,
+    );
+  }
   if (last) {
     const when = new Date(last.time).toLocaleString();
     lines.push(`Last review: [${last.severity}] ${when}${last.preview ? ` — ${last.preview}` : ""}`);
@@ -243,14 +250,14 @@ function usageText(): string {
     "  status   Show current state.",
     "  models   Write available models to a file and recommend 4-5.",
     "  thinking List valid thinking variants for the advisor model.",
-    "  configure [model=<id|name|auto>] [thinking=<variant|auto>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [watchStaleTurns=N] [fallback=<id>,...|none]",
+    "  configure [model=<id|name|auto>] [thinking=<variant|auto>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [watchStaleMessages=N] [fallback=<id>,...|none]",
     "           model accepts an exact provider/model id, a display name,",
     "           or a substring (unambiguous match applies, else a pick",
     "           list). Empty model means auto. thinking accepts a variant",
     "           id valid for the resolved model, or auto. watch enables",
     "           automatic turn-boundary reviews; reviewInterval reviews",
-    "           every Nth turn (default 1); watchStaleTurns drops a note to",
-    "           record-only when the primary advanced more turns than that",
+    "           every Nth turn (default 1); watchStaleMessages drops a note to",
+    "           record-only when the primary advanced more messages than that",
     "           since the review started (default 2, 0 disables). fallback",
     "           lists models tried in order when the configured model is",
     "           stale.",
@@ -654,15 +661,51 @@ function lastAssistantText(messages: any[]): string | null {
   return null;
 }
 
+// Outcome of one sidecar review attempt. `stale` = killed for falling too
+// far behind the primary; `failed` = error/timeout with no verdict.
+type ReviewOutcome =
+  | { kind: "verdict"; text: string }
+  | { kind: "stale" }
+  | { kind: "failed" };
+
+// Poll cadence for the kill-if-behind check, and the bound on cleanup
+// calls so a hung interrupt/remove can never stall the event loop.
+const STALE_POLL_MS = 20_000;
+const POLL_TICK_MS = 250;
+const INTERRUPT_TIMEOUT_MS = 2_000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Current message count of a session, or null when unreadable.
+async function transcriptLength(ctx: any, sessionID: string): Promise<number | null> {
+  try {
+    const res = await ctx.session.context({ sessionID });
+    const messages = Array.isArray(res) ? res : (res?.data ?? []);
+    return Array.isArray(messages) ? messages.length : null;
+  } catch {
+    return null;
+  }
+}
+
+// Interrupt bounded so a hung call cannot block the loop.
+async function boundedInterrupt(ctx: any, sessionID: string): Promise<void> {
+  await Promise.race([ctx.session.interrupt({ sessionID, continue: false }).catch(() => {}), sleep(INTERRUPT_TIMEOUT_MS)]);
+}
+
 // Runs one investigative sidecar review: prompt (tool loop under the
-// sandbox permissions), bounded wait, then read the verdict. Returns the
-// verdict text, or null on timeout/failure. Never throws.
+// sandbox permissions), bounded wait, then read the verdict. Kills the
+// sidecar if the primary races ahead past staleMessages while it runs.
+// Never throws; every awaited cleanup is bounded or fire-and-forget so the
+// caller always returns and the watch loop keeps processing.
 async function runSidecarReview(
   ctx: any,
+  primarySessionID: string,
+  reviewedThrough: number,
+  staleMessages: number,
   model: { id: string; providerID: string; variant?: string },
   directory: string | null,
   promptText: string,
-): Promise<string | null> {
+): Promise<ReviewOutcome> {
   let sidecar: string | null = null;
   try {
     const session = await ctx.session.create({
@@ -672,27 +715,53 @@ async function runSidecarReview(
       permissions: [...SIDECAR_PERMISSIONS],
     });
     sidecar = typeof session?.id === "string" && session.id.length > 0 ? session.id : null;
-    if (!sidecar) return null;
+    if (!sidecar) return { kind: "failed" };
     sidecarSessions.add(sidecar);
     await ctx.session.prompt({ sessionID: sidecar, text: promptText });
-    const settled = await Promise.race([
-      ctx.session.wait({ sessionID: sidecar }).then(() => true),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), SIDECAR_TIMEOUT_MS)),
-    ]);
-    if (!settled) {
-      await ctx.session.interrupt({ sessionID: sidecar, continue: false }).catch(() => {});
-      return null;
+
+    // Tracked settle promise: never rejects (an interrupt must not become
+    // an unhandled rejection).
+    let done = false;
+    void ctx.session
+      .wait({ sessionID: sidecar })
+      .then(() => {
+        done = true;
+      })
+      .catch(() => {
+        done = true;
+      });
+
+    const started = Date.now();
+    let lastCheck = started - STALE_POLL_MS; // check once immediately, then on cadence
+    while (!done) {
+      if (Date.now() - started > SIDECAR_TIMEOUT_MS) {
+        await boundedInterrupt(ctx, sidecar);
+        return { kind: "failed" };
+      }
+      if (staleMessages > 0 && Date.now() - lastCheck >= STALE_POLL_MS) {
+        lastCheck = Date.now();
+        const current = await transcriptLength(ctx, primarySessionID);
+        if (current !== null && current - reviewedThrough > staleMessages) {
+          await boundedInterrupt(ctx, sidecar);
+          return { kind: "stale" };
+        }
+      }
+      await sleep(POLL_TICK_MS);
     }
+
     const res = await ctx.session.context({ sessionID: sidecar });
     const messages = Array.isArray(res) ? res : (res?.data ?? []);
-    if (!Array.isArray(messages)) return null;
-    return lastAssistantText(messages);
+    const text = Array.isArray(messages) ? lastAssistantText(messages) : null;
+    return text ? { kind: "verdict", text } : { kind: "failed" };
   } catch {
-    return null;
+    return { kind: "failed" };
   } finally {
     if (sidecar) {
+      // Clear the self-event filter synchronously first, so the session is
+      // never left gated even if removal hangs.
       sidecarSessions.delete(sidecar);
-      await ctx.session.remove({ sessionID: sidecar }).catch(() => {});
+      // Fire-and-forget: removal is best-effort and must not block.
+      void ctx.session.remove({ sessionID: sidecar }).catch(() => {});
     }
   }
 }
@@ -723,6 +792,63 @@ async function writeCursor(ctx: any, sessionID: string, cursor: WatchCursor): Pr
   } catch {
     // Ignored: next boundary re-derives from zero.
   }
+}
+
+// Plugin-global watch activity counters, surfaced by /advisor status so
+// "quiet" can be told apart from "idle/broken". Each review attempt lands
+// in exactly one of the four buckets (reviews = sum).
+type WatchStats = {
+  reviews: number;
+  delivered: number;
+  silent: number;
+  failed: number;
+  stale: number;
+  lastAt: number;
+};
+
+const WATCH_STATS_KEY = "watchStats";
+
+async function readWatchStats(ctx: any): Promise<WatchStats | null> {
+  try {
+    const raw = (await ctx.storage.get(WATCH_STATS_KEY)) as Record<string, unknown> | undefined;
+    if (raw && typeof raw === "object" && typeof raw.reviews === "number") {
+      const n = (v: unknown) => (typeof v === "number" && v >= 0 ? Math.floor(v) : 0);
+      return {
+        reviews: n(raw.reviews),
+        delivered: n(raw.delivered),
+        silent: n(raw.silent),
+        failed: n(raw.failed),
+        stale: n(raw.stale),
+        lastAt: n(raw.lastAt),
+      };
+    }
+  } catch {
+    // Ignored: no stats yet.
+  }
+  return null;
+}
+
+// Records one review attempt into exactly one bucket. Serialized loop ⇒ no
+// read-modify-write race.
+async function bumpWatchStats(ctx: any, bucket: "delivered" | "silent" | "failed" | "stale"): Promise<void> {
+  try {
+    const cur =
+      (await readWatchStats(ctx)) ?? { reviews: 0, delivered: 0, silent: 0, failed: 0, stale: 0, lastAt: 0 };
+    cur[bucket] += 1;
+    cur.reviews += 1;
+    cur.lastAt = Date.now();
+    await ctx.storage.set(WATCH_STATS_KEY, { ...cur });
+  } catch {
+    // Observability only: never fail a review over it.
+  }
+}
+
+// Coarse relative age for the activity line.
+function relAge(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
 }
 
 // Best-effort text of the newest user message, for the cascade guard.
@@ -847,33 +973,42 @@ async function handleTurnEnd(ctx: any, sessionID: string, interrupted: boolean):
   const immune = await readImmune(ctx, sessionID);
   if (immune > 0) await writeImmune(ctx, sessionID, immune - 1);
   const watchdog = loadWatchdogGuidance(directory);
-  const verdict = await runSidecarReview(
+  const outcome = await runSidecarReview(
     ctx,
+    sessionID,
+    reviewedThrough,
+    live.watchStaleMessages,
     model,
     directory,
     `${WATCH_SYSTEM_PROMPT}${watchdog ? `\n\n${watchdog}` : ""}\n\n--- TRANSCRIPT DELTA ---\n\n${delta}`,
   );
-  // Execution failure (timeout, model error, sandbox refusal): advance the
-  // cursor so one bad review cannot retry-storm every later boundary.
+  // Advance the cursor regardless of outcome so one bad or slow review
+  // cannot retry-storm every later boundary.
   await writeCursor(ctx, sessionID, { count: messages.length, turns });
-  if (!verdict) return;
-  const admitted = guardAdmit(sessionID, verdict);
-  if (!admitted) return;
+  if (outcome.kind === "stale") {
+    await bumpWatchStats(ctx, "stale");
+    return;
+  }
+  if (outcome.kind === "failed") {
+    await bumpWatchStats(ctx, "failed");
+    return;
+  }
+  const admitted = guardAdmit(sessionID, outcome.text);
+  if (!admitted) {
+    await bumpWatchStats(ctx, "silent");
+    return;
+  }
   const severity = overallSeverity(admitted);
   const note = admitted;
-  // Delivery freshness (Fix B / B-refinement): if the primary advanced
-  // past N turns since this review started, the note is stale — force
-  // record-only so it never interrupts, and label the reviewed span.
+  // Counted as delivered on production, independent of the write below.
+  await bumpWatchStats(ctx, "delivered");
+  // Delivery freshness: if the primary advanced past N messages since this
+  // review started, the note is stale — force record-only and label the span.
   let stale = false;
-  const staleTurns = live.watchStaleTurns;
-  if (staleTurns > 0) {
-    try {
-      const res = await ctx.session.context({ sessionID });
-      const current = Array.isArray(res) ? res : (res?.data ?? []);
-      if (Array.isArray(current) && current.length - reviewedThrough > staleTurns) stale = true;
-    } catch {
-      // Ignored: treat as fresh.
-    }
+  const staleMessages = live.watchStaleMessages;
+  if (staleMessages > 0) {
+    const current = await transcriptLength(ctx, sessionID);
+    if (current !== null && current - reviewedThrough > staleMessages) stale = true;
   }
   const label = stale
     ? `[oc-advisor ${severity} · reviewed msgs ${reviewedFrom}–${reviewedThrough}]`
@@ -1163,7 +1298,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
     if (err) return `Error: not saved: ${err}`;
     return "Advisor disabled. The advisor tool will answer with a disabled notice until /advisor on.";
   }
-  if (sub === "status") return statusText(live, env, await readLastReview(ctx));
+  if (sub === "status") return statusText(live, env, await readLastReview(ctx), await readWatchStats(ctx));
   if (sub === "models") {
     let executor: string | null = null;
     let dir: string | null = null;
@@ -1217,7 +1352,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
     if (!argStr) return usageText();
     const next = { ...live };
     let rest = argStr;
-    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval|watchStaleTurns|fallback)\s*=\s*\S+|$)/i.exec(argStr);
+    const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval|watchStaleMessages|fallback)\s*=\s*\S+|$)/i.exec(argStr);
     if (modelMatch) {
       rest = rest.replace(modelMatch[0], " ");
       const resolved = await resolveModelInput(ctx, (modelMatch[1] || "").trim());
@@ -1281,14 +1416,14 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
       }
       next.reviewInterval = n;
     }
-    const staleMatch = /(?:^|\s)watchStaleTurns\s*=\s*(\S+)/i.exec(argStr);
+    const staleMatch = /(?:^|\s)watchStaleMessages\s*=\s*(\S+)/i.exec(argStr);
     if (staleMatch) {
       rest = rest.replace(staleMatch[0], " ");
       const n = Number(staleMatch[1]);
       if (!Number.isInteger(n) || n < 0) {
-        return `Bad watchStaleTurns "${staleMatch[1]}". Use a non-negative integer (0 disables).\n\n${usageText()}`;
+        return `Bad watchStaleMessages "${staleMatch[1]}". Use a non-negative integer (0 disables).\n\n${usageText()}`;
       }
-      next.watchStaleTurns = n;
+      next.watchStaleMessages = n;
     }
     const fallbackMatch = /(?:^|\s)fallback\s*=\s*(\S+)/i.exec(argStr);
     if (fallbackMatch) {
@@ -1331,7 +1466,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
         // Ignored: cursor starts from zero on first boundary.
       }
     }
-    return `Saved.\n${statusText(next, env, await readLastReview(ctx))}`;
+    return `Saved.\n${statusText(next, env, await readLastReview(ctx), await readWatchStats(ctx))}`;
   }
   return usageText();
 }
@@ -1412,12 +1547,12 @@ export default Plugin.define({
             Array.isArray(opts.fallback)
               ? (opts.fallback as unknown[]).filter((f): f is string => typeof f === "string" && f.length > 0)
               : DEFAULT_SETTINGS.fallback,
-          watchStaleTurns:
-            typeof opts.watchStaleTurns === "number" &&
-            Number.isInteger(opts.watchStaleTurns) &&
-            (opts.watchStaleTurns as number) >= 0
-              ? (opts.watchStaleTurns as number)
-              : DEFAULT_SETTINGS.watchStaleTurns,
+          watchStaleMessages:
+            typeof opts.watchStaleMessages === "number" &&
+            Number.isInteger(opts.watchStaleMessages) &&
+            (opts.watchStaleMessages as number) >= 0
+              ? (opts.watchStaleMessages as number)
+              : DEFAULT_SETTINGS.watchStaleMessages,
         });
       }
     } catch {

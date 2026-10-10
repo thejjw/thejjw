@@ -2,6 +2,16 @@
 
 ## 0.2.0
 
+- Watch activity counters: `/advisor status` reports `N reviews —
+  D delivered, S silent, F failed, X stale`, so a quiet watch is
+  distinguishable from an idle or broken one. README explains each
+  bucket.
+- Kill-if-behind: a review whose primary races ahead past
+  `watchStaleMessages` is interrupted and counted `stale`; every review
+  cleanup is bounded so the watch loop keeps processing.
+- `watchStaleTurns` renamed to `watchStaleMessages` (default 2 → 6) to
+  match its message-count semantics.
+
 - `/advisor status` (and the bare `/advisor`) now report the full
   configuration — model source, thinking, fallback, watch, review
   interval, and the stale-turn threshold — with each numeric setting
@@ -11,9 +21,9 @@
 - Silence is content-aware: a reply that reasons toward `NO_CONCERNS`
   is silence, and an explicit severity-tagged finding always wins over
   the sentinel.
-- Stale-review guard: `watchStaleTurns` (default 2, 0 disables) forces a
-  note to record-only and labels the reviewed span when the primary
-  advanced past it during the review.
+- Stale-review guard: `watchStaleMessages` (default 6, 0 disables)
+  forces a note to record-only and labels the reviewed span when the
+  primary advanced past it during the review.
 - Delivered notes end with a resume directive so the agent returns to
   the interrupted task instead of stopping after the note.
 
