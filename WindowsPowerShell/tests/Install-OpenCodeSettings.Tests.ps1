@@ -76,7 +76,11 @@ Describe 'Install-OpenCodeSettings' {
         $commitOutput = & git -C $script:fixtureRepo -c commit.gpgsign=false commit -m 'test fixture' 2>&1
         if ($LASTEXITCODE -ne 0) { throw "Could not commit the test Git fixture: $($commitOutput -join ' ')" }
 
-        $_OpenCodeInternal.RepoUrl = $script:fixtureRepo
+        # file:// (not a plain path) so git honours --depth/--filter instead of
+        # warning that it ignores them for local clones.
+        $script:fixtureUrl = 'file:///' + ($script:fixtureRepo -replace '\\', '/')
+        $_OpenCodeInternal.RepoUrl = $script:fixtureUrl
+        $script:gitBin = Split-Path -Parent (Get-Command git).Source
 
         # The tests must not change the persistent User PATH.
         $script:persistentUserPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
@@ -128,7 +132,7 @@ Describe 'Install-OpenCodeSettings' {
         $null = New-Item -ItemType Directory -Path $installedDir -Force
         Copy-Item -LiteralPath (Join-Path (Join-Path $script:fixtureRepo 'oc\plugins\oc-advisor\src') 'advisor.ts') -Destination $installedDir
 
-        $output = @(Install-OpenCodeSettings -Ref main -CloneDir $script:cloneDir -SkipValidate 6>&1 | Out-String)
+        $output = (Install-OpenCodeSettings -Ref main -CloneDir $script:cloneDir -SkipValidate 6>&1 | Out-String)
 
         $installedArgs = @(Get-Content -LiteralPath $script:nodeArgsFile)
         @($installedArgs | Where-Object { $_ -like '*install.mjs*' -and $_ -notlike '*--status*' }).Count | Should -Be 1
@@ -164,7 +168,11 @@ Describe 'Install-OpenCodeSettings' {
     }
 
     It 'passes --skip-validate when the opencode CLI is missing' {
-        Mock Get-Command -ParameterFilter { $Name -eq 'opencode' } -MockWith { $null }
+        # Trim PATH to the shim and git only, so `opencode` genuinely cannot be
+        # resolved. Mocking Get-Command would disturb Pester's own command
+        # resolution, so exercise the real lookup instead.
+        $env:PATH = "$script:fakeBin;$script:gitBin"
+        Get-Command opencode -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
 
         Install-OpenCodeSettings -Ref main -CloneDir $script:cloneDir 6>&1 | Out-String
 
@@ -195,7 +203,7 @@ Describe 'Install-OpenCodeSettings' {
         # Use the real node from the machine, not the shim installed above.
         $env:PATH = $script:originalPath
 
-        $output = @(Install-OpenCodeSettings -Ref main -CloneDir $script:cloneDir -SkipValidate 6>&1 | Out-String)
+        $output = (Install-OpenCodeSettings -Ref main -CloneDir $script:cloneDir -SkipValidate 6>&1 | Out-String)
 
         $configRoot = Join-Path $script:sandboxHome '.config\opencode'
         Test-Path -LiteralPath (Join-Path $configRoot 'plugins\oc-advisor\src\advisor.ts') | Should -BeTrue

@@ -86,6 +86,28 @@ Describe 'Get-JsoncText helper' {
         $result.Text | Should -BeExactly $jsonc
     }
 
+    It 'keeps commas that sit inside strings' {
+        $jsonc = '{"list":"a,b,c,","obj":{"k":"x,"},"n":1}'
+        $result = $_ProfileHelpers.GetJsoncText($jsonc)
+
+        $result.CommentsRemoved | Should -BeFalse
+        $result.TrailingCommasRemoved | Should -BeFalse
+        $result.Text | Should -BeExactly $jsonc
+        $parsed = $result.Text | ConvertFrom-Json
+        $parsed.list | Should -Be 'a,b,c,'
+        $parsed.obj.k | Should -Be 'x,'
+        $parsed.n | Should -Be 1
+    }
+
+    It 'drops a trailing comma that sits behind a comment' {
+        $jsonc = "{`n  `"a`": 1, // the comma hides behind this comment`n}"
+        $result = $_ProfileHelpers.GetJsoncText($jsonc)
+
+        $result.CommentsRemoved | Should -BeTrue
+        $result.TrailingCommasRemoved | Should -BeTrue
+        ($result.Text | ConvertFrom-Json).a | Should -Be 1
+    }
+
     It 'handles comments and trailing commas together' {
         $jsonc = @'
 {
