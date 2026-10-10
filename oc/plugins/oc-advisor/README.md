@@ -152,6 +152,13 @@ bygone turns. A large backlog renders as a **combined digest**
 `N message(s) omitted` note when the cap is hit, so a long window stays
 one reviewable chunk and the reviewed-span label stays honest.
 
+Reasoning/thinking text is excluded in both directions: the primary's
+thinking is stripped from the delta (it would crowd the context and mix
+unreliable drafts with evidence), and only the advisor's final text is
+read back, never its reasoning. This differs from omp, which includes
+primary reasoning by default — a deliberate divergence for cost and
+parsing robustness.
+
 An emission guard (normalization, noise-phrase filter, rank-aware
 dedupe where escalations re-admit, budget of 4 non-blocker findings per
 review with blockers exempt) keeps repeat runs quiet. A reply that

@@ -659,14 +659,16 @@ async function writeImmune(ctx: any, sessionID: string, turns: number): Promise<
   }
 }
 
-// Last assistant text in a transcript (skips tool-only messages). The
-// sidecar's verdict; null when absent.
+// Last assistant *text* in a transcript (skips tool-only messages and,
+// deliberately, reasoning/thinking parts). The sidecar's verdict; null when
+// absent. Text-only so a verbose advisor's reasoning is never parsed as
+// findings or delivered to the primary.
 function lastAssistantText(messages: any[]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (!m || m.type !== "assistant" || !Array.isArray(m.content)) continue;
     const text = m.content
-      .filter((p: any) => p && (p.type === "text" || p.type === "reasoning") && typeof p.text === "string")
+      .filter((p: any) => p && p.type === "text" && typeof p.text === "string")
       .map((p: any) => p.text)
       .join("\n")
       .trim();
@@ -874,11 +876,12 @@ function newestUserText(messages: any[]): string | null {
   return null;
 }
 
-// Renders transcript messages into reviewable text. Small deltas get full
-// detail (tool inputs + results); large deltas switch to a compact
-// per-turn digest (tool names only) so a backlog stays one reviewable
-// chunk. A truncation marker keeps the label honest instead of silently
-// clipping content.
+// Renders transcript messages into reviewable text. Reasoning/thinking
+// parts are excluded (text only): a verbose primary's thinking would
+// otherwise crowd the delta and its drafts could be misparsed as findings.
+// Small deltas get full detail (tool inputs + results); large deltas switch
+// to a compact per-turn digest (tool names only). A truncation marker keeps
+// the label honest instead of silently clipping content.
 const DELTA_DIGEST_THRESHOLD = 40;
 
 function renderDelta(messages: any[], digest: boolean): string {
@@ -893,7 +896,7 @@ function renderDelta(messages: any[], digest: boolean): string {
     total += clipped.length;
   };
   const textOf = (part: any): string | null => {
-    if (part && (part.type === "text" || part.type === "reasoning") && typeof part.text === "string") return part.text;
+    if (part && part.type === "text" && typeof part.text === "string") return part.text;
     return null;
   };
   for (const m of messages) {

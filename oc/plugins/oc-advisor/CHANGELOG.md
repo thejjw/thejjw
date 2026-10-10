@@ -2,6 +2,12 @@
 
 ## 0.2.0
 
+- Reasoning/thinking text is excluded both ways: the primary's thinking
+  is stripped from the watch delta, and the advisor's verdict is read
+  from its text only. Prevents verbose thinkers from crowding the delta
+  and stops reasoning drafts being parsed as findings. (omp includes
+  primary reasoning by default; this is a deliberate divergence.)
+
 - Watch reviews now fire on **quiescence**: a per-session timer
   (`watchQuietMs`, default 8000; 0 = immediate) coalesces a fast burst
   into one settled review, so "review then fall behind then restart" no
