@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.1.1
+## 0.1.2
+
+- New `advisor_ctl` tool: /advisor parsing, validation, and config edits
+  run in code; the command template only relays the tool result.
+- The model no longer edits the config file itself.
 
 - Removed command-output interception: hook-set output is ignored for
   TUI-invoked commands, so `/advisor` is now a plain model-executed

@@ -49,22 +49,23 @@ Precedence for one call, lowest to highest:
 
 ## /advisor command
 
-`/advisor` is a plain command template (`commands/advisor.md`) carried out
-by the model: it reads and edits our plugin tuple in `opencode.json(c)`
-directly. (An earlier revision tried intercepting the command from the
-plugin, but hook-set command output is ignored for TUI-invoked commands,
-so the interception was removed.)
+`/advisor` is a thin template (`commands/advisor.md`): it tells the model
+to call the `advisor_ctl` tool with the words after `/advisor` and relay
+the result verbatim. All logic (parsing, validation, config edit) runs in
+code inside the tool — the model only relays. (An earlier revision tried
+intercepting the command from the plugin, but hook-set command output is
+ignored for TUI-invoked commands, so the interception was removed.)
 
 - `/advisor` or `/advisor status` — report enabled/disabled and model.
-- `/advisor on` — set `"enabled": true`.
-- `/advisor off` — set `"enabled": false`. While disabled the tool stays
-  registered but answers with a disabled notice instead of calling a
-  model (no cost).
+- `/advisor on` / `/advisor off` — set `"enabled"`. While disabled the
+  advisor tool stays registered but answers with a disabled notice
+  instead of calling a model (no cost).
 - `/advisor configure [model=<provider/model|auto>] [enabled=on|off]` —
-  apply settings; bare call shows current settings plus usage.
+  invalid input is rejected with usage and changes nothing.
 
-The tool re-reads settings from disk on every call, so command changes
-apply immediately with no restart.
+`advisor_ctl` is a regular plugin tool, so it also works wherever tools
+work. The advisor tool re-reads settings from disk on every call, so
+command changes apply immediately with no restart.
 
 Settings persist as the options object of our own plugin tuple in the
 user's existing `opencode.json(c)` — for example

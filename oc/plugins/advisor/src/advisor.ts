@@ -4,12 +4,16 @@ import os from "node:os";
 import path from "node:path";
 
 // oc advisor plugin: registers the advisor tool (pull-style second-model
-// guidance). /advisor on|off|status|configure is a plain command template
-// (commands/advisor.md) carried out by the model itself: hook-set command
-// output is ignored for TUI-invoked commands in current opencode, so the
-// template reads/edits our tuple in opencode.json(c) directly. The tool
-// re-reads settings from disk on every call, so those edits apply without
-// a restart.
+// guidance) plus the advisor_ctl tool (programmatic management: status,
+// on/off/configure, implemented in code). /advisor is a thin command
+// template (commands/advisor.md) that tells the model to call advisor_ctl
+// and relay its result: hook-set command output is ignored for TUI-invoked
+// commands in current opencode, so all /advisor logic lives in the tool,
+// not in a hook. The advisor tool re-reads settings from disk on every
+// call, so control changes apply without a restart.
+
+// Version of this copy. Reported by advisor_ctl status.
+const VERSION = "0.1.2";
 
 // Suffix identifying our own plugin tuple in opencode.json(c). The installer
 // writes a file:// URL ending in this path, so matching on the suffix keeps
@@ -119,15 +123,117 @@ function readOwnOptions(): { enabled?: boolean; model?: string } {
   return out;
 }
 
-// Effective settings for one call. Re-read from disk every time so /advisor
-// edits (which change the file) apply immediately, no restart needed.
-// Precedence: defaults, init options, file tuple.
+// Effective settings for one call. Re-read from disk every time so control
+// changes apply immediately, no restart needed. Precedence: defaults, init
+// options, file tuple.
 function currentSettings(): AdvisorSettings {
   const file = readOwnOptions();
   return {
     enabled: file.enabled ?? initOptions.enabled ?? DEFAULT_SETTINGS.enabled,
     model: file.model ?? initOptions.model ?? DEFAULT_SETTINGS.model,
   };
+}
+
+// Writes the given settings into our own plugin tuple. Surgical: only the
+// options object is replaced, so comments and formatting elsewhere in the
+// file survive. Returns an error message, or null on success.
+function writeOwnOptions(next: AdvisorSettings): string | null {
+  const file = userConfigPath();
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    return `cannot read ${file}: ${(error as Error).message}`;
+  }
+  const span = findOwnOptions(text);
+  if (!span) {
+    return "our plugin entry was not found in opencode config; run scripts/install.mjs";
+  }
+  const replacement = `{ "enabled": ${next.enabled ? "true" : "false"}, "model": ${JSON.stringify(next.model)} }`;
+  try {
+    fs.writeFileSync(file, text.slice(0, span.start) + replacement + text.slice(span.end), "utf8");
+  } catch (error) {
+    return `cannot write ${file}: ${(error as Error).message}`;
+  }
+  return null;
+}
+
+// One-line description of the given settings for status output.
+function describeSettings(settings: AdvisorSettings): string {
+  const env = resolveModelFromEnv();
+  if (env) return `${env.providerID}/${env.modelID} (from environment)`;
+  if (settings.model === "auto") return "auto (follows the calling session model)";
+  return `${settings.model} (from advisor settings)`;
+}
+
+function statusText(settings: AdvisorSettings): string {
+  return [
+    `Advisor ${VERSION}: ${settings.enabled ? "enabled" : "disabled"}.`,
+    `Model: ${describeSettings(settings)}.`,
+  ].join("\n");
+}
+
+function usageText(): string {
+  return [
+    "Usage: /advisor [on|off|status|configure]",
+    "  on       Enable the advisor.",
+    "  off      Disable the advisor (the tool answers with a disabled notice).",
+    "  status   Show current state.",
+    "  configure [model=<provider/model|auto>] [enabled=on|off]",
+    "           With no args, shows current settings. Empty model means auto.",
+  ].join("\n");
+}
+
+// Applies one control command (on|off|status|configure ...) in code and
+// returns the exact reply text. This backs the advisor_ctl tool, which the
+// /advisor template invokes.
+function applyCommand(rawArgs: string): string {
+  const tokens = (rawArgs || "")
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
+  const sub = (tokens[0] || "status").toLowerCase();
+  const live = currentSettings();
+  if (sub === "on") {
+    const err = writeOwnOptions({ ...live, enabled: true });
+    if (err) return `Error: not saved: ${err}`;
+    return "Advisor enabled.";
+  }
+  if (sub === "off") {
+    const err = writeOwnOptions({ ...live, enabled: false });
+    if (err) return `Error: not saved: ${err}`;
+    return "Advisor disabled. The advisor tool will answer with a disabled notice until /advisor on.";
+  }
+  if (sub === "status") return statusText(live);
+  if (sub === "configure") {
+    if (tokens.length === 1) return `${statusText(live)}\n\n${usageText()}`;
+    const next = { ...live };
+    for (const token of tokens.slice(1)) {
+      const eq = token.indexOf("=");
+      if (eq === -1) return `Unknown option "${token}".\n\n${usageText()}`;
+      const key = token.slice(0, eq).toLowerCase();
+      const value = token.slice(eq + 1);
+      if (key === "model") {
+        if (value.length === 0 || value.toLowerCase() === "auto") {
+          next.model = "auto";
+        } else if (value.includes("/")) {
+          next.model = value;
+        } else {
+          return `Bad model "${value}". Use provider/model or auto.\n\n${usageText()}`;
+        }
+      } else if (key === "enabled") {
+        if (value.toLowerCase() === "on") next.enabled = true;
+        else if (value.toLowerCase() === "off") next.enabled = false;
+        else return `Bad enabled value "${value}". Use on or off.\n\n${usageText()}`;
+      } else {
+        return `Unknown option "${key}".\n\n${usageText()}`;
+      }
+    }
+    const err = writeOwnOptions(next);
+    if (err) return `Not saved: ${err}\n\n${usageText()}`;
+    return `Saved.\n${statusText(next)}`;
+  }
+  return usageText();
 }
 
 // Active model of the calling session: the newest message carrying model
@@ -247,6 +353,16 @@ export const AdvisorPlugin: Plugin = async ({ client }, options) => {
       }
     },
     tool: {
+      advisor_ctl: tool({
+        description:
+          "Control the oc advisor plugin itself (status, on/off, configure). This manages the advisor; it is not the advisor. Call it when the user invokes /advisor, passing the words after /advisor as the action (empty means status), and relay its result back verbatim without adding anything.",
+        args: {
+          action: tool.schema.string().default(""),
+        },
+        async execute(args: any) {
+          return applyCommand(typeof args.action === "string" ? args.action : "");
+        },
+      }),
       advisor: tool({
         description: TOOL_DESCRIPTION,
         args: {
