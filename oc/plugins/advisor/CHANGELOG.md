@@ -10,7 +10,8 @@
   result. (A command-output hook was tried first; hook output is ignored
   for TUI-invoked commands on current opencode, so the hook was removed.)
 - `configure model=` fuzzy-matches ids and display names; unambiguous
-  match applies, else a pick list. No hardcoded default model.
+  match applies, else a pick list. `/advisor models` lists every usable
+  id. No hardcoded default model.
 - Settings re-read from disk on every tool call; control changes apply
   with no restart.
 - Installer rewritten as plain Node.js (no bun), minimal scope.

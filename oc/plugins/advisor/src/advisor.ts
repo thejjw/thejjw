@@ -187,10 +187,11 @@ function statusText(settings: AdvisorSettings): string {
 
 function usageText(): string {
   return [
-    "Usage: /advisor [on|off|status|configure]",
+    "Usage: /advisor [on|off|status|models|configure]",
     "  on       Enable the advisor.",
     "  off      Disable the advisor (the tool answers with a disabled notice).",
     "  status   Show current state.",
+    "  models   List provider/model ids usable with configure model=.",
     "  configure [model=<id|name|auto>] [enabled=on|off]",
     "           model accepts an exact provider/model id, a display name,",
     "           or a substring (unambiguous match applies, else a pick",
@@ -277,6 +278,16 @@ async function applyCommand(client: any, rawArgs: string): Promise<string> {
     return "Advisor disabled. The advisor tool will answer with a disabled notice until /advisor on.";
   }
   if (sub === "status") return statusText(live);
+  if (sub === "models") {
+    const candidates = await listModels(client);
+    if (candidates.length === 0) {
+      return "Could not list models from the provider registry. Run `opencode models` for exact provider/model ids.";
+    }
+    const lines = candidates.map(
+      (m) => `${m.providerID}/${m.modelID}${m.name ? ` (${m.name})` : ""}`,
+    );
+    return `${candidates.length} models (use one with /advisor configure model=):\n${lines.join("\n")}`;
+  }
   if (sub === "configure") {
     // Rejoin: display names contain spaces, so model= consumes everything
     // up to an enabled= clause or the end, in any order.
