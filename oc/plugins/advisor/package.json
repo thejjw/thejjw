@@ -1,0 +1,14 @@
+{
+  "name": "oc-advisor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local OpenCode advisor tool: strategic second-model guidance on demand",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.34",
+    "@opencode-ai/sdk": "1.18.34"
+  }
+}
