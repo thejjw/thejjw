@@ -72,6 +72,11 @@ when the model is also followed, otherwise use the catalog default.
 - `/advisor configure thinking=<variant|auto>` — validated against the
   resolved model; unknown ids are rejected with the valid list.
 
+`auto` never reaches the model request: it is resolved per call and the
+variant field is omitted for the catalog default — except when the model
+is also followed (`model: auto`), in which case your session's variant is
+mirrored. A session variant is never carried onto a different model.
+
 ## /advisor command
 
 `/advisor` is a thin template (`commands/advisor.md`): it tells the model
