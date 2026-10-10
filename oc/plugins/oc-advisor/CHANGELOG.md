@@ -2,6 +2,12 @@
 
 ## 0.2.0
 
+- `/advisor status` (and the bare `/advisor`) now report the full
+  configuration — model source, thinking, fallback, watch, review
+  interval, and the stale-turn threshold — with each numeric setting
+  showing its default. Bare `/advisor configure` prints only the usage
+  block listing its options.
+
 - Silence is content-aware: a reply that reasons toward `NO_CONCERNS`
   is silence, and an explicit severity-tagged finding always wins over
   the sentinel.

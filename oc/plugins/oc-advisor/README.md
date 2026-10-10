@@ -3,7 +3,7 @@
 Local OpenCode plugin that adds two tools: `oc-advisor`, a second model
 the executor can consult for a concise plan or course correction, and
 `oc-advisor_ctl`, which manages the plugin itself
-(status/on/off/models/thinking/watch/configure).
+(on/off/status/models/thinking/configure).
 
 Based on `@u007/opencode-advisor` (https://github.com/u007/opencode-advisor).
 Everything below describes this copy.
@@ -100,9 +100,11 @@ as `models` does). All logic (parsing, validation, settings, model
 listing) runs in code inside the tool — the model only relays or, for
 `models`, recommends per the returned criteria.
 
-- `/advisor` or `/advisor status` — report enabled/disabled, model,
-  thinking, watch state, and the last auto-review delivery (time,
-  severity, preview) when watch has delivered at least once.
+- `/advisor` or `/advisor status` — report the full configuration:
+  enabled/disabled, model (and its source), thinking, fallback, watch
+  on/off, review interval, stale-turn threshold, and the last auto-review
+  delivery (time, severity, preview) when watch has delivered.
+  Numeric settings show their default next to the current value.
 - `/advisor models` — handled by the tool: writes available models to
   `models_<timestamp>.txt` in the workspace via the model catalog (falling
   back to an `opencode models` dump run by the model when unreachable),
@@ -114,7 +116,9 @@ listing) runs in code inside the tool — the model only relays or, for
   instead of calling a model (no cost). Watch reviews are also gated
   on `enabled`.
 - `/advisor configure [model=<...>] [thinking=<...>] [enabled=on|off] [watch=on|off] [reviewInterval=N] [watchStaleTurns=N] [fallback=<id>,...|none]` —
-  invalid input is rejected with usage and changes nothing.
+  invalid input is rejected with usage and changes nothing. A bare
+  `/advisor configure` (no options) prints the usage block, which lists
+  every attachable option.
 
 `oc-advisor_ctl` is a regular plugin tool, so it also works wherever tools
 work.

@@ -5,7 +5,7 @@ import path from "node:path";
 
 // oc-advisor plugin (v2 API): registers the oc-advisor tool (pull-style
 // second-model guidance) plus the oc-advisor_ctl tool (programmatic
-// management: status, on/off, models, thinking, watch, configure). /advisor
+// management: status, on/off, models, thinking, configure). /advisor
 // is a thin command template (commands/advisor.md) that tells the model to
 // call oc-advisor_ctl and relay its result.
 //
@@ -204,24 +204,29 @@ async function writeSettings(ctx: any, next: AdvisorSettings): Promise<string | 
   return null;
 }
 
-// One-line description of the given settings for status output.
-function describeSettings(settings: AdvisorSettings, env: { providerID: string; modelID: string; variant?: string } | null): string {
-  if (env) return `${env.providerID}/${env.modelID}${env.variant ? `#${env.variant}` : ""} (from environment)`;
-  const model = settings.model === "auto" ? "auto (follows the calling session model)" : settings.model;
-  const thinking = settings.thinking === "auto" ? "auto" : settings.thinking;
-  const fallback = settings.fallback.length > 0 ? `, fallback ${settings.fallback.join(", ")}` : "";
-  return `${model}, thinking ${thinking}${fallback} (from advisor settings)`;
-}
-
+// Full configuration report for /advisor status (and the bare command).
+// Every tunable shows its current value plus the DEFAULT_SETTINGS hint so
+// the number is self-explanatory. The environment override, when present,
+// is surfaced first because it outranks the stored settings.
 function statusText(
   settings: AdvisorSettings,
   env: { providerID: string; modelID: string; variant?: string } | null,
   last: LastReview | null,
 ): string {
+  const model = env
+    ? `${env.providerID}/${env.modelID}${env.variant ? `#${env.variant}` : ""} (from environment)`
+    : settings.model === "auto"
+      ? "auto (follows the calling session model)"
+      : `${settings.model} (from advisor settings)`;
+  const fallback = settings.fallback.length > 0 ? settings.fallback.join(", ") : "(none)";
   const lines = [
     `Advisor ${VERSION}: ${settings.enabled ? "enabled" : "disabled"}.`,
-    `Model: ${describeSettings(settings, env)}.`,
-    `Watch: ${settings.watch ? `on (every ${settings.reviewInterval === 1 ? "turn" : `${settings.reviewInterval} turns`})` : "off"}.`,
+    `Model: ${model}.`,
+    `Thinking: ${settings.thinking === "auto" ? "auto" : settings.thinking}.`,
+    `Fallback: ${fallback}.`,
+    `Watch: ${settings.watch ? "on" : "off"} (default: ${DEFAULT_SETTINGS.watch ? "on" : "off"}).`,
+    `Review interval: ${settings.reviewInterval} (default: ${DEFAULT_SETTINGS.reviewInterval}).`,
+    `Stale turns: ${settings.watchStaleTurns} (default: ${DEFAULT_SETTINGS.watchStaleTurns}; 0 disables).`,
   ];
   if (last) {
     const when = new Date(last.time).toLocaleString();
@@ -1209,7 +1214,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
     // Rejoin: display names contain spaces, so model= consumes everything
     // up to a thinking=/enabled= clause or the end, in any order.
     const argStr = tokens.slice(1).join(" ");
-    if (!argStr) return `${statusText(live, env, await readLastReview(ctx))}\n\n${usageText()}`;
+    if (!argStr) return usageText();
     const next = { ...live };
     let rest = argStr;
     const modelMatch = /(?:^|\s)model\s*=\s*(.*?)(?=\s+(?:thinking|enabled|watch|reviewInterval|watchStaleTurns|fallback)\s*=\s*\S+|$)/i.exec(argStr);
