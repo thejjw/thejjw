@@ -5,7 +5,10 @@ the executor can consult for a concise plan or course correction, and
 `oc-advisor_ctl`, which manages the plugin itself
 (on/off/status/models/thinking/configure).
 
-Based on `@u007/opencode-advisor` (https://github.com/u007/opencode-advisor).
+Based on `@u007/opencode-advisor` (https://github.com/u007/opencode-advisor) —
+originally a local copy of its 1.2.3 behavior, heavily reworked since
+(OpenCode v2 port, watch mode, activity counters, review scheduling); see
+Attribution and `CHANGELOG.md` for the divergence.
 Everything below describes this copy.
 
 ## How it works
