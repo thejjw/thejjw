@@ -3,11 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// Version of this copy. Reported by /advisor status.
-const VERSION = "0.1.0";
-
-// Slash command handled by this plugin (see commands/advisor.md).
-const COMMAND = "advisor";
+// oc advisor plugin: registers the advisor tool (pull-style second-model
+// guidance). /advisor on|off|status|configure is a plain command template
+// (commands/advisor.md) carried out by the model itself: hook-set command
+// output is ignored for TUI-invoked commands in current opencode, so the
+// template reads/edits our tuple in opencode.json(c) directly. The tool
+// re-reads settings from disk on every call, so those edits apply without
+// a restart.
 
 // Suffix identifying our own plugin tuple in opencode.json(c). The installer
 // writes a file:// URL ending in this path, so matching on the suffix keeps
@@ -27,7 +29,9 @@ const DEFAULT_SETTINGS: AdvisorSettings = {
   model: "auto",
 };
 
-let settings: AdvisorSettings = { ...DEFAULT_SETTINGS };
+// Options captured from our plugin-entry tuple at startup. The file tuple
+// (see currentSettings) wins when both exist.
+let initOptions: { enabled?: boolean; model?: string } = {};
 
 // Global default model from merged opencode config ("provider/model").
 // Last resort when nothing else resolves a model.
@@ -51,14 +55,14 @@ function resolveModelFromEnv(): { providerID: string; modelID: string } | null {
   return null;
 }
 
-// Reads our plugin-entry options. Accepts { enabled, model } and the
-// upstream { providerID, modelID } form.
+// Reads our plugin-entry options into init state. Accepts { enabled, model }
+// and the upstream { providerID, modelID } form.
 function applyOptions(opts: Record<string, unknown>) {
-  if (typeof opts.enabled === "boolean") settings.enabled = opts.enabled;
+  if (typeof opts.enabled === "boolean") initOptions.enabled = opts.enabled;
   if (typeof opts.model === "string" && opts.model.length > 0) {
-    settings.model = opts.model;
+    initOptions.model = opts.model;
   } else if (typeof opts.providerID === "string" && typeof opts.modelID === "string") {
-    settings.model = `${opts.providerID}/${opts.modelID}`;
+    initOptions.model = `${opts.providerID}/${opts.modelID}`;
   }
 }
 
@@ -94,28 +98,36 @@ function findOwnOptions(text: string): { start: number; end: number } | null {
   return { start, end: start + (m[0].length - m[0].indexOf("{")) };
 }
 
-// Writes current settings back into our own plugin tuple. Surgical: only the
-// options object is replaced, so comments and formatting elsewhere in the
-// file survive. Returns an error message, or null on success.
-function persistSettings(): string | null {
-  const file = userConfigPath();
+// Reads our tuple's options straight from disk. Parsed with regexes (never
+// a full parse), so comments and formatting in opencode.json(c) do not
+// matter. Empty when absent or unreadable.
+function readOwnOptions(): { enabled?: boolean; model?: string } {
   let text: string;
   try {
-    text = fs.readFileSync(file, "utf8");
-  } catch (error) {
-    return `cannot read ${file}: ${(error as Error).message}`;
+    text = fs.readFileSync(userConfigPath(), "utf8");
+  } catch {
+    return {};
   }
   const span = findOwnOptions(text);
-  if (!span) {
-    return "our plugin entry was not found in opencode config; run scripts/install.mjs";
-  }
-  const replacement = `{ "enabled": ${settings.enabled ? "true" : "false"}, "model": ${JSON.stringify(settings.model)} }`;
-  try {
-    fs.writeFileSync(file, text.slice(0, span.start) + replacement + text.slice(span.end), "utf8");
-  } catch (error) {
-    return `cannot write ${file}: ${(error as Error).message}`;
-  }
-  return null;
+  if (!span) return {};
+  const body = text.slice(span.start, span.end);
+  const out: { enabled?: boolean; model?: string } = {};
+  const enabled = /"enabled"\s*:\s*(true|false)/.exec(body);
+  if (enabled) out.enabled = enabled[1] === "true";
+  const model = /"model"\s*:\s*"([^"]*)"/.exec(body);
+  if (model) out.model = model[1];
+  return out;
+}
+
+// Effective settings for one call. Re-read from disk every time so /advisor
+// edits (which change the file) apply immediately, no restart needed.
+// Precedence: defaults, init options, file tuple.
+function currentSettings(): AdvisorSettings {
+  const file = readOwnOptions();
+  return {
+    enabled: file.enabled ?? initOptions.enabled ?? DEFAULT_SETTINGS.enabled,
+    model: file.model ?? initOptions.model ?? DEFAULT_SETTINGS.model,
+  };
 }
 
 // Active model of the calling session: the newest message carrying model
@@ -153,6 +165,7 @@ async function resolveModel(
   client: any,
   context: any,
   args: { providerID?: string; modelID?: string },
+  settings: AdvisorSettings,
 ): Promise<ResolvedModel | { error: string }> {
   if (args.providerID && args.modelID) {
     return { providerID: args.providerID, modelID: args.modelID, source: "per-call args" };
@@ -174,79 +187,6 @@ async function resolveModel(
     if (parsed) return { ...parsed, source: "global default model" };
   }
   return { error: "no model available: set one via /advisor configure model=<provider/model>" };
-}
-
-// One-line description of the configured model for status output.
-function describeConfiguredModel(): string {
-  const env = resolveModelFromEnv();
-  if (env) return `${env.providerID}/${env.modelID} (from environment)`;
-  if (settings.model === "auto") return "auto (follows the calling session model)";
-  return `${settings.model} (from advisor settings)`;
-}
-
-function statusText(): string {
-  return [
-    `Advisor ${VERSION}: ${settings.enabled ? "enabled" : "disabled"}.`,
-    `Model: ${describeConfiguredModel()}.`,
-  ].join("\n");
-}
-
-function usageText(): string {
-  return [
-    "Usage: /advisor [on|off|status|configure]",
-    "  on       Enable the advisor.",
-    "  off      Disable the advisor (the tool answers with a disabled notice).",
-    "  status   Show current state.",
-    "  configure [model=<provider/model|auto>] [enabled=on|off]",
-    "           With no args, shows current settings. Empty model means auto.",
-  ].join("\n");
-}
-
-// Handles /advisor subcommands. Returns the reply text for the command card.
-function handleCommand(rawArgs: string): string {
-  const tokens = (rawArgs || "")
-    .trim()
-    .split(/\s+/)
-    .filter((t) => t.length > 0);
-  const sub = (tokens[0] || "status").toLowerCase();
-  if (sub === "on") {
-    settings.enabled = true;
-    const err = persistSettings();
-    return err ? `Advisor enabled for this process, but not saved: ${err}` : "Advisor enabled.";
-  }
-  if (sub === "off") {
-    settings.enabled = false;
-    const err = persistSettings();
-    return err ? `Advisor disabled for this process, but not saved: ${err}` : "Advisor disabled. The advisor tool will answer with a disabled notice until /advisor on.";
-  }
-  if (sub === "status") return statusText();
-  if (sub === "configure") {
-    if (tokens.length === 1) return `${statusText()}\n\n${usageText()}`;
-    for (const token of tokens.slice(1)) {
-      const eq = token.indexOf("=");
-      if (eq === -1) return `Unknown option "${token}".\n\n${usageText()}`;
-      const key = token.slice(0, eq).toLowerCase();
-      const value = token.slice(eq + 1);
-      if (key === "model") {
-        if (value.length === 0 || value.toLowerCase() === "auto") {
-          settings.model = "auto";
-        } else if (value.includes("/")) {
-          settings.model = value;
-        } else {
-          return `Bad model "${value}". Use provider/model or auto.\n\n${usageText()}`;
-        }
-      } else if (key === "enabled") {
-        if (value.toLowerCase() === "on") settings.enabled = true;
-        else if (value.toLowerCase() === "off") settings.enabled = false;
-        else return `Bad enabled value "${value}". Use on or off.\n\n${usageText()}`;
-      } else {
-        return `Unknown option "${key}".\n\n${usageText()}`;
-      }
-    }
-    const err = persistSettings();
-    return `${err ? `Applied for this process, but not saved: ${err}\n` : "Saved.\n"}${statusText()}`;
-  }
-  return usageText();
 }
 
 const SYSTEM_PROMPT = `You are a strategic advisor for a coding agent. Read the context below and provide a concise plan or course correction.
@@ -306,10 +246,6 @@ export const AdvisorPlugin: Plugin = async ({ client }, options) => {
         globalDefaultModel = config.model;
       }
     },
-    "command.execute.before": async (input: any, output: any) => {
-      if (input?.command !== COMMAND) return;
-      output.parts = [{ type: "text", text: handleCommand(input.arguments ?? "") }];
-    },
     tool: {
       advisor: tool({
         description: TOOL_DESCRIPTION,
@@ -319,7 +255,8 @@ export const AdvisorPlugin: Plugin = async ({ client }, options) => {
           modelID: tool.schema.string().default(""),
         },
         async execute(args: any, context: any) {
-          if (!settings.enabled) {
+          const live = currentSettings();
+          if (!live.enabled) {
             return "Advisor is disabled. Run /advisor on to enable it.";
           }
           if (inAdvisorCall) {
@@ -328,7 +265,7 @@ export const AdvisorPlugin: Plugin = async ({ client }, options) => {
           if (typeof args.prompt !== "string" || args.prompt.trim().length === 0) {
             return "Error: advisor prompt is required and must not be empty.";
           }
-          const resolved = await resolveModel(client, context, args);
+          const resolved = await resolveModel(client, context, args, live);
           if ("error" in resolved) return `Error: ${resolved.error}`;
           try {
             inAdvisorCall = true;

@@ -49,14 +49,22 @@ Precedence for one call, lowest to highest:
 
 ## /advisor command
 
-- `/advisor on` — enable the advisor (saved).
-- `/advisor off` — disable it. While disabled the tool stays registered but
-  answers with a disabled notice instead of calling a model (no cost).
-- `/advisor status` — show enabled/disabled, the effective model and where
-  it comes from, and the version.
+`/advisor` is a plain command template (`commands/advisor.md`) carried out
+by the model: it reads and edits our plugin tuple in `opencode.json(c)`
+directly. (An earlier revision tried intercepting the command from the
+plugin, but hook-set command output is ignored for TUI-invoked commands,
+so the interception was removed.)
+
+- `/advisor` or `/advisor status` — report enabled/disabled and model.
+- `/advisor on` — set `"enabled": true`.
+- `/advisor off` — set `"enabled": false`. While disabled the tool stays
+  registered but answers with a disabled notice instead of calling a
+  model (no cost).
 - `/advisor configure [model=<provider/model|auto>] [enabled=on|off]` —
-  with no args, shows current settings plus usage. An empty model means
-  `auto` (follow the calling session).
+  apply settings; bare call shows current settings plus usage.
+
+The tool re-reads settings from disk on every call, so command changes
+apply immediately with no restart.
 
 Settings persist as the options object of our own plugin tuple in the
 user's existing `opencode.json(c)` — for example

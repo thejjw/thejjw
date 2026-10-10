@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- Removed command-output interception: hook-set output is ignored for
+  TUI-invoked commands, so `/advisor` is now a plain model-executed
+  template that reads/edits our tuple directly.
+- The tool re-reads settings from disk on every call; `/advisor` changes
+  apply with no restart.
+
 ## 0.1.0
 
 - Initial local copy. Behavior matches `@u007/opencode-advisor` 1.2.3 except:
