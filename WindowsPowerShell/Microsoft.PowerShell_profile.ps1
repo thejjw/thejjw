@@ -9381,7 +9381,7 @@ function Install-AiTools {
     When supplied, offer an interactive pruning pass before the confirmation prompt where
     individual package ids can be removed one by one from the pending install lists
     (PowerShell modules, winget packages, npm globals). Removed ids are skipped by the
-    checks, installs, and upgrades alike.
+    checks and installs alike.
     Composes with -Auto: the pruning prompts still run; only the final Y/N
     confirmation is skipped.
 
@@ -9417,7 +9417,7 @@ function Install-AiTools {
     Since Docker and Podman are alternatives, -All selects Docker; use -Podman explicitly if preferred.
 
 .PARAMETER UserScope
-    When supplied, restricts winget installs and upgrades to the current user's profile
+    When supplied, restricts winget installs to the current user's profile
     (--scope user), enables unattended/silent switches, suppresses UAC elevation prompts via
     RunAsInvoker, and requires a non-elevated PowerShell session.
 
@@ -10554,6 +10554,7 @@ function Invoke-AiUpgrade {
     <#
 .SYNOPSIS
     Updates all AI CLI tools in one shot.
+.DESCRIPTION
     Runs the native update/upgrade command for each available CLI registered in
     $_AiToolsInternal.UpgradeCommands (agy, Claude, Codex, OpenCode, and Cursor),
     checks and updates configured PowerShell modules (e.g. Pester) from PSGallery,
