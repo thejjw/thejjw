@@ -9316,10 +9316,15 @@ function Invoke-WingetPackage {
 
         [switch]$UserScope,
 
-        [switch]$Interactive
+        [switch]$Interactive,
+
+        [switch]$NoUpgrade
     )
 
     $arguments = @($Action, '--source', 'winget', '--exact', '--id', $PackageId)
+    if ($NoUpgrade) {
+        $arguments += '--no-upgrade'
+    }
     if ($UserScope) {
         $arguments += @('--scope', 'user')
         if (-not $Interactive) {
@@ -9380,9 +9385,6 @@ function Install-AiTools {
     Composes with -Auto: the pruning prompts still run; only the final Y/N
     confirmation is skipped.
 
-.PARAMETER Update
-    When supplied, upgrade any already-installed winget packages to their latest versions.
-
 .PARAMETER ExtendedSetup
     When supplied, also installs the extended (non-minimal) package set: heavier tools such as
     FFmpeg, ImageMagick, security scanners, database CLIs, and similar large-scope packages.
@@ -9427,7 +9429,6 @@ function Install-AiTools {
     param(
         [switch]$Auto,
         [switch]$Customize,
-        [switch]$Update,
         [switch]$ExtendedSetup,
         [switch]$Sdk,
         [switch]$Dotnet,
@@ -9599,13 +9600,12 @@ function Install-AiTools {
                 Sort-Object Version -Descending |
                 Select-Object -First 1
 
-            if ($installedModule -and -not $Update) {
+            if ($installedModule) {
                 Write-Host "[$moduleInstallIdx/$($powerShellModules.Count)] installed: $($module.Name) $($installedModule.Version)" -ForegroundColor Green
                 continue
             }
 
-            $action = if ($installedModule) { 'Updating' } else { 'Installing' }
-            Write-Host "[$moduleInstallIdx/$($powerShellModules.Count)] $action $($module.Name) >= $minimumVersion..." -ForegroundColor Cyan
+            Write-Host "[$moduleInstallIdx/$($powerShellModules.Count)] Installing $($module.Name) >= $minimumVersion..." -ForegroundColor Cyan
 
             try {
                 if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) {
@@ -9687,9 +9687,9 @@ function Install-AiTools {
         return
     }
 
-    # winget list output is unstructured text; we match the package id then
-    # verify the "Source" column contains "winget" to avoid false positives from
-    # similarly-named packages in other sources (e.g. MSStore).
+    # Matches exact package ID bounded by whitespace. Because winget list was already
+    # restricted via --source winget, all rows originate from the winget catalog and
+    # the Source column is omitted by winget across all locales.
     function Test-WingetInstalledPackage {
         param(
             [string[]]$Rows,
@@ -9697,12 +9697,9 @@ function Install-AiTools {
         )
 
         $escapedId = [regex]::Escape($PackageId)
+        $pattern = "(?i)(?:^|\s)$escapedId\s+"
         foreach ($row in $Rows) {
-            if ($row -notmatch $escapedId) {
-                continue
-            }
-
-            if ($row -match "\bwinget\b") {
+            if ($row -match $pattern) {
                 return $true
             }
         }
@@ -9741,8 +9738,21 @@ function Install-AiTools {
             $scopeTag = if ($UserScope) { ' [user scope]' } else { '' }
             Write-Host "[$wingetInstallIdx/$totalMissing] Installing $m$scopeTag..." -ForegroundColor Cyan
             try {
-                $exitCode = Invoke-WingetPackage -Action install -PackageId $m -UserScope:$UserScope
-                if ($exitCode -ne 0) {
+                $exitCode = Invoke-WingetPackage -Action install -PackageId $m -UserScope:$UserScope -NoUpgrade
+                $alreadyInstalledCodes = @(-1978335135, -1978335189, -1978334963)
+                $rebootCodes = @(3010, -1978334965)
+                if ($exitCode -eq 0) {
+                    $installed += $m
+                }
+                elseif ($exitCode -in $alreadyInstalledCodes) {
+                    Write-Host "$m is already installed." -ForegroundColor DarkGray
+                    $installed += $m
+                }
+                elseif ($exitCode -in $rebootCodes) {
+                    Write-Host "Installed $m (reboot required)." -ForegroundColor Green
+                    $installed += $m
+                }
+                else {
                     Write-Host "Winget install failed for $m (exit code $exitCode)." -ForegroundColor Yellow
                 }
             }
@@ -9760,7 +9770,7 @@ function Install-AiTools {
             Write-Host "Failed to verify winget package inventory: $_" -ForegroundColor Red
             return
         }
-        $stillMissing = $missing | Where-Object { -not (Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $_) }
+        $stillMissing = $missing | Where-Object { $_ -notin $installed -and -not (Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $_) }
         if ($stillMissing) {
             Write-Host "The following packages failed to install:" -ForegroundColor Red
             foreach ($m in $stillMissing) { Write-Host " - $m" -ForegroundColor Red }
@@ -9773,24 +9783,6 @@ function Install-AiTools {
         Write-Host "All winget packages already present." -ForegroundColor Green
     }
 
-    if ($Update -and $installed.Count -gt 0) {
-        Write-Host "Upgrading existing winget packages..." -ForegroundColor Cyan
-        $totalInstalled = $installed.Count
-        $wingetUpgradeIdx = 0
-        # Upgrade each installed winget package, printing progress
-        foreach ($pkg in $installed) {
-            $wingetUpgradeIdx++
-            $scopeTag = if ($UserScope) { ' [user scope]' } else { '' }
-            Write-Host "[$wingetUpgradeIdx/$totalInstalled] Upgrading $pkg$scopeTag..." -ForegroundColor Cyan
-            try {
-                $exitCode = Invoke-WingetPackage -Action upgrade -PackageId $pkg -UserScope:$UserScope
-                if ($exitCode -ne 0) {
-                    Write-Host "Winget upgrade failed for $pkg (exit code $exitCode)." -ForegroundColor Yellow
-                }
-            }
-            catch { Write-Host "Failed to start winget upgrade for $($pkg): $_" -ForegroundColor Red }
-        }
-    }
 
     # Ensure Git is present; use an interactive installer unless user scope requires unattended setup.
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -10562,10 +10554,10 @@ function Invoke-AiUpgrade {
     <#
 .SYNOPSIS
     Updates all AI CLI tools in one shot.
-.DESCRIPTION
     Runs the native update/upgrade command for each available CLI registered in
     $_AiToolsInternal.UpgradeCommands (agy, Claude, Codex, OpenCode, and Cursor),
-    then checks and updates every npm-installed managed package -- from
+    checks and updates configured PowerShell modules (e.g. Pester) from PSGallery,
+    and updates every npm-installed managed package -- from
     $_AiToolsInternal.NpmPackages and MoreAiNpmPackages -- through one global
     npm command. Winget packages are upgraded only when -Winget is supplied.
     Preserves and restores the terminal window title so npm commands cannot
@@ -10620,6 +10612,61 @@ function Invoke-AiUpgrade {
         }
         Write-Host ">>> $($tool.Label): $($tool.Cmd) $($tool.Args -join ' ')" -ForegroundColor Cyan
         & $tool.Cmd @($tool.Args)
+    }
+
+    # PowerShell modules stage: check and update configured modules (e.g. Pester)
+    if ($_AiToolsInternal.PowerShellModules -and (Get-Command Find-Module -ErrorAction SilentlyContinue) -and (Get-Command Update-Module -ErrorAction SilentlyContinue)) {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $moduleUpdates = @()
+        foreach ($mod in $_AiToolsInternal.PowerShellModules) {
+            $installedMod = Get-Module -ListAvailable -Name $mod.Name |
+                Where-Object { $_.Version -ge [version]$mod.MinimumVersion } |
+                Sort-Object Version -Descending | Select-Object -First 1
+            if ($installedMod) {
+                try {
+                    $onlineMod = Find-Module -Name $mod.Name -Repository $mod.Repository -ErrorAction Stop | Select-Object -First 1
+                    if ($onlineMod -and [version]$onlineMod.Version -gt [version]$installedMod.Version) {
+                        $moduleUpdates += [pscustomobject]@{
+                            Config    = $mod
+                            Current   = $installedMod.Version
+                            Available = $onlineMod.Version
+                        }
+                    }
+                }
+                catch {
+                    Write-Warning "Could not check updates for PowerShell module $($mod.Name): $($_.Exception.Message)"
+                }
+            }
+        }
+
+        if ($moduleUpdates.Count -eq 0) {
+            Write-Host '>>> powershell modules: all managed modules are already up to date.' -ForegroundColor Green
+        }
+        else {
+            Write-Host ">>> powershell modules: $($moduleUpdates.Count) update(s) available:" -ForegroundColor Cyan
+            $modNameWidth = ($moduleUpdates.Config.Name | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+            foreach ($up in $moduleUpdates) {
+                Write-Host ("      {0}  {1} -> {2}" -f $up.Config.Name.PadRight($modNameWidth), $up.Current, $up.Available) -ForegroundColor Cyan
+            }
+            $moduleFailures = @()
+            $modUpIndex = 0
+            foreach ($up in $moduleUpdates) {
+                $modUpIndex++
+                Write-Host (">>> powershell modules: [{0}/{1}] updating {2}  {3} -> {4}" -f $modUpIndex, $moduleUpdates.Count, $up.Config.Name, $up.Current, $up.Available) -ForegroundColor Cyan
+                try {
+                    Update-Module -Name $up.Config.Name -Scope $up.Config.Scope -Force -ErrorAction Stop
+                }
+                catch {
+                    $moduleFailures += "$($up.Config.Name) ($($_.Exception.Message))"
+                }
+            }
+            if ($moduleFailures.Count -eq 0) {
+                Write-Host 'PowerShell-managed modules updated successfully.' -ForegroundColor Green
+            }
+            else {
+                Write-Warning "PowerShell module update failed for: $($moduleFailures -join ', ')"
+            }
+        }
     }
 
     # Winget stage: discover updates once, restrict the results to every package

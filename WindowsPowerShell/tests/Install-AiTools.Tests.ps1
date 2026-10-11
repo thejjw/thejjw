@@ -200,13 +200,6 @@ Describe 'Install-AiTools PowerShell modules' {
         Should -Invoke Install-Module -Times 0 -Exactly
     }
 
-    It 'refreshes an installed module during an update run' {
-        $script:moduleInstalled = $true
-
-        Install-AiTools -Auto -Update
-
-        Should -Invoke Install-Module -Times 1 -Exactly
-    }
 
     It 'bootstraps NuGet when a suitable provider is unavailable' {
         Mock Get-PackageProvider { return $null }
@@ -360,7 +353,7 @@ Describe 'Install-AiTools npm packages' {
             param($ArgumentList)
             $script:wingetCalls += [pscustomobject]@{ Args = @($ArgumentList) }
             $global:LASTEXITCODE = 0
-            if ($script:wingetCalls.Count -gt 1) { return 'Example Example.Inventory 1.0 winget' }
+            if ($script:wingetCalls.Count -gt 1) { return 'Example Example.Inventory 1.0' }
             return @()
         }
         $script:inventoryResponses.Enqueue([pscustomobject]@{
@@ -382,7 +375,7 @@ Describe 'Install-AiTools npm packages' {
         Mock Start-Process {}
         Mock winget { $global:LASTEXITCODE = 9; return 'source unavailable' }
 
-        Install-AiTools -Auto -Update
+        Install-AiTools -Auto
 
         Should -Invoke winget -Times 1 -Exactly
         Should -Invoke Start-Process -Times 0 -Exactly
@@ -409,13 +402,13 @@ Describe 'Install-AiTools npm packages' {
         Should -Invoke Write-Host -ParameterFilter { $Object -like '*inventory*9*' }
     }
 
-    It 'skips healthy packages even during an update run' {
+    It 'skips healthy packages that are already installed' {
         $script:inventoryResponses.Enqueue([pscustomobject]@{
             ExitCode = 0
             Json = New-NpmInventoryJson $_AiToolsInternal.NpmPackages
         })
 
-        Install-AiTools -Auto -Update
+        Install-AiTools -Auto
 
         @($script:npmCalls | Where-Object { $_.Args[0] -eq 'install' }).Count | Should -Be 0
         Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
@@ -669,6 +662,36 @@ Describe 'Install-AiTools npm packages' {
 
         Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
             ($ArgumentList -join ' ') -eq 'install --source winget --exact --id Git.Git --scope user --silent --disable-interactivity --accept-package-agreements --accept-source-agreements'
+        }
+    }
+
+    It 'passes --no-upgrade when installing missing Winget packages' {
+        $_AiToolsInternal.WingetPackages = @('Example.Package')
+        Mock Start-Process { return [pscustomobject]@{ ExitCode = 0 } }
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson @() })
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson $_AiToolsInternal.NpmPackages })
+
+        Install-AiTools -Auto
+
+        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+            $ArgumentList -contains '--no-upgrade' -and
+            $ArgumentList -contains 'Example.Package'
+        }
+    }
+
+    It 'treats benign Winget exit codes for already-installed packages as successful' {
+        $_AiToolsInternal.WingetPackages = @('Example.AlreadyInstalled')
+        Mock Start-Process { return [pscustomobject]@{ ExitCode = -1978335135 } }
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson @() })
+        $script:inventoryResponses.Enqueue([pscustomobject]@{ ExitCode = 0; Json = New-NpmInventoryJson $_AiToolsInternal.NpmPackages })
+
+        Install-AiTools -Auto
+
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -eq 'Example.AlreadyInstalled is already installed.'
+        }
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -eq 'All packages installed successfully.'
         }
     }
 }

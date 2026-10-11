@@ -26,6 +26,8 @@ Describe 'Invoke-AiUpgrade managed packages' {
         function winget {
             param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
         }
+        function Find-Module { param($Name, $Repository, $ErrorAction) }
+        function Update-Module { param($Name, $Scope, [switch]$Force, $ErrorAction) }
         $script:testHostTitle = $null
         try {
             $script:testHostTitle = $Host.UI.RawUI.WindowTitle
@@ -352,5 +354,58 @@ Describe 'Invoke-AiUpgrade managed packages' {
 
         $expectedDefault = if ($PSEdition -eq 'Core') { 'PowerShell' } else { 'Windows PowerShell' }
         $Host.UI.RawUI.WindowTitle | Should -Be $expectedDefault
+    }
+
+    It 'reports when all managed PowerShell modules are already up to date' {
+        $_AiToolsInternal.PowerShellModules = @(
+            @{ Name = 'Pester'; MinimumVersion = '6.0'; Repository = 'PSGallery'; Scope = 'CurrentUser' }
+        )
+        Mock Get-Command {
+            if ($Name -in @('npm', 'winget', 'Find-Module', 'Update-Module')) { return [pscustomobject]@{ Name = $Name } }
+            return $null
+        }
+        Mock Get-Module {
+            return [pscustomobject]@{ Name = 'Pester'; Version = [version]'6.2.0' }
+        }
+        Mock Find-Module {
+            return [pscustomobject]@{ Name = 'Pester'; Version = '6.2.0' }
+        }
+        Mock Update-Module {}
+
+        Invoke-AiUpgrade
+
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -eq '>>> powershell modules: all managed modules are already up to date.'
+        }
+        Should -Invoke Update-Module -Times 0 -Exactly
+    }
+
+    It 'updates an outdated managed PowerShell module when a newer version is available' {
+        $_AiToolsInternal.PowerShellModules = @(
+            @{ Name = 'Pester'; MinimumVersion = '6.0'; Repository = 'PSGallery'; Scope = 'CurrentUser' }
+        )
+        Mock Get-Command {
+            if ($Name -in @('npm', 'winget', 'Find-Module', 'Update-Module')) { return [pscustomobject]@{ Name = $Name } }
+            return $null
+        }
+        Mock Get-Module {
+            return [pscustomobject]@{ Name = 'Pester'; Version = [version]'6.0.1' }
+        }
+        Mock Find-Module {
+            return [pscustomobject]@{ Name = 'Pester'; Version = '6.2.0' }
+        }
+        Mock Update-Module {}
+
+        Invoke-AiUpgrade
+
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -eq '>>> powershell modules: 1 update(s) available:'
+        }
+        Should -Invoke Update-Module -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'Pester' -and $Scope -eq 'CurrentUser' -and $Force
+        }
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -eq 'PowerShell-managed modules updated successfully.'
+        }
     }
 }
