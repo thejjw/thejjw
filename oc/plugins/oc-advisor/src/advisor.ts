@@ -1577,7 +1577,7 @@ Required tool arg \`prompt\` must include all context the advisor needs for this
 
 Give the advice serious weight. Only override if you have primary-source evidence that contradicts a specific claim. Surface conflicts in another advisor call rather than silently switching approaches.
 
-When watch mode is on (/advisor status shows it), turn-boundary reviews also arrive automatically as advisor notes; this tool remains for on-demand checks. Reply NO_CONCERNS when there is nothing material to say.`;
+When watch mode is on (/advisor status shows it), turn-boundary reviews also arrive automatically as advisor notes; this tool remains for on-demand checks. The advisor replies NO_CONCERNS when there is nothing material to say.`;
 
 export default Plugin.define({
   id: "oc-advisor",
