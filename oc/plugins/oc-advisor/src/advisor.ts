@@ -1563,12 +1563,13 @@ const TOOL_DESCRIPTION = `Consult a strategic advisor (a second model giving a c
 
 Call advisor BEFORE substantive work — before writing code, editing files, committing to an interpretation, or building on an assumption. If the task requires orientation first (finding files, reading code, fetching docs), do that, then call advisor. Orientation is NOT substantive work.
 
-Also call advisor:
+You MUST call advisor:
+- BEFORE substantive work — before writing code, editing files, committing to an interpretation, or building on an assumption. If the task requires orientation first (finding files, reading code, fetching docs), do that, then call advisor. Orientation is NOT substantive work.
 - When stuck — errors recurring, approach not converging, results that don't fit
 - When considering a change of approach
-- When you believe the task is complete. BEFORE this call, make your deliverable durable: write the file, save the result, commit the change
+- BEFORE declaring done: exactly once after the deliverable is durable and before your final user-facing summary. Declaring done means any turn with a completion claim, change summary, or commit. BEFORE this call, make your deliverable durable: write the file, save the result, commit the change, and include your draft summary in the prompt. Only pure Q&A with zero workspace changes (no created/edited files, no executed commands, no commits) may skip this final call.
 
-On tasks longer than a few steps, call advisor at least once before committing to an approach and once before declaring done. On short reactive turns where tool output directly dictates the next action, skip advisor.
+On tasks longer than a few steps, call advisor at least once before committing to an approach and once before declaring done. The short-reactive skip (tool output directly dictates the next action) applies to intermediate turns only, never to the declaring-done turn.
 
 Optional tool args \`providerID\` and \`modelID\` (plus \`variant\`) override the advisor model for this one call; leave them blank to use the configured default (/advisor status shows it).
 
