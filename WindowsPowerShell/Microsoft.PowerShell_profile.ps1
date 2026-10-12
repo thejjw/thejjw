@@ -5581,6 +5581,13 @@ function Install-OpenCodeSettings {
         Write-Host ("clone materialized {0} file(s):" -f $materialized.Count) -ForegroundColor DarkGray
         foreach ($file in $materialized) { Write-Host "  $file" -ForegroundColor DarkGray }
 
+        # Report the exact commit the sparse clone checked out (short hash,
+        # commit date, subject). Reuses Update-Profile's trailer wording so the
+        # profile has one commit-reporting phrase; the clone is depth-1, so
+        # `log -1` is the checked-out tip and costs nothing.
+        $commitInfo = & git -C $CloneDir log -1 --format="Remote commit at %cs, [%h]  %s" 2>$null
+        if ($commitInfo) { Write-Host $commitInfo -ForegroundColor DarkGray }
+
         $installerArgs = @($installerPath)
         if ($DryRun) { $installerArgs += '--dry-run' }
         if ($SkipValidate) { $installerArgs += '--skip-validate' }

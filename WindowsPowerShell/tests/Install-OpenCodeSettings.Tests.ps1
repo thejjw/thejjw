@@ -138,6 +138,7 @@ Describe 'Install-OpenCodeSettings' {
         @($installedArgs | Where-Object { $_ -like '*install.mjs*' -and $_ -notlike '*--status*' }).Count | Should -Be 1
         @($installedArgs | Where-Object { $_ -like '*install.mjs*--status*' }).Count | Should -Be 1
         $output | Should -BeLike '*advisor.ts: MATCH*'
+        $output | Should -BeLike '*Remote commit at*'
         Test-Path -LiteralPath $script:cloneDir | Should -BeFalse
     }
 
