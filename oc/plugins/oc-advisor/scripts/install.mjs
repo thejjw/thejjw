@@ -279,8 +279,19 @@ function entryState(configPath) {
 }
 
 function showStatus(configPath) {
-  console.log(`Copy:     ${copyState()} → ${pluginDestDir}`);
-  console.log(`Entry:    ${entryState(configPath)} (target: ${configPath})`);
+  const copy = copyState();
+  const entry = entryState(configPath);
+  console.log(`Copy:     ${copy} → ${pluginDestDir}`);
+  // Copy/discovery mode needs no config entry (mutual exclusion), so a
+  // missing entry alongside a copy is healthy, not a fault. Both present
+  // means double-load: copy and --reference at once.
+  let entryNote = ` (target: ${configPath})`;
+  if (entry === "missing" && (copy === "installed" || copy === "differs")) {
+    entryNote = ` (expected — copy/discovery mode loads with no config entry) (target: ${configPath})`;
+  } else if (entry === "installed" && (copy === "installed" || copy === "differs")) {
+    entryNote = ` (WARNING: copy also present; plugin may load twice — use copy or --reference, not both) (target: ${configPath})`;
+  }
+  console.log(`Entry:    ${entry}${entryNote}`);
   const cmdExists = fs.existsSync(commandDest);
   const cmdCurrent = cmdExists && fs.readFileSync(commandDest, "utf8") === fs.readFileSync(commandSrc, "utf8");
   console.log(`Command:  ${cmdExists ? (cmdCurrent ? "installed" : "differs") : "not installed"} → ${commandDest}`);
