@@ -10657,6 +10657,7 @@ function Invoke-AiUpgrade {
                 Write-Host ("      {0}  {1} -> {2}" -f $up.Config.Name.PadRight($modNameWidth), $up.Current, $up.Available) -ForegroundColor Cyan
             }
             $moduleFailures = @()
+            $modulePruneWarnings = @()
             $modUpIndex = 0
             foreach ($up in $moduleUpdates) {
                 $modUpIndex++
@@ -10667,6 +10668,36 @@ function Invoke-AiUpgrade {
                     # newer version with Install-Module (which does support -Scope) --
                     # the same cmdlet the Install-AiTools stage already uses.
                     Install-Module -Name $up.Config.Name -MinimumVersion $up.Available -Repository $up.Config.Repository -Scope $up.Config.Scope -Force -SkipPublisherCheck -Confirm:$false -ErrorAction Stop
+
+                    # Install-Module places the new version beside the old one. Once the
+                    # new version is discoverable, delete older version folders under the
+                    # SAME module folder so stale copies do not linger. The parent-name
+                    # and version-leaf checks restrict deletion to this module in this
+                    # scope -- e.g. the inbox Pester under Program Files is never touched.
+                    $newModule = Get-Module -ListAvailable -Name $up.Config.Name |
+                        Where-Object { $_.Version -ge [version]$up.Available } |
+                        Sort-Object Version -Descending |
+                        Select-Object -First 1
+                    if (-not $newModule) {
+                        throw "$($up.Config.Name) >= $($up.Available) was not discoverable after installation."
+                    }
+                    $moduleRoot = Split-Path -Parent $newModule.ModuleBase
+                    $parsedInstalledVersion = $null
+                    if ([version]::TryParse((Split-Path -Leaf $newModule.ModuleBase), [ref]$parsedInstalledVersion) -and
+                        (Split-Path -Leaf $moduleRoot) -ieq $up.Config.Name) {
+                        foreach ($oldDir in @(Get-ChildItem -LiteralPath $moduleRoot -Directory -ErrorAction SilentlyContinue)) {
+                            $oldVersion = $null
+                            if ([version]::TryParse($oldDir.Name, [ref]$oldVersion) -and $oldVersion -lt $newModule.Version) {
+                                try {
+                                    Remove-Item -LiteralPath $oldDir.FullName -Recurse -Force -ErrorAction Stop
+                                    Write-Host ("      removed old version {0}" -f $oldVersion) -ForegroundColor DarkGray
+                                }
+                                catch {
+                                    $modulePruneWarnings += ("{0} {1} ({2})" -f $up.Config.Name, $oldVersion, $_.Exception.Message)
+                                }
+                            }
+                        }
+                    }
                 }
                 catch {
                     $moduleFailures += "$($up.Config.Name) ($($_.Exception.Message))"
@@ -10677,6 +10708,9 @@ function Invoke-AiUpgrade {
             }
             else {
                 Write-Warning "PowerShell module update failed for: $($moduleFailures -join ', ')"
+            }
+            if ($modulePruneWarnings.Count -gt 0) {
+                Write-Warning "Some old module versions could not be removed: $($modulePruneWarnings -join ', ')"
             }
         }
     }
