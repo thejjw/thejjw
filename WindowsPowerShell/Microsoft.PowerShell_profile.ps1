@@ -5538,8 +5538,11 @@ function Install-OpenCodeSettings {
     $originalEnvVars = Save-ProcessEnvVars @('GIT_TERMINAL_PROMPT')
     $env:GIT_TERMINAL_PROMPT = '0'
     try {
+        # Full (blobless) history is kept so the plugin's own last-change commit
+        # can be resolved below; --filter=blob:none keeps it from downloading any
+        # file content, and --sparse still materializes only the plugin subtree.
         $cloneArgs = @(
-            'clone', '--depth', '1', '--single-branch', '--no-tags', '--branch', $Ref,
+            'clone', '--single-branch', '--no-tags', '--branch', $Ref,
             '--filter=blob:none', '--sparse', $_OpenCodeInternal.RepoUrl, $CloneDir
         )
         Write-Host ("git {0}" -f ($cloneArgs -join ' ')) -ForegroundColor DarkGray
@@ -5581,11 +5584,15 @@ function Install-OpenCodeSettings {
         Write-Host ("clone materialized {0} file(s):" -f $materialized.Count) -ForegroundColor DarkGray
         foreach ($file in $materialized) { Write-Host "  $file" -ForegroundColor DarkGray }
 
-        # Report the exact commit the sparse clone checked out (short hash,
-        # commit date, subject). Reuses Update-Profile's trailer wording so the
-        # profile has one commit-reporting phrase; the clone is depth-1, so
-        # `log -1` is the checked-out tip and costs nothing.
-        $commitInfo = & git -C $CloneDir log -1 --format="Remote commit at %cs, [%h]  %s" 2>$null
+        # Report the last commit that touched the plugin subtree (date, short
+        # hash, subject). Reuses Update-Profile's trailer wording; a pathspec is
+        # required, otherwise git reports the branch tip rather than the plugin.
+        $commitInfo = & git -C $CloneDir log -1 --format="Remote commit at %cs, [%h]  %s" -- $_OpenCodeInternal.PluginPath 2>$null
+        if (-not $commitInfo) {
+            # The plain fallback clone (retry without --filter) is still --depth 1
+            # and may lack the history to resolve the path; degrade to the tip.
+            $commitInfo = & git -C $CloneDir log -1 --format="Remote commit at %cs, [%h]  %s" 2>$null
+        }
         if ($commitInfo) { Write-Host $commitInfo -ForegroundColor DarkGray }
 
         $installerArgs = @($installerPath)
