@@ -10662,7 +10662,11 @@ function Invoke-AiUpgrade {
                 $modUpIndex++
                 Write-Host (">>> powershell modules: [{0}/{1}] updating {2}  {3} -> {4}" -f $modUpIndex, $moduleUpdates.Count, $up.Config.Name, $up.Current, $up.Available) -ForegroundColor Cyan
                 try {
-                    Update-Module -Name $up.Config.Name -Scope $up.Config.Scope -Force -ErrorAction Stop
+                    # Update-Module only gained -Scope in PowerShellGet 2.x; the inbox
+                    # 1.x build on Windows PowerShell 5.1 has no -Scope, so install the
+                    # newer version with Install-Module (which does support -Scope) --
+                    # the same cmdlet the Install-AiTools stage already uses.
+                    Install-Module -Name $up.Config.Name -MinimumVersion $up.Available -Repository $up.Config.Repository -Scope $up.Config.Scope -Force -SkipPublisherCheck -Confirm:$false -ErrorAction Stop
                 }
                 catch {
                     $moduleFailures += "$($up.Config.Name) ($($_.Exception.Message))"
