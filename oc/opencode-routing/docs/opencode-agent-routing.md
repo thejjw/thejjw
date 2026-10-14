@@ -2,7 +2,7 @@
 
 This bundle installs a reusable OpenCode configuration for multi-model agent routing. It keeps three primary heads and adds alternate profiles with `alt_` prefixes.
 
-Last updated: 2026-09-23.
+Last updated: 2026-10-14.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 
 | Agent | Model | Purpose |
 | --- | --- | --- |
-| `head-gpt` | `openai/gpt-5.6-terra` | Main premium orchestrator |
+| `head-gpt` | `openai/gpt-6.1-sol` | Main premium orchestrator |
 | `head-glm` | `zai-coding-plan/glm-5.3` | Main GLM orchestrator |
 | `head-minimax` | `minimax-coding-plan/MiniMax-M3` | Main MiniMax orchestrator |
 
@@ -54,11 +54,11 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 
 | Agent | Model | Purpose |
 | --- | --- | --- |
-| `alt_premium` | `openai/gpt-5.6-sol` | Highest-quality orchestration and review-heavy work |
-| `alt_openai` | `openai/gpt-5.6-terra` | All-OpenAI workflow |
-| `alt_glm_stack` | `zai-coding-plan/glm-5.3` | All-GLM workflow |
-| `alt_budget` | `zai-coding-plan/glm-4.7` | Cheap and fast routine workflow |
-| `alt_review_heavy` | `openai/gpt-5.6-terra` | GLM implementation plus premium review |
+| `alt_head-premium` | `openai/gpt-6-astra` | Highest-quality orchestration and review-heavy work |
+| `alt_head-openai` | `openai/gpt-5.6-terra` | All-OpenAI workflow |
+| `alt_head-glm_stack` | `zai-coding-plan/glm-5.3` | All-GLM workflow |
+| `alt_head-budget` | `zai-coding-plan/glm-5.3-flash` | Cheap and fast routine workflow |
+| `alt_head-review_heavy` | `openai/gpt-5.6-terra` | GLM implementation plus premium review |
 
 ## Subagents
 
@@ -66,25 +66,24 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 | --- | --- | --- |
 | `fast-discovery-m3` | `minimax-coding-plan/MiniMax-M3` | Fast read-only discovery |
 | `fast-openai-gpt6-luna` | `openai/gpt-6-luna` | OpenAI read-only discovery |
-| `fast-glm-4.7` | `zai-coding-plan/glm-4.7` | GLM read-only discovery |
-| `hard-impl-glm53` | `zai-coding-plan/glm-5.3` | Main implementation work |
-| `hard-impl-glm47` | `zai-coding-plan/glm-4.7` | Alternate implementation work |
-| `hard-impl-openai` | `openai/gpt-6-sol` | OpenAI implementation work |
+| `fast-glm-5.3-flash` | `zai-coding-plan/glm-5.3-flash` | GLM read-only discovery |
+| `hard-impl-glm53` | `zai-coding-plan/glm-5.3-flash` | Main implementation work |
+| `hard-impl-openai` | `openai/gpt-6.1-sol` | OpenAI implementation work |
 | `hard-impl-m3` | `minimax-coding-plan/MiniMax-M3` | MiniMax implementation work |
-| `premium-reviewer-gpt-5.6-sol` | `openai/gpt-5.6-sol` | Read-only final review and risk analysis |
+| `premium-reviewer-gpt-6-astra` | `openai/gpt-6-astra` | Read-only final review and risk analysis |
 
 ## Routing
 
 | Head | Allowed Subagents |
 | --- | --- |
 | `head-gpt` | `fast-discovery-m3`, `hard-impl-glm53` |
-| `head-glm` | `fast-discovery-m3`, `hard-impl-glm47` |
+| `head-glm` | `fast-discovery-m3`, `hard-impl-glm53` |
 | `head-minimax` | `fast-discovery-m3`, `hard-impl-m3` |
-| `alt_premium` | `fast-discovery-m3`, `hard-impl-openai`, `premium-reviewer-gpt-5.6-sol` |
-| `alt_openai` | `fast-openai-gpt6-luna`, `hard-impl-openai`, `premium-reviewer-gpt-5.6-sol` |
-| `alt_glm_stack` | `fast-glm-4.7`, `hard-impl-glm53` |
-| `alt_budget` | `fast-discovery-m3`, `hard-impl-glm47` |
-| `alt_review_heavy` | `fast-discovery-m3`, `hard-impl-glm53`, `premium-reviewer-gpt-5.6-sol` |
+| `alt_head-premium` | `fast-discovery-m3`, `hard-impl-openai`, `premium-reviewer-gpt-6-astra` |
+| `alt_head-openai` | `fast-openai-gpt6-luna`, `hard-impl-openai`, `premium-reviewer-gpt-6-astra` |
+| `alt_head-glm_stack` | `fast-glm-5.3-flash`, `hard-impl-glm53` |
+| `alt_head-budget` | `fast-discovery-m3`, `hard-impl-glm53` |
+| `alt_head-review_heavy` | `fast-discovery-m3`, `hard-impl-glm53`, `premium-reviewer-gpt-6-astra` |
 
 ## Validation
 
