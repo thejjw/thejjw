@@ -12900,13 +12900,21 @@ namespace ChunkDownload
         {
             int attempt = 0;
             string useUrl = url;
+            // Resume offset: partial bytes from a truncated connection are kept
+            // on disk and the next attempt re-requests only the remainder, so
+            // each byte is counted once and a deterministic truncation point
+            // cannot trap the retry loop on the same full range.
+            long pos = start;
+            long totalGot = 0;
+            long want = end - start + 1;
             while (true)
             {
                 attempt++;
+                long reqStart = pos;
                 try
                 {
                     HttpWebRequest r = MakeReq(useUrl, timeoutMs);
-                    r.AddRange(start, end);
+                    r.AddRange(pos, end);
                     using (HttpWebResponse resp = (HttpWebResponse)r.GetResponse())
                     using (Stream rs = resp.GetResponseStream())
                     using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
@@ -12915,7 +12923,10 @@ namespace ChunkDownload
                         // 200 body at this offset would silently corrupt the file.
                         if (resp.StatusCode != HttpStatusCode.PartialContent)
                             throw new IOException("Expected 206 for range request, got " + (int)resp.StatusCode);
-                        fs.Seek(start, SeekOrigin.Begin);
+                        string cr = resp.Headers["Content-Range"];
+                        if (string.IsNullOrEmpty(cr) || !cr.StartsWith("bytes " + pos + "-"))
+                            throw new IOException("Range mismatch: Content-Range '" + cr + "' does not start at " + pos);
+                        fs.Seek(pos, SeekOrigin.Begin);
                         byte[] buf = new byte[81920];
                         int n;
                         long got = 0;
@@ -12924,14 +12935,21 @@ namespace ChunkDownload
                             fs.Write(buf, 0, n);
                             Interlocked.Add(ref _written, n);
                             got += n;
+                            totalGot += n;
+                            pos += n;
                         }
                         // A dropped connection can surface as a clean end-of-stream
                         // instead of an exception; the pre-allocated file would keep
                         // zeros for the missing tail and pass the final size check.
-                        // Make it loud so the retry loop fetches the range again.
-                        long want = end - start + 1;
-                        if (got != want)
-                            throw new IOException(string.Format("Short read: got {0} of {1} bytes for range {2}-{3}", got, want, start, end));
+                        // Resume the remainder instead of re-fetching the whole range.
+                        long reqWant = end - reqStart + 1;
+                        if (got != reqWant)
+                        {
+                            if (attempt > maxRetries)
+                                throw new IOException(string.Format("Short read: got {0} of {1} bytes for range {2}-{3}", totalGot, want, start, end));
+                            Thread.Sleep(500 * attempt);
+                            continue;
+                        }
                     }
                     return;
                 }
@@ -12940,7 +12958,11 @@ namespace ChunkDownload
                     // A 403 usually means a time-limited signed CDN URL expired; re-resolve from the original.
                     HttpWebResponse er = we.Response as HttpWebResponse;
                     if (er != null && (int)er.StatusCode == 403 && useUrl != origUrl) useUrl = origUrl;
-                    if (attempt > maxRetries) throw;
+                    if (attempt > maxRetries)
+                    {
+                        if (we.Message != null && we.Message.IndexOf("Short read", StringComparison.OrdinalIgnoreCase) >= 0) throw;
+                        throw new IOException(string.Format("Short read: got {0} of {1} bytes for range {2}-{3} ({4})", totalGot, want, start, end, we.Message), we);
+                    }
                     Thread.Sleep(500 * attempt);
                 }
                 catch
@@ -13020,7 +13042,7 @@ namespace ChunkDownload
                         long e = Math.Min(s + chunkSize - 1, total - 1);
                         if (s > e) break;
                         long cs = s, ce = e;
-                        tasks.Add(Task.Factory.StartNew(delegate() { DownloadChunk(finalUrl, url, path, cs, ce, timeoutMs, 3); }, TaskCreationOptions.LongRunning));
+                        tasks.Add(Task.Factory.StartNew(delegate() { DownloadChunk(finalUrl, url, path, cs, ce, timeoutMs, 5); }, TaskCreationOptions.LongRunning));
                     }
                     Task.WaitAll(tasks.ToArray());
                 }
@@ -13301,11 +13323,14 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
     # surfaces only at extract time as ".ExtractToFile ... A local file header is
     # corrupt" or a truncated central directory; for 7z via tar.exe the same zeroed
     # region surfaces as "Unexpected Property ID" (its header parser reading zero
-    # bytes); network stalls are covered too.
+    # bytes); a truncated HTTP range surfaces as "Short read ... for range" and
+    # is resumed within Save-WebFile, retried here only when resume also fails.
+    # Network stalls are covered too. Patterns are literal failure signatures so a
+    # 4xx status alone never matches.
     $isTransientError = {
         param([string]$Message)
         if ([string]::IsNullOrEmpty($Message)) { return $false }
-        return ($Message -match '(?i)(local file header is corrupt|central directory|end of (the )?stream|unexpected end( of archive)?|damaged 7-zip archive|unexpected property id|exit delayed from previous errors|data error|corrupt|crc|block length|compressed data|number of entries|timed out|timeout|connection|transport|prematurely|reset by|unable to read data|actively refused)')
+        return ($Message -match '(?i)(local file header is corrupt|central directory|end of (the )?stream|unexpected end( of archive)?|damaged 7-zip archive|unexpected property id|exit delayed from previous errors|data error|corrupt|crc|block length|compressed data|number of entries|short read|got \d+ of \d+ bytes for range|range mismatch|expected 206 for range request|timed out|timeout|connection|transport|prematurely|reset by|unable to read data|actively refused)')
     }
 
     # Temp working directory (single archive at a time; cleaned per pack).
