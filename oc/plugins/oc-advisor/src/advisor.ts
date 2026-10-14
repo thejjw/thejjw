@@ -225,6 +225,7 @@ function statusText(
   env: { providerID: string; modelID: string; variant?: string } | null,
   last: LastReview | null,
   stats: WatchStats | null,
+  pull: PullStats | null,
 ): string {
   const model = env
     ? `${env.providerID}/${env.modelID}${env.variant ? `#${env.variant}` : ""} (from environment)`
@@ -242,6 +243,18 @@ function statusText(
     `Stale messages: ${settings.watchStaleMessages} (default: ${DEFAULT_SETTINGS.watchStaleMessages}; 0 disables).`,
     `Quiet window: ${settings.watchQuietMs}ms (default: ${DEFAULT_SETTINGS.watchQuietMs}).`,
   ];
+  if (pull && pull.consults > 0) {
+    const when = pull.lastAt > 0 ? ` (last ${relAge(pull.lastAt)})` : "";
+    const via = pull.lastModel ? ` via ${pull.lastModel}` : "";
+    lines.push(`Consultations: ${pull.consults}${via}${when}.`);
+  } else {
+    lines.push(`Consultations: 0 (no pull consultations recorded yet).`);
+  }
+  if (!settings.watch) {
+    lines.push(
+      `Consult the advisor: before substantive work (after orientation), when stuck or changing approach, and exactly once before declaring done.`,
+    );
+  }
   if (stats && stats.reviews > 0) {
     const age = stats.lastAt > 0 ? ` (last ${relAge(stats.lastAt)})` : "";
     lines.push(
@@ -833,6 +846,48 @@ async function bumpWatchStats(ctx: any, bucket: "delivered" | "silent" | "failed
   }
 }
 
+// Plugin-global pull consultation counters, surfaced by /advisor status so
+// pull-style use is visible even with watch off (the default). Only the
+// oc-advisor pull tool path bumps this, and only when it returns text —
+// ctl/command traffic and errors never count.
+type PullStats = {
+  consults: number;
+  lastAt: number;
+  lastModel: string;
+};
+
+const PULL_STATS_KEY = "pullStats";
+
+async function readPullStats(ctx: any): Promise<PullStats> {
+  try {
+    const raw = (await ctx.storage.get(PULL_STATS_KEY)) as Record<string, unknown> | undefined;
+    if (raw && typeof raw === "object") {
+      const n = (v: unknown) => (typeof v === "number" && v >= 0 ? Math.floor(v) : 0);
+      return {
+        consults: n(raw.consults),
+        lastAt: n(raw.lastAt),
+        lastModel: typeof raw.lastModel === "string" ? raw.lastModel : "",
+      };
+    }
+  } catch {
+    // Ignored: no consultations yet.
+  }
+  return { consults: 0, lastAt: 0, lastModel: "" };
+}
+
+// Records one pull consultation. Observability only: never fail a call over it.
+async function bumpPullStats(ctx: any, model: string): Promise<void> {
+  try {
+    const cur = await readPullStats(ctx);
+    cur.consults += 1;
+    cur.lastAt = Date.now();
+    cur.lastModel = model;
+    await ctx.storage.set(PULL_STATS_KEY, { ...cur });
+  } catch {
+    // Ignored.
+  }
+}
+
 // Coarse relative age for the activity line.
 function relAge(ms: number): string {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -1351,7 +1406,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
     if (err) return `Error: not saved: ${err}`;
     return "Advisor disabled. The advisor tool will answer with a disabled notice until /advisor on.";
   }
-  if (sub === "status") return statusText(live, env, await readLastReview(ctx), await readWatchStats(ctx));
+  if (sub === "status") return statusText(live, env, await readLastReview(ctx), await readWatchStats(ctx), await readPullStats(ctx));
   if (sub === "models") {
     let executor: string | null = null;
     let dir: string | null = null;
@@ -1528,7 +1583,7 @@ async function applyCommand(ctx: any, rawArgs: string, sessionID?: string): Prom
         // Ignored: cursor starts from zero on first boundary.
       }
     }
-    return `Saved.\n${statusText(next, env, await readLastReview(ctx), await readWatchStats(ctx))}`;
+    return `Saved.\n${statusText(next, env, await readLastReview(ctx), await readWatchStats(ctx), await readPullStats(ctx))}`;
   }
   return usageText();
 }
@@ -1722,6 +1777,11 @@ export default Plugin.define({
               prompt: promptText,
             });
             const text = response?.text;
+            if (text) {
+              // Pull-path only: ctl/command traffic never reaches here, and
+              // empty returns are not consultations.
+              await bumpPullStats(ctx, `${resolved.providerID}/${resolved.modelID}`);
+            }
             return { content: text || "Advisor returned no advice." };
           } catch (error) {
             return { content: `Error: advisor call failed: ${(error as Error).message}` };
