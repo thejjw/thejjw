@@ -3,6 +3,9 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "description": "Local OpenCode advisor tool: strategic second-model guidance on demand",
   "engines": {
     "node": ">=18"
