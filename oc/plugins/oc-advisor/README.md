@@ -105,8 +105,11 @@ listing) runs in code inside the tool — the model only relays or, for
 
 - `/advisor` or `/advisor status` — report the full configuration:
   enabled/disabled, model (and its source), thinking, fallback, watch
-  on/off, review interval, stale-turn threshold, and the last auto-review
-  delivery (time, severity, preview) when watch has delivered.
+  on/off, review interval, stale-turn threshold, pull consultation count
+  (with last model and age; zero until the first pull call returns text),
+  and the last auto-review delivery (time, severity, preview) when watch
+  has delivered. With watch off (the default) the report also recaps when
+  to consult the advisor, since no automatic reviews will arrive.
   Numeric settings show their default next to the current value.
 - `/advisor models` — handled by the tool: writes available models to
   `models_<timestamp>.txt` in the workspace via the model catalog (falling
@@ -137,7 +140,10 @@ last delivery record live in the same storage.
 
 ## Watch mode (automatic reviews)
 
-The pull-style `oc-advisor` tool waits to be called. Watch mode instead
+Watch mode is off by default; enable it with `/advisor configure watch=on`.
+It depends on the host delivering turn-terminal session events — on a host
+that never emits them, no automatic reviews will arrive and the pull-style
+`oc-advisor` tool remains the only path. The pull-style `oc-advisor` tool waits to be called. Watch mode instead
 reviews on its own: after the session goes quiet for `watchQuietMs`
 (default 8s), the plugin snapshots the accumulated transcript delta into
 an ephemeral investigative sidecar — a short tool loop with
