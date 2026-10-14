@@ -987,6 +987,9 @@ $_FontInstallInternal = @{
         [pscustomobject]@{ Name = 'D2Coding';            Url = 'https://github.com/naver/d2codingfont/releases/download/VER1.3.2/D2Coding-Ver1.3.2-20180524.zip'; Bytes = 21256997; Fonts = 1; Kind = 'Zip'; Include = '(?i)^D2CodingAll/[^/]+\.ttc$';           Probe = 'D2Coding-Ver1.3.2-20180524-all.ttc';     Extended = $false; Note = 'Installs the D2CodingAll .ttc (regular+bold+ligature in one collection).' }
         [pscustomobject]@{ Name = 'KoPubWorld';          Url = 'https://www.kopus.org/wp-content/uploads/2026/04/KOPUBWORLD_OTF_FONTS2026.zip'; Bytes = 20297063; Fonts = 6; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';        Probe = 'KoPubWorld Batang_Pro Light.otf';        Extended = $false; Note = 'OTF-only (2026 release). KoPubWorld Batang (serif) + Dotum (sans), 3 weights each (Light/Medium/Bold).' }
         [pscustomobject]@{ Name = 'KoPub';               Url = 'https://www.kopus.org/wp-content/uploads/2022/04/KOPUB2.0_OTF_FONTS.zip'; Bytes = 12640328; Fonts = 6; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';             Probe = 'KoPub Batang_Pro Light.otf';             Extended = $false; Note = 'OTF-only (classic KoPub 2.0). KoPub Batang (serif) + Dotum (sans), 3 weights each (Light/Medium/Bold).' }
+        # Fixed = default Sans design, Normal width, 4 faces (Regular/Bold + Italics).
+        # Intentionally not the Extended/Oblique/Slab/Term/SS/Aile/Etoile variants.
+        [pscustomobject]@{ Name = 'IosevkaFixed';         Url = 'https://github.com/be5invis/Iosevka/releases/download/v34.9.0/PkgTTF-IosevkaFixed-34.9.0.zip'; Bytes = 148235929; Fonts = 4; Kind = 'Zip'; Include = '(?i)^IosevkaFixed-(Regular|Bold|Italic|BoldItalic)\.ttf$'; Probe = 'IosevkaFixed-Regular.ttf'; Extended = $false; Note = 'LARGE ~141 MB archive, installs 4. Default Sans Fixed, Normal width only (Regular/Bold + Italics); Fixed has no ligatures, family "Iosevka Fixed". Excludes Extended/Oblique/Slab/Term/SS/Aile/Etoile.' }
     )
 }
 
