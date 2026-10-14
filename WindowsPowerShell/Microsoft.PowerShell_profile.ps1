@@ -609,9 +609,6 @@ $_NrdInternal = @{
     )
 
     # Canonical agent-guidance template; keep the nrd AGENT_EOF copy in bin/install_j.sh in sync.
-    # Shared verbatim: the ## oc-advisor section (ships on all platforms; its
-    # absent-tool guard makes it inert where no oc-advisor tool exists).
-    # Dropped in the bash copy: ## Environment (nrd targets bash/zsh only).
     AgentsMarkdown = @'
 # AGENTS.md
 
@@ -698,19 +695,6 @@ $_NrdInternal = @{
 * Where it cuts cost without hurting quality, route exploration/search
   subagents to a smaller/faster model and reserve the main session for
   synthesis and architectural judgment.
-
-## oc-advisor
-
-* The rest of this section applies only if your harness exposes an `oc-advisor`
-  tool (OpenCode `oc-advisor` plugin). Otherwise ignore it; nothing else here
-  depends on it.
-* Consult `oc-advisor` (manage via `oc-advisor_ctl` / `/advisor`): before
-  substantive work (orient first, then call before writing code, editing files,
-  committing to an interpretation, or building on an assumption); when stuck or
-  changing approach; exactly once after the deliverable is durable and before
-  the final summary. Pure Q&A with zero workspace changes may skip the last call.
-* Give its advice serious weight; override only on primary-source evidence that
-  contradicts a specific claim.
 '@
 }
 

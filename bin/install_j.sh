@@ -1030,11 +1030,8 @@ nrd() {
     # Porting rule: keep every section byte-identical EXCEPT ## Environment,
     # which is dropped here -- nrd targets Linux/macOS where the shell is
     # always bash/zsh, so the canonical template's Windows shell-detection
-    # guidance (PowerShell vs bash) does not apply. The ## oc-advisor section
-    # IS shared verbatim: its absent-tool guard keeps it inert on machines
-    # without the OpenCode oc-advisor plugin, so it ships on all platforms.
-    # When the canonical template changes, re-check this block against it
-    # before pasting (section list, not just this file).
+    # guidance (PowerShell vs bash) does not apply. When the canonical
+    # template changes, re-check this block against it before pasting.
     cat > "$dir/AGENTS.md" << 'AGENT_EOF'
 # AGENTS.md
 
@@ -1106,19 +1103,6 @@ nrd() {
 * Where it cuts cost without hurting quality, route exploration/search
   subagents to a smaller/faster model and reserve the main session for
   synthesis and architectural judgment.
-
-## oc-advisor
-
-* The rest of this section applies only if your harness exposes an `oc-advisor`
-  tool (OpenCode `oc-advisor` plugin). Otherwise ignore it; nothing else here
-  depends on it.
-* Consult `oc-advisor` (manage via `oc-advisor_ctl` / `/advisor`): before
-  substantive work (orient first, then call before writing code, editing files,
-  committing to an interpretation, or building on an assumption); when stuck or
-  changing approach; exactly once after the deliverable is durable and before
-  the final summary. Pure Q&A with zero workspace changes may skip the last call.
-* Give its advice serious weight; override only on primary-source evidence that
-  contradicts a specific claim.
 AGENT_EOF
   fi
 
