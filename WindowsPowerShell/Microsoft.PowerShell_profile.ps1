@@ -4090,7 +4090,8 @@ Last Edit: 2026-10
         throw "Directory already exists: $Path"
     }
     Write-Verbose "Creating directory: $Path"
-    $null = New-Item -ItemType Directory -LiteralPath $Path
+    # New-Item uses -Path for literal names; stop before git if creation fails.
+    $null = New-Item -ItemType Directory -Path $Path -ErrorAction Stop
 
     # A throw below (e.g. git setup failure) leaves the created directory in
     # place for inspection; the working directory only changes once every step
