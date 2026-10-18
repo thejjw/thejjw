@@ -718,7 +718,7 @@ Use MiniMax MCP server for:
 - Image understanding (``understand_image``)
 
 **When using DeepSeek models (deepseek-*):**
-Use Claude Code's built-in Web Search tool for web searches; DeepSeek supports it natively through its API. Web Search incurs additional model token costs because DeepSeek makes extra LLM API requests to summarize retrieved content.
+Use Claude Code's built-in Web Search tool for web searches; DeepSeek supports it natively through its API with costs.
 deepseek-flash natively supports multimodal image understanding (both OpenAI and Anthropic formats). deepseek-v4-pro is text-only; use MiniMax MCP or Z.ai MCP servers if image analysis is required with legacy pro models.
 **When using genuine Anthropic account (Claude Code with native models):**
 Use built-in web fetch and web search tools directly -- they will yield the best results.
@@ -11324,14 +11324,14 @@ function Get-DeepseekUsage {
 <#
 .SYNOPSIS
     Queries DeepSeek's user-balance endpoint and estimates remaining token
-    budget under V4.1 Flash / V4 Pro pricing.
+    and tool-request budgets under current pricing.
 .DESCRIPTION
     Calls https://api.deepseek.com/user/balance with the API key in
     $env:DEEPSEEK_API_KEY, prints the per-currency balances, and for each
     currency with a non-zero balance projects the token count available
     under every (model, scenario) pricing row in the embedded $pricing
-    table. Flags concerns when the account is unavailable or balances
-    are at or below threshold. Stores the parsed response in
+    table and request capacity for Search/Fetch tools. Flags concerns when the account
+    is unavailable or balances are at or below threshold. Stores the parsed response in
     $Global:deepseekLastQuery and returns it.
 .PARAMETER ApiKey
     DeepSeek API key. Defaults to $env:DEEPSEEK_API_KEY.
@@ -11349,9 +11349,10 @@ function Get-DeepseekUsage {
     $d.balance_infos | Where-Object { $_.currency -eq 'CNY' }
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-09
+    Last Edit: 2026-10
     Note: Per DeepSeek's Sept 2026 announcement, V4 Pro API service continues
     after Sept 14, 2026 with billing unchanged (own rates, no Flash routing).
+    Web Search & Fetch APIs are billed at $0.75 (5 CNY) per 1,000 successful requests.
 #>
     [CmdletBinding()]
     param(
@@ -11380,6 +11381,13 @@ function Get-DeepseekUsage {
         [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.044; CostCny = 0.30 }
         [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 1.32;  CostCny = 9.00 }
         [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Peak';     Scenario = 'Output';              CostUsd = 3.96;  CostCny = 27.00 }
+    )
+
+    # Web Search & Fetch pricing per 1,000 requests (introduced Nov 2026).
+    # Source: api-docs.deepseek.com
+    $requestPricing = @(
+        [pscustomobject]@{ Action = 'Web Search (API)'; Unit = '1K req'; CostUsd = 0.75; CostCny = 5.00 }
+        [pscustomobject]@{ Action = 'Web Fetch (API)';  Unit = '1K req'; CostUsd = 0.75; CostCny = 5.00 }
     )
 
     if (-not $ApiKey) { Write-Error 'DEEPSEEK_API_KEY not set (env var or -ApiKey).'; return }
@@ -11440,13 +11448,29 @@ function Get-DeepseekUsage {
         $title = if ($cur -eq 'USD') { 'Estimated USD token budget (DeepSeek)' } else { 'Estimated CNY token budget (DeepSeek)' }
         $_ProfileHelpers.WriteSection($title)
         $rows | Format-Table -AutoSize -Wrap | Out-Host
+
+        $reqRows = New-Object System.Collections.Generic.List[object]
+        $reqCostKey = 'Cost' + $cur
+        foreach ($r in $requestPricing) {
+            $cost = [double]$r.$reqCostKey
+            $reqs = if ($cost -gt 0) { [math]::Floor($bal / $cost * 1000) } else { 0 }
+            $reqRows.Add([pscustomobject]@{
+                Action             = $r.Action
+                Unit               = $r.Unit
+                Cost               = ('{0} {1}' -f $cur, ($_ProfileHelpers.FormatPrice($cost)))
+                Available_Requests = ('{0:N0}' -f $reqs)
+            })
+        }
+        $reqTitle = if ($cur -eq 'USD') { 'Estimated USD tool request budget (DeepSeek)' } else { 'Estimated CNY tool request budget (DeepSeek)' }
+        $_ProfileHelpers.WriteSection($reqTitle)
+        $reqRows | Format-Table -AutoSize -Wrap | Out-Host
     }
     if (-not $hasAny) {
-        $_ProfileHelpers.WriteSection('Estimated token budget (DeepSeek)')
+        $_ProfileHelpers.WriteSection('Estimated usage budget (DeepSeek)')
         Write-Host '  (no USD or CNY balance > 0 reported)' -ForegroundColor DarkGray
     }
-    Write-Host ('  Estimate formula: tokens = balance / cost_per_1M * 1,000,000.') -ForegroundColor DarkGray
-    Write-Host ('  Actual spend depends on cache-hit ratio, prompt size, output length, and model mix.') -ForegroundColor DarkGray
+    Write-Host ('  Estimate formula: tokens = balance / cost_per_1M * 1,000,000; requests = balance / cost_per_1K * 1,000.') -ForegroundColor DarkGray
+    Write-Host ('  Actual spend depends on cache-hit ratio, prompt size, output length, tool requests, and model mix.') -ForegroundColor DarkGray
     Write-Host ('  Note: deepseek-v4-pro continues after Sept 14, 2026 with billing unchanged (per DeepSeek announcement).') -ForegroundColor DarkGray
 
     $_ProfileHelpers.WriteSection('Concerns (DeepSeek)')
