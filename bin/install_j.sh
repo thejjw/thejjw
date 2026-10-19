@@ -1693,7 +1693,7 @@ fi
 # claudez-remote (claudezr) - remote Claude Code via Z.AI
 # ---------------------------------------------------------------------------
 CLAUDEZR_MARKER="# >>> claudez-remote >>>"
-CLAUDEZR_VERSION_MARKER="# remote_claude_base version 9"
+CLAUDEZR_VERSION_MARKER="# remote_claude_base version 10"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> claudez-remote >>>" "# <<< claudez-remote <<<"
@@ -1709,7 +1709,7 @@ else
   sed -e "s|__NVM_VERSION__|${NVM_VERSION}|g" \
       -e "s|__UV_INSTALL_URL__|${UV_INSTALL_URL}|g" >> "$PROFILE" << 'CLAUDERZR_EOF'
 # >>> claudez-remote >>>
-# remote_claude_base version 9
+# remote_claude_base version 10
 
 # _claude_sq - single-quote escape a value for safe bash embedding.
 _claude_sq() {
@@ -1725,6 +1725,9 @@ _claude_sq() {
 #          [haiku] [sonnet] [opus] [timeout_ms] [disable_1m] \
 #          [subagent] [effort] [auto_compact_window] [anthropic_model] \
 #          [fable_model] [max_context_tokens]
+#
+#   A root@host login exports IS_SANDBOX=1, the marker Claude Code requires
+#   before it accepts --dangerously-skip-permissions under uid 0.
 remote_claude_base() {
   local host="$1" key="$2" port="${3:-22}"
   local base_url="${4:-}" haiku="$5" sonnet="$6" opus="$7"
@@ -1765,6 +1768,12 @@ export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export ENABLE_PROMPT_CACHING_1H=1
 export DISABLE_AUTOUPDATER=1
+# Claude Code refuses --dangerously-skip-permissions under uid 0 unless IS_SANDBOX=1
+# is set; warn here so the refusal is not the first thing the user sees.
+if [ "$(id -u)" -eq 0 ] && [ "${IS_SANDBOX:-}" != "1" ]; then
+    echo "[sandbox] uid 0 without IS_SANDBOX: Claude Code will refuse --dangerously-skip-permissions." >&2
+    echo "[sandbox] Use a root login (root@host) to enable the override." >&2
+fi
 CC_TMUX="$(command -v tmux 2>/dev/null || true)"
 if [ -n "$CC_TMUX" ]; then
     echo "[tmux] Found $CC_TMUX; using an isolated detachable session (detach: Ctrl-b d)."
@@ -1809,7 +1818,7 @@ cc_tmux_clean() (
     unset CLAUDE_CODE_AUTO_COMPACT_WINDOW CLAUDE_CODE_MAX_CONTEXT_TOKENS
     unset API_TIMEOUT_MS CLAUDE_CODE_DISABLE_1M_CONTEXT
     unset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC ENABLE_PROMPT_CACHING_1H
-    unset DISABLE_AUTOUPDATER NVM_DIR
+    unset DISABLE_AUTOUPDATER NVM_DIR IS_SANDBOX
     HOME="$CC_REAL_HOME" PATH="$CC_ORIGINAL_PATH" \
         "$CC_TMUX" -L "$CC_TMUX_LABEL" "$@"
 )
@@ -1840,6 +1849,7 @@ if [ -n "$CC_TMUX" ]; then
             -e "DISABLE_AUTOUPDATER=$DISABLE_AUTOUPDATER"
         )
         [ -n "${NVM_DIR:-}" ] && CC_TMUX_ENV+=(-e "NVM_DIR=$NVM_DIR")
+        [ -n "${IS_SANDBOX:-}" ] && CC_TMUX_ENV+=(-e "IS_SANDBOX=$IS_SANDBOX")
         [ -n "${ANTHROPIC_BASE_URL:-}" ] && CC_TMUX_ENV+=(-e "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL")
         [ -n "${ANTHROPIC_MODEL:-}" ] && CC_TMUX_ENV+=(-e "ANTHROPIC_MODEL=$ANTHROPIC_MODEL")
         [ -n "${ANTHROPIC_DEFAULT_FABLE_MODEL:-}" ] && CC_TMUX_ENV+=(-e "ANTHROPIC_DEFAULT_FABLE_MODEL=$ANTHROPIC_DEFAULT_FABLE_MODEL")
@@ -1886,6 +1896,14 @@ REMOTE_SCRIPT
   ) && encoded=$(printf '%s' "$encoded" | tr -d '\n\r')
 
   local env="ANTHROPIC_API_KEY=$(_claude_sq "$key")"
+
+  # Claude Code refuses --dangerously-skip-permissions under uid 0 unless it is told
+  # it runs inside a deliberate sandbox: IS_SANDBOX must be exactly "1". Only an
+  # explicit root@host login gets the marker (case-insensitive, matching ssh's
+  # tolerance for "Root"); other logins keep the stock behavior.
+  case "${host%%@*}" in
+    [Rr][Oo][Oo][Tt]) env+=" IS_SANDBOX=$(_claude_sq 1)" ;;
+  esac
   env+=" ANTHROPIC_DEFAULT_HAIKU_MODEL=$(_claude_sq "$haiku")"
   env+=" ANTHROPIC_DEFAULT_SONNET_MODEL=$(_claude_sq "$sonnet")"
   env+=" ANTHROPIC_DEFAULT_OPUS_MODEL=$(_claude_sq "$opus")"

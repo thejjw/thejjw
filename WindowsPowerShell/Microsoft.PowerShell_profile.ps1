@@ -7085,7 +7085,9 @@ environment variables inline and starts claude on the remote host with a
 temporary HOME, npm prefix, and workspace. When tmux with per-window
 environment support is available, Claude runs in an isolated detachable tmux
 server whose additional windows do not inherit Claude credentials. Otherwise,
-the launcher uses the direct one-shot behavior.
+the launcher uses the direct one-shot behavior. A root login (RemoteUser root,
+or a root@host RemoteHost) also sets IS_SANDBOX=1, the marker Claude Code
+requires before it accepts --dangerously-skip-permissions under uid 0.
 
 .PARAMETER RemoteHost
 SSH hostname, IP address, or legacy user@host target.
@@ -7162,7 +7164,7 @@ Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:ZAI_API_KE
 
 .NOTES
 Author: jjw(@thejjw)
-Last Edit: 2026-08
+Last Edit: 2026-10
 #>
     [CmdletBinding()]
     param(
@@ -7267,6 +7269,12 @@ export CLAUDE_CODE_DISABLE_1M_CONTEXT="${CLAUDE_CODE_DISABLE_1M_CONTEXT:-1}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export ENABLE_PROMPT_CACHING_1H=1
 export DISABLE_AUTOUPDATER=1
+# Claude Code refuses --dangerously-skip-permissions under uid 0 unless IS_SANDBOX=1
+# is set; warn here so the refusal is not the first thing the user sees.
+if [ "$(id -u)" -eq 0 ] && [ "${IS_SANDBOX:-}" != "1" ]; then
+    echo "[sandbox] uid 0 without IS_SANDBOX: Claude Code will refuse --dangerously-skip-permissions." >&2
+    echo "[sandbox] Use a root login (-RemoteUser root or root@host) to enable the override." >&2
+fi
 CC_TMUX="$(command -v tmux 2>/dev/null || true)"
 if [ -n "$CC_TMUX" ]; then
     echo "[tmux] Found $CC_TMUX; using an isolated detachable session (detach: Ctrl-b d)."
@@ -7311,7 +7319,7 @@ cc_tmux_clean() (
     unset CLAUDE_CODE_AUTO_COMPACT_WINDOW CLAUDE_CODE_MAX_CONTEXT_TOKENS
     unset API_TIMEOUT_MS CLAUDE_CODE_DISABLE_1M_CONTEXT
     unset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC ENABLE_PROMPT_CACHING_1H
-    unset DISABLE_AUTOUPDATER NVM_DIR
+    unset DISABLE_AUTOUPDATER NVM_DIR IS_SANDBOX
     HOME="$CC_REAL_HOME" PATH="$CC_ORIGINAL_PATH" \
         "$CC_TMUX" -L "$CC_TMUX_LABEL" "$@"
 )
@@ -7342,6 +7350,7 @@ if [ -n "$CC_TMUX" ]; then
             -e "DISABLE_AUTOUPDATER=$DISABLE_AUTOUPDATER"
         )
         [ -n "${NVM_DIR:-}" ] && CC_TMUX_ENV+=(-e "NVM_DIR=$NVM_DIR")
+        [ -n "${IS_SANDBOX:-}" ] && CC_TMUX_ENV+=(-e "IS_SANDBOX=$IS_SANDBOX")
         [ -n "${ANTHROPIC_BASE_URL:-}" ] && CC_TMUX_ENV+=(-e "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL")
         [ -n "${ANTHROPIC_MODEL:-}" ] && CC_TMUX_ENV+=(-e "ANTHROPIC_MODEL=$ANTHROPIC_MODEL")
         [ -n "${ANTHROPIC_DEFAULT_FABLE_MODEL:-}" ] && CC_TMUX_ENV+=(-e "ANTHROPIC_DEFAULT_FABLE_MODEL=$ANTHROPIC_DEFAULT_FABLE_MODEL")
@@ -7407,6 +7416,15 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
         "API_TIMEOUT_MS=$(Escape-BashSingleQuotedValue $TimeoutMs)"
         "CLAUDE_CODE_DISABLE_1M_CONTEXT=$(Escape-BashSingleQuotedValue $Disable1M)"
     )
+
+    # Claude Code exits when bypass mode is requested under uid 0 unless it is told
+    # it runs inside a deliberate sandbox: IS_SANDBOX must be exactly "1". Only an
+    # explicit root login (RemoteUser root, or the legacy root@host form) gets the
+    # marker; non-root sessions keep the stock behavior.
+    if ($RemoteUser -eq 'root' -or $RemoteHost -imatch '^root@') {
+        $envParts.Add("IS_SANDBOX=$(Escape-BashSingleQuotedValue '1')")
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($BaseUrl)) {
         $envParts.Insert(1, "ANTHROPIC_BASE_URL=$(Escape-BashSingleQuotedValue $BaseUrl)")
     }
@@ -7467,7 +7485,8 @@ Runs Claude Code on a remote SSH endpoint with temporary remote state.
 Prompts for the API key from ZAI_API_KEY if it is not provided, then runs
 the remote Claude launcher with the remote defaults defined inside
 Invoke-RemoteClaudeCodeBase. The remote Claude invocation always uses
---dangerously-skip-permissions.
+--dangerously-skip-permissions; a root login additionally sets IS_SANDBOX=1 so
+Claude Code accepts that flag under uid 0.
 
 .PARAMETER RemoteHost
 SSH hostname, IP address, or legacy user@host target.
@@ -7490,7 +7509,7 @@ Invoke-RemoteClaudeCodeZ -RemoteHost user@remote-host -ApiKey $env:ZAI_API_KEY
 
 .NOTES
 Author: jjw(@thejjw)
-Last Edit: 2026-08
+Last Edit: 2026-10
 #>
     [CmdletBinding()]
     param(
@@ -7827,7 +7846,9 @@ Runs Claude Code on a remote SSH endpoint through Kimi Code.
 
 .DESCRIPTION
 Reads KIMI_CODE_PLAN_API_KEY when ApiKey is omitted, then launches the shared temporary
-remote Claude environment with the same K3 1M model routing as claudek.
+remote Claude environment with the same K3 1M model routing as claudek. A root
+login additionally sets IS_SANDBOX=1 so Claude Code accepts
+--dangerously-skip-permissions under uid 0.
 
 .PARAMETER RemoteHost
 SSH hostname, IP address, or legacy user@host target.
@@ -7852,7 +7873,7 @@ Invoke-RemoteClaudeCodeK user@remote-host -KeyFile C:\Keys\remote.ppk
 
 .NOTES
 Author: jjw(@thejjw)
-Last Edit: 2026-07
+Last Edit: 2026-10
 #>
     [CmdletBinding()]
     param(
@@ -8465,7 +8486,8 @@ Runs Claude Code on a remote SSH endpoint via MiniMax with temporary remote stat
 .DESCRIPTION
 Reads the API key from MINIMAX_API_KEY if not provided, then runs the remote
 Claude launcher with MiniMax endpoint defaults. The remote invocation always
-uses --dangerously-skip-permissions.
+uses --dangerously-skip-permissions; a root login additionally sets IS_SANDBOX=1
+so Claude Code accepts that flag under uid 0.
 
 .PARAMETER RemoteHost
 SSH hostname, IP address, or legacy user@host target.
@@ -8491,7 +8513,7 @@ Invoke-RemoteClaudeCodeMM -RemoteHost user@remote-host -ApiKey $env:MINIMAX_API_
 
 .NOTES
 Author: jjw(@thejjw)
-Last Edit: 2026-05
+Last Edit: 2026-10
 #>
     [CmdletBinding()]
     param(
