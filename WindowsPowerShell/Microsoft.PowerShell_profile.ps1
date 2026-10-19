@@ -7289,7 +7289,16 @@ if ! command -v node &>/dev/null; then
     nvm install --lts --no-progress && nvm use --lts
 fi
 if ! command -v claude &>/dev/null; then
-    npm install --global --prefix "$CC_NPM" --no-audit --no-fund @anthropic-ai/claude-code
+    CC_CC_PKG='@anthropic-ai/claude-code'
+    CC_CC_NPM_OPTS=()
+    # npm >= 11.17 understands allow-scripts, and from 11.19 an unallowed postinstall
+    # is skipped: Claude Code's postinstall (install.cjs) supplies the native binary.
+    # Do not add --strict-allow-scripts - that turns the warning into a hard failure.
+    if npm config ls -l 2>/dev/null | grep -q '^allow-scripts'; then
+        CC_CC_NPM_OPTS=(--allow-scripts="$CC_CC_PKG")
+    fi
+    npm install --global --prefix "$CC_NPM" --no-audit --no-fund \
+        "${CC_CC_NPM_OPTS[@]}" "$CC_CC_PKG"
     export PATH="$CC_NPM/bin:$PATH"
 fi
 CC_SYSTEM_UV="$(command -v uv 2>/dev/null || true)"
