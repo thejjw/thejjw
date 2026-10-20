@@ -883,7 +883,7 @@ $_AiToolsInternal = @{
     ReaNpmPackage    = 'rea-agents'
     # Same id as SdkWingetPackages; the OpenJDK MSI is per-machine, so the REA
     # stage installs it without --scope user.
-    ReaWingetPackage = 'Microsoft.OpenJDK.25'
+    ReaGhidraJdkWingetPackage = 'Microsoft.OpenJDK.25'
     Ghidra           = @{
         Version      = '12.1.4'
         AssetName    = 'ghidra_12.1.4_PUBLIC_20260921.zip'
@@ -9576,10 +9576,10 @@ function Install-ReaToolchain {
     # --- JDK -----------------------------------------------------------------
     $jdk = Get-JdkInstallation -MinimumMajor $javaMajorMin
     if (-not $jdk) {
-        Write-Host "Installing JDK ($($_AiToolsInternal.ReaWingetPackage)) for Ghidra..." -ForegroundColor Cyan
+        Write-Host "Installing JDK ($($_AiToolsInternal.ReaGhidraJdkWingetPackage)) for Ghidra..." -ForegroundColor Cyan
         try {
             # The OpenJDK MSI is a per-machine package, so no user scope here.
-            $null = Invoke-WingetPackage -Action install -PackageId $_AiToolsInternal.ReaWingetPackage
+            $null = Invoke-WingetPackage -Action install -PackageId $_AiToolsInternal.ReaGhidraJdkWingetPackage
             Update-ProcessPath
             $jdk = Get-JdkInstallation -MinimumMajor $javaMajorMin
         }
@@ -9994,7 +9994,7 @@ function Install-AiTools {
         Write-Host "REA reverse-engineering toolchain:" -ForegroundColor Cyan
         Write-Host " - rea (REA CLI via npm: $($_AiToolsInternal.ReaNpmPackage))"
         Write-Host " - Ghidra (latest release resolved at run time, ~$([math]::Round($($_AiToolsInternal.Ghidra.Bytes) / 1MB)) MB -> $($($_AiToolsInternal.Ghidra.Root)))"
-        Write-Host " - $($_AiToolsInternal.ReaWingetPackage) (64-bit JDK prerequisite for Ghidra)"
+        Write-Host " - $($_AiToolsInternal.ReaGhidraJdkWingetPackage) (64-bit JDK prerequisite for Ghidra)"
     }
 
     # -Customize offers an interactive pruning pass over the pending install
@@ -14277,4 +14277,3 @@ function Invoke-WindowsUpdate {
 # Auto-load vault credentials at profile load time so every session starts with
 # keys available. Uses -Quiet to avoid printing key counts in transient shells.
 Load-AiApiKeysFromCS -Quiet
-

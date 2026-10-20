@@ -1006,7 +1006,7 @@ Describe 'Install-AiTools -REA switch' {
             MoreAiNpmPackages      = @()
             Urls                   = @{}
             ReaNpmPackage          = 'rea-agents'
-            ReaWingetPackage       = 'Microsoft.OpenJDK.25'
+            ReaGhidraJdkWingetPackage = 'Microsoft.OpenJDK.25'
             Ghidra                 = @{ Version = '12.1.4'; Root = 'C:\Tools'; Bytes = 1 }
         }
 
