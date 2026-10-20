@@ -876,6 +876,26 @@ $_AiToolsInternal = @{
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
         OmpTps        = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
     }
+
+    # REA reverse-engineering toolchain used by the -REA stage of Install-AiTools.
+    # The Ghidra release is resolved from the GitHub releases API at run time; the
+    # constants below are the fallback used when the API cannot be reached.
+    ReaNpmPackage    = 'rea-agents'
+    # Same id as SdkWingetPackages; the OpenJDK MSI is per-machine, so the REA
+    # stage installs it without --scope user.
+    ReaWingetPackage = 'Microsoft.OpenJDK.25'
+    Ghidra           = @{
+        Version      = '12.1.4'
+        AssetName    = 'ghidra_12.1.4_PUBLIC_20260921.zip'
+        Url          = 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip'
+        Bytes        = 569649598
+        Sha256       = 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db'
+        Root         = 'C:\Tools'
+        # Ghidra's own application.properties declares application.java.min=21
+        # with no maximum, so any JDK >= 21 satisfies its launcher check.
+        JavaMajorMin = 21
+    }
+
     NpmPackages            = @(
         '@earendil-works/pi-coding-agent',
         '@oh-my-pi/pi-coding-agent',
@@ -907,7 +927,8 @@ $_AiToolsInternal = @{
         @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
         @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
         @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
-        @{ Label = 'cursor';   Cmd = 'agent';    Probe = 'cursor-agent'; Args = @('update') }
+        @{ Label = 'cursor';   Cmd = 'agent';    Probe = 'cursor-agent'; Args = @('update') },
+        @{ Label = 'rea';      Cmd = 'rea';      Args = @('update') }
     )
 }
 
@@ -9275,6 +9296,32 @@ function Install-AiSkills {
     }
 }
 
+function Set-UserEnvironmentValue {
+    <#
+.SYNOPSIS
+    Writes an environment variable to the user scope and the current process.
+.DESCRIPTION
+    Persists the value in the user environment so it survives new shells, and
+    applies it to the running process so the value is usable immediately.
+.PARAMETER Name
+    Environment variable name.
+.PARAMETER Value
+    Environment variable value. An empty value removes the variable.
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string] $Value
+    )
+
+    [Environment]::SetEnvironmentVariable($Name, $Value, 'User')
+    [Environment]::SetEnvironmentVariable($Name, $Value, 'Process')
+}
+
 function Add-UserPathEntry {
     <#
 .SYNOPSIS
@@ -9422,6 +9469,334 @@ function Invoke-WingetPackage {
     }
 }
 
+function Get-JdkInstallation {
+    <#
+.SYNOPSIS
+    Finds the newest installed 64-bit JDK at or above a minimum Java major version.
+.DESCRIPTION
+    Inspects JAVA_HOME, the java command on PATH, and the Microsoft Build of OpenJDK
+    folders under Program Files, then reports the newest usable JDK whose javac
+    reports a major version at or above the requested minimum. A directory only
+    counts as a JDK when it contains bin\javac.exe.
+.PARAMETER MinimumMajor
+    Lowest acceptable Java major version (default 21).
+.OUTPUTS
+    A PSCustomObject with Home and Major properties, or $null when no suitable JDK
+    is installed.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param([int]$MinimumMajor = 21)
+
+    $candidates = @()
+    if ($env:JAVA_HOME) { $candidates += $env:JAVA_HOME }
+    $javaCommand = Get-Command java -ErrorAction SilentlyContinue
+    if ($javaCommand -and $javaCommand.Source) {
+        $candidates += (Split-Path -Parent (Split-Path -Parent $javaCommand.Source))
+    }
+    $candidates += @(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Microsoft') -Directory -Filter 'jdk-*' -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.FullName })
+
+    $best = $null
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        if (-not $candidate) { continue }
+        $javac = Join-Path $candidate 'bin\javac.exe'
+        if (-not (Test-Path -LiteralPath $javac)) { continue }
+        $major = 0
+        try {
+            foreach ($line in @(& $javac -version 2>&1)) {
+                if ([string]$line -match 'javac\s+(\d+)') {
+                    $major = [int]$Matches[1]
+                    break
+                }
+            }
+        }
+        catch { $major = 0 }
+        if ($major -ge $MinimumMajor -and (-not $best -or $major -gt $best.Major)) {
+            $best = [pscustomobject]@{ Home = $candidate; Major = $major }
+        }
+    }
+    return $best
+}
+
+function Install-ReaToolchain {
+    <#
+.SYNOPSIS
+    Installs the REA reverse-engineering CLI together with the Ghidra analysis engine.
+
+.DESCRIPTION
+    Installs a 64-bit JDK (Ghidra declares Java 21 as its minimum), downloads the
+    latest published Ghidra release, extracts it under the tools root, and points
+    REA at it through the GHIDRA_INSTALL_DIR, JAVA_HOME and REA_ANALYSIS_PROVIDER
+    environment variables. The REA CLI itself is the 'rea-agents' npm package.
+
+    The stage stops short of agent wiring: 'rea setup' is never run, so no MCP
+    server is registered with any agent. Only the read-only 'rea doctor' report is
+    produced. Existing environment values are preserved; unset variables are filled
+    in, and a changed GHIDRA_INSTALL_DIR is reported.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param()
+
+    $config = $_AiToolsInternal.Ghidra
+    $javaMajorMin = [int]$config.JavaMajorMin
+
+    # Merges the machine and user registry PATH entries into the current process
+    # so binaries installed during this run (the JDK) resolve without a new shell.
+    function Update-ProcessPath {
+        $current = @($env:PATH -split ';' | Where-Object { $_ })
+        $registry = @(
+            [Environment]::GetEnvironmentVariable('PATH', 'Machine'),
+            [Environment]::GetEnvironmentVariable('PATH', 'User')
+        ) | Where-Object { $_ } | ForEach-Object { $_ -split ';' } | Where-Object { $_ }
+        foreach ($entry in $registry) {
+            if ($current -notcontains $entry) { $current += $entry }
+        }
+        $env:PATH = $current -join ';'
+    }
+
+    # REA requires Node.js 22.19+, 24.11+ or 26+.
+    function Test-NodeVersionSupported {
+        param([string]$VersionText)
+
+        if ($VersionText -notmatch '^v?(?<major>\d+)\.(?<minor>\d+)') { return $false }
+        $major = [int]$Matches['major']
+        $minor = [int]$Matches['minor']
+        if ($major -eq 22) { return $minor -ge 19 }
+        if ($major -eq 24) { return $minor -ge 11 }
+        return $major -ge 26
+    }
+
+    # --- JDK -----------------------------------------------------------------
+    $jdk = Get-JdkInstallation -MinimumMajor $javaMajorMin
+    if (-not $jdk) {
+        Write-Host "Installing JDK ($($_AiToolsInternal.ReaWingetPackage)) for Ghidra..." -ForegroundColor Cyan
+        try {
+            # The OpenJDK MSI is a per-machine package, so no user scope here.
+            $null = Invoke-WingetPackage -Action install -PackageId $_AiToolsInternal.ReaWingetPackage
+            Update-ProcessPath
+            $jdk = Get-JdkInstallation -MinimumMajor $javaMajorMin
+        }
+        catch { Write-Warning "JDK installation failed: $($_.Exception.Message)" }
+    }
+
+    if ($jdk) {
+        Write-Host "JDK ready: $($jdk.Home) (Java $($jdk.Major))" -ForegroundColor Green
+    }
+    else {
+        Write-Warning "No JDK >= $javaMajorMin was found. Ghidra needs a 64-bit JDK $javaMajorMin+ (winget install Microsoft.OpenJDK.21)."
+    }
+
+    # --- Ghidra release metadata ---------------------------------------------
+    # The newest release is preferred; the pinned constants are the fallback when
+    # the GitHub API cannot be reached.
+    $release = $null
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $api = Invoke-RestMethod -Uri 'https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest' -Headers @{ 'User-Agent' = 'omp' } -ErrorAction Stop
+        $asset = $api.assets | Where-Object { $_.name -match '^ghidra_.+_PUBLIC_\d{8}\.zip$' } | Select-Object -First 1
+        $digest = $null
+        if ($api.body -match 'SHA-256:\s*`(?<sha>[0-9a-fA-F]{64})`') { $digest = $Matches['sha'].ToLowerInvariant() }
+        if ($asset -and $digest) {
+            $version = [regex]::Match($asset.name, '^ghidra_(?<version>.+)_PUBLIC_\d{8}\.zip$').Groups['version'].Value
+            $release = [pscustomobject]@{
+                Version   = $version
+                AssetName = $asset.name
+                Url       = $asset.browser_download_url
+                Bytes     = [long]$asset.size
+                Sha256    = $digest
+            }
+        }
+        else {
+            Write-Host 'Ghidra release metadata was incomplete; using the pinned fallback.' -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "Could not resolve the latest Ghidra release ($($_.Exception.Message)); using the pinned fallback." -ForegroundColor Yellow
+    }
+    if (-not $release) {
+        $release = [pscustomobject]@{
+            Version   = $config.Version
+            AssetName = $config.AssetName
+            Url       = $config.Url
+            Bytes     = [long]$config.Bytes
+            Sha256    = $config.Sha256
+        }
+    }
+
+    # --- Ghidra extraction ---------------------------------------------------
+    $preferredRoot = [string]$config.Root
+    $root = $preferredRoot
+    try {
+        if (-not (Test-Path -LiteralPath $root)) {
+            New-Item -ItemType Directory -Path $root -Force -ErrorAction Stop | Out-Null
+        }
+    }
+    catch {
+        $root = Join-Path $env:LOCALAPPDATA 'Tools'
+        Write-Host "Could not create $preferredRoot; using $root instead." -ForegroundColor Yellow
+        New-Item -ItemType Directory -Path $root -Force -ErrorAction Stop | Out-Null
+    }
+
+    $target = Join-Path $root ("ghidra_{0}_PUBLIC" -f $release.Version)
+    $launcher = Join-Path $target 'ghidraRun.bat'
+    if (Test-Path -LiteralPath $launcher) {
+        Write-Host "Ghidra already installed: $target" -ForegroundColor Green
+    }
+    else {
+        $archive = Join-Path ([System.IO.Path]::GetTempPath()) $release.AssetName
+        $staging = Join-Path $root ('.ghidra-stage-' + [guid]::NewGuid().ToString('N'))
+        try {
+            Write-Host ("Downloading Ghidra {0} ({1} MB)..." -f $release.Version, [math]::Round($release.Bytes / 1MB)) -ForegroundColor Cyan
+            Save-WebFile -Uri $release.Url -OutFile $archive -Force -Quiet -ErrorAction Stop | Out-Null
+
+            $length = (Get-Item -LiteralPath $archive).Length
+            if ($release.Bytes -gt 0 -and $length -ne $release.Bytes) {
+                throw "Downloaded size $length does not match the expected $($release.Bytes) bytes."
+            }
+            $sha = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($sha -ne $release.Sha256.ToLowerInvariant()) {
+                throw "SHA-256 mismatch: expected $($release.Sha256), got $sha."
+            }
+
+            # Extract into a staging directory and move the single top-level
+            # folder into place, so a failed download never leaves a partial tree.
+            Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $staging -Force -ErrorAction Stop | Out-Null
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($archive, $staging)
+
+            $extracted = @(Get-ChildItem -LiteralPath $staging -Directory)
+            if ($extracted.Count -ne 1) {
+                throw 'The Ghidra archive did not contain exactly one top-level directory.'
+            }
+            if (Test-Path -LiteralPath $target) {
+                Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+            }
+            Move-Item -LiteralPath $extracted[0].FullName -Destination $target -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $launcher)) {
+                throw "Ghidra launcher not found after extraction: $launcher"
+            }
+            Write-Host "Ghidra $($release.Version) installed: $target" -ForegroundColor Green
+        }
+        catch {
+            Write-Warning "Ghidra installation failed: $($_.Exception.Message)"
+        }
+        finally {
+            if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    # --- Environment ---------------------------------------------------------
+    $ghidraInstalled = Test-Path -LiteralPath $launcher
+    if ($ghidraInstalled) {
+        $existingGhidraDir = [Environment]::GetEnvironmentVariable('GHIDRA_INSTALL_DIR', 'User')
+        if (-not $existingGhidraDir) { $existingGhidraDir = $env:GHIDRA_INSTALL_DIR }
+        if ($existingGhidraDir -and $existingGhidraDir -ne $target) {
+            Write-Host "GHIDRA_INSTALL_DIR changed from '$existingGhidraDir' to '$target'." -ForegroundColor Yellow
+        }
+        Set-UserEnvironmentValue -Name 'GHIDRA_INSTALL_DIR' -Value $target
+        Write-Host "GHIDRA_INSTALL_DIR = $target" -ForegroundColor Green
+    }
+    else {
+        Write-Warning "Ghidra is not installed at $target; GHIDRA_INSTALL_DIR was left unchanged."
+    }
+
+    if ($jdk) {
+        $existingJavaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')
+        if (-not $existingJavaHome) { $existingJavaHome = $env:JAVA_HOME }
+        if (-not $existingJavaHome) {
+            Set-UserEnvironmentValue -Name 'JAVA_HOME' -Value $jdk.Home
+            Write-Host "JAVA_HOME = $($jdk.Home)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "JAVA_HOME left unchanged: $existingJavaHome" -ForegroundColor DarkGray
+        }
+    }
+
+    $existingProvider = [Environment]::GetEnvironmentVariable('REA_ANALYSIS_PROVIDER', 'User')
+    if (-not $existingProvider) { $existingProvider = $env:REA_ANALYSIS_PROVIDER }
+    if (-not $existingProvider) {
+        Set-UserEnvironmentValue -Name 'REA_ANALYSIS_PROVIDER' -Value 'ghidra'
+        Write-Host 'REA_ANALYSIS_PROVIDER = ghidra' -ForegroundColor Green
+    }
+    else {
+        Write-Host "REA_ANALYSIS_PROVIDER left unchanged: $existingProvider" -ForegroundColor DarkGray
+    }
+
+    # --- REA CLI -------------------------------------------------------------
+    Write-Host 'Checking the REA CLI...' -ForegroundColor Cyan
+    $nodeVersion = $null
+    if (Get-Command node -ErrorAction SilentlyContinue) {
+        $nodeVersion = ([string](& node --version 2>$null)).Trim()
+    }
+    if ($nodeVersion -and -not (Test-NodeVersionSupported -VersionText $nodeVersion)) {
+        Write-Warning "Node $nodeVersion is outside REA's supported range (22.19+, 24.11+ or 26+). REA needs a newer Node.js."
+    }
+
+    if (-not (Get-Command rea -ErrorAction SilentlyContinue)) {
+        & npm install --global $($_AiToolsInternal.ReaNpmPackage)
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "npm install failed with exit code $LASTEXITCODE for $($_AiToolsInternal.ReaNpmPackage)."
+        }
+        Update-ProcessPath
+    }
+    else {
+        Write-Host 'rea CLI already installed.' -ForegroundColor Green
+    }
+
+    # --- Read-only diagnostics ------------------------------------------------
+    if (Get-Command rea -ErrorAction SilentlyContinue) {
+        Write-Host 'Running read-only REA diagnostics (rea doctor --json)...' -ForegroundColor Cyan
+        try {
+            $doctorOutput = @(& rea doctor --json 2>&1)
+            $doctorExit = $LASTEXITCODE
+            $doctorText = ($doctorOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+            try {
+                $doctor = $doctorText | ConvertFrom-Json -ErrorAction Stop
+                $healthy = if ($doctor.PSObject.Properties['healthy']) { $doctor.healthy } else { '(unknown)' }
+                Write-Host ("rea doctor: healthy = {0} (exit code {1})" -f $healthy, $doctorExit) -ForegroundColor DarkGray
+            }
+            catch {
+                Write-Host ("rea doctor exited with code {0}" -f $doctorExit) -ForegroundColor DarkGray
+            }
+            $doctorOutput | Select-Object -First 40 | ForEach-Object { Write-Host ('  {0}' -f $_) -ForegroundColor DarkGray }
+        }
+        catch { Write-Warning "rea doctor failed: $($_.Exception.Message)" }
+    }
+
+    # --- Guide ----------------------------------------------------------------
+    Write-Host ''
+    Write-Host '== REA + Ghidra installed ==' -ForegroundColor Cyan
+    Write-Host ('  REA CLI   : rea (npm package {0})' -f $_AiToolsInternal.ReaNpmPackage) -ForegroundColor Gray
+    Write-Host ('  Ghidra    : {0}' -f $(if ($ghidraInstalled) { $target } else { '(not installed)' })) -ForegroundColor Gray
+    Write-Host ('  JDK       : {0}' -f $(if ($jdk) { '{0} (Java {1})' -f $jdk.Home, $jdk.Major } else { '(not resolved)' })) -ForegroundColor Gray
+    Write-Host ('  Provider  : {0}' -f $(if ($existingProvider) { $existingProvider } else { 'ghidra' })) -ForegroundColor Gray
+    Write-Host ''
+    Write-Host 'Quick start:' -ForegroundColor Cyan
+    if ($ghidraInstalled) {
+        Write-Host ('  1. Ghidra GUI      : "{0}\ghidraRun.bat"' -f $target) -ForegroundColor Gray
+    }
+    Write-Host '  2. Provider check  : rea doctor --provider ghidra --json' -ForegroundColor Gray
+    Write-Host '  3. Hello world     : rea analyze "C:\Windows\System32\cmd.exe" --provider ghidra --json' -ForegroundColor Gray
+    Write-Host '     Native commands : rea search <file> "text" --provider ghidra --json' -ForegroundColor Gray
+    Write-Host '                      rea function <file> <symbol> --provider ghidra --json' -ForegroundColor Gray
+    Write-Host '                      rea decompile <file> <address> --provider ghidra --json' -ForegroundColor Gray
+    Write-Host '  4. JavaScript app  : rea analyze-javascript-application <dir> --json' -ForegroundColor Gray
+    Write-Host '  5. Provider list   : rea providers --json' -ForegroundColor Gray
+    Write-Host ''
+    Write-Host 'Deliberately not done:' -ForegroundColor Yellow
+    Write-Host '  - No agent was wired. Run "rea setup" yourself to register the REA MCP server with your agents.' -ForegroundColor Yellow
+    Write-Host '  - Windows Ghidra support is experimental and read-only for native PE targets. Cold imports can take minutes; raise REA_GHIDRA_STARTUP_TIMEOUT_MS when a client times out.' -ForegroundColor Yellow
+    Write-Host '  - Restart PowerShell so other shells inherit the new environment variables.' -ForegroundColor Yellow
+}
+
 function Install-AiTools {
     <#
 .SYNOPSIS
@@ -9475,6 +9850,13 @@ function Install-AiTools {
     npm packages (@qwen-code/qwen-code, @moonshot-ai/kimi-code, @deepseek-ai/dsh, @xai-official/grok,
     gloomberb), and the Cursor CLI (agent) via its installer if not present.
 
+.PARAMETER REA
+    When supplied, installs the REA reverse-engineering toolchain: the REA CLI
+    (npm package rea-agents), a 64-bit JDK for Ghidra, and the latest published
+    Ghidra release extracted under the tools root (C:\Tools by default).
+    Sets GHIDRA_INSTALL_DIR, JAVA_HOME and REA_ANALYSIS_PROVIDER for the current
+    user. No agent is wired: run 'rea setup' yourself to register the REA MCP server.
+
 .PARAMETER All
     When supplied, enables all optional package groups: extended tools, SDK runtimes, .NET SDK,
     Docker Desktop, database clients, and extra AI developer tools. Equivalent to -ExtendedSetup -Sdk -Docker -Database -MoreAi.
@@ -9500,6 +9882,7 @@ function Install-AiTools {
         [switch]$Podman,
         [switch]$Database,
         [switch]$MoreAi,
+        [switch]$REA,
         [switch]$All,
         [switch]$UserScope
     )
@@ -9524,6 +9907,7 @@ function Install-AiTools {
         if (-not $Podman) { $Docker = $true }
         $Database = $true
         $MoreAi = $true
+        $REA = $true
     }
 
     $powerShellModules = @($_AiToolsInternal.PowerShellModules)
@@ -9565,6 +9949,7 @@ function Install-AiTools {
     if ($Podman) { $setupLabels += 'podman' }
     if ($Database) { $setupLabels += 'db' }
     if ($MoreAi) { $setupLabels += 'moreai' }
+    if ($REA) { $setupLabels += 'rea' }
     if ($All) { $setupLabels = @('all') }
     $setupLabel = $setupLabels -join ', '
     Write-Host "The setup will check/install the following items ($setupLabel):" -ForegroundColor Cyan
@@ -9603,6 +9988,13 @@ function Install-AiTools {
         Write-Host " - kimi (Kimi Code CLI)"
         Write-Host " - grok (Grok CLI)"
         Write-Host " - cursor (Cursor CLI / agent)"
+    }
+
+    if ($REA) {
+        Write-Host "REA reverse-engineering toolchain:" -ForegroundColor Cyan
+        Write-Host " - rea (REA CLI via npm: $($_AiToolsInternal.ReaNpmPackage))"
+        Write-Host " - Ghidra (latest release resolved at run time, ~$([math]::Round($($_AiToolsInternal.Ghidra.Bytes) / 1MB)) MB -> $($($_AiToolsInternal.Ghidra.Root)))"
+        Write-Host " - $($_AiToolsInternal.ReaWingetPackage) (64-bit JDK prerequisite for Ghidra)"
     }
 
     # -Customize offers an interactive pruning pass over the pending install
@@ -10018,6 +10410,11 @@ function Install-AiTools {
                 Write-Host "Failed to install Cursor CLI: $_" -ForegroundColor Red
             }
         }
+    }
+
+    # Install the REA reverse-engineering toolchain (REA CLI + Ghidra) on request.
+    if ($REA) {
+        Install-ReaToolchain
     }
 
     # Create a docker.bat shim so tools that hardcode `docker` commands
