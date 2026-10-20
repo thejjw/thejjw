@@ -772,6 +772,7 @@ $_AiToolsInternal = @{
         'Microsoft.VCRedist.2015+.x64',
         'Microsoft.VCRedist.2015+.x86',
         'Microsoft.IntelligentTerminal',
+        'ShiningLight.OpenSSL.Light',
         'TwibrightLabs.Links',
         'OpenJS.NodeJS.LTS',
         'GnuPG.Gpg4win',
