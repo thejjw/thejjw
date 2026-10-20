@@ -34,9 +34,9 @@
       }
     },
     "head-minimax": {
-      "description": "Primary MiniMax orchestration head using MiniMax M3. Use for MiniMax-dedicated workflows.",
+      "description": "Primary MiniMax orchestration head using MiniMax M3.1 Flash. Use for MiniMax-dedicated workflows.",
       "mode": "primary",
-      "model": "minimax-coding-plan/MiniMax-M3",
+      "model": "minimax-coding-plan/MiniMax-M3.1-Flash",
       "variant": "high",
       "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-m3. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
       "permission": {
@@ -130,9 +130,9 @@
       }
     },
     "fast-discovery-m3": {
-      "description": "Fast read-only codebase discovery, search, file mapping, dependency lookup, and summarization using MiniMax M3.",
+      "description": "Fast read-only codebase discovery, search, file mapping, dependency lookup, and summarization using MiniMax M3.1 Flash.",
       "mode": "subagent",
-      "model": "minimax-coding-plan/MiniMax-M3",
+      "model": "minimax-coding-plan/MiniMax-M3.1-Flash",
       "steps": 12,
       "prompt": "You are a fast discovery agent. Search, inspect, summarize, and return concise findings with file references. Do not modify files. Prefer targeted searches over exhaustive reading.",
       "permission": {
@@ -224,9 +224,9 @@
       }
     },
     "hard-impl-m3": {
-      "description": "Implementation and hard debugging subagent using MiniMax M3.",
+      "description": "Implementation and hard debugging subagent using MiniMax M3.1 Flash.",
       "mode": "subagent",
-      "model": "minimax-coding-plan/MiniMax-M3",
+      "model": "minimax-coding-plan/MiniMax-M3.1-Flash",
       "steps": 40,
       "prompt": "You are an implementation agent. Make the smallest correct code changes, preserve existing style, run focused verification when appropriate, and report what changed. Avoid broad discovery unless necessary.",
       "permission": {

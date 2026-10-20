@@ -48,7 +48,7 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 | --- | --- | --- |
 | `head-gpt` | `openai/gpt-6.1-sol` | Main premium orchestrator |
 | `head-glm` | `zai-coding-plan/glm-5.3` | Main GLM orchestrator |
-| `head-minimax` | `minimax-coding-plan/MiniMax-M3` | Main MiniMax orchestrator |
+| `head-minimax` | `minimax-coding-plan/MiniMax-M3.1-Flash` | Main MiniMax orchestrator |
 
 ## Alternate Heads
 
@@ -64,12 +64,12 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 
 | Agent | Model | Purpose |
 | --- | --- | --- |
-| `fast-discovery-m3` | `minimax-coding-plan/MiniMax-M3` | Fast read-only discovery |
+| `fast-discovery-m3` | `minimax-coding-plan/MiniMax-M3.1-Flash` | Fast read-only discovery |
 | `fast-openai-gpt6-luna` | `openai/gpt-6-luna` | OpenAI read-only discovery |
 | `fast-glm-5.3-flash` | `zai-coding-plan/glm-5.3-flash` | GLM read-only discovery |
 | `hard-impl-glm53` | `zai-coding-plan/glm-5.3-flash` | Main implementation work |
 | `hard-impl-openai` | `openai/gpt-6.1-sol` | OpenAI implementation work |
-| `hard-impl-m3` | `minimax-coding-plan/MiniMax-M3` | MiniMax implementation work |
+| `hard-impl-m3` | `minimax-coding-plan/MiniMax-M3.1-Flash` | MiniMax implementation work |
 | `premium-reviewer-gpt-6-astra` | `openai/gpt-6-astra` | Read-only final review and risk analysis |
 
 ## Routing
