@@ -712,7 +712,7 @@ Use Z.ai MCP servers for:
 - Text extraction
 
 **When using MiniMax models (MiniMax-*):**
-Note: MiniMax-M3 natively supports multimodal input (images and video) in addition to MCP.
+Note: MiniMax-M3.1 Flash natively supports multimodal input (images and video) in addition to MCP.
 Use MiniMax MCP server for:
 - Web searches (``web_search``)
 - Image understanding (``understand_image``)
@@ -1090,7 +1090,10 @@ $_CcrInternal = @{
         minimax = @{
             base        = 'https://api.minimax.io/anthropic/v1/messages'
             key         = '$MINIMAX_API_KEY'
-            models      = @('MiniMax-M3[1m]')
+            # Bare id on purpose: the Anthropic transformer forwards this string verbatim, and
+            # MiniMax's API silently falls back to MiniMax-M3 for any id it does not know
+            # (the [1m] suffix is a Claude Code-side marker and is not understood server-side).
+            models      = @('MiniMax-M3.1-Flash')
             transformer = 'Anthropic'
         }
         deepseek = @{
@@ -7709,23 +7712,29 @@ function claudemm {
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'API_TIMEOUT_MS',
         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_USE_POWERSHELL_TOOL',
         'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
+        'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
         'ENABLE_PROMPT_CACHING_1H'
     )
 
     $env:ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
-    # MiniMax offers a single model (M3[1m]), so all Anthropic model slots route to it
-    $env:ANTHROPIC_MODEL = "MiniMax-M3[1m]"
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "MiniMax-M3[1m]"
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "MiniMax-M3[1m]"
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "MiniMax-M3[1m]"
+    # MiniMax offers a single model (M3.1 Flash), so all Anthropic model slots route to it.
+    # The [1m] suffix is a Claude Code-side marker: Claude Code strips it and sends the plain
+    # MiniMax-M3.1-Flash id, which is the only id MiniMax's API resolves to that model.
+    $env:ANTHROPIC_MODEL = "MiniMax-M3.1-Flash[1m]"
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "MiniMax-M3.1-Flash[1m]"
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "MiniMax-M3.1-Flash[1m]"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "MiniMax-M3.1-Flash[1m]"
     $env:API_TIMEOUT_MS = "3000000"
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
     $env:ENABLE_PROMPT_CACHING_1H = "1"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
+    # 512K auto-compact window: MiniMax recommends 512K over 1M for everyday coding
+    # (same task performance, ~20% lower cost). The [1m] suffix still declares 1M.
+    $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = "524288"
 
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = "MiniMax-M3[1m]"
+    $env:CLAUDE_CODE_SUBAGENT_MODEL = "MiniMax-M3.1-Flash[1m]"
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
 
     try {
@@ -8551,14 +8560,18 @@ Last Edit: 2026-10
     }
 
     # All three model tiers map to the same MiniMax model; Claude Code selects
-    # the tier internally and MiniMax routes accordingly.
+    # the tier internally and MiniMax routes accordingly. The [1m] suffix is a
+    # Claude Code-side marker that Claude Code strips before the request is sent.
     $BaseUrl = "https://api.minimax.io/anthropic"
-    $HaikuModel = "MiniMax-M3[1m]"
-    $SonnetModel = "MiniMax-M3[1m]"
-    $OpusModel = "MiniMax-M3[1m]"
+    $HaikuModel = "MiniMax-M3.1-Flash[1m]"
+    $SonnetModel = "MiniMax-M3.1-Flash[1m]"
+    $OpusModel = "MiniMax-M3.1-Flash[1m]"
     # 50-minute timeout -- MiniMax inference can be slow for complex agentic loops.
     $TimeoutMs = "3000000"
     $Disable1M = "0"
+    # 512K auto-compact window: MiniMax recommends 512K over 1M for everyday coding
+    # (same task performance, ~20% lower cost).
+    $AutoCompactWindow = "524288"
 
     # Build the splat hashtable and optionally attach KeyFile so a single
     # Invoke-RemoteClaudeCodeBase call covers both key-file and API-key modes.
@@ -8572,6 +8585,7 @@ Last Edit: 2026-10
         OpusModel   = $OpusModel
         TimeoutMs   = $TimeoutMs
         Disable1M   = $Disable1M
+        AutoCompactWindow = $AutoCompactWindow
     }
     if (-not [string]::IsNullOrWhiteSpace($KeyFile)) { $baseParams['KeyFile'] = $KeyFile }
     if (-not [string]::IsNullOrWhiteSpace($RemoteUser)) { $baseParams['RemoteUser'] = $RemoteUser }
