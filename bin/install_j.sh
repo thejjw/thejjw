@@ -1148,7 +1148,7 @@ Use Z.ai MCP servers for:
 - Text extraction
 
 **When using MiniMax models (MiniMax-*):**
-Note: MiniMax-M3 natively supports multimodal input (images and video) in addition to MCP.
+Note: MiniMax-M3.1 Flash natively supports multimodal input (images and video) in addition to MCP.
 Use MiniMax MCP server for:
 - Web searches (`web_search`)
 - Image understanding (`understand_image`)
@@ -1179,7 +1179,7 @@ Use Z.ai MCP servers for:
 - Text extraction
 
 **When using MiniMax models (MiniMax-*):**
-Note: MiniMax-M3 natively supports multimodal input (images and video) in addition to MCP.
+Note: MiniMax-M3.1 Flash natively supports multimodal input (images and video) in addition to MCP.
 Use MiniMax MCP server for:
 - Web searches (`web_search`)
 - Image understanding (`understand_image`)
@@ -2048,13 +2048,14 @@ claudemm() {
   MINIMAX_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
-  ANTHROPIC_MODEL="MiniMax-M3[1m]" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M3[1m]" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M3[1m]" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M3[1m]" \
+  ANTHROPIC_MODEL="MiniMax-M3.1-Flash[1m]" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M3.1-Flash[1m]" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M3.1-Flash[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M3.1-Flash[1m]" \
   API_TIMEOUT_MS="3000000" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   ENABLE_PROMPT_CACHING_1H="1" \
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW="524288" \
   claude "$@"
 }
 # claudemmd - Launch claudemm without permission prompts.
@@ -2076,10 +2077,10 @@ EOF
         MINIMAX_API_KEY="$MINIMAX_API_KEY"
         ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
         ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY"
-        ANTHROPIC_MODEL="MiniMax-M3[1m]"
-        ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M3[1m]"
-        ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M3[1m]"
-        ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M3[1m]"
+        ANTHROPIC_MODEL="MiniMax-M3.1-Flash[1m]"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M3.1-Flash[1m]"
+        ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M3.1-Flash[1m]"
+        ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M3.1-Flash[1m]"
         API_TIMEOUT_MS="3000000"
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
       )
@@ -2139,11 +2140,14 @@ claudemmr() {
 
   remote_claude_base "$host" "$key" "$port" \
     "https://api.minimax.io/anthropic" \
-    "MiniMax-M3[1m]" \
-    "MiniMax-M3[1m]" \
-    "MiniMax-M3[1m]" \
+    "MiniMax-M3.1-Flash[1m]" \
+    "MiniMax-M3.1-Flash[1m]" \
+    "MiniMax-M3.1-Flash[1m]" \
     "3000000" \
-    "0"
+    "0" \
+    "" \
+    "" \
+    "524288"
 }
 
 CLAUEMMR_EOF
