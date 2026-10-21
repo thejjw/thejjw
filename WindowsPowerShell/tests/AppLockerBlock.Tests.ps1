@@ -31,6 +31,7 @@ Describe 'AppLocker block helpers' {
         foreach ($functionName in @(
                 'Read-AppLockerPolicy',
                 'Get-AppLockerRuleIdList',
+                'Resolve-AppLockerTargetFile',
                 'Add-AppLockerBlock',
                 'Remove-AppLockerBlock',
                 'Test-IsAdministrator'
@@ -338,7 +339,181 @@ $rules
         }
     }
 
-    Describe 'Revert path' {
+    Describe 'Rule modes' {
+        BeforeAll {
+            Mock Test-IsAdministrator { return $true }
+            Mock Import-Module {}
+            Mock Write-Host {}
+            Mock Write-Warning {}
+            Mock Get-AppLockerPolicy { return [xml]'<AppLockerPolicy Version="1" />' }
+            Mock Set-AppLockerPolicy {}
+            Mock Get-Service {
+                return [pscustomobject]@{ Name = 'AppIDSvc'; Status = 'Running'; StartType = 'Manual' }
+            }
+            Mock Start-Service {}
+            Mock Set-Service {}
+            Mock gpupdate.exe {}
+            Mock Test-AppLockerPolicy { return [pscustomobject]@{ PolicyDecision = 'Denied' } }
+
+            # Captures the policy document the helper writes.
+            $script:applied = @{}
+            Mock Set-AppLockerPolicy { $script:applied.Xml = Get-Content -LiteralPath $XmlPolicy -Raw }
+
+            # A stand-in for Get-AppLockerFileInformation on a signed binary.
+            $script:fakeFileInfo = [pscustomobject]@{
+                Path      = 'C:\Program Files\Vendor\data\example.exe'
+                Hash      = 'SHA256 0x76DA8D68E5D73BE3006C26D76D8BD635EED1EA8FD52D83BF12806B01429C9608'
+                Publisher = [pscustomobject]@{
+                    PublisherName    = 'O=VENDOR INTERNATIONAL INC., S=SEOUL, C=KR'
+                    ProductName      = ''
+                    BinaryName       = ''
+                    HasProductName   = $false
+                    HasBinaryName    = $false
+                }
+            }
+            Mock Get-AppLockerFileInformation { return $script:fakeFileInfo }
+            Mock Resolve-AppLockerTargetFile { return 'C:\Program Files\Vendor\data\example.exe' }
+        }
+
+        It 'writes a path rule by default' {
+            Add-AppLockerBlock -Name 'example.exe' -NoGroupPolicyRefresh -Confirm:$false | Out-Null
+
+            $written = [xml]$script:applied.Xml
+            $collection = $written.AppLockerPolicy.RuleCollection | Where-Object { $_.Type -eq 'Exe' }
+            $deny = @($collection.FilePathRule | Where-Object { $_.Action -eq 'Deny' })
+            $deny.Count | Should -Be 1
+            $deny[0].Conditions.FilePathCondition.Path | Should -Be '*\example.exe'
+        }
+
+        It 'writes a hash rule in hash mode' {
+            Add-AppLockerBlock -Name 'example.exe' -Mode Hash -FilePath 'C:\Program Files\Vendor\data\example.exe' -NoGroupPolicyRefresh -Confirm:$false | Out-Null
+
+            $written = [xml]$script:applied.Xml
+            $collection = $written.AppLockerPolicy.RuleCollection | Where-Object { $_.Type -eq 'Exe' }
+            $deny = @($collection.FileHashRule)
+            $deny.Count | Should -Be 1
+            # The Data attribute holds only the hex value; the algorithm belongs
+            # in the Type attribute, and the full "<algo> 0x<hex>" string is
+            # rejected by AppLocker.
+            $deny[0].Conditions.FileHashCondition.FileHash.Data | Should -Be '0x76DA8D68E5D73BE3006C26D76D8BD635EED1EA8FD52D83BF12806B01429C9608'
+            $deny[0].Conditions.FileHashCondition.FileHash.Type | Should -Be 'SHA256'
+        }
+
+        It 'normalizes a hash to the value AppLocker expects' {
+            $normalized = $_ProfileHelpers.ConvertToAppLockerHashValue('SHA256 0xABCDEF')
+
+            $normalized | Should -Be '0xABCDEF'
+        }
+
+        It 'writes a publisher rule in publisher mode' {
+            Add-AppLockerBlock -Name 'example.exe' -Mode Publisher -FilePath 'C:\Program Files\Vendor\data\example.exe' -NoGroupPolicyRefresh -Confirm:$false -Force | Out-Null
+
+            $written = [xml]$script:applied.Xml
+            $collection = $written.AppLockerPolicy.RuleCollection | Where-Object { $_.Type -eq 'Exe' }
+            $deny = @($collection.FilePublisherRule)
+            $deny.Count | Should -Be 1
+            $condition = $deny[0].Conditions.FilePublisherCondition
+            $condition.PublisherName | Should -Be 'O=VENDOR INTERNATIONAL INC., S=SEOUL, C=KR'
+            # No product or binary name means the rule covers the whole publisher.
+            $condition.BinaryName | Should -Be '*'
+        }
+
+        It 'records the mode in the rule description' {
+            Add-AppLockerBlock -Name 'example.exe' -Mode Hash -FilePath 'C:\Program Files\Vendor\data\example.exe' -NoGroupPolicyRefresh -Confirm:$false | Out-Null
+
+            $written = [xml]$script:applied.Xml
+            $collection = $written.AppLockerPolicy.RuleCollection | Where-Object { $_.Type -eq 'Exe' }
+            $deny = @($collection.FileHashRule)[0]
+            $deny.Description | Should -Be 'Created by Add-AppLockerBlock (mode=hash)'
+        }
+
+        It 'refuses to combine -Path and -FilePath' {
+            { Add-AppLockerBlock -Name 'example.exe' -Path 'C:\Tools' -FilePath 'C:\Tools\example.exe' -Confirm:$false } |
+                Should -Throw '*cannot be combined*'
+        }
+
+        It 'fails when the file cannot be resolved to one file' {
+            Mock Resolve-AppLockerTargetFile { return $null }
+
+            { Add-AppLockerBlock -Name 'example.exe' -Mode Hash -Confirm:$false } |
+                Should -Throw '*exactly one file*'
+        }
+
+        It 'reports the collateral of a publisher rule and refuses without -Force' {
+            # The collateral scan finds one more executable that the probe
+            # policy also denies.
+            Mock Get-ChildItem {
+                return @(
+                    [pscustomobject]@{ FullName = 'C:\Program Files\Vendor\data\example.exe'; PSIsContainer = $false }
+                )
+            }
+            Mock Test-AppLockerPolicy {
+                return [pscustomobject]@{
+                    FilePath        = 'C:\Program Files\Vendor\data\other.exe'
+                    PolicyDecision  = 'Denied'
+                }
+            }
+
+            { Add-AppLockerBlock -Name 'example.exe' -Mode Publisher -FilePath 'C:\Program Files\Vendor\data\example.exe' -Confirm:$false } |
+                Should -Throw '*-Force*'
+        }
+
+        It 'adds the publisher rule with -Force despite the collateral' {
+            Mock Get-ChildItem {
+                return @(
+                    [pscustomobject]@{ FullName = 'C:\Program Files\Vendor\data\example.exe'; PSIsContainer = $false }
+                )
+            }
+            Mock Test-AppLockerPolicy {
+                return [pscustomobject]@{
+                    FilePath        = 'C:\Program Files\Vendor\data\other.exe'
+                    PolicyDecision  = 'Denied'
+                }
+            }
+
+            Add-AppLockerBlock -Name 'example.exe' -Mode Publisher -FilePath 'C:\Program Files\Vendor\data\example.exe' -NoGroupPolicyRefresh -Confirm:$false -Force | Out-Null
+
+            $written = [xml]$script:applied.Xml
+            $collection = $written.AppLockerPolicy.RuleCollection | Where-Object { $_.Type -eq 'Exe' }
+            @($collection.FilePublisherRule).Count | Should -Be 1
+        }
+    }
+
+    Describe 'Resolve-AppLockerTargetFile' {
+        BeforeAll {
+            $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'
+            $tokens = $null
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                $profilePath, [ref]$tokens, [ref]$errors)
+            $functionAst = $ast.Find({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                        $node.Name -eq 'Resolve-AppLockerTargetFile'
+                }, $true)
+            if (-not $functionAst) { throw 'Could not load Resolve-AppLockerTargetFile from the profile.' }
+            . ([scriptblock]::Create($functionAst.Extent.Text))
+        }
+
+        It 'resolves an explicit file path' {
+            $probe = Join-Path $TestDrive 'example.exe'
+            Set-Content -LiteralPath $probe -Value 'not a real binary' -Encoding ASCII
+
+            $resolved = Resolve-AppLockerTargetFile -FileName 'example.exe' -FilePath $probe
+
+            $resolved | Should -Not -BeNullOrEmpty
+            (Split-Path -Leaf $resolved) | Should -Be 'example.exe'
+        }
+
+        It 'returns nothing for a file path that does not exist' {
+            Resolve-AppLockerTargetFile -FileName 'example.exe' -FilePath (Join-Path $TestDrive 'missing.exe') |
+                Should -BeNullOrEmpty
+        }
+    }
+
+
+
+    Describe 'Listing and reverting rule modes' {
         BeforeAll {
             Mock Test-IsAdministrator { return $true }
             Mock Import-Module {}
@@ -351,14 +526,59 @@ $rules
             Mock Start-Service {}
             Mock Set-Service {}
             Mock gpupdate.exe {}
+            $script:applied = @{}
+            Mock Set-AppLockerPolicy { $script:applied.Xml = Get-Content -LiteralPath $XmlPolicy -Raw }
         }
 
-        It 'removes the block through the revert path' {
+        It 'reports the mode of each block' {
             Mock Get-AppLockerPolicy {
                 return [xml]@'
 <AppLockerPolicy Version="1">
   <RuleCollection Type="Exe" EnforcementMode="Enabled">
-    <FilePathRule Id="11111111-1111-1111-1111-111111111111" Name="Block example.exe" Description="Created by Add-AppLockerBlock" UserOrGroupSid="S-1-1-0" Action="Deny">
+    <FilePathRule Id="11111111-1111-1111-1111-111111111111" Name="Block example.exe" Description="Created by Add-AppLockerBlock (mode=path)" UserOrGroupSid="S-1-1-0" Action="Deny">
+      <Conditions><FilePathCondition Path="*\example.exe" /></Conditions>
+    </FilePathRule>
+    <FileHashRule Id="22222222-2222-2222-2222-222222222222" Name="Block other.exe" Description="Created by Add-AppLockerBlock (mode=hash)" UserOrGroupSid="S-1-1-0" Action="Deny">
+      <Conditions><FileHashCondition><FileHash Type="SHA256" Data="SHA256 0xABC" SourceFileName="other.exe" SourceFileLength="0" /></FileHashCondition></Conditions>
+    </FileHashRule>
+  </RuleCollection>
+</AppLockerPolicy>
+'@
+            }
+
+            $report = @(Add-AppLockerBlock -List)
+
+            $report.Count | Should -Be 2
+            ($report | Where-Object { $_.FileName -eq 'example.exe' }).Mode | Should -Be 'Path'
+            ($report | Where-Object { $_.FileName -eq 'other.exe' }).Mode | Should -Be 'Hash'
+        }
+
+
+        It 'removes a hash rule by its file name' {
+            Mock Get-AppLockerPolicy {
+                return [xml]@'
+<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="Enabled">
+    <FileHashRule Id="22222222-2222-2222-2222-222222222222" Name="Block other.exe" Description="Created by Add-AppLockerBlock (mode=hash)" UserOrGroupSid="S-1-1-0" Action="Deny">
+      <Conditions><FileHashCondition><FileHash Type="SHA256" Data="SHA256 0xABC" SourceFileName="other.exe" SourceFileLength="0" /></FileHashCondition></Conditions>
+    </FileHashRule>
+  </RuleCollection>
+</AppLockerPolicy>
+'@
+            }
+
+            $result = Remove-AppLockerBlock -Name 'other.exe' -NoGroupPolicyRefresh -Confirm:$false
+
+            $result.Action | Should -Be 'Removed'
+            $result.RemovedDetails | Should -Be 'Hash: other.exe'
+        }
+
+        It 'removes a rule by its rule id' {
+            Mock Get-AppLockerPolicy {
+                return [xml]@'
+<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="Enabled">
+    <FilePathRule Id="11111111-1111-1111-1111-111111111111" Name="Block example.exe" Description="Created by Add-AppLockerBlock (mode=path)" UserOrGroupSid="S-1-1-0" Action="Deny">
       <Conditions><FilePathCondition Path="*\example.exe" /></Conditions>
     </FilePathRule>
   </RuleCollection>
@@ -366,9 +586,37 @@ $rules
 '@
             }
 
-            Add-AppLockerBlock -Revert -Name 'example.exe' -NoGroupPolicyRefresh -Confirm:$false | Out-Null
+            $result = Remove-AppLockerBlock -Name '11111111-1111-1111-1111-111111111111' -NoGroupPolicyRefresh -Confirm:$false
 
-            Should -Invoke -CommandName Set-AppLockerPolicy -Times 1 -Exactly
+            $result.Action | Should -Be 'Removed'
+        }
+
+        It 'keeps the allow-all baseline while another deny rule remains' {
+            Mock Get-AppLockerPolicy {
+                return [xml]@'
+<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="Enabled">
+    <FilePathRule Id="11111111-1111-1111-1111-111111111111" Name="Allow all executables" Description="Created by Add-AppLockerBlock" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions><FilePathCondition Path="*" /></Conditions>
+    </FilePathRule>
+    <FilePathRule Id="22222222-2222-2222-2222-222222222222" Name="Block example.exe" Description="Created by Add-AppLockerBlock (mode=path)" UserOrGroupSid="S-1-1-0" Action="Deny">
+      <Conditions><FilePathCondition Path="*\example.exe" /></Conditions>
+    </FilePathRule>
+    <FilePathRule Id="33333333-3333-3333-3333-333333333333" Name="Block other.exe" Description="Created by Add-AppLockerBlock (mode=path)" UserOrGroupSid="S-1-1-0" Action="Deny">
+      <Conditions><FilePathCondition Path="*\other.exe" /></Conditions>
+    </FilePathRule>
+  </RuleCollection>
+</AppLockerPolicy>
+'@
+            }
+
+            Remove-AppLockerBlock -Name 'example.exe' -NoGroupPolicyRefresh -Confirm:$false | Out-Null
+
+            $written = [xml]$script:applied.Xml
+            $collection = $written.AppLockerPolicy.RuleCollection | Where-Object { $_.Type -eq 'Exe' }
+            # The baseline stays because a deny rule is still present.
+            @($collection.FilePathRule | Where-Object { $_.Action -eq 'Allow' }).Count | Should -Be 1
+            @($collection.FilePathRule | Where-Object { $_.Action -eq 'Deny' }).Count | Should -Be 1
         }
     }
 }

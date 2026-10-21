@@ -632,6 +632,108 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         return ,$collection
     }
 
+    # Normalizes a hash to the form AppLocker's Data attribute expects.
+    # Get-AppLockerFileInformation reports "<algorithm> 0x<hex>", but the
+    # algorithm belongs in the Type attribute and the Data attribute holds
+    # only the hex value.
+    function ConvertToAppLockerHashValue {
+        param(
+            [Parameter(Mandatory = $true)][string]$Hash
+        )
+
+        $value = $Hash.Trim()
+        if ($value -match '^(?i:SHA1|SHA256|SHA384|SHA512)\s+(.+)$') { $value = $Matches[1] }
+        return $value
+    }
+
+    # Builds a FileHashRule element inside the given AppLocker policy document.
+    # The hash must be AppLocker's own Authenticode PE image hash (the one
+    # Get-AppLockerFileInformation reports), not the flat file hash from
+    # Get-FileHash; the flat hash never matches.
+    function NewAppLockerFileHashRule {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][string]$Description,
+            [Parameter(Mandatory = $true)][string]$UserOrGroupSid,
+            [Parameter(Mandatory = $true)][string]$Hash,
+            [string]$SourceFileName = '',
+            [int64]$SourceFileLength = 0
+        )
+
+        $rule = $Document.CreateElement('FileHashRule')
+        $rule.SetAttribute('Id', [guid]::NewGuid().ToString())
+        $rule.SetAttribute('Name', $Name)
+        $rule.SetAttribute('Description', $Description)
+        $rule.SetAttribute('UserOrGroupSid', $UserOrGroupSid)
+        $rule.SetAttribute('Action', 'Deny')
+
+        $conditions = $Document.CreateElement('Conditions')
+        $condition = $Document.CreateElement('FileHashCondition')
+        $fileHash = $Document.CreateElement('FileHash')
+        $fileHash.SetAttribute('Type', 'SHA256')
+        $fileHash.SetAttribute('Data', (ConvertToAppLockerHashValue -Hash $Hash))
+        $fileHash.SetAttribute('SourceFileName', $SourceFileName)
+        $fileHash.SetAttribute('SourceFileLength', [string]$SourceFileLength)
+        [void]$condition.AppendChild($fileHash)
+        [void]$conditions.AppendChild($condition)
+        [void]$rule.AppendChild($conditions)
+
+        return ,$rule
+    }
+
+    # Describes the condition of an AppLocker rule, whatever its kind.
+    # The returned object carries the mode that produced the rule plus the
+    # fields that identify what the rule matches.
+    function GetAppLockerRuleInfo {
+        param(
+            [Parameter(Mandatory = $true)]$Rule
+        )
+
+        $action = $Rule.GetAttribute('Action')
+        $description = $Rule.GetAttribute('Description')
+        $info = [pscustomobject]@{
+            RuleId      = $Rule.GetAttribute('Id')
+            Name        = $Rule.GetAttribute('Name')
+            Description = $description
+            Action      = $action
+            Mode        = 'Unknown'
+            Target      = ''
+            Path        = $null
+            Hash        = $null
+            Publisher   = $null
+            ProductName = $null
+            BinaryName  = $null
+        }
+
+        if ($Rule.LocalName -eq 'FilePathRule') {
+            $info.Mode = 'Path'
+            $info.Path = GetAppLockerRulePath -Rule $Rule
+            $info.Target = $info.Path
+        }
+        elseif ($Rule.LocalName -eq 'FileHashRule') {
+            $info.Mode = 'Hash'
+            $fileHash = @($Rule.Conditions.FileHashCondition.FileHash)[0]
+            if ($fileHash) {
+                $info.Hash = $fileHash.GetAttribute('Data')
+                $sourceName = $fileHash.GetAttribute('SourceFileName')
+                $info.Target = if ($sourceName) { $sourceName } else { $info.Hash }
+            }
+        }
+        elseif ($Rule.LocalName -eq 'FilePublisherRule') {
+            $info.Mode = 'Publisher'
+            $publisher = @($Rule.Conditions.FilePublisherCondition)[0]
+            if ($publisher) {
+                $info.Publisher = $publisher.GetAttribute('PublisherName')
+                $info.ProductName = $publisher.GetAttribute('ProductName')
+                $info.BinaryName = $publisher.GetAttribute('BinaryName')
+                $info.Target = $info.BinaryName
+            }
+        }
+
+        return $info
+    }
+
     # Describes the executable filename blocks declared by an AppLocker policy
     # document. Folder rules (paths ending in a wildcard) are not filename
     # blocks and are left out.
@@ -648,24 +750,32 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
 
         foreach ($rule in (GetAppLockerRules -Collection $collection)) {
             if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
-            $path = GetAppLockerRulePath -Rule $rule
-            if (-not $path) { continue }
+            $info = GetAppLockerRuleInfo -Rule $rule
 
             # Only file-name rules count; a trailing wildcard targets a folder.
-            $leaf = ($path -split '[\\/]')[-1]
-            if (-not $leaf -or $leaf.Contains('*') -or $leaf.Contains('?')) { continue }
+            if ($info.Mode -eq 'Path') {
+                $leaf = ($info.Path -split '[\\/]')[-1]
+                if (-not $leaf -or $leaf.Contains('*') -or $leaf.Contains('?')) { continue }
+                $fileName = $leaf
+            }
+            else {
+                $fileName = $info.Target
+            }
+            if (-not $fileName) { continue }
 
-            $id = $rule.GetAttribute('Id')
-            $description = $rule.GetAttribute('Description')
             $rows += [pscustomobject]@{
-                RuleId      = $id
-                Name        = $rule.GetAttribute('Name')
-                Description = $description
-                Action      = 'Deny'
-                Path        = $path
-                FileName    = $leaf
-                Managed     = [bool]($ManagedMarker -and ($description -like "*$ManagedMarker*"))
-                Scope       = $(if ($LocalRuleIds -contains $id) { 'Local' } else { 'GroupPolicy' })
+                RuleId      = $info.RuleId
+                Name        = $info.Name
+                Description = $info.Description
+                Action      = $info.Action
+                Mode        = $info.Mode
+                FileName    = $fileName
+                Target      = $info.Target
+                Path        = $info.Path
+                Hash        = $info.Hash
+                Publisher   = $info.Publisher
+                Managed     = [bool]($ManagedMarker -and ($info.Description -like "*$ManagedMarker*"))
+                Scope       = $(if ($LocalRuleIds -contains $info.RuleId) { 'Local' } else { 'GroupPolicy' })
             }
         }
 
@@ -694,7 +804,10 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         'GetAppLockerRulePath',
         'NewAppLockerFilePathRule',
         'NewAppLockerFilePublisherRule',
+        'NewAppLockerFileHashRule',
         'NewAppLockerRuleCollection',
+        'GetAppLockerRuleInfo',
+        'ConvertToAppLockerHashValue',
         'GetAppLockerBlockReport'
     )
     Export-ModuleMember -Function $profileHelperFunctions
@@ -14342,6 +14455,73 @@ function Get-AppLockerRuleIdList {
         ForEach-Object { $_.GetAttribute('Id') })
 }
 
+function Resolve-AppLockerTargetFile {
+    <#
+.SYNOPSIS
+    Finds the executable a file name refers to.
+
+.DESCRIPTION
+    Hash and publisher rules are built from the real file, so it has to be
+    located first. When -FilePath is given, that file is used. Otherwise the
+    name is looked up in PATH and in the usual install locations.
+
+    Returns $null when the name does not resolve to exactly one file, so the
+    caller can ask for an explicit path instead of guessing.
+
+.PARAMETER FileName
+    The file name to look for, for example 'example.exe'.
+
+.PARAMETER FilePath
+    Full path of the file to use instead of searching.
+
+.OUTPUTS
+    System.String with the resolved path, or $null.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName,
+
+        [string]$FilePath
+    )
+
+    if ($FilePath) {
+        $resolved = Resolve-Path -LiteralPath $FilePath -ErrorAction SilentlyContinue
+        if (-not $resolved) { return $null }
+        if (-not (Test-Path -LiteralPath $resolved.Path -PathType Leaf)) { return $null }
+        return $resolved.Path
+    }
+
+    $candidates = @()
+    foreach ($directory in ($env:PATH -split ';')) {
+        if (-not $directory) { continue }
+        $probe = Join-Path $directory $FileName
+        if (Test-Path -LiteralPath $probe -PathType Leaf) { $candidates += (Get-Item -LiteralPath $probe).FullName }
+    }
+
+    $roots = @(
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)},
+        $env:LOCALAPPDATA,
+        $env:ProgramData
+    )
+    foreach ($root in $roots) {
+        if (-not $root -or -not (Test-Path -LiteralPath $root)) { continue }
+        $found = @(Get-ChildItem -LiteralPath $root -Filter $FileName -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+            Where-Object { -not $_.PSIsContainer } |
+            Select-Object -ExpandProperty FullName)
+        $candidates += $found
+    }
+
+    $candidates = @($candidates | Sort-Object -Unique)
+    if ($candidates.Count -ne 1) { return $null }
+    return $candidates[0]
+}
+
 function Add-AppLockerBlock {
     <#
 .SYNOPSIS
@@ -14373,9 +14553,26 @@ function Add-AppLockerBlock {
     Executable file name(s) to block, for example 'example.exe'. With -Path,
     a name relative to that directory.
 
+.PARAMETER Mode
+    How the executable is identified:
+
+      - Path (default): the rule matches the file name in any directory. A
+        renamed copy of the file is not blocked.
+      - Hash: the rule matches this exact binary by content. A renamed copy is
+        still blocked, but the rule stops matching after the program updates.
+      - Publisher: the rule matches by code-signing identity, so it survives
+        both renames and program updates. It can also match other files from
+        the same publisher, so the affected files are reported before the rule
+        is written.
+
+.PARAMETER FilePath
+    Path of the executable to fingerprint for the Hash and Publisher modes. When
+    omitted, the file is looked up by name in PATH and the usual install
+    locations; the rule is only added when exactly one file matches.
+
 .PARAMETER Path
     Optional directory that scopes the rule to a single location. Without it
-    the rule matches the file name in any directory.
+    the rule matches the file name in any directory. Path mode only.
 
 .PARAMETER Enforcement
     Enforcement mode for the EXE rule collection: 'Enabled' blocks the file,
@@ -14397,7 +14594,10 @@ function Add-AppLockerBlock {
     Path of an existing executable to evaluate after the policy is applied.
 
 .PARAMETER Force
-    With -Revert, also remove matching rules that this profile did not create.
+    With -Revert, also remove matching rules that this profile did not
+    create. With the Publisher mode, accept a rule that also matches other
+    files from the same publisher.
+
 
 .PARAMETER List
     Report the filename blocks that currently exist instead of changing them.
@@ -14412,6 +14612,15 @@ function Add-AppLockerBlock {
 .EXAMPLE
     PS C:\> Add-AppLockerBlock -Name app.exe -Path 'C:\Tools'
     Blocks C:\Tools\app.exe only.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe -Mode Hash
+    Blocks that exact binary, so a renamed copy is blocked too.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe -Mode Publisher
+    Blocks every copy of that program from the same publisher, so renames and
+    program updates do not get around it.
 
 .EXAMPLE
     PS C:\> Add-AppLockerBlock -List
@@ -14439,6 +14648,13 @@ function Add-AppLockerBlock {
         [string[]]$Name,
 
         [Parameter(ParameterSetName = 'Add')]
+        [ValidateSet('Path', 'Hash', 'Publisher')]
+        [string]$Mode = 'Path',
+
+        [Parameter(ParameterSetName = 'Add')]
+        [string]$FilePath,
+
+        [Parameter(ParameterSetName = 'Add')]
         [string]$Path,
 
         [Parameter(ParameterSetName = 'Add')]
@@ -14462,6 +14678,7 @@ function Add-AppLockerBlock {
         [Parameter(ParameterSetName = 'Add')]
         [Parameter(ParameterSetName = 'Revert')]
         [switch]$Force,
+
 
         [Parameter(ParameterSetName = 'List', Mandatory = $true)]
         [switch]$List,
@@ -14505,7 +14722,7 @@ function Add-AppLockerBlock {
 
         if ($report.Count -gt 0) {
             Write-Host ''
-            $report | Format-Table FileName, Action, Scope, Managed, Path -AutoSize | Out-Host
+            $report | Format-Table FileName, Mode, Action, Scope, Managed, Target -AutoSize | Out-Host
         }
         else {
             Write-Host '   (none)' -ForegroundColor DarkGray
@@ -14527,7 +14744,7 @@ function Add-AppLockerBlock {
         throw 'Add-AppLockerBlock requires an elevated PowerShell session. Re-run as Administrator.'
     }
 
-    # --- resolve the rule path for every requested file name -----------------
+    # --- resolve the rule target for every requested file name ---------------
     $targets = @()
     foreach ($item in $Name) {
         if ([string]::IsNullOrWhiteSpace($item)) { throw 'File name must not be empty.' }
@@ -14537,8 +14754,11 @@ function Add-AppLockerBlock {
         if ($item.Contains('*') -or $item.Contains('?')) {
             throw "'$item' must not contain wildcard characters."
         }
-        $rulePath = if ($Path) { [System.IO.Path]::Combine($Path, $item) } else { "*\$item" }
-        $targets += [pscustomobject]@{ FileName = $item; RulePath = $rulePath }
+        $targets += [pscustomobject]@{ FileName = $item }
+    }
+
+    if ($Mode -eq 'Path' -and $Path -and $FilePath) {
+        throw '-Path and -FilePath cannot be combined; -Path scopes a path rule to a directory, -FilePath points at the file to fingerprint.'
     }
 
     $local = Read-AppLockerPolicy
@@ -14569,21 +14789,74 @@ function Add-AppLockerBlock {
     $mergedAppxRules = @($localAppxRules) + @($domainAppxRules)
     $mergedAllowCount = @($mergedExeRules | Where-Object { $_.GetAttribute('Action') -eq 'Allow' }).Count
 
-    # Skip names that are already blocked by the very same path rule.
-    $existingPaths = @()
+    # Skip names that are already blocked by a rule of the same kind.
+    $existingTargets = @()
     foreach ($rule in $localExeRules) {
         if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
-        $existingPath = $_ProfileHelpers.GetAppLockerRulePath($rule)
-        if ($existingPath) { $existingPaths += $existingPath }
+        $info = $_ProfileHelpers.GetAppLockerRuleInfo($rule)
+        if ($info.Mode -eq 'Path') { $existingTargets += $info.Path }
+        elseif ($info.Mode -eq 'Hash') { $existingTargets += $info.Hash }
+        elseif ($info.Mode -eq 'Publisher') { $existingTargets += $info.Publisher }
     }
 
     $blocked = @()
     $alreadyBlocked = @()
     foreach ($target in $targets) {
-        $isBlocked = @($existingPaths | Where-Object {
-            [string]::Equals($_, $target.RulePath, [System.StringComparison]::OrdinalIgnoreCase)
-        }).Count -gt 0
-        if ($isBlocked) { $alreadyBlocked += $target.FileName } else { $blocked += $target }
+        $rulePath = $null
+        $ruleHash = $null
+        $rulePublisher = $null
+        $fileInfo = $null
+        $resolvedPath = $null
+        $isBlocked = $false
+
+        if ($Mode -eq 'Path') {
+            # Concatenation rather than interpolation: PowerShell only expands
+            # a member in a double-quoted string when the member exists on the
+            # object's .NET type, which a PSCustomObject property does not.
+            $rulePath = if ($Path) { [System.IO.Path]::Combine($Path, $target.FileName) } else { '*\' + $target.FileName }
+            $isBlocked = @($existingTargets | Where-Object {
+                [string]::Equals($_, $rulePath, [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count -gt 0
+        }
+        else {
+            # Hash and Publisher rules are built from the real file, so it has
+            # to be found first.
+            $resolved = Resolve-AppLockerTargetFile -FileName $target.FileName -FilePath $FilePath
+            if (-not $resolved) {
+                throw ("Could not resolve '{0}' to exactly one file. Pass -FilePath with the full path to the executable." -f $target.FileName)
+            }
+            $fileInfo = Get-AppLockerFileInformation -Path $resolved -ErrorAction Stop
+            $resolvedPath = $resolved
+
+            if ($Mode -eq 'Hash') {
+                # The Authenticode PE image hash AppLocker uses, not the flat
+                # file hash: the flat hash never matches.
+                $ruleHash = $_ProfileHelpers.ConvertToAppLockerHashValue($fileInfo.Hash)
+                $isBlocked = @($existingTargets | Where-Object {
+                    [string]::Equals($_, $ruleHash, [System.StringComparison]::OrdinalIgnoreCase)
+                }).Count -gt 0
+            }
+            else {
+                $rulePublisher = $fileInfo.Publisher.PublisherName
+                $isBlocked = @($existingTargets | Where-Object {
+                    [string]::Equals($_, $rulePublisher, [System.StringComparison]::OrdinalIgnoreCase)
+                }).Count -gt 0
+            }
+        }
+
+        if ($isBlocked) {
+            $alreadyBlocked += $target.FileName
+            continue
+        }
+
+        $blocked += [pscustomobject]@{
+            FileName  = $target.FileName
+            RulePath  = $rulePath
+            RuleHash  = $ruleHash
+            Publisher = $rulePublisher
+            FileInfo  = $fileInfo
+            FilePath  = $resolvedPath
+        }
     }
 
     if ($blocked.Count -eq 0) {
@@ -14591,8 +14864,60 @@ function Add-AppLockerBlock {
         return [pscustomobject]@{
             Action           = 'AlreadyBlocked'
             BlockedFiles     = @($alreadyBlocked)
+            Mode             = $Mode
             BackupPath       = $null
             EnforcementMode  = $(if ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') } else { 'NotConfigured' })
+        }
+    }
+
+    # A publisher rule matches by signing identity, which can also cover other
+    # files from the same publisher. The affected files are reported, and a rule
+    # that reaches beyond the requested file needs -Force to be written.
+    $collateral = @()
+    if ($Mode -eq 'Publisher') {
+        $publisher = $blocked[0].FileInfo.Publisher
+        # The product and binary names narrow the rule; an empty product name
+        # still matches every file of that publisher that has no product name.
+        $productName = if ($publisher.HasProductName) { $publisher.ProductName } else { '' }
+        $binaryName = if ($publisher.HasBinaryName) { $publisher.BinaryName } else { '*' }
+
+        $probe = New-Object System.Xml.XmlDocument
+        $probe.LoadXml('<AppLockerPolicy Version="1" />')
+        $probeExe = $_ProfileHelpers.NewAppLockerRuleCollection($probe, 'Exe', 'Enabled')
+        [void]$probe.DocumentElement.AppendChild($probeExe)
+        $probeRule = $_ProfileHelpers.NewAppLockerFilePublisherRule($probe, 'probe', 'probe', 'Deny', $everyoneSid, $publisher.PublisherName, $productName, $binaryName)
+        [void]$probeExe.AppendChild($probeRule)
+        $probeFile = Join-Path ([System.IO.Path]::GetTempPath()) ('applocker-probe-{0}.xml' -f [guid]::NewGuid().ToString('N'))
+        [System.IO.File]::WriteAllText($probeFile, $probe.OuterXml, [System.Text.UTF8Encoding]::new($false))
+        try {
+            $searchRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA, $env:ProgramData)
+            $candidates = @()
+            foreach ($searchRoot in $searchRoots) {
+                if (-not $searchRoot -or -not (Test-Path -LiteralPath $searchRoot)) { continue }
+                $candidates += @(Get-ChildItem -LiteralPath $searchRoot -Filter '*.exe' -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.PSIsContainer } |
+                    Select-Object -ExpandProperty FullName)
+            }
+            foreach ($candidate in $candidates) {
+                $decision = Test-AppLockerPolicy -XmlPolicy $probeFile -Path $candidate -User 'Everyone' -ErrorAction SilentlyContinue
+                if (-not $decision) { continue }
+                if ($decision.PolicyDecision -eq 'Denied' -and $decision.FilePath -ne $blocked[0].FilePath) {
+                    $collateral += $decision.FilePath
+                }
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue
+        }
+
+        if ($collateral.Count -gt 0 -and -not $Force) {
+            Write-Host ("A publisher rule for this file also matches {0} other executable(s):" -f $collateral.Count) -ForegroundColor Yellow
+            $collateral | Sort-Object -Unique | Select-Object -First 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+            if ($collateral.Count -gt 20) { Write-Host '  ...' -ForegroundColor Yellow }
+            throw 'Re-run with -Force to add a rule that also blocks those files.'
+        }
+        if ($collateral.Count -gt 0) {
+            Write-Host ("Publisher rule also matches {0} other executable(s)." -f $collateral.Count) -ForegroundColor Yellow
         }
     }
 
@@ -14611,8 +14936,8 @@ function Add-AppLockerBlock {
     }
 
     if (-not $localExe) {
-        $mode = if ($Enforcement) { $Enforcement } else { 'Enabled' }
-        $localExe = $_ProfileHelpers.NewAppLockerRuleCollection($localDoc, 'Exe', $mode)
+        $newEnforcementMode = if ($Enforcement) { $Enforcement } else { 'Enabled' }
+        $localExe = $_ProfileHelpers.NewAppLockerRuleCollection($localDoc, 'Exe', $newEnforcementMode)
         [void]$localDoc.DocumentElement.AppendChild($localExe)
     }
     elseif ($Enforcement) {
@@ -14640,8 +14965,28 @@ function Add-AppLockerBlock {
     }
 
     foreach ($target in $blocked) {
-        $rule = $_ProfileHelpers.NewAppLockerFilePathRule($localDoc, "Block $($target.FileName)", $managedMarker, 'Deny', $everyoneSid, $target.RulePath)
-        [void]$localExe.AppendChild($rule)
+        $description = '{0} (mode={1})' -f $managedMarker, $Mode.ToLowerInvariant()
+        if ($Mode -eq 'Path') {
+            $rule = $_ProfileHelpers.NewAppLockerFilePathRule($localDoc, "Block $($target.FileName)", $description, 'Deny', $everyoneSid, $target.RulePath)
+            [void]$localExe.AppendChild($rule)
+        }
+        elseif ($Mode -eq 'Hash') {
+            # The length is informational only; AppLocker matches on the hash.
+            $fileLength = 0
+            $fileItem = Get-Item -LiteralPath $target.FilePath -ErrorAction SilentlyContinue
+            if ($fileItem) { $fileLength = $fileItem.Length }
+            $rule = $_ProfileHelpers.NewAppLockerFileHashRule($localDoc, "Block $($target.FileName)", $description, $everyoneSid, $target.RuleHash, $target.FileName, $fileLength)
+            [void]$localExe.AppendChild($rule)
+        }
+        else {
+            $publisher = $target.FileInfo.Publisher
+            # The product and binary names narrow the rule to the requested
+            # program; without them it would cover every file of that publisher.
+            $productName = if ($publisher.HasProductName) { $publisher.ProductName } else { '' }
+            $binaryName = if ($publisher.HasBinaryName) { $publisher.BinaryName } else { '*' }
+            $rule = $_ProfileHelpers.NewAppLockerFilePublisherRule($localDoc, "Block $($target.FileName)", $description, 'Deny', $everyoneSid, $publisher.PublisherName, $productName, $binaryName)
+            [void]$localExe.AppendChild($rule)
+        }
     }
 
     # Back up the policy exactly as it was before the change.
@@ -14709,6 +15054,14 @@ function Add-AppLockerBlock {
     if ($alreadyBlocked.Count -gt 0) {
         Write-Host ("Already blocked: {0}" -f ($alreadyBlocked -join ', ')) -ForegroundColor DarkGray
     }
+    Write-Host ("Mode: {0}" -f $Mode) -ForegroundColor DarkGray
+    if ($Mode -eq 'Hash') {
+        Write-Host ("Hash: {0}" -f ($blocked.RuleHash -join ', ')) -ForegroundColor DarkGray
+        Write-Host 'A hash rule stops matching after the program updates.' -ForegroundColor Yellow
+    }
+    if ($Mode -eq 'Publisher') {
+        Write-Host ("Publisher: {0}" -f ($blocked.Publisher -join ', ')) -ForegroundColor DarkGray
+    }
     Write-Host ("EXE enforcement mode: {0}" -f $modeAfter) -ForegroundColor DarkGray
     Write-Host ("Policy backup: {0}" -f $backupPath) -ForegroundColor DarkGray
     if ($decision) {
@@ -14719,6 +15072,9 @@ function Add-AppLockerBlock {
         Action           = 'Blocked'
         BlockedFiles     = @($blocked.FileName)
         BlockedPaths     = @($blocked.RulePath)
+        BlockedHashes    = @($blocked.RuleHash)
+        BlockedPublishers = @($blocked.Publisher)
+        Mode             = $Mode
         AlreadyBlocked   = @($alreadyBlocked)
         BackupPath       = $backupPath
         EnforcementMode  = $modeAfter
@@ -14798,29 +15154,32 @@ function Remove-AppLockerBlock {
     $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Appx')
 
     $removed = @()
+    $removedDetails = @()
     $kept = @()
 
     if ($localExe) {
         foreach ($rule in @($_ProfileHelpers.GetAppLockerRules($localExe))) {
             if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
-            $rulePath = $_ProfileHelpers.GetAppLockerRulePath($rule)
-            $leaf = if ($rulePath) { ($rulePath -split '[\\/]')[-1] } else { '' }
-            $isManaged = ($rule.GetAttribute('Description') -like "*$managedMarker*")
+            $info = $_ProfileHelpers.GetAppLockerRuleInfo($rule)
+            $leaf = if ($info.Path) { ($info.Path -split '[\\/]')[-1] } else { '' }
+            $isManaged = ($info.Description -like "*$managedMarker*")
 
             $matches = @($Name | Where-Object {
                 $candidate = $_
-                [string]::Equals($rule.GetAttribute('Id'), $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
-                [string]::Equals($rule.GetAttribute('Name'), $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
-                [string]::Equals($leaf, $candidate, [System.StringComparison]::OrdinalIgnoreCase)
+                [string]::Equals($info.RuleId, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($info.Name, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($leaf, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($info.Target, $candidate, [System.StringComparison]::OrdinalIgnoreCase)
             }).Count -gt 0
             if (-not $matches) { continue }
 
             if (-not $isManaged -and -not $Force) {
-                $kept += "$($rule.GetAttribute('Name')) ($rulePath)"
+                $kept += "$($info.Name) ($($info.Mode): $($info.Target))"
                 continue
             }
             [void]$localExe.RemoveChild($rule)
-            $removed += $rulePath
+            $removed += $info.Target
+            $removedDetails += "$($info.Mode): $($info.Target)"
         }
     }
 
@@ -14832,12 +15191,14 @@ function Remove-AppLockerBlock {
         }
         else {
             # Nothing local matched; the block may come from a Group Policy.
-            $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Exe')
             $report = @($_ProfileHelpers.GetAppLockerBlockReport($effective.Document, $managedMarker, @()))
-            $foreign = @($report | Where-Object { $_.Scope -eq 'GroupPolicy' -and $_.FileName -in $Name })
+            $foreign = @($report | Where-Object {
+                $_.Scope -eq 'GroupPolicy' -and
+                ($_.FileName -in $Name -or $_.Target -in $Name)
+            })
             if ($foreign.Count -gt 0) {
                 Write-Host 'The matching block comes from a Group Policy and cannot be removed from this machine:' -ForegroundColor Yellow
-                $foreign | ForEach-Object { Write-Host "  $($_.Path)" -ForegroundColor Yellow }
+                $foreign | ForEach-Object { Write-Host "  $($_.Mode): $($_.Target)" -ForegroundColor Yellow }
             }
             else {
                 Write-Host 'No matching filename block was found.' -ForegroundColor Yellow
@@ -14847,6 +15208,7 @@ function Remove-AppLockerBlock {
         return [pscustomobject]@{
             Action      = 'NotFound'
             Removed     = @()
+            RemovedDetails = @()
             Kept        = @($kept)
             BackupPath  = $null
         }
@@ -14907,17 +15269,18 @@ function Remove-AppLockerBlock {
     }
 
     Write-Host ''
-    Write-Host ("Removed: {0}" -f ($removed -join ', ')) -ForegroundColor Green
+    Write-Host ("Removed: {0}" -f ($removedDetails -join ', ')) -ForegroundColor Green
     if ($kept.Count -gt 0) {
         Write-Host ("Kept (not created here): {0}" -f ($kept -join ', ')) -ForegroundColor Yellow
     }
     Write-Host ("Policy backup: {0}" -f $backupPath) -ForegroundColor DarkGray
 
     return [pscustomobject]@{
-        Action      = 'Removed'
-        Removed     = @($removed)
-        Kept        = @($kept)
-        BackupPath  = $backupPath
+        Action         = 'Removed'
+        Removed        = @($removed)
+        RemovedDetails = @($removedDetails)
+        Kept           = @($kept)
+        BackupPath     = $backupPath
     }
 }
 
