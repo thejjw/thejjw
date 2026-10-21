@@ -734,21 +734,40 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         return $info
     }
 
-    # Describes the executable filename blocks declared by an AppLocker policy
-    # document. Folder rules (paths ending in a wildcard) are not filename
-    # blocks and are left out.
+    # Returns the rules of the effective policy that the local policy does
+    # not have, which are the ones a Group Policy contributes.
+    #
+    # The effective policy is a snapshot that only catches up with the local
+    # policy after a Group Policy refresh, so a rule this profile created and
+    # that has since been removed from the local policy can still be in the
+    # snapshot. Those rules carry the managed marker, so they are left out.
+    function GetAppLockerDomainRules {
+        param(
+            [Parameter(Mandatory = $true)]$Rules,
+            [string[]] $LocalRuleIds = @(),
+            [string] $ManagedMarker = ''
+        )
+
+        $domain = @($Rules | Where-Object {
+            $LocalRuleIds -notcontains $_.GetAttribute('Id') -and
+            $_.GetAttribute('Description') -notlike "*$ManagedMarker*"
+        })
+        return ,$domain
+    }
+
+    # Describes the executable filename blocks declared by a set of AppLocker
+    # rules. Folder rules (paths ending in a wildcard) are not filename blocks
+    # and are left out.
     function GetAppLockerBlockReport {
         param(
-            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)]$Rules,
             [string] $ManagedMarker = '',
             [string[]] $LocalRuleIds = @()
         )
 
         $rows = @()
-        $collection = GetAppLockerRuleCollection -Document $Document -Type 'Exe'
-        if (-not $collection) { return ,$rows }
-
-        foreach ($rule in (GetAppLockerRules -Collection $collection)) {
+        foreach ($rule in @($Rules)) {
+            if (-not $rule) { continue }
             if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
             $info = GetAppLockerRuleInfo -Rule $rule
 
@@ -802,6 +821,7 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         'GetAppLockerRuleCollection',
         'GetAppLockerRules',
         'GetAppLockerRulePath',
+        'GetAppLockerDomainRules',
         'NewAppLockerFilePathRule',
         'NewAppLockerFilePublisherRule',
         'NewAppLockerFileHashRule',
@@ -14710,21 +14730,37 @@ function Add-AppLockerBlock {
         $effective = Read-AppLockerPolicy -Effective
 
         $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($local.Document, 'Exe')
+        $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($local.Document, 'Appx')
         $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Exe')
         $effectiveAppx = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Appx')
 
-        $report = @($_ProfileHelpers.GetAppLockerBlockReport($effective.Document, $managedMarker, (Get-AppLockerRuleIdList $localExe)))
+        $localExeRules = if ($localExe) { @($_ProfileHelpers.GetAppLockerRules($localExe)) } else { @() }
+        $localAppxRules = if ($localAppx) { @($_ProfileHelpers.GetAppLockerRules($localAppx)) } else { @() }
+        $effectiveExeRules = if ($effectiveExe) { @($_ProfileHelpers.GetAppLockerRules($effectiveExe)) } else { @() }
+        $effectiveAppxRules = if ($effectiveAppx) { @($_ProfileHelpers.GetAppLockerRules($effectiveAppx)) } else { @() }
+
+        $localExeIds = @($localExeRules | ForEach-Object { $_.GetAttribute('Id') })
+        $localAppxIds = @($localAppxRules | ForEach-Object { $_.GetAttribute('Id') })
+
+        # The effective policy is a snapshot that only catches up with the
+        # local policy after a Group Policy refresh, so the local rules are
+        # read live and the effective policy only adds the rules that a Group
+        # Policy contributes. Listing the snapshot alone would hide a rule
+        # that was just added and keep showing a rule that was just removed.
+        $domainExeRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveExeRules, $localExeIds, $managedMarker)
+        $domainAppxRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveAppxRules, $localAppxIds, $managedMarker)
+        $mergedExeRules = @($localExeRules) + @($domainExeRules)
+        $mergedAppxRules = @($localAppxRules) + @($domainAppxRules)
+
+        $report = @($_ProfileHelpers.GetAppLockerBlockReport($mergedExeRules, $managedMarker, $localExeIds))
 
         Write-Host ''
         Write-Host '== AppLocker executable filename blocks ==' -ForegroundColor Cyan
-        $exeMode = if ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') } else { 'NotConfigured' }
-        $allowCount = 0
-        if ($effectiveExe) {
-            $allowCount = @($_ProfileHelpers.GetAppLockerRules($effectiveExe) |
-                Where-Object { $_.GetAttribute('Action') -eq 'Allow' }).Count
-        }
-        $appxCount = 0
-        if ($effectiveAppx) { $appxCount = @($_ProfileHelpers.GetAppLockerRules($effectiveAppx)).Count }
+        $exeMode = if ($localExe) { $localExe.GetAttribute('EnforcementMode') }
+                   elseif ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') }
+                   else { 'NotConfigured' }
+        $allowCount = @($mergedExeRules | Where-Object { $_.GetAttribute('Action') -eq 'Allow' }).Count
+        $appxCount = $mergedAppxRules.Count
         Write-Host ("   EXE enforcement mode : {0}" -f $exeMode) -ForegroundColor DarkGray
         Write-Host ("   EXE allow rules      : {0}" -f $allowCount) -ForegroundColor DarkGray
         Write-Host ("   Packaged app rules   : {0}" -f $appxCount) -ForegroundColor DarkGray
@@ -14797,8 +14833,8 @@ function Add-AppLockerBlock {
     # view keeps the decision stable even before a Group Policy refresh.
     $localExeIds = @($localExeRules | ForEach-Object { $_.GetAttribute('Id') })
     $localAppxIds = @($localAppxRules | ForEach-Object { $_.GetAttribute('Id') })
-    $domainExeRules = @($effectiveExeRules | Where-Object { $localExeIds -notcontains $_.GetAttribute('Id') })
-    $domainAppxRules = @($effectiveAppxRules | Where-Object { $localAppxIds -notcontains $_.GetAttribute('Id') })
+    $domainExeRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveExeRules, $localExeIds, $managedMarker)
+    $domainAppxRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveAppxRules, $localAppxIds, $managedMarker)
 
     $mergedExeRules = @($localExeRules) + @($domainExeRules)
     $mergedAppxRules = @($localAppxRules) + @($domainAppxRules)
@@ -15167,6 +15203,7 @@ function Remove-AppLockerBlock {
 
     $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Exe')
     $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Appx')
+    $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Exe')
 
     $removed = @()
     $removedDetails = @()
@@ -15206,7 +15243,13 @@ function Remove-AppLockerBlock {
         }
         else {
             # Nothing local matched; the block may come from a Group Policy.
-            $report = @($_ProfileHelpers.GetAppLockerBlockReport($effective.Document, $managedMarker, @()))
+            # Only rules that a Group Policy contributes are considered: the
+            # effective policy is a snapshot and can still hold a rule this
+            # profile created and that has since been removed.
+            $localExeIds = Get-AppLockerRuleIdList $localExe
+            $effectiveExeRules = if ($effectiveExe) { @($_ProfileHelpers.GetAppLockerRules($effectiveExe)) } else { @() }
+            $domainExeRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveExeRules, $localExeIds, $managedMarker)
+            $report = @($_ProfileHelpers.GetAppLockerBlockReport($domainExeRules, $managedMarker, @()))
             $foreign = @($report | Where-Object {
                 $_.Scope -eq 'GroupPolicy' -and
                 ($_.FileName -in $Name -or $_.Target -in $Name)

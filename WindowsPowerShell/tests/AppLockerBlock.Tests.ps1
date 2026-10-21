@@ -114,6 +114,75 @@ $rules
 
             $report.Count | Should -Be 0
         }
+
+        It 'shows a rule that was just added even when the effective policy is still empty' {
+            # The effective policy is a snapshot that only catches up with the
+            # local policy after a Group Policy refresh, so it can still be
+            # empty right after a rule was written.
+            Mock Get-AppLockerPolicy {
+                return [xml]@'
+<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="Enabled">
+    <FilePathRule Id="11111111-1111-1111-1111-111111111111" Name="Block example.exe" Description="Created by Add-AppLockerBlock" UserOrGroupSid="S-1-1-0" Action="Deny">
+      <Conditions><FilePathCondition Path="*\example.exe" /></Conditions>
+    </FilePathRule>
+  </RuleCollection>
+</AppLockerPolicy>
+'@
+            } -ParameterFilter { -not $Effective }
+            Mock Get-AppLockerPolicy { return [xml]'<AppLockerPolicy Version="1" />' } -ParameterFilter { $Effective }
+
+            $report = @(Add-AppLockerBlock -List)
+
+            $report.Count | Should -Be 1
+            $report[0].FileName | Should -Be 'example.exe'
+            $report[0].Scope | Should -Be 'Local'
+        }
+
+        It 'drops a rule that was removed even when the effective policy still holds it' {
+            # The same stale snapshot keeps a rule that was removed from the
+            # local policy; it must not come back as a Group Policy rule.
+            Mock Get-AppLockerPolicy { return [xml]'<AppLockerPolicy Version="1" />' } -ParameterFilter { -not $Effective }
+            Mock Get-AppLockerPolicy {
+                return [xml]@'
+<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="Enabled">
+    <FilePathRule Id="11111111-1111-1111-1111-111111111111" Name="Block example.exe" Description="Created by Add-AppLockerBlock" UserOrGroupSid="S-1-1-0" Action="Deny">
+      <Conditions><FilePathCondition Path="*\example.exe" /></Conditions>
+    </FilePathRule>
+  </RuleCollection>
+</AppLockerPolicy>
+'@
+            } -ParameterFilter { $Effective }
+
+            $report = @(Add-AppLockerBlock -List)
+
+            $report.Count | Should -Be 0
+        }
+
+        It 'shows a rule that a Group Policy contributes' {
+            # A rule the local policy does not have and that this profile did
+            # not create comes from a Group Policy.
+            Mock Get-AppLockerPolicy { return [xml]'<AppLockerPolicy Version="1" />' } -ParameterFilter { -not $Effective }
+            Mock Get-AppLockerPolicy {
+                return [xml]@'
+<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="Enabled">
+    <FilePathRule Id="22222222-2222-2222-2222-222222222222" Name="Block other.exe" Description="Set by the domain" UserOrGroupSid="S-1-1-0" Action="Deny">
+      <Conditions><FilePathCondition Path="*\other.exe" /></Conditions>
+    </FilePathRule>
+  </RuleCollection>
+</AppLockerPolicy>
+'@
+            } -ParameterFilter { $Effective }
+
+            $report = @(Add-AppLockerBlock -List)
+
+            $report.Count | Should -Be 1
+            $report[0].FileName | Should -Be 'other.exe'
+            $report[0].Scope | Should -Be 'GroupPolicy'
+            $report[0].Managed | Should -BeFalse
+        }
     }
 
     Describe 'Add-AppLockerBlock rule building' {
