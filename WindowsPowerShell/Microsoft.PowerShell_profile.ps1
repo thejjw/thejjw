@@ -505,6 +505,173 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         }
     }
 
+    # --- AppLocker policy helpers -------------------------------------------
+    # Pure XML manipulation of an AppLocker policy document. These helpers never
+    # touch the live policy; the public helpers own reading and writing it.
+
+    # Returns the rule collection element of the given type (for example 'Exe'),
+    # or $null when the document does not define one.
+    function GetAppLockerRuleCollection {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)][string]$Type
+        )
+
+        $collections = @($Document.DocumentElement.ChildNodes |
+            Where-Object {
+                $_.NodeType -eq [System.Xml.XmlNodeType]::Element -and
+                $_.GetAttribute('Type') -eq $Type
+            })
+        if ($collections.Count -eq 0) { return $null }
+
+        # XmlElement is enumerable, so the comma stops PowerShell unrolling it.
+        return ,$collections[0]
+    }
+
+    # Returns the rule elements (FilePathRule, FilePublisherRule, FileHashRule)
+    # defined in an AppLocker rule collection.
+    function GetAppLockerRules {
+        param(
+            [Parameter(Mandatory = $true)]$Collection
+        )
+
+        $rules = @($Collection.ChildNodes |
+            Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+        return ,$rules
+    }
+
+    # Returns the path condition of an AppLocker FilePathRule, or $null when the
+    # rule does not use a path condition.
+    function GetAppLockerRulePath {
+        param(
+            [Parameter(Mandatory = $true)]$Rule
+        )
+
+        $condition = @($Rule.Conditions.FilePathCondition)[0]
+        if (-not $condition) { return $null }
+        return [string]$condition.GetAttribute('Path')
+    }
+
+    # Builds a FilePathRule element inside the given AppLocker policy document.
+    function NewAppLockerFilePathRule {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][string]$Description,
+            [Parameter(Mandatory = $true)][string]$Action,
+            [Parameter(Mandatory = $true)][string]$UserOrGroupSid,
+            [Parameter(Mandatory = $true)][string]$Path
+        )
+
+        $rule = $Document.CreateElement('FilePathRule')
+        $rule.SetAttribute('Id', [guid]::NewGuid().ToString())
+        $rule.SetAttribute('Name', $Name)
+        $rule.SetAttribute('Description', $Description)
+        $rule.SetAttribute('UserOrGroupSid', $UserOrGroupSid)
+        $rule.SetAttribute('Action', $Action)
+
+        $conditions = $Document.CreateElement('Conditions')
+        $condition = $Document.CreateElement('FilePathCondition')
+        $condition.SetAttribute('Path', $Path)
+        [void]$conditions.AppendChild($condition)
+        [void]$rule.AppendChild($conditions)
+
+        return ,$rule
+    }
+
+    # Builds a FilePublisherRule element inside the given AppLocker policy
+    # document. Used for the packaged-apps baseline that keeps Store apps
+    # runnable while executable rules are enforced.
+    function NewAppLockerFilePublisherRule {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][string]$Description,
+            [Parameter(Mandatory = $true)][string]$Action,
+            [Parameter(Mandatory = $true)][string]$UserOrGroupSid,
+            [string]$PublisherName = '*',
+            [string]$ProductName = '*',
+            [string]$BinaryName = '*'
+        )
+
+        $rule = $Document.CreateElement('FilePublisherRule')
+        $rule.SetAttribute('Id', [guid]::NewGuid().ToString())
+        $rule.SetAttribute('Name', $Name)
+        $rule.SetAttribute('Description', $Description)
+        $rule.SetAttribute('UserOrGroupSid', $UserOrGroupSid)
+        $rule.SetAttribute('Action', $Action)
+
+        $conditions = $Document.CreateElement('Conditions')
+        $condition = $Document.CreateElement('FilePublisherCondition')
+        $condition.SetAttribute('PublisherName', $PublisherName)
+        $condition.SetAttribute('ProductName', $ProductName)
+        $condition.SetAttribute('BinaryName', $BinaryName)
+        $versionRange = $Document.CreateElement('BinaryVersionRange')
+        $versionRange.SetAttribute('LowSection', '*')
+        $versionRange.SetAttribute('HighSection', '*')
+        [void]$condition.AppendChild($versionRange)
+        [void]$conditions.AppendChild($condition)
+        [void]$rule.AppendChild($conditions)
+
+        return ,$rule
+    }
+
+    # Builds a rule collection element of the given type inside the given
+    # AppLocker policy document.
+    function NewAppLockerRuleCollection {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)][string]$Type,
+            [Parameter(Mandatory = $true)][string]$EnforcementMode
+        )
+
+        $collection = $Document.CreateElement('RuleCollection')
+        $collection.SetAttribute('Type', $Type)
+        $collection.SetAttribute('EnforcementMode', $EnforcementMode)
+
+        return ,$collection
+    }
+
+    # Describes the executable filename blocks declared by an AppLocker policy
+    # document. Folder rules (paths ending in a wildcard) are not filename
+    # blocks and are left out.
+    function GetAppLockerBlockReport {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [string] $ManagedMarker = '',
+            [string[]] $LocalRuleIds = @()
+        )
+
+        $rows = @()
+        $collection = GetAppLockerRuleCollection -Document $Document -Type 'Exe'
+        if (-not $collection) { return ,$rows }
+
+        foreach ($rule in (GetAppLockerRules -Collection $collection)) {
+            if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
+            $path = GetAppLockerRulePath -Rule $rule
+            if (-not $path) { continue }
+
+            # Only file-name rules count; a trailing wildcard targets a folder.
+            $leaf = ($path -split '[\\/]')[-1]
+            if (-not $leaf -or $leaf.Contains('*') -or $leaf.Contains('?')) { continue }
+
+            $id = $rule.GetAttribute('Id')
+            $description = $rule.GetAttribute('Description')
+            $rows += [pscustomobject]@{
+                RuleId      = $id
+                Name        = $rule.GetAttribute('Name')
+                Description = $description
+                Action      = 'Deny'
+                Path        = $path
+                FileName    = $leaf
+                Managed     = [bool]($ManagedMarker -and ($description -like "*$ManagedMarker*"))
+                Scope       = $(if ($LocalRuleIds -contains $id) { 'Local' } else { 'GroupPolicy' })
+            }
+        }
+
+        return ,$rows
+    }
+
     $profileHelperFunctions = @(
         'ResolveWUResultCode',
         'ResolveWUHResult',
@@ -521,7 +688,14 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         'ShowFontArchive',
         'Expand7ZipArchive',
         'NewTemporarySshIdentity',
-        'RemoveTemporarySshIdentity'
+        'RemoveTemporarySshIdentity',
+        'GetAppLockerRuleCollection',
+        'GetAppLockerRules',
+        'GetAppLockerRulePath',
+        'NewAppLockerFilePathRule',
+        'NewAppLockerFilePublisherRule',
+        'NewAppLockerRuleCollection',
+        'GetAppLockerBlockReport'
     )
     Export-ModuleMember -Function $profileHelperFunctions
 }
@@ -14084,6 +14258,665 @@ if (-not `$commandSucceeded) { exit 1 }
 
     $nativeArguments = if ($Command.Count -gt 1) { $Command[1..($Command.Count - 1)] } else { @() }
     & $sudoPath $nativeCommand.Source @nativeArguments
+}
+
+# Internal configuration for Add-AppLockerBlock and Remove-AppLockerBlock.
+$_AppLockerInternal = @{
+    # Written into the Description of every rule this profile creates, so that
+    # -List can tell managed rules apart from hand-written ones and -Revert can
+    # remove exactly what was created here.
+    ManagedMarker = 'Created by Add-AppLockerBlock'
+    EveryoneSid   = 'S-1-1-0'
+}
+
+function Read-AppLockerPolicy {
+    <#
+.SYNOPSIS
+    Reads the local or effective AppLocker policy.
+
+.DESCRIPTION
+    Returns the policy XML text together with the parsed document. The raw text
+    is kept so a backup can be written before the document is modified.
+
+.PARAMETER Effective
+    Read the merged effective policy instead of the local one.
+
+.OUTPUTS
+    PSCustomObject with Raw (the policy XML) and Document (parsed XML).
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Effective
+    )
+
+    $raw = if ($Effective) { Get-AppLockerPolicy -Effective -Xml } else { Get-AppLockerPolicy -Local -Xml }
+
+    $document = New-Object System.Xml.XmlDocument
+    $document.PreserveWhitespace = $true
+    if ($raw -is [System.Xml.XmlDocument]) {
+        # Accept an already parsed document as well as the XML text the cmdlet
+        # returns, so the policy can be fed in from either shape.
+        $document = $raw
+        $raw = $document.OuterXml
+    }
+    else {
+        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = '<AppLockerPolicy Version="1" />' }
+        $document.LoadXml($raw)
+    }
+
+    return [pscustomobject]@{ Raw = $raw; Document = $document }
+}
+
+function Get-AppLockerRuleIdList {
+    <#
+.SYNOPSIS
+    Lists the rule ids of an AppLocker rule collection.
+
+.DESCRIPTION
+    Returns the Id attribute of every rule element in the collection, so the
+    local rules can be told apart from the ones a Group Policy contributes.
+
+.PARAMETER Collection
+    The rule collection element, or $null.
+
+.OUTPUTS
+    System.String[] of rule ids.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        $Collection
+    )
+
+    if (-not $Collection) { return @() }
+    return @($_ProfileHelpers.GetAppLockerRules($Collection) |
+        ForEach-Object { $_.GetAttribute('Id') })
+}
+
+function Add-AppLockerBlock {
+    <#
+.SYNOPSIS
+    Adds, lists, or reverts AppLocker executable filename blocks on this machine.
+
+.DESCRIPTION
+    Writes a Deny rule into the EXE rule collection of the local AppLocker
+    policy so a given executable can no longer run, and keeps the rest of the
+    machine working. AppLocker allows a file only when it matches an allow
+    rule, so a Deny rule on its own blocks every other executable too. The
+    helper therefore maintains two supporting rules:
+
+      - an allow-all rule for Everyone, added only when the effective policy
+        has no allow rule for EXE files (adding one next to an existing
+        allowlist would widen that allowlist),
+      - an allow-all-signed rule for packaged apps, added only when the policy
+        has neither executable nor packaged-app rules, because enforcing EXE
+        rules blocks every packaged app otherwise (Start menu, Settings, ...).
+
+    Both supporting rules and the Deny rule carry a marker in their
+    Description, so -List can separate them from hand-written policy and
+    -Revert can remove exactly what this profile created.
+
+    -List probes the machine and reports the filename blocks that currently
+    exist. -Revert removes a block by file name, by rule name, or by rule id
+    and drops the supporting rules again once no Deny rule is left.
+
+.PARAMETER Name
+    Executable file name(s) to block, for example 'example.exe'. With -Path,
+    a name relative to that directory.
+
+.PARAMETER Path
+    Optional directory that scopes the rule to a single location. Without it
+    the rule matches the file name in any directory.
+
+.PARAMETER Enforcement
+    Enforcement mode for the EXE rule collection: 'Enabled' blocks the file,
+    'AuditOnly' only logs it. When omitted, an existing collection keeps its
+    current mode and a newly created collection is set to 'Enabled'.
+
+.PARAMETER BackupDirectory
+    Directory that receives a copy of the local policy before it is changed.
+    Defaults to the user temp directory.
+
+.PARAMETER PersistServiceStartup
+    Also set the Application Identity service to start automatically. Without
+    it the service is only started for the current session.
+
+.PARAMETER NoGroupPolicyRefresh
+    Skip the gpupdate refresh that makes the new policy effective.
+
+.PARAMETER VerifyPath
+    Path of an existing executable to evaluate after the policy is applied.
+
+.PARAMETER Force
+    With -Revert, also remove matching rules that this profile did not create.
+
+.PARAMETER List
+    Report the filename blocks that currently exist instead of changing them.
+
+.PARAMETER Revert
+    Remove an existing block instead of adding one.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe
+    Blocks example.exe in any directory and keeps other executables running.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name app.exe -Path 'C:\Tools'
+    Blocks C:\Tools\app.exe only.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -List
+    Lists the filename blocks that currently exist.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Revert -Name example.exe
+    Removes the block for example.exe again.
+
+.OUTPUTS
+    For -List, one object per filename block. Otherwise a summary object.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+
+    Adding and reverting a block requires an elevated PowerShell session;
+    AppLocker rules are enforced by the Application Identity service. -List
+    only reads the policy and works without elevation.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High', DefaultParameterSetName = 'Add')]
+    param(
+        [Parameter(ParameterSetName = 'Add', Mandatory = $true, Position = 0)]
+        [Parameter(ParameterSetName = 'Revert', Mandatory = $true, Position = 0)]
+        [string[]]$Name,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [string]$Path,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [ValidateSet('Enabled', 'AuditOnly')]
+        [string]$Enforcement,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [Parameter(ParameterSetName = 'Revert')]
+        [string]$BackupDirectory = $env:TEMP,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [switch]$PersistServiceStartup,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [Parameter(ParameterSetName = 'Revert')]
+        [switch]$NoGroupPolicyRefresh,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [string]$VerifyPath,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [Parameter(ParameterSetName = 'Revert')]
+        [switch]$Force,
+
+        [Parameter(ParameterSetName = 'List', Mandatory = $true)]
+        [switch]$List,
+
+        [Parameter(ParameterSetName = 'Revert', Mandatory = $true)]
+        [switch]$Revert
+    )
+
+    $ErrorActionPreference = 'Stop'
+
+    Import-Module AppLocker -ErrorAction Stop
+
+    $managedMarker = $_AppLockerInternal.ManagedMarker
+    $everyoneSid = $_AppLockerInternal.EveryoneSid
+
+    # Listing only reads the policy, so it works without elevation.
+    if ($PSCmdlet.ParameterSetName -eq 'List') {
+        $local = Read-AppLockerPolicy
+        $effective = Read-AppLockerPolicy -Effective
+
+        $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($local.Document, 'Exe')
+        $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Exe')
+        $effectiveAppx = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Appx')
+
+        $report = @($_ProfileHelpers.GetAppLockerBlockReport($effective.Document, $managedMarker, (Get-AppLockerRuleIdList $localExe)))
+
+        Write-Host ''
+        Write-Host '== AppLocker executable filename blocks ==' -ForegroundColor Cyan
+        $exeMode = if ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') } else { 'NotConfigured' }
+        $allowCount = 0
+        if ($effectiveExe) {
+            $allowCount = @($_ProfileHelpers.GetAppLockerRules($effectiveExe) |
+                Where-Object { $_.GetAttribute('Action') -eq 'Allow' }).Count
+        }
+        $appxCount = 0
+        if ($effectiveAppx) { $appxCount = @($_ProfileHelpers.GetAppLockerRules($effectiveAppx)).Count }
+        Write-Host ("   EXE enforcement mode : {0}" -f $exeMode) -ForegroundColor DarkGray
+        Write-Host ("   EXE allow rules      : {0}" -f $allowCount) -ForegroundColor DarkGray
+        Write-Host ("   Packaged app rules   : {0}" -f $appxCount) -ForegroundColor DarkGray
+        Write-Host ("   Filename blocks      : {0}" -f $report.Count) -ForegroundColor DarkGray
+
+        if ($report.Count -gt 0) {
+            Write-Host ''
+            $report | Format-Table FileName, Action, Scope, Managed, Path -AutoSize | Out-Host
+        }
+        else {
+            Write-Host '   (none)' -ForegroundColor DarkGray
+        }
+
+        return $report
+    }
+
+    if ($PSCmdlet.ParameterSetName -eq 'Revert') {
+        # The revert path reuses Remove-AppLockerBlock; -WhatIf and -Confirm
+        # propagate because both functions support ShouldProcess.
+        Remove-AppLockerBlock -Name $Name -Force:$Force -BackupDirectory $BackupDirectory `
+            -NoGroupPolicyRefresh:$NoGroupPolicyRefresh
+        return
+    }
+
+    # Changing the policy needs administrator rights.
+    if (-not (Test-IsAdministrator)) {
+        throw 'Add-AppLockerBlock requires an elevated PowerShell session. Re-run as Administrator.'
+    }
+
+    # --- resolve the rule path for every requested file name -----------------
+    $targets = @()
+    foreach ($item in $Name) {
+        if ([string]::IsNullOrWhiteSpace($item)) { throw 'File name must not be empty.' }
+        if ($item -match '[\\/]') {
+            throw "'$item' must be a file name without a directory. Use -Path to scope the rule to a directory."
+        }
+        if ($item.Contains('*') -or $item.Contains('?')) {
+            throw "'$item' must not contain wildcard characters."
+        }
+        $rulePath = if ($Path) { [System.IO.Path]::Combine($Path, $item) } else { "*\$item" }
+        $targets += [pscustomobject]@{ FileName = $item; RulePath = $rulePath }
+    }
+
+    $local = Read-AppLockerPolicy
+    $effective = Read-AppLockerPolicy -Effective
+    $localDoc = $local.Document
+    $effectiveDoc = $effective.Document
+
+    $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Exe')
+    $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Appx')
+    $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effectiveDoc, 'Exe')
+    $effectiveAppx = $_ProfileHelpers.GetAppLockerRuleCollection($effectiveDoc, 'Appx')
+
+    $localExeRules = if ($localExe) { @($_ProfileHelpers.GetAppLockerRules($localExe)) } else { @() }
+    $localAppxRules = if ($localAppx) { @($_ProfileHelpers.GetAppLockerRules($localAppx)) } else { @() }
+    $effectiveExeRules = if ($effectiveExe) { @($_ProfileHelpers.GetAppLockerRules($effectiveExe)) } else { @() }
+    $effectiveAppxRules = if ($effectiveAppx) { @($_ProfileHelpers.GetAppLockerRules($effectiveAppx)) } else { @() }
+
+    # Rules that come from a Group Policy rather than from the local policy.
+    # Merging is additive, so the effective set is local rules plus the
+    # domain-only rules from the effective policy. Working from that merged
+    # view keeps the decision stable even before a Group Policy refresh.
+    $localExeIds = @($localExeRules | ForEach-Object { $_.GetAttribute('Id') })
+    $localAppxIds = @($localAppxRules | ForEach-Object { $_.GetAttribute('Id') })
+    $domainExeRules = @($effectiveExeRules | Where-Object { $localExeIds -notcontains $_.GetAttribute('Id') })
+    $domainAppxRules = @($effectiveAppxRules | Where-Object { $localAppxIds -notcontains $_.GetAttribute('Id') })
+
+    $mergedExeRules = @($localExeRules) + @($domainExeRules)
+    $mergedAppxRules = @($localAppxRules) + @($domainAppxRules)
+    $mergedAllowCount = @($mergedExeRules | Where-Object { $_.GetAttribute('Action') -eq 'Allow' }).Count
+
+    # Skip names that are already blocked by the very same path rule.
+    $existingPaths = @()
+    foreach ($rule in $localExeRules) {
+        if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
+        $existingPath = $_ProfileHelpers.GetAppLockerRulePath($rule)
+        if ($existingPath) { $existingPaths += $existingPath }
+    }
+
+    $blocked = @()
+    $alreadyBlocked = @()
+    foreach ($target in $targets) {
+        $isBlocked = @($existingPaths | Where-Object {
+            [string]::Equals($_, $target.RulePath, [System.StringComparison]::OrdinalIgnoreCase)
+        }).Count -gt 0
+        if ($isBlocked) { $alreadyBlocked += $target.FileName } else { $blocked += $target }
+    }
+
+    if ($blocked.Count -eq 0) {
+        Write-Host "Already blocked: $($alreadyBlocked -join ', ')" -ForegroundColor Yellow
+        return [pscustomobject]@{
+            Action           = 'AlreadyBlocked'
+            BlockedFiles     = @($alreadyBlocked)
+            BackupPath       = $null
+            EnforcementMode  = $(if ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') } else { 'NotConfigured' })
+        }
+    }
+
+    # An allow-all rule is required so that the new Deny rule does not turn the
+    # EXE collection into an allowlist that blocks everything else. It is only
+    # safe to add it when the merged policy has no allow rule at all.
+    $needAllowBaseline = ($mergedAllowCount -eq 0)
+    # Packaged apps are blocked as soon as EXE rules are enforced and the
+    # packaged-app collection has no rules, so the same rule applies there.
+    $needAppxBaseline = ($mergedExeRules.Count -eq 0 -and $mergedAppxRules.Count -eq 0)
+
+    if (-not $PSCmdlet.ShouldProcess(
+            "AppLocker EXE policy ($($blocked.FileName -join ', '))",
+            'Block executable by filename')) {
+        return
+    }
+
+    if (-not $localExe) {
+        $mode = if ($Enforcement) { $Enforcement } else { 'Enabled' }
+        $localExe = $_ProfileHelpers.NewAppLockerRuleCollection($localDoc, 'Exe', $mode)
+        [void]$localDoc.DocumentElement.AppendChild($localExe)
+    }
+    elseif ($Enforcement) {
+        $localExe.SetAttribute('EnforcementMode', $Enforcement)
+    }
+
+    if ($needAllowBaseline) {
+        $hasAllowAll = @($localExeRules | Where-Object {
+            $_.GetAttribute('Action') -eq 'Allow' -and
+            [string]::Equals($_ProfileHelpers.GetAppLockerRulePath($_), '*', [System.StringComparison]::OrdinalIgnoreCase)
+        }).Count -gt 0
+        if (-not $hasAllowAll) {
+            $baseline = $_ProfileHelpers.NewAppLockerFilePathRule($localDoc, 'Allow all executables', $managedMarker, 'Allow', $everyoneSid, '*')
+            [void]$localExe.AppendChild($baseline)
+        }
+    }
+
+    if ($needAppxBaseline) {
+        if (-not $localAppx) {
+            $localAppx = $_ProfileHelpers.NewAppLockerRuleCollection($localDoc, 'Appx', 'Enabled')
+            [void]$localDoc.DocumentElement.AppendChild($localAppx)
+        }
+        $appxRule = $_ProfileHelpers.NewAppLockerFilePublisherRule($localDoc, 'Allow all signed packaged apps', $managedMarker, 'Allow', $everyoneSid)
+        [void]$localAppx.AppendChild($appxRule)
+    }
+
+    foreach ($target in $blocked) {
+        $rule = $_ProfileHelpers.NewAppLockerFilePathRule($localDoc, "Block $($target.FileName)", $managedMarker, 'Deny', $everyoneSid, $target.RulePath)
+        [void]$localExe.AppendChild($rule)
+    }
+
+    # Back up the policy exactly as it was before the change.
+    if (-not (Test-Path -LiteralPath $BackupDirectory)) {
+        $null = New-Item -ItemType Directory -Path $BackupDirectory -Force
+    }
+    $backupPath = Join-Path $BackupDirectory ("AppLocker-backup-{0}.xml" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [System.IO.File]::WriteAllText($backupPath, $local.Raw, [System.Text.UTF8Encoding]::new($false))
+
+    $policyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("AppLocker-{0}.xml" -f [guid]::NewGuid().ToString('N'))
+    [System.IO.File]::WriteAllText($policyFile, $localDoc.OuterXml, [System.Text.UTF8Encoding]::new($false))
+    try {
+        Set-AppLockerPolicy -XmlPolicy $policyFile -ErrorAction Stop
+    }
+    finally {
+        Remove-Item -LiteralPath $policyFile -Force -ErrorAction SilentlyContinue
+    }
+
+    # AppLocker enforcement depends on the Application Identity service.
+    $service = Get-Service -Name 'AppIDSvc' -ErrorAction SilentlyContinue
+    if (-not $service) {
+        Write-Warning 'The Application Identity service (AppIDSvc) was not found; AppLocker rules may not be enforced.'
+    }
+    else {
+        if ($PersistServiceStartup -and $service.StartType -ne 'Disabled') {
+            try {
+                Set-Service -Name 'AppIDSvc' -StartupType Automatic -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "Could not set the Application Identity service to start automatically: $($_.Exception.Message)"
+            }
+        }
+        elseif ($service.StartType -eq 'Disabled') {
+            Write-Warning 'The Application Identity service is disabled; AppLocker rules will not be enforced.'
+        }
+        if ($service.Status -ne 'Running') {
+            try {
+                Start-Service -Name 'AppIDSvc' -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "Could not start the Application Identity service: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    if (-not $NoGroupPolicyRefresh) {
+        & gpupdate.exe /force | Out-Null
+    }
+
+    $effectiveAfter = Read-AppLockerPolicy -Effective
+    $effectiveExeAfter = $_ProfileHelpers.GetAppLockerRuleCollection($effectiveAfter.Document, 'Exe')
+    $modeAfter = if ($effectiveExeAfter) { $effectiveExeAfter.GetAttribute('EnforcementMode') } else { 'NotConfigured' }
+
+    $decision = $null
+    if ($VerifyPath) {
+        if (-not (Test-Path -LiteralPath $VerifyPath)) {
+            throw "VerifyPath does not exist: $VerifyPath"
+        }
+        $decision = Get-AppLockerPolicy -Effective |
+            Test-AppLockerPolicy -Path $VerifyPath -User "$env:USERDOMAIN\$env:USERNAME"
+    }
+
+    Write-Host ''
+    Write-Host ("Blocked: {0}" -f ($blocked.FileName -join ', ')) -ForegroundColor Green
+    if ($alreadyBlocked.Count -gt 0) {
+        Write-Host ("Already blocked: {0}" -f ($alreadyBlocked -join ', ')) -ForegroundColor DarkGray
+    }
+    Write-Host ("EXE enforcement mode: {0}" -f $modeAfter) -ForegroundColor DarkGray
+    Write-Host ("Policy backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+    if ($decision) {
+        Write-Host ("Verify {0}: {1}" -f $VerifyPath, $decision.PolicyDecision) -ForegroundColor DarkGray
+    }
+
+    return [pscustomobject]@{
+        Action           = 'Blocked'
+        BlockedFiles     = @($blocked.FileName)
+        BlockedPaths     = @($blocked.RulePath)
+        AlreadyBlocked   = @($alreadyBlocked)
+        BackupPath       = $backupPath
+        EnforcementMode  = $modeAfter
+        Verification     = $(if ($decision) { $decision.PolicyDecision } else { $null })
+    }
+}
+
+function Remove-AppLockerBlock {
+    <#
+.SYNOPSIS
+    Removes AppLocker executable filename blocks from the local policy.
+
+.DESCRIPTION
+    Deletes the EXE Deny rules that match the given file names, rule names, or
+    rule ids, and drops the allow-all and packaged-app rules that this profile
+    added once no Deny rule is left. Rules that were not created by
+    Add-AppLockerBlock are kept unless -Force is given, so hand-written policy
+    is never removed by accident.
+
+.PARAMETER Name
+    File name(s), rule name(s), or rule id(s) of the blocks to remove.
+
+.PARAMETER Force
+    Also remove matching rules that Add-AppLockerBlock did not create.
+
+.PARAMETER BackupDirectory
+    Directory that receives a copy of the local policy before it is changed.
+    Defaults to the user temp directory.
+
+.PARAMETER NoGroupPolicyRefresh
+    Skip the gpupdate refresh that makes the change effective.
+
+.EXAMPLE
+    PS C:\> Remove-AppLockerBlock -Name example.exe
+    Removes the filename block for example.exe.
+
+.EXAMPLE
+    PS C:\> Remove-AppLockerBlock -Name example.exe -Force
+    Removes the block even when it was created outside this profile.
+
+.OUTPUTS
+    A summary object describing what was removed.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+
+    Requires an elevated PowerShell session.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string[]]$Name,
+
+        [switch]$Force,
+
+        [string]$BackupDirectory = $env:TEMP,
+
+        [switch]$NoGroupPolicyRefresh
+    )
+
+    $ErrorActionPreference = 'Stop'
+
+    if (-not (Test-IsAdministrator)) {
+        throw 'Remove-AppLockerBlock requires an elevated PowerShell session. Re-run as Administrator.'
+    }
+
+    Import-Module AppLocker -ErrorAction Stop
+
+    $managedMarker = $_AppLockerInternal.ManagedMarker
+
+    $local = Read-AppLockerPolicy
+    $effective = Read-AppLockerPolicy -Effective
+    $localDoc = $local.Document
+
+    $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Exe')
+    $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Appx')
+
+    $removed = @()
+    $kept = @()
+
+    if ($localExe) {
+        foreach ($rule in @($_ProfileHelpers.GetAppLockerRules($localExe))) {
+            if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
+            $rulePath = $_ProfileHelpers.GetAppLockerRulePath($rule)
+            $leaf = if ($rulePath) { ($rulePath -split '[\\/]')[-1] } else { '' }
+            $isManaged = ($rule.GetAttribute('Description') -like "*$managedMarker*")
+
+            $matches = @($Name | Where-Object {
+                $candidate = $_
+                [string]::Equals($rule.GetAttribute('Id'), $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($rule.GetAttribute('Name'), $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($leaf, $candidate, [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count -gt 0
+            if (-not $matches) { continue }
+
+            if (-not $isManaged -and -not $Force) {
+                $kept += "$($rule.GetAttribute('Name')) ($rulePath)"
+                continue
+            }
+            [void]$localExe.RemoveChild($rule)
+            $removed += $rulePath
+        }
+    }
+
+    if ($removed.Count -eq 0) {
+        if ($kept.Count -gt 0) {
+            Write-Host 'Matching rules were not created by Add-AppLockerBlock and were left in place:' -ForegroundColor Yellow
+            $kept | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+            Write-Host 'Re-run with -Force to remove them anyway.' -ForegroundColor Yellow
+        }
+        else {
+            # Nothing local matched; the block may come from a Group Policy.
+            $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Exe')
+            $report = @($_ProfileHelpers.GetAppLockerBlockReport($effective.Document, $managedMarker, @()))
+            $foreign = @($report | Where-Object { $_.Scope -eq 'GroupPolicy' -and $_.FileName -in $Name })
+            if ($foreign.Count -gt 0) {
+                Write-Host 'The matching block comes from a Group Policy and cannot be removed from this machine:' -ForegroundColor Yellow
+                $foreign | ForEach-Object { Write-Host "  $($_.Path)" -ForegroundColor Yellow }
+            }
+            else {
+                Write-Host 'No matching filename block was found.' -ForegroundColor Yellow
+            }
+        }
+
+        return [pscustomobject]@{
+            Action      = 'NotFound'
+            Removed     = @()
+            Kept        = @($kept)
+            BackupPath  = $null
+        }
+    }
+
+    if (-not $PSCmdlet.ShouldProcess(
+            "AppLocker EXE policy ($($removed -join ', '))",
+            'Remove executable filename block')) {
+        return
+    }
+
+    # The allow-all rule exists only to keep other executables running while a
+    # Deny rule is present, so it goes once no Deny rule is left.
+    $remaining = if ($localExe) { @($_ProfileHelpers.GetAppLockerRules($localExe)) } else { @() }
+    $remainingDeny = @($remaining | Where-Object { $_.GetAttribute('Action') -eq 'Deny' })
+    if ($remainingDeny.Count -eq 0) {
+        foreach ($rule in @($remaining | Where-Object {
+            $_.GetAttribute('Description') -like "*$managedMarker*" -and
+            [string]::Equals($_ProfileHelpers.GetAppLockerRulePath($_), '*', [System.StringComparison]::OrdinalIgnoreCase)
+        })) {
+            [void]$localExe.RemoveChild($rule)
+        }
+        $remaining = @($_ProfileHelpers.GetAppLockerRules($localExe))
+    }
+    if ($remaining.Count -eq 0) {
+        [void]$localDoc.DocumentElement.RemoveChild($localExe)
+        $localExe = $null
+    }
+
+    # The packaged-app rule only matters while EXE rules are enforced locally.
+    if ($null -eq $localExe -and $localAppx) {
+        foreach ($rule in @($_ProfileHelpers.GetAppLockerRules($localAppx) |
+                Where-Object { $_.GetAttribute('Description') -like "*$managedMarker*" })) {
+            [void]$localAppx.RemoveChild($rule)
+        }
+        if (@($_ProfileHelpers.GetAppLockerRules($localAppx)).Count -eq 0) {
+            [void]$localDoc.DocumentElement.RemoveChild($localAppx)
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $BackupDirectory)) {
+        $null = New-Item -ItemType Directory -Path $BackupDirectory -Force
+    }
+    $backupPath = Join-Path $BackupDirectory ("AppLocker-backup-{0}.xml" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [System.IO.File]::WriteAllText($backupPath, $local.Raw, [System.Text.UTF8Encoding]::new($false))
+
+    $policyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("AppLocker-{0}.xml" -f [guid]::NewGuid().ToString('N'))
+    [System.IO.File]::WriteAllText($policyFile, $localDoc.OuterXml, [System.Text.UTF8Encoding]::new($false))
+    try {
+        Set-AppLockerPolicy -XmlPolicy $policyFile -ErrorAction Stop
+    }
+    finally {
+        Remove-Item -LiteralPath $policyFile -Force -ErrorAction SilentlyContinue
+    }
+
+    if (-not $NoGroupPolicyRefresh) {
+        & gpupdate.exe /force | Out-Null
+    }
+
+    Write-Host ''
+    Write-Host ("Removed: {0}" -f ($removed -join ', ')) -ForegroundColor Green
+    if ($kept.Count -gt 0) {
+        Write-Host ("Kept (not created here): {0}" -f ($kept -join ', ')) -ForegroundColor Yellow
+    }
+    Write-Host ("Policy backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+
+    return [pscustomobject]@{
+        Action      = 'Removed'
+        Removed     = @($removed)
+        Kept        = @($kept)
+        BackupPath  = $backupPath
+    }
 }
 
 function Invoke-WindowsUpdateScan {
