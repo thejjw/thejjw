@@ -14335,8 +14335,10 @@ function Get-AppLockerRuleIdList {
         $Collection
     )
 
-    if (-not $Collection) { return @() }
-    return @($_ProfileHelpers.GetAppLockerRules($Collection) |
+    # The leading comma keeps an empty result an array instead of nothing, so
+    # callers always get a string array back.
+    if (-not $Collection) { return , @() }
+    return , @($_ProfileHelpers.GetAppLockerRules($Collection) |
         ForEach-Object { $_.GetAttribute('Id') })
 }
 

@@ -103,6 +103,16 @@ $rules
 
             $report.Count | Should -Be 1
         }
+
+        It 'lists an empty policy without failing' {
+            # A machine without a local policy has no EXE rule collection, so
+            # there are no local rule ids to compare against.
+            Mock Get-AppLockerPolicy { return [xml]'<AppLockerPolicy Version="1" />' }
+
+            $report = @(Add-AppLockerBlock -List)
+
+            $report.Count | Should -Be 0
+        }
     }
 
     Describe 'Add-AppLockerBlock rule building' {
