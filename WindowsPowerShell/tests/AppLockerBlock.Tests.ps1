@@ -513,6 +513,30 @@ $rules
 
 
 
+    Describe 'Update-Profile cache busting' {
+        BeforeAll {
+            $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'
+            $tokens = $null
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                $profilePath, [ref]$tokens, [ref]$errors)
+            $functionAst = $ast.Find({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                        $node.Name -eq 'Update-Profile'
+                }, $true)
+            if (-not $functionAst) { throw 'Could not load Update-Profile from the profile.' }
+        }
+
+        It 'adds a cache-busting query string to the download URL' {
+            # The raw content endpoint caches for several minutes, so a profile
+            # pushed moments ago could be served stale.
+            $text = $functionAst.Extent.Text
+            $text | Should -Match 'cacheBuster'
+            $text | Should -Match ([regex]::Escape('$_ProfileUpdateUrl + $cacheBuster'))
+        }
+    }
+
     Describe 'Listing and reverting rule modes' {
         BeforeAll {
             Mock Test-IsAdministrator { return $true }

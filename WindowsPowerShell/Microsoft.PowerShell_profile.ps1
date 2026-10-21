@@ -9066,7 +9066,11 @@ function Update-Profile {
     try {
         # Download to a temp file first; only overwrite $PROFILE on success to avoid corruption
         $tempFile = [System.IO.Path]::GetTempFileName()
-        $downloadResponse = Invoke-WebRequest2 -Uri $_ProfileUpdateUrl -OutFile $tempFile -UseBasicParsing -PassThru
+        # The raw content endpoint is cached at the CDN for several minutes, so
+        # a profile pushed moments ago can be served stale. A unique query
+        # string forces a fresh fetch from the origin.
+        $cacheBuster = '?cb={0}' -f [guid]::NewGuid().ToString('N')
+        $downloadResponse = Invoke-WebRequest2 -Uri ($_ProfileUpdateUrl + $cacheBuster) -OutFile $tempFile -UseBasicParsing -PassThru
         $contentEncoding = $downloadResponse.Headers['Content-Encoding']
         if (-not $contentEncoding) { $contentEncoding = 'identity' }
         $wireBytes = $downloadResponse.Headers['Content-Length']
