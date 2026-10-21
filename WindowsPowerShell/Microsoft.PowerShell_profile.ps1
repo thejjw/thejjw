@@ -14599,6 +14599,9 @@ function Add-AppLockerBlock {
     files from the same publisher.
 
 
+.PARAMETER Format
+    With -List, print the blocks as a table instead of returning objects.
+
 .PARAMETER List
     Report the filename blocks that currently exist instead of changing them.
 
@@ -14680,6 +14683,9 @@ function Add-AppLockerBlock {
         [switch]$Force,
 
 
+        [Parameter(ParameterSetName = 'List')]
+        [switch]$Format,
+
         [Parameter(ParameterSetName = 'List', Mandatory = $true)]
         [switch]$List,
 
@@ -14720,14 +14726,19 @@ function Add-AppLockerBlock {
         Write-Host ("   Packaged app rules   : {0}" -f $appxCount) -ForegroundColor DarkGray
         Write-Host ("   Filename blocks      : {0}" -f $report.Count) -ForegroundColor DarkGray
 
-        if ($report.Count -gt 0) {
-            Write-Host ''
-            $report | Format-Table FileName, Mode, Action, Scope, Managed, Target -AutoSize | Out-Host
-        }
-        else {
-            Write-Host '   (none)' -ForegroundColor DarkGray
+        if ($Format) {
+            if ($report.Count -gt 0) {
+                Write-Host ''
+                $report | Format-Table FileName, Mode, Action, Scope, Managed, Target -AutoSize | Out-Host
+            }
+            else {
+                Write-Host '   (none)' -ForegroundColor DarkGray
+            }
+            return
         }
 
+        # Without -Format the objects are returned so they can be piped or
+        # filtered; printing them here as well would duplicate the output.
         return $report
     }
 

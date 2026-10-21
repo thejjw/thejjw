@@ -530,6 +530,25 @@ $rules
             Mock Set-AppLockerPolicy { $script:applied.Xml = Get-Content -LiteralPath $XmlPolicy -Raw }
         }
 
+        It 'does not print the table and the objects at the same time' {
+            Mock Get-AppLockerPolicy { return [xml]'<AppLockerPolicy Version="1" />' }
+
+            $output = @(Add-AppLockerBlock -List)
+
+            # Only the objects come back; the summary lines go to the host.
+            $output.Count | Should -Be 0
+        }
+
+        It 'prints the blocks as a table with -Format' {
+            $policyXml = '<AppLockerPolicy Version="1" />'
+            Mock Get-AppLockerPolicy { return [xml]$policyXml }
+
+            $output = @(Add-AppLockerBlock -List -Format)
+
+            # -Format prints the table and returns nothing.
+            $output.Count | Should -Be 0
+        }
+
         It 'reports the mode of each block' {
             Mock Get-AppLockerPolicy {
                 return [xml]@'
