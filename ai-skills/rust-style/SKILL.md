@@ -435,6 +435,8 @@ lints as the machine-checkable form of the rules above.
 | Missing match arm on `#[non_exhaustive]` enum | `non_exhaustive_omitted_patterns` (rustc) |
 
 Use `#[expect(lint)]` over `#[allow(lint)]`, with a justification comment.
+(This comes from the Apollo handbook, not the Google guide -- see
+[Sources and Maintenance](#sources-and-maintenance).)
 
 ## When to use me
 
