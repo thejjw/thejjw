@@ -20,6 +20,8 @@ Reusable agent skill documentation for AI coding environments.
   - Intended for OpenCode and Claude Code.
 - `polish-document`: Refine rough, translated, or inconsistent documents into professional, presentation-ready deliverables.
   - Intended for OpenCode, Claude Code, Antigravity Windows App/IDE, Antigravity CLI, and Codex.
+- `rust-style`: Write, review, and refactor Rust following the Google Rust Style Guide -- ownership and borrowing, API design, traits, imports and naming, error handling, public-API stability, and unsafe code, with an anti-pattern checklist.
+  - Intended for OpenCode, Claude Code, Antigravity Windows App/IDE, Antigravity CLI, and Codex.
 - `session-exporter`: Export the current session conversation history to Markdown.
   - Intended for Antigravity CLI only.
 - `web-search-ddg`: Search current web information using DuckDuckGo with no API key.
