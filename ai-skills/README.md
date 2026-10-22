@@ -8,6 +8,8 @@ Reusable agent skill documentation for AI coding environments.
   - Intended for Antigravity CLI only.
 - `codebase-docs`: Maintain codebase documentation in the `docs/` folder using surgical git-based updates.
   - Intended for OpenCode, Claude Code, Antigravity Windows App/IDE, and Antigravity CLI.
+- `cpp-style`: Write, review, and refactor C++ following the Google C++ Style Guide -- headers and includes, scoping and namespaces, class and function design, ownership and smart pointers, modern C++ features, naming, comments, formatting, and an anti-pattern checklist.
+  - Intended for OpenCode, Claude Code, Antigravity Windows App/IDE, Antigravity CLI, and Codex.
 - `deep-research`: Deep research harness — clarify scope, confirm a research plan, fan out web searches, verify claims, and deliver a cited long-form report.
   - Intended for all AI coding agents.
 - `deepseek-usage-query`: Query DeepSeek API balance and estimate token budget from current pricing.
