@@ -695,3 +695,385 @@ Describe 'Install-AiTools npm packages' {
         }
     }
 }
+
+Describe 'Install-AiTools REA toolchain' {
+    BeforeAll {
+        $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $profilePath,
+            [ref]$tokens,
+            [ref]$errors
+        )
+        if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
+
+        $configAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$_AiToolsInternal'
+        }, $true)
+        if (-not $configAst) { throw 'Could not load $_AiToolsInternal from the profile.' }
+
+        function Get-ProfileFunctionText {
+            param([string]$Name)
+            $found = $ast.Find({
+                param($node)
+                $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                    $node.Name -eq $Name
+            }, $true)
+            if (-not $found) { throw "Could not load $Name from the profile." }
+            return $found.Extent.Text
+        }
+
+        . ([scriptblock]::Create((Get-ProfileFunctionText 'Get-JdkInstallation')))
+        . ([scriptblock]::Create((Get-ProfileFunctionText 'Install-ReaToolchain')))
+        . ([scriptblock]::Create((Get-ProfileFunctionText 'Set-UserEnvironmentValue')))
+        . ([scriptblock]::Create($configAst.Extent.Text))
+
+        $script:originalReaConfig = $_AiToolsInternal
+        $script:reaEnvNames = @('GHIDRA_INSTALL_DIR', 'JAVA_HOME', 'REA_ANALYSIS_PROVIDER')
+        $script:reaEnvBackup = @{}
+        foreach ($name in $script:reaEnvNames) {
+            $script:reaEnvBackup[$name] = @{
+                User    = [Environment]::GetEnvironmentVariable($name, 'User')
+                Process = [Environment]::GetEnvironmentVariable($name, 'Process')
+            }
+        }
+        $script:reaPathBackup = $env:PATH
+
+        # Stubs for the commands the stage shells out to. The stubs record their
+        # arguments so the tests can assert on them.
+        function Save-WebFile {
+            [CmdletBinding()]
+            param($Uri, $OutFile, [switch]$Force, [switch]$Quiet)
+        }
+        function Invoke-WingetPackage {
+            [CmdletBinding()]
+            param($Action, $PackageId, [switch]$UserScope, [switch]$Interactive, [switch]$NoUpgrade)
+        }
+        function npm {
+            [CmdletBinding()]
+            param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
+            $script:reaNpmCalls += , @($ArgumentList)
+            # A completed global install makes the CLI resolvable.
+            $script:reaPresent = $true
+            $global:LASTEXITCODE = 0
+        }
+        function rea {
+            [CmdletBinding()]
+            param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
+            $script:reaCalls += , @($ArgumentList)
+            '{"healthy":true}'
+        }
+        function node {
+            [CmdletBinding()]
+            param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
+            'v24.11.0'
+        }
+    }
+
+    AfterAll {
+        foreach ($name in $script:reaEnvNames) {
+            $backup = $script:reaEnvBackup[$name]
+            if ([Environment]::GetEnvironmentVariable($name, 'User') -ne $backup.User) {
+                [Environment]::SetEnvironmentVariable($name, $backup.User, 'User')
+            }
+            if ([Environment]::GetEnvironmentVariable($name, 'Process') -ne $backup.Process) {
+                [Environment]::SetEnvironmentVariable($name, $backup.Process, 'Process')
+            }
+        }
+        $env:PATH = $script:reaPathBackup
+        $_AiToolsInternal = $script:originalReaConfig
+    }
+
+    BeforeEach {
+        # A disposable workspace holds both the extracted Ghidra tree and the
+        # archive fixture the mocked downloader copies into place.
+        $script:reaWorkspace = Join-Path ([System.IO.Path]::GetTempPath()) ('rea-stage-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:reaWorkspace -Force | Out-Null
+
+        $fixtureRoot = Join-Path $script:reaWorkspace 'fixture'
+        $fixtureGhidra = Join-Path $fixtureRoot 'ghidra_9.9.9_PUBLIC'
+        New-Item -ItemType Directory -Path $fixtureGhidra -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $fixtureGhidra 'ghidraRun.bat') -Value '@echo off'
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $script:reaZip = Join-Path $script:reaWorkspace 'ghidra_9.9.9_PUBLIC_20260101.zip'
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($fixtureRoot, $script:reaZip)
+        $script:reaZipSha = (Get-FileHash -LiteralPath $script:reaZip -Algorithm SHA256).Hash.ToLowerInvariant()
+        $script:reaZipSize = (Get-Item -LiteralPath $script:reaZip).Length
+
+        # Copy the configuration so the shared profile config is never mutated.
+        $config = @{}
+        foreach ($key in $script:originalReaConfig.Keys) { $config[$key] = $script:originalReaConfig[$key] }
+        $ghidra = @{}
+        foreach ($key in $script:originalReaConfig.Ghidra.Keys) { $ghidra[$key] = $script:originalReaConfig.Ghidra[$key] }
+        $ghidra['Root'] = $script:reaWorkspace
+        $config['Ghidra'] = $ghidra
+        $_AiToolsInternal = $config
+
+        foreach ($name in $script:reaEnvNames) {
+            [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+        }
+
+        $script:reaNpmCalls = @()
+        $script:reaCalls = @()
+        $script:reaEnvWrites = @()
+        $script:reaPresent = $false
+
+        Mock Write-Host {}
+        Mock Write-Warning {}
+        # The real setter writes to the user registry, which is slow and mutates
+        # the machine; the scope semantics are covered by their own test.
+        Mock Set-UserEnvironmentValue {
+            $script:reaEnvWrites += [pscustomobject]@{ Name = $Name; Value = $Value }
+        }
+        Mock Get-JdkInstallation {
+            return [pscustomobject]@{ Home = 'C:\Program Files\Microsoft\jdk-25.0.0.1-hotspot'; Major = 25 }
+        }
+        Mock Invoke-RestMethod {
+            return [pscustomobject]@{
+                tag_name = 'Ghidra_9.9.9_build'
+                body     = 'SHA-256: `' + $script:reaZipSha + '`'
+                assets   = @([pscustomobject]@{
+                        name                 = 'ghidra_9.9.9_PUBLIC_20260101.zip'
+                        size                 = $script:reaZipSize
+                        browser_download_url = 'https://example.invalid/ghidra_9.9.9_PUBLIC_20260101.zip'
+                    })
+            }
+        }
+        Mock Save-WebFile { Copy-Item -LiteralPath $script:reaZip -Destination $OutFile -Force }
+        Mock Invoke-WingetPackage { return 0 }
+        Mock Get-Command {
+            if ($Name -eq 'rea' -and $script:reaPresent) {
+                return [pscustomobject]@{ Name = 'rea'; Source = 'C:\npm\rea.cmd' }
+            }
+            if ($Name -eq 'node') { return [pscustomobject]@{ Name = 'node'; Source = 'C:\node\node.exe' } }
+            return $null
+        }
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $script:reaWorkspace) {
+            Remove-Item -LiteralPath $script:reaWorkspace -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'extracts the resolved Ghidra release and points REA at it' {
+        Install-ReaToolchain
+
+        $target = Join-Path $script:reaWorkspace 'ghidra_9.9.9_PUBLIC'
+        Test-Path -LiteralPath (Join-Path $target 'ghidraRun.bat') | Should -BeTrue
+
+        $writes = @{}
+        foreach ($write in $script:reaEnvWrites) { $writes[$write.Name] = $write.Value }
+        $writes['GHIDRA_INSTALL_DIR'] | Should -Be $target
+        $writes['REA_ANALYSIS_PROVIDER'] | Should -Be 'ghidra'
+        $writes['JAVA_HOME'] | Should -Be 'C:\Program Files\Microsoft\jdk-25.0.0.1-hotspot'
+    }
+
+    It 'installs the REA CLI globally and never wires an agent' {
+        Install-ReaToolchain
+
+        $script:reaNpmCalls | Should -HaveCount 1
+        ($script:reaNpmCalls[0] -join ' ') | Should -Be 'install --global rea-agents'
+
+        $reaCommand = ($script:reaCalls | ForEach-Object { $_ -join ' ' }) -join '; '
+        $reaCommand | Should -Match 'doctor'
+        $reaCommand | Should -Not -Match 'setup'
+    }
+
+    It 'skips the npm install when the REA CLI is already present' {
+        $script:reaPresent = $true
+
+        Install-ReaToolchain
+
+        $script:reaNpmCalls | Should -HaveCount 0
+    }
+
+    It 'installs the machine-scoped JDK when no supported one is present' {
+        Mock Get-JdkInstallation { return $null }
+
+        Install-ReaToolchain
+
+        Should -Invoke Invoke-WingetPackage -Times 1 -Exactly -ParameterFilter {
+            $PackageId -eq 'Microsoft.OpenJDK.25' -and -not $UserScope
+        }
+    }
+
+    It 'rejects an archive whose digest does not match the release' {
+        Mock Invoke-RestMethod {
+            return [pscustomobject]@{
+                tag_name = 'Ghidra_9.9.9_build'
+                body     = 'SHA-256: `0000000000000000000000000000000000000000000000000000000000000000`'
+                assets   = @([pscustomobject]@{
+                        name                 = 'ghidra_9.9.9_PUBLIC_20260101.zip'
+                        size                 = $script:reaZipSize
+                        browser_download_url = 'https://example.invalid/ghidra_9.9.9_PUBLIC_20260101.zip'
+                    })
+            }
+        }
+
+        Install-ReaToolchain
+
+        Should -Invoke Write-Warning -ParameterFilter { $Message -like '*SHA-256 mismatch*' }
+        Test-Path -LiteralPath (Join-Path $script:reaWorkspace 'ghidra_9.9.9_PUBLIC') | Should -BeFalse
+        @($script:reaEnvWrites | Where-Object { $_.Name -eq 'GHIDRA_INSTALL_DIR' }) | Should -HaveCount 0
+    }
+
+    It 'keeps an existing analysis provider instead of overwriting it' {
+        $env:REA_ANALYSIS_PROVIDER = 'hopper'
+
+        Install-ReaToolchain
+
+        @($script:reaEnvWrites | Where-Object { $_.Name -eq 'REA_ANALYSIS_PROVIDER' }) | Should -HaveCount 0
+    }
+
+    It 'prints a usage guide that leaves agent registration to the user' {
+        Install-ReaToolchain
+
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*ghidraRun.bat*' }
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*rea doctor*' }
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*rea setup*' }
+    }
+}
+
+Describe 'Install-AiTools -REA switch' {
+    BeforeAll {
+        $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $profilePath,
+            [ref]$tokens,
+            [ref]$errors
+        )
+        if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
+
+        $configAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$_AiToolsInternal'
+        }, $true)
+        $installerAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Install-AiTools'
+        }, $true)
+        $inventoryAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Get-GlobalNpmInventory'
+        }, $true)
+        if (-not $inventoryAst) { throw 'Could not load Get-GlobalNpmInventory from the profile.' }
+        if (-not $installerAst) { throw 'Could not load Install-AiTools from the profile.' }
+        . ([scriptblock]::Create($inventoryAst.Extent.Text))
+        . ([scriptblock]::Create($configAst.Extent.Text))
+        . ([scriptblock]::Create($installerAst.Extent.Text))
+        $script:originalSwitchConfig = $_AiToolsInternal
+
+        # Settings helpers and the REA stage live outside the isolated function AST.
+        function Install-QwenSettings {}
+        function Install-KimiSettings {}
+        function Install-GrokSettings {}
+        function Install-ReaToolchain {}
+        function Add-UserPathEntry { param([string]$Path) }
+        function Test-IsAdministrator { return $false }
+        function winget {
+            param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
+        }
+        function npm {
+            param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
+        }
+    }
+
+    AfterAll {
+        $_AiToolsInternal = $script:originalSwitchConfig
+    }
+
+    BeforeEach {
+        $_AiToolsInternal = @{
+            PowerShellModules      = @()
+            WingetPackages         = @()
+            ExtendedWingetPackages = @()
+            SdkWingetPackages      = @()
+            DbWingetPackages       = @()
+            MoreAiWingetPackages   = @()
+            DockerWingetPackage    = 'Docker.DockerDesktop'
+            PodmanWingetPackage    = 'RedHat.Podman'
+            GitWingetPackage       = 'Git.Git'
+            NpmPackages            = @()
+            MoreAiNpmPackages      = @()
+            Urls                   = @{}
+            ReaNpmPackage          = 'rea-agents'
+            ReaGhidraJdkWingetPackage = 'Microsoft.OpenJDK.25'
+            Ghidra                 = @{ Version = '12.1.4'; Root = 'C:\Tools'; Bytes = 1 }
+        }
+
+        Mock Write-Host {}
+        Mock Write-Warning {}
+        Mock Get-Command {
+            if ($Name -in @('winget', 'npm', 'opencode')) { return [pscustomobject]@{ Name = $Name } }
+            return $null
+        }
+        Mock winget { $global:LASTEXITCODE = 0; return @() }
+        Mock npm { $global:LASTEXITCODE = 0 }
+        Mock powershell {}
+        Mock Start-Process {}
+        Mock Install-ReaToolchain {}
+    }
+
+    It 'runs the REA stage when -REA is supplied' {
+        Install-AiTools -Auto -REA
+
+        Should -Invoke Install-ReaToolchain -Times 1 -Exactly
+    }
+
+    It 'skips the REA stage by default' {
+        Install-AiTools -Auto
+
+        Should -Invoke Install-ReaToolchain -Times 0 -Exactly
+    }
+
+    It 'runs the REA stage through -All' {
+        Install-AiTools -Auto -All
+
+        Should -Invoke Install-ReaToolchain -Times 1 -Exactly
+    }
+}
+
+Describe 'Set-UserEnvironmentValue' {
+    BeforeAll {
+        $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $profilePath,
+            [ref]$tokens,
+            [ref]$errors
+        )
+        if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
+
+        $setterAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Set-UserEnvironmentValue'
+        }, $true)
+        if (-not $setterAst) { throw 'Could not load Set-UserEnvironmentValue from the profile.' }
+        . ([scriptblock]::Create($setterAst.Extent.Text))
+
+        $script:envTestName = 'OMP_PROFILE_ENV_TEST'
+    }
+
+    AfterAll {
+        [Environment]::SetEnvironmentVariable($script:envTestName, $null, 'User')
+        [Environment]::SetEnvironmentVariable($script:envTestName, $null, 'Process')
+    }
+
+    It 'writes the value to the user scope and to the current process' {
+        Set-UserEnvironmentValue -Name $script:envTestName -Value 'probe'
+
+        [Environment]::GetEnvironmentVariable($script:envTestName, 'User') | Should -Be 'probe'
+        [Environment]::GetEnvironmentVariable($script:envTestName, 'Process') | Should -Be 'probe'
+    }
+}

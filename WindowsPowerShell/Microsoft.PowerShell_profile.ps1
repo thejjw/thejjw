@@ -505,6 +505,302 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         }
     }
 
+    # --- AppLocker policy helpers -------------------------------------------
+    # Pure XML manipulation of an AppLocker policy document. These helpers never
+    # touch the live policy; the public helpers own reading and writing it.
+
+    # Returns the rule collection element of the given type (for example 'Exe'),
+    # or $null when the document does not define one.
+    function GetAppLockerRuleCollection {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)][string]$Type
+        )
+
+        $collections = @($Document.DocumentElement.ChildNodes |
+            Where-Object {
+                $_.NodeType -eq [System.Xml.XmlNodeType]::Element -and
+                $_.GetAttribute('Type') -eq $Type
+            })
+        if ($collections.Count -eq 0) { return $null }
+
+        # XmlElement is enumerable, so the comma stops PowerShell unrolling it.
+        return ,$collections[0]
+    }
+
+    # Returns the rule elements (FilePathRule, FilePublisherRule, FileHashRule)
+    # defined in an AppLocker rule collection.
+    function GetAppLockerRules {
+        param(
+            [Parameter(Mandatory = $true)]$Collection
+        )
+
+        $rules = @($Collection.ChildNodes |
+            Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+        return ,$rules
+    }
+
+    # Returns the path condition of an AppLocker FilePathRule, or $null when the
+    # rule does not use a path condition.
+    function GetAppLockerRulePath {
+        param(
+            [Parameter(Mandatory = $true)]$Rule
+        )
+
+        $condition = @($Rule.Conditions.FilePathCondition)[0]
+        if (-not $condition) { return $null }
+        return [string]$condition.GetAttribute('Path')
+    }
+
+    # Builds a FilePathRule element inside the given AppLocker policy document.
+    function NewAppLockerFilePathRule {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][string]$Description,
+            [Parameter(Mandatory = $true)][string]$Action,
+            [Parameter(Mandatory = $true)][string]$UserOrGroupSid,
+            [Parameter(Mandatory = $true)][string]$Path
+        )
+
+        $rule = $Document.CreateElement('FilePathRule')
+        $rule.SetAttribute('Id', [guid]::NewGuid().ToString())
+        $rule.SetAttribute('Name', $Name)
+        $rule.SetAttribute('Description', $Description)
+        $rule.SetAttribute('UserOrGroupSid', $UserOrGroupSid)
+        $rule.SetAttribute('Action', $Action)
+
+        $conditions = $Document.CreateElement('Conditions')
+        $condition = $Document.CreateElement('FilePathCondition')
+        $condition.SetAttribute('Path', $Path)
+        [void]$conditions.AppendChild($condition)
+        [void]$rule.AppendChild($conditions)
+
+        return ,$rule
+    }
+
+    # Builds a FilePublisherRule element inside the given AppLocker policy
+    # document. Used for the packaged-apps baseline that keeps Store apps
+    # runnable while executable rules are enforced.
+    function NewAppLockerFilePublisherRule {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][string]$Description,
+            [Parameter(Mandatory = $true)][string]$Action,
+            [Parameter(Mandatory = $true)][string]$UserOrGroupSid,
+            [string]$PublisherName = '*',
+            [string]$ProductName = '*',
+            [string]$BinaryName = '*'
+        )
+
+        $rule = $Document.CreateElement('FilePublisherRule')
+        $rule.SetAttribute('Id', [guid]::NewGuid().ToString())
+        $rule.SetAttribute('Name', $Name)
+        $rule.SetAttribute('Description', $Description)
+        $rule.SetAttribute('UserOrGroupSid', $UserOrGroupSid)
+        $rule.SetAttribute('Action', $Action)
+
+        $conditions = $Document.CreateElement('Conditions')
+        $condition = $Document.CreateElement('FilePublisherCondition')
+        $condition.SetAttribute('PublisherName', $PublisherName)
+        $condition.SetAttribute('ProductName', $ProductName)
+        $condition.SetAttribute('BinaryName', $BinaryName)
+        $versionRange = $Document.CreateElement('BinaryVersionRange')
+        $versionRange.SetAttribute('LowSection', '*')
+        $versionRange.SetAttribute('HighSection', '*')
+        [void]$condition.AppendChild($versionRange)
+        [void]$conditions.AppendChild($condition)
+        [void]$rule.AppendChild($conditions)
+
+        return ,$rule
+    }
+
+    # Builds a rule collection element of the given type inside the given
+    # AppLocker policy document.
+    function NewAppLockerRuleCollection {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)][string]$Type,
+            [Parameter(Mandatory = $true)][string]$EnforcementMode
+        )
+
+        $collection = $Document.CreateElement('RuleCollection')
+        $collection.SetAttribute('Type', $Type)
+        $collection.SetAttribute('EnforcementMode', $EnforcementMode)
+
+        return ,$collection
+    }
+
+    # Normalizes a hash to the form AppLocker's Data attribute expects.
+    # Get-AppLockerFileInformation reports "<algorithm> 0x<hex>", but the
+    # algorithm belongs in the Type attribute and the Data attribute holds
+    # only the hex value.
+    function ConvertToAppLockerHashValue {
+        param(
+            [Parameter(Mandatory = $true)][string]$Hash
+        )
+
+        $value = $Hash.Trim()
+        if ($value -match '^(?i:SHA1|SHA256|SHA384|SHA512)\s+(.+)$') { $value = $Matches[1] }
+        return $value
+    }
+
+    # Builds a FileHashRule element inside the given AppLocker policy document.
+    # The hash must be AppLocker's own Authenticode PE image hash (the one
+    # Get-AppLockerFileInformation reports), not the flat file hash from
+    # Get-FileHash; the flat hash never matches.
+    function NewAppLockerFileHashRule {
+        param(
+            [Parameter(Mandatory = $true)][xml]$Document,
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][string]$Description,
+            [Parameter(Mandatory = $true)][string]$UserOrGroupSid,
+            [Parameter(Mandatory = $true)][string]$Hash,
+            [string]$SourceFileName = '',
+            [int64]$SourceFileLength = 0
+        )
+
+        $rule = $Document.CreateElement('FileHashRule')
+        $rule.SetAttribute('Id', [guid]::NewGuid().ToString())
+        $rule.SetAttribute('Name', $Name)
+        $rule.SetAttribute('Description', $Description)
+        $rule.SetAttribute('UserOrGroupSid', $UserOrGroupSid)
+        $rule.SetAttribute('Action', 'Deny')
+
+        $conditions = $Document.CreateElement('Conditions')
+        $condition = $Document.CreateElement('FileHashCondition')
+        $fileHash = $Document.CreateElement('FileHash')
+        $fileHash.SetAttribute('Type', 'SHA256')
+        $fileHash.SetAttribute('Data', (ConvertToAppLockerHashValue -Hash $Hash))
+        $fileHash.SetAttribute('SourceFileName', $SourceFileName)
+        $fileHash.SetAttribute('SourceFileLength', [string]$SourceFileLength)
+        [void]$condition.AppendChild($fileHash)
+        [void]$conditions.AppendChild($condition)
+        [void]$rule.AppendChild($conditions)
+
+        return ,$rule
+    }
+
+    # Describes the condition of an AppLocker rule, whatever its kind.
+    # The returned object carries the mode that produced the rule plus the
+    # fields that identify what the rule matches.
+    function GetAppLockerRuleInfo {
+        param(
+            [Parameter(Mandatory = $true)]$Rule
+        )
+
+        $action = $Rule.GetAttribute('Action')
+        $description = $Rule.GetAttribute('Description')
+        $info = [pscustomobject]@{
+            RuleId      = $Rule.GetAttribute('Id')
+            Name        = $Rule.GetAttribute('Name')
+            Description = $description
+            Action      = $action
+            Mode        = 'Unknown'
+            Target      = ''
+            Path        = $null
+            Hash        = $null
+            Publisher   = $null
+            ProductName = $null
+            BinaryName  = $null
+        }
+
+        if ($Rule.LocalName -eq 'FilePathRule') {
+            $info.Mode = 'Path'
+            $info.Path = GetAppLockerRulePath -Rule $Rule
+            $info.Target = $info.Path
+        }
+        elseif ($Rule.LocalName -eq 'FileHashRule') {
+            $info.Mode = 'Hash'
+            $fileHash = @($Rule.Conditions.FileHashCondition.FileHash)[0]
+            if ($fileHash) {
+                $info.Hash = $fileHash.GetAttribute('Data')
+                $sourceName = $fileHash.GetAttribute('SourceFileName')
+                $info.Target = if ($sourceName) { $sourceName } else { $info.Hash }
+            }
+        }
+        elseif ($Rule.LocalName -eq 'FilePublisherRule') {
+            $info.Mode = 'Publisher'
+            $publisher = @($Rule.Conditions.FilePublisherCondition)[0]
+            if ($publisher) {
+                $info.Publisher = $publisher.GetAttribute('PublisherName')
+                $info.ProductName = $publisher.GetAttribute('ProductName')
+                $info.BinaryName = $publisher.GetAttribute('BinaryName')
+                $info.Target = $info.BinaryName
+            }
+        }
+
+        return $info
+    }
+
+    # Returns the rules of the effective policy that the local policy does
+    # not have, which are the ones a Group Policy contributes.
+    #
+    # The effective policy is a snapshot that only catches up with the local
+    # policy after a Group Policy refresh, so a rule this profile created and
+    # that has since been removed from the local policy can still be in the
+    # snapshot. Those rules carry the managed marker, so they are left out.
+    function GetAppLockerDomainRules {
+        param(
+            [Parameter(Mandatory = $true)]$Rules,
+            [string[]] $LocalRuleIds = @(),
+            [string] $ManagedMarker = ''
+        )
+
+        $domain = @($Rules | Where-Object {
+            $LocalRuleIds -notcontains $_.GetAttribute('Id') -and
+            $_.GetAttribute('Description') -notlike "*$ManagedMarker*"
+        })
+        return ,$domain
+    }
+
+    # Describes the executable filename blocks declared by a set of AppLocker
+    # rules. Folder rules (paths ending in a wildcard) are not filename blocks
+    # and are left out.
+    function GetAppLockerBlockReport {
+        param(
+            [Parameter(Mandatory = $true)]$Rules,
+            [string] $ManagedMarker = '',
+            [string[]] $LocalRuleIds = @()
+        )
+
+        $rows = @()
+        foreach ($rule in @($Rules)) {
+            if (-not $rule) { continue }
+            if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
+            $info = GetAppLockerRuleInfo -Rule $rule
+
+            # Only file-name rules count; a trailing wildcard targets a folder.
+            if ($info.Mode -eq 'Path') {
+                $leaf = ($info.Path -split '[\\/]')[-1]
+                if (-not $leaf -or $leaf.Contains('*') -or $leaf.Contains('?')) { continue }
+                $fileName = $leaf
+            }
+            else {
+                $fileName = $info.Target
+            }
+            if (-not $fileName) { continue }
+
+            $rows += [pscustomobject]@{
+                RuleId      = $info.RuleId
+                Name        = $info.Name
+                Description = $info.Description
+                Action      = $info.Action
+                Mode        = $info.Mode
+                FileName    = $fileName
+                Target      = $info.Target
+                Path        = $info.Path
+                Hash        = $info.Hash
+                Publisher   = $info.Publisher
+                Managed     = [bool]($ManagedMarker -and ($info.Description -like "*$ManagedMarker*"))
+                Scope       = $(if ($LocalRuleIds -contains $info.RuleId) { 'Local' } else { 'GroupPolicy' })
+            }
+        }
+
+        return ,$rows
+    }
+
     $profileHelperFunctions = @(
         'ResolveWUResultCode',
         'ResolveWUHResult',
@@ -521,7 +817,18 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         'ShowFontArchive',
         'Expand7ZipArchive',
         'NewTemporarySshIdentity',
-        'RemoveTemporarySshIdentity'
+        'RemoveTemporarySshIdentity',
+        'GetAppLockerRuleCollection',
+        'GetAppLockerRules',
+        'GetAppLockerRulePath',
+        'GetAppLockerDomainRules',
+        'NewAppLockerFilePathRule',
+        'NewAppLockerFilePublisherRule',
+        'NewAppLockerFileHashRule',
+        'NewAppLockerRuleCollection',
+        'GetAppLockerRuleInfo',
+        'ConvertToAppLockerHashValue',
+        'GetAppLockerBlockReport'
     )
     Export-ModuleMember -Function $profileHelperFunctions
 }
@@ -876,6 +1183,26 @@ $_AiToolsInternal = @{
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
         OmpTps        = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
     }
+
+    # REA reverse-engineering toolchain used by the -REA stage of Install-AiTools.
+    # The Ghidra release is resolved from the GitHub releases API at run time; the
+    # constants below are the fallback used when the API cannot be reached.
+    ReaNpmPackage    = 'rea-agents'
+    # Same id as SdkWingetPackages; the OpenJDK MSI is per-machine, so the REA
+    # stage installs it without --scope user.
+    ReaGhidraJdkWingetPackage = 'Microsoft.OpenJDK.25'
+    Ghidra           = @{
+        Version      = '12.1.4'
+        AssetName    = 'ghidra_12.1.4_PUBLIC_20260921.zip'
+        Url          = 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip'
+        Bytes        = 569649598
+        Sha256       = 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db'
+        Root         = 'C:\Tools'
+        # Ghidra's own application.properties declares application.java.min=21
+        # with no maximum, so any JDK >= 21 satisfies its launcher check.
+        JavaMajorMin = 21
+    }
+
     NpmPackages            = @(
         '@earendil-works/pi-coding-agent',
         '@oh-my-pi/pi-coding-agent',
@@ -907,7 +1234,8 @@ $_AiToolsInternal = @{
         @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
         @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
         @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
-        @{ Label = 'cursor';   Cmd = 'agent';    Probe = 'cursor-agent'; Args = @('update') }
+        @{ Label = 'cursor';   Cmd = 'agent';    Probe = 'cursor-agent'; Args = @('update') },
+        @{ Label = 'rea';      Cmd = 'rea';      Args = @('update') }
     )
 }
 
@@ -8758,7 +9086,11 @@ function Update-Profile {
     try {
         # Download to a temp file first; only overwrite $PROFILE on success to avoid corruption
         $tempFile = [System.IO.Path]::GetTempFileName()
-        $downloadResponse = Invoke-WebRequest2 -Uri $_ProfileUpdateUrl -OutFile $tempFile -UseBasicParsing -PassThru
+        # The raw content endpoint is cached at the CDN for several minutes, so
+        # a profile pushed moments ago can be served stale. A unique query
+        # string forces a fresh fetch from the origin.
+        $cacheBuster = '?cb={0}' -f [guid]::NewGuid().ToString('N')
+        $downloadResponse = Invoke-WebRequest2 -Uri ($_ProfileUpdateUrl + $cacheBuster) -OutFile $tempFile -UseBasicParsing -PassThru
         $contentEncoding = $downloadResponse.Headers['Content-Encoding']
         if (-not $contentEncoding) { $contentEncoding = 'identity' }
         $wireBytes = $downloadResponse.Headers['Content-Length']
@@ -9275,6 +9607,32 @@ function Install-AiSkills {
     }
 }
 
+function Set-UserEnvironmentValue {
+    <#
+.SYNOPSIS
+    Writes an environment variable to the user scope and the current process.
+.DESCRIPTION
+    Persists the value in the user environment so it survives new shells, and
+    applies it to the running process so the value is usable immediately.
+.PARAMETER Name
+    Environment variable name.
+.PARAMETER Value
+    Environment variable value. An empty value removes the variable.
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string] $Value
+    )
+
+    [Environment]::SetEnvironmentVariable($Name, $Value, 'User')
+    [Environment]::SetEnvironmentVariable($Name, $Value, 'Process')
+}
+
 function Add-UserPathEntry {
     <#
 .SYNOPSIS
@@ -9422,6 +9780,334 @@ function Invoke-WingetPackage {
     }
 }
 
+function Get-JdkInstallation {
+    <#
+.SYNOPSIS
+    Finds the newest installed 64-bit JDK at or above a minimum Java major version.
+.DESCRIPTION
+    Inspects JAVA_HOME, the java command on PATH, and the Microsoft Build of OpenJDK
+    folders under Program Files, then reports the newest usable JDK whose javac
+    reports a major version at or above the requested minimum. A directory only
+    counts as a JDK when it contains bin\javac.exe.
+.PARAMETER MinimumMajor
+    Lowest acceptable Java major version (default 21).
+.OUTPUTS
+    A PSCustomObject with Home and Major properties, or $null when no suitable JDK
+    is installed.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param([int]$MinimumMajor = 21)
+
+    $candidates = @()
+    if ($env:JAVA_HOME) { $candidates += $env:JAVA_HOME }
+    $javaCommand = Get-Command java -ErrorAction SilentlyContinue
+    if ($javaCommand -and $javaCommand.Source) {
+        $candidates += (Split-Path -Parent (Split-Path -Parent $javaCommand.Source))
+    }
+    $candidates += @(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Microsoft') -Directory -Filter 'jdk-*' -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.FullName })
+
+    $best = $null
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        if (-not $candidate) { continue }
+        $javac = Join-Path $candidate 'bin\javac.exe'
+        if (-not (Test-Path -LiteralPath $javac)) { continue }
+        $major = 0
+        try {
+            foreach ($line in @(& $javac -version 2>&1)) {
+                if ([string]$line -match 'javac\s+(\d+)') {
+                    $major = [int]$Matches[1]
+                    break
+                }
+            }
+        }
+        catch { $major = 0 }
+        if ($major -ge $MinimumMajor -and (-not $best -or $major -gt $best.Major)) {
+            $best = [pscustomobject]@{ Home = $candidate; Major = $major }
+        }
+    }
+    return $best
+}
+
+function Install-ReaToolchain {
+    <#
+.SYNOPSIS
+    Installs the REA reverse-engineering CLI together with the Ghidra analysis engine.
+
+.DESCRIPTION
+    Installs a 64-bit JDK (Ghidra declares Java 21 as its minimum), downloads the
+    latest published Ghidra release, extracts it under the tools root, and points
+    REA at it through the GHIDRA_INSTALL_DIR, JAVA_HOME and REA_ANALYSIS_PROVIDER
+    environment variables. The REA CLI itself is the 'rea-agents' npm package.
+
+    The stage stops short of agent wiring: 'rea setup' is never run, so no MCP
+    server is registered with any agent. Only the read-only 'rea doctor' report is
+    produced. Existing environment values are preserved; unset variables are filled
+    in, and a changed GHIDRA_INSTALL_DIR is reported.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param()
+
+    $config = $_AiToolsInternal.Ghidra
+    $javaMajorMin = [int]$config.JavaMajorMin
+
+    # Merges the machine and user registry PATH entries into the current process
+    # so binaries installed during this run (the JDK) resolve without a new shell.
+    function Update-ProcessPath {
+        $current = @($env:PATH -split ';' | Where-Object { $_ })
+        $registry = @(
+            [Environment]::GetEnvironmentVariable('PATH', 'Machine'),
+            [Environment]::GetEnvironmentVariable('PATH', 'User')
+        ) | Where-Object { $_ } | ForEach-Object { $_ -split ';' } | Where-Object { $_ }
+        foreach ($entry in $registry) {
+            if ($current -notcontains $entry) { $current += $entry }
+        }
+        $env:PATH = $current -join ';'
+    }
+
+    # REA requires Node.js 22.19+, 24.11+ or 26+.
+    function Test-NodeVersionSupported {
+        param([string]$VersionText)
+
+        if ($VersionText -notmatch '^v?(?<major>\d+)\.(?<minor>\d+)') { return $false }
+        $major = [int]$Matches['major']
+        $minor = [int]$Matches['minor']
+        if ($major -eq 22) { return $minor -ge 19 }
+        if ($major -eq 24) { return $minor -ge 11 }
+        return $major -ge 26
+    }
+
+    # --- JDK -----------------------------------------------------------------
+    $jdk = Get-JdkInstallation -MinimumMajor $javaMajorMin
+    if (-not $jdk) {
+        Write-Host "Installing JDK ($($_AiToolsInternal.ReaGhidraJdkWingetPackage)) for Ghidra..." -ForegroundColor Cyan
+        try {
+            # The OpenJDK MSI is a per-machine package, so no user scope here.
+            $null = Invoke-WingetPackage -Action install -PackageId $_AiToolsInternal.ReaGhidraJdkWingetPackage
+            Update-ProcessPath
+            $jdk = Get-JdkInstallation -MinimumMajor $javaMajorMin
+        }
+        catch { Write-Warning "JDK installation failed: $($_.Exception.Message)" }
+    }
+
+    if ($jdk) {
+        Write-Host "JDK ready: $($jdk.Home) (Java $($jdk.Major))" -ForegroundColor Green
+    }
+    else {
+        Write-Warning "No JDK >= $javaMajorMin was found. Ghidra needs a 64-bit JDK $javaMajorMin+ (winget install Microsoft.OpenJDK.21)."
+    }
+
+    # --- Ghidra release metadata ---------------------------------------------
+    # The newest release is preferred; the pinned constants are the fallback when
+    # the GitHub API cannot be reached.
+    $release = $null
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $api = Invoke-RestMethod -Uri 'https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest' -Headers @{ 'User-Agent' = 'omp' } -ErrorAction Stop
+        $asset = $api.assets | Where-Object { $_.name -match '^ghidra_.+_PUBLIC_\d{8}\.zip$' } | Select-Object -First 1
+        $digest = $null
+        if ($api.body -match 'SHA-256:\s*`(?<sha>[0-9a-fA-F]{64})`') { $digest = $Matches['sha'].ToLowerInvariant() }
+        if ($asset -and $digest) {
+            $version = [regex]::Match($asset.name, '^ghidra_(?<version>.+)_PUBLIC_\d{8}\.zip$').Groups['version'].Value
+            $release = [pscustomobject]@{
+                Version   = $version
+                AssetName = $asset.name
+                Url       = $asset.browser_download_url
+                Bytes     = [long]$asset.size
+                Sha256    = $digest
+            }
+        }
+        else {
+            Write-Host 'Ghidra release metadata was incomplete; using the pinned fallback.' -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "Could not resolve the latest Ghidra release ($($_.Exception.Message)); using the pinned fallback." -ForegroundColor Yellow
+    }
+    if (-not $release) {
+        $release = [pscustomobject]@{
+            Version   = $config.Version
+            AssetName = $config.AssetName
+            Url       = $config.Url
+            Bytes     = [long]$config.Bytes
+            Sha256    = $config.Sha256
+        }
+    }
+
+    # --- Ghidra extraction ---------------------------------------------------
+    $preferredRoot = [string]$config.Root
+    $root = $preferredRoot
+    try {
+        if (-not (Test-Path -LiteralPath $root)) {
+            New-Item -ItemType Directory -Path $root -Force -ErrorAction Stop | Out-Null
+        }
+    }
+    catch {
+        $root = Join-Path $env:LOCALAPPDATA 'Tools'
+        Write-Host "Could not create $preferredRoot; using $root instead." -ForegroundColor Yellow
+        New-Item -ItemType Directory -Path $root -Force -ErrorAction Stop | Out-Null
+    }
+
+    $target = Join-Path $root ("ghidra_{0}_PUBLIC" -f $release.Version)
+    $launcher = Join-Path $target 'ghidraRun.bat'
+    if (Test-Path -LiteralPath $launcher) {
+        Write-Host "Ghidra already installed: $target" -ForegroundColor Green
+    }
+    else {
+        $archive = Join-Path ([System.IO.Path]::GetTempPath()) $release.AssetName
+        $staging = Join-Path $root ('.ghidra-stage-' + [guid]::NewGuid().ToString('N'))
+        try {
+            Write-Host ("Downloading Ghidra {0} ({1} MB)..." -f $release.Version, [math]::Round($release.Bytes / 1MB)) -ForegroundColor Cyan
+            Save-WebFile -Uri $release.Url -OutFile $archive -Force -Quiet -ErrorAction Stop | Out-Null
+
+            $length = (Get-Item -LiteralPath $archive).Length
+            if ($release.Bytes -gt 0 -and $length -ne $release.Bytes) {
+                throw "Downloaded size $length does not match the expected $($release.Bytes) bytes."
+            }
+            $sha = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($sha -ne $release.Sha256.ToLowerInvariant()) {
+                throw "SHA-256 mismatch: expected $($release.Sha256), got $sha."
+            }
+
+            # Extract into a staging directory and move the single top-level
+            # folder into place, so a failed download never leaves a partial tree.
+            Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $staging -Force -ErrorAction Stop | Out-Null
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($archive, $staging)
+
+            $extracted = @(Get-ChildItem -LiteralPath $staging -Directory)
+            if ($extracted.Count -ne 1) {
+                throw 'The Ghidra archive did not contain exactly one top-level directory.'
+            }
+            if (Test-Path -LiteralPath $target) {
+                Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+            }
+            Move-Item -LiteralPath $extracted[0].FullName -Destination $target -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $launcher)) {
+                throw "Ghidra launcher not found after extraction: $launcher"
+            }
+            Write-Host "Ghidra $($release.Version) installed: $target" -ForegroundColor Green
+        }
+        catch {
+            Write-Warning "Ghidra installation failed: $($_.Exception.Message)"
+        }
+        finally {
+            if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    # --- Environment ---------------------------------------------------------
+    $ghidraInstalled = Test-Path -LiteralPath $launcher
+    if ($ghidraInstalled) {
+        $existingGhidraDir = [Environment]::GetEnvironmentVariable('GHIDRA_INSTALL_DIR', 'User')
+        if (-not $existingGhidraDir) { $existingGhidraDir = $env:GHIDRA_INSTALL_DIR }
+        if ($existingGhidraDir -and $existingGhidraDir -ne $target) {
+            Write-Host "GHIDRA_INSTALL_DIR changed from '$existingGhidraDir' to '$target'." -ForegroundColor Yellow
+        }
+        Set-UserEnvironmentValue -Name 'GHIDRA_INSTALL_DIR' -Value $target
+        Write-Host "GHIDRA_INSTALL_DIR = $target" -ForegroundColor Green
+    }
+    else {
+        Write-Warning "Ghidra is not installed at $target; GHIDRA_INSTALL_DIR was left unchanged."
+    }
+
+    if ($jdk) {
+        $existingJavaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')
+        if (-not $existingJavaHome) { $existingJavaHome = $env:JAVA_HOME }
+        if (-not $existingJavaHome) {
+            Set-UserEnvironmentValue -Name 'JAVA_HOME' -Value $jdk.Home
+            Write-Host "JAVA_HOME = $($jdk.Home)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "JAVA_HOME left unchanged: $existingJavaHome" -ForegroundColor DarkGray
+        }
+    }
+
+    $existingProvider = [Environment]::GetEnvironmentVariable('REA_ANALYSIS_PROVIDER', 'User')
+    if (-not $existingProvider) { $existingProvider = $env:REA_ANALYSIS_PROVIDER }
+    if (-not $existingProvider) {
+        Set-UserEnvironmentValue -Name 'REA_ANALYSIS_PROVIDER' -Value 'ghidra'
+        Write-Host 'REA_ANALYSIS_PROVIDER = ghidra' -ForegroundColor Green
+    }
+    else {
+        Write-Host "REA_ANALYSIS_PROVIDER left unchanged: $existingProvider" -ForegroundColor DarkGray
+    }
+
+    # --- REA CLI -------------------------------------------------------------
+    Write-Host 'Checking the REA CLI...' -ForegroundColor Cyan
+    $nodeVersion = $null
+    if (Get-Command node -ErrorAction SilentlyContinue) {
+        $nodeVersion = ([string](& node --version 2>$null)).Trim()
+    }
+    if ($nodeVersion -and -not (Test-NodeVersionSupported -VersionText $nodeVersion)) {
+        Write-Warning "Node $nodeVersion is outside REA's supported range (22.19+, 24.11+ or 26+). REA needs a newer Node.js."
+    }
+
+    if (-not (Get-Command rea -ErrorAction SilentlyContinue)) {
+        & npm install --global $($_AiToolsInternal.ReaNpmPackage)
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "npm install failed with exit code $LASTEXITCODE for $($_AiToolsInternal.ReaNpmPackage)."
+        }
+        Update-ProcessPath
+    }
+    else {
+        Write-Host 'rea CLI already installed.' -ForegroundColor Green
+    }
+
+    # --- Read-only diagnostics ------------------------------------------------
+    if (Get-Command rea -ErrorAction SilentlyContinue) {
+        Write-Host 'Running read-only REA diagnostics (rea doctor --json)...' -ForegroundColor Cyan
+        try {
+            $doctorOutput = @(& rea doctor --json 2>&1)
+            $doctorExit = $LASTEXITCODE
+            $doctorText = ($doctorOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+            try {
+                $doctor = $doctorText | ConvertFrom-Json -ErrorAction Stop
+                $healthy = if ($doctor.PSObject.Properties['healthy']) { $doctor.healthy } else { '(unknown)' }
+                Write-Host ("rea doctor: healthy = {0} (exit code {1})" -f $healthy, $doctorExit) -ForegroundColor DarkGray
+            }
+            catch {
+                Write-Host ("rea doctor exited with code {0}" -f $doctorExit) -ForegroundColor DarkGray
+            }
+            $doctorOutput | Select-Object -First 40 | ForEach-Object { Write-Host ('  {0}' -f $_) -ForegroundColor DarkGray }
+        }
+        catch { Write-Warning "rea doctor failed: $($_.Exception.Message)" }
+    }
+
+    # --- Guide ----------------------------------------------------------------
+    Write-Host ''
+    Write-Host '== REA + Ghidra installed ==' -ForegroundColor Cyan
+    Write-Host ('  REA CLI   : rea (npm package {0})' -f $_AiToolsInternal.ReaNpmPackage) -ForegroundColor Gray
+    Write-Host ('  Ghidra    : {0}' -f $(if ($ghidraInstalled) { $target } else { '(not installed)' })) -ForegroundColor Gray
+    Write-Host ('  JDK       : {0}' -f $(if ($jdk) { '{0} (Java {1})' -f $jdk.Home, $jdk.Major } else { '(not resolved)' })) -ForegroundColor Gray
+    Write-Host ('  Provider  : {0}' -f $(if ($existingProvider) { $existingProvider } else { 'ghidra' })) -ForegroundColor Gray
+    Write-Host ''
+    Write-Host 'Quick start:' -ForegroundColor Cyan
+    if ($ghidraInstalled) {
+        Write-Host ('  1. Ghidra GUI      : "{0}\ghidraRun.bat"' -f $target) -ForegroundColor Gray
+    }
+    Write-Host '  2. Provider check  : rea doctor --provider ghidra --json' -ForegroundColor Gray
+    Write-Host '  3. Hello world     : rea analyze "C:\Windows\System32\cmd.exe" --provider ghidra --json' -ForegroundColor Gray
+    Write-Host '     Native commands : rea search <file> "text" --provider ghidra --json' -ForegroundColor Gray
+    Write-Host '                      rea function <file> <symbol> --provider ghidra --json' -ForegroundColor Gray
+    Write-Host '                      rea decompile <file> <address> --provider ghidra --json' -ForegroundColor Gray
+    Write-Host '  4. JavaScript app  : rea analyze-javascript-application <dir> --json' -ForegroundColor Gray
+    Write-Host '  5. Provider list   : rea providers --json' -ForegroundColor Gray
+    Write-Host ''
+    Write-Host 'Deliberately not done:' -ForegroundColor Yellow
+    Write-Host '  - No agent was wired. Run "rea setup" yourself to register the REA MCP server with your agents.' -ForegroundColor Yellow
+    Write-Host '  - Windows Ghidra support is experimental and read-only for native PE targets. Cold imports can take minutes; raise REA_GHIDRA_STARTUP_TIMEOUT_MS when a client times out.' -ForegroundColor Yellow
+    Write-Host '  - Restart PowerShell so other shells inherit the new environment variables.' -ForegroundColor Yellow
+}
+
 function Install-AiTools {
     <#
 .SYNOPSIS
@@ -9475,6 +10161,13 @@ function Install-AiTools {
     npm packages (@qwen-code/qwen-code, @moonshot-ai/kimi-code, @deepseek-ai/dsh, @xai-official/grok,
     gloomberb), and the Cursor CLI (agent) via its installer if not present.
 
+.PARAMETER REA
+    When supplied, installs the REA reverse-engineering toolchain: the REA CLI
+    (npm package rea-agents), a 64-bit JDK for Ghidra, and the latest published
+    Ghidra release extracted under the tools root (C:\Tools by default).
+    Sets GHIDRA_INSTALL_DIR, JAVA_HOME and REA_ANALYSIS_PROVIDER for the current
+    user. No agent is wired: run 'rea setup' yourself to register the REA MCP server.
+
 .PARAMETER All
     When supplied, enables all optional package groups: extended tools, SDK runtimes, .NET SDK,
     Docker Desktop, database clients, and extra AI developer tools. Equivalent to -ExtendedSetup -Sdk -Docker -Database -MoreAi.
@@ -9500,6 +10193,7 @@ function Install-AiTools {
         [switch]$Podman,
         [switch]$Database,
         [switch]$MoreAi,
+        [switch]$REA,
         [switch]$All,
         [switch]$UserScope
     )
@@ -9524,6 +10218,7 @@ function Install-AiTools {
         if (-not $Podman) { $Docker = $true }
         $Database = $true
         $MoreAi = $true
+        $REA = $true
     }
 
     $powerShellModules = @($_AiToolsInternal.PowerShellModules)
@@ -9565,6 +10260,7 @@ function Install-AiTools {
     if ($Podman) { $setupLabels += 'podman' }
     if ($Database) { $setupLabels += 'db' }
     if ($MoreAi) { $setupLabels += 'moreai' }
+    if ($REA) { $setupLabels += 'rea' }
     if ($All) { $setupLabels = @('all') }
     $setupLabel = $setupLabels -join ', '
     Write-Host "The setup will check/install the following items ($setupLabel):" -ForegroundColor Cyan
@@ -9603,6 +10299,13 @@ function Install-AiTools {
         Write-Host " - kimi (Kimi Code CLI)"
         Write-Host " - grok (Grok CLI)"
         Write-Host " - cursor (Cursor CLI / agent)"
+    }
+
+    if ($REA) {
+        Write-Host "REA reverse-engineering toolchain:" -ForegroundColor Cyan
+        Write-Host " - rea (REA CLI via npm: $($_AiToolsInternal.ReaNpmPackage))"
+        Write-Host " - Ghidra (latest release resolved at run time, ~$([math]::Round($($_AiToolsInternal.Ghidra.Bytes) / 1MB)) MB -> $($($_AiToolsInternal.Ghidra.Root)))"
+        Write-Host " - $($_AiToolsInternal.ReaGhidraJdkWingetPackage) (64-bit JDK prerequisite for Ghidra)"
     }
 
     # -Customize offers an interactive pruning pass over the pending install
@@ -10018,6 +10721,11 @@ function Install-AiTools {
                 Write-Host "Failed to install Cursor CLI: $_" -ForegroundColor Red
             }
         }
+    }
+
+    # Install the REA reverse-engineering toolchain (REA CLI + Ghidra) on request.
+    if ($REA) {
+        Install-ReaToolchain
     }
 
     # Create a docker.bat shim so tools that hardcode `docker` commands
@@ -13689,6 +14397,951 @@ if (-not `$commandSucceeded) { exit 1 }
     & $sudoPath $nativeCommand.Source @nativeArguments
 }
 
+# Internal configuration for Add-AppLockerBlock and Remove-AppLockerBlock.
+$_AppLockerInternal = @{
+    # Written into the Description of every rule this profile creates, so that
+    # -List can tell managed rules apart from hand-written ones and -Revert can
+    # remove exactly what was created here.
+    ManagedMarker = 'Created by Add-AppLockerBlock'
+    EveryoneSid   = 'S-1-1-0'
+}
+
+function Read-AppLockerPolicy {
+    <#
+.SYNOPSIS
+    Reads the local or effective AppLocker policy.
+
+.DESCRIPTION
+    Returns the policy XML text together with the parsed document. The raw text
+    is kept so a backup can be written before the document is modified.
+
+.PARAMETER Effective
+    Read the merged effective policy instead of the local one.
+
+.OUTPUTS
+    PSCustomObject with Raw (the policy XML) and Document (parsed XML).
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Effective
+    )
+
+    $raw = if ($Effective) { Get-AppLockerPolicy -Effective -Xml } else { Get-AppLockerPolicy -Local -Xml }
+
+    $document = New-Object System.Xml.XmlDocument
+    $document.PreserveWhitespace = $true
+    if ($raw -is [System.Xml.XmlDocument]) {
+        # Accept an already parsed document as well as the XML text the cmdlet
+        # returns, so the policy can be fed in from either shape.
+        $document = $raw
+        $raw = $document.OuterXml
+    }
+    else {
+        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = '<AppLockerPolicy Version="1" />' }
+        $document.LoadXml($raw)
+    }
+
+    return [pscustomobject]@{ Raw = $raw; Document = $document }
+}
+
+function Get-AppLockerRuleIdList {
+    <#
+.SYNOPSIS
+    Lists the rule ids of an AppLocker rule collection.
+
+.DESCRIPTION
+    Returns the Id attribute of every rule element in the collection, so the
+    local rules can be told apart from the ones a Group Policy contributes.
+
+.PARAMETER Collection
+    The rule collection element, or $null.
+
+.OUTPUTS
+    System.String[] of rule ids.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        $Collection
+    )
+
+    # The leading comma keeps an empty result an array instead of nothing, so
+    # callers always get a string array back.
+    if (-not $Collection) { return , @() }
+    return , @($_ProfileHelpers.GetAppLockerRules($Collection) |
+        ForEach-Object { $_.GetAttribute('Id') })
+}
+
+function Resolve-AppLockerTargetFile {
+    <#
+.SYNOPSIS
+    Finds the executable a file name refers to.
+
+.DESCRIPTION
+    Hash and publisher rules are built from the real file, so it has to be
+    located first. When -FilePath is given, that file is used. Otherwise the
+    name is looked up in PATH and in the usual install locations.
+
+    Returns $null when the name does not resolve to exactly one file, so the
+    caller can ask for an explicit path instead of guessing.
+
+.PARAMETER FileName
+    The file name to look for, for example 'example.exe'.
+
+.PARAMETER FilePath
+    Full path of the file to use instead of searching.
+
+.OUTPUTS
+    System.String with the resolved path, or $null.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName,
+
+        [string]$FilePath
+    )
+
+    if ($FilePath) {
+        $resolved = Resolve-Path -LiteralPath $FilePath -ErrorAction SilentlyContinue
+        if (-not $resolved) { return $null }
+        if (-not (Test-Path -LiteralPath $resolved.Path -PathType Leaf)) { return $null }
+        return $resolved.Path
+    }
+
+    $candidates = @()
+    foreach ($directory in ($env:PATH -split ';')) {
+        if (-not $directory) { continue }
+        $probe = Join-Path $directory $FileName
+        if (Test-Path -LiteralPath $probe -PathType Leaf) { $candidates += (Get-Item -LiteralPath $probe).FullName }
+    }
+
+    $roots = @(
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)},
+        $env:LOCALAPPDATA,
+        $env:ProgramData
+    )
+    foreach ($root in $roots) {
+        if (-not $root -or -not (Test-Path -LiteralPath $root)) { continue }
+        $found = @(Get-ChildItem -LiteralPath $root -Filter $FileName -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+            Where-Object { -not $_.PSIsContainer } |
+            Select-Object -ExpandProperty FullName)
+        $candidates += $found
+    }
+
+    $candidates = @($candidates | Sort-Object -Unique)
+    if ($candidates.Count -ne 1) { return $null }
+    return $candidates[0]
+}
+
+function Add-AppLockerBlock {
+    <#
+.SYNOPSIS
+    Adds, lists, or reverts AppLocker executable filename blocks on this machine.
+
+.DESCRIPTION
+    Writes a Deny rule into the EXE rule collection of the local AppLocker
+    policy so a given executable can no longer run, and keeps the rest of the
+    machine working. AppLocker allows a file only when it matches an allow
+    rule, so a Deny rule on its own blocks every other executable too. The
+    helper therefore maintains two supporting rules:
+
+      - an allow-all rule for Everyone, added only when the effective policy
+        has no allow rule for EXE files (adding one next to an existing
+        allowlist would widen that allowlist),
+      - an allow-all-signed rule for packaged apps, added only when the policy
+        has neither executable nor packaged-app rules, because enforcing EXE
+        rules blocks every packaged app otherwise (Start menu, Settings, ...).
+
+    Both supporting rules and the Deny rule carry a marker in their
+    Description, so -List can separate them from hand-written policy and
+    -Revert can remove exactly what this profile created.
+
+    -List probes the machine and reports the filename blocks that currently
+    exist. -Revert removes a block by file name, by rule name, or by rule id
+    and drops the supporting rules again once no Deny rule is left.
+
+.PARAMETER Name
+    Executable file name(s) to block, for example 'example.exe'. With -Path,
+    a name relative to that directory.
+
+.PARAMETER Mode
+    How the executable is identified:
+
+      - Path (default): the rule matches the file name in any directory. A
+        renamed copy of the file is not blocked.
+      - Hash: the rule matches this exact binary by content. A renamed copy is
+        still blocked, but the rule stops matching after the program updates.
+      - Publisher: the rule matches by code-signing identity, so it survives
+        both renames and program updates. It can also match other files from
+        the same publisher, so the affected files are reported before the rule
+        is written.
+
+.PARAMETER FilePath
+    Path of the executable to fingerprint for the Hash and Publisher modes. When
+    omitted, the file is looked up by name in PATH and the usual install
+    locations; the rule is only added when exactly one file matches.
+
+.PARAMETER Path
+    Optional directory that scopes the rule to a single location. Without it
+    the rule matches the file name in any directory. Path mode only.
+
+.PARAMETER Enforcement
+    Enforcement mode for the EXE rule collection: 'Enabled' blocks the file,
+    'AuditOnly' only logs it. When omitted, an existing collection keeps its
+    current mode and a newly created collection is set to 'Enabled'.
+
+.PARAMETER BackupDirectory
+    Directory that receives a copy of the local policy before it is changed.
+    Defaults to the user temp directory.
+
+.PARAMETER PersistServiceStartup
+    Also set the Application Identity service to start automatically. Without
+    it the service is only started for the current session.
+
+.PARAMETER NoGroupPolicyRefresh
+    Skip the gpupdate refresh that makes the new policy effective.
+
+.PARAMETER VerifyPath
+    Path of an existing executable to evaluate after the policy is applied.
+
+.PARAMETER Force
+    With -Revert, also remove matching rules that this profile did not
+    create. With the Publisher mode, accept a rule that also matches other
+    files from the same publisher.
+
+
+.PARAMETER Format
+    With -List, print the blocks as a table instead of returning objects.
+
+.PARAMETER List
+    Report the filename blocks that currently exist instead of changing them.
+
+.PARAMETER Revert
+    Remove an existing block instead of adding one.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe
+    Blocks example.exe in any directory and keeps other executables running.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name app.exe -Path 'C:\Tools'
+    Blocks C:\Tools\app.exe only.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe -Mode Hash
+    Blocks that exact binary, so a renamed copy is blocked too.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe -Mode Publisher
+    Blocks every copy of that program from the same publisher, so renames and
+    program updates do not get around it.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -List
+    Lists the filename blocks that currently exist.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Revert -Name example.exe
+    Removes the block for example.exe again.
+
+.OUTPUTS
+    For -List, one object per filename block. Otherwise a summary object.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+
+    Adding and reverting a block requires an elevated PowerShell session;
+    AppLocker rules are enforced by the Application Identity service. -List
+    only reads the policy and works without elevation.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High', DefaultParameterSetName = 'Add')]
+    param(
+        [Parameter(ParameterSetName = 'Add', Mandatory = $true, Position = 0)]
+        [Parameter(ParameterSetName = 'Revert', Mandatory = $true, Position = 0)]
+        [string[]]$Name,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [ValidateSet('Path', 'Hash', 'Publisher')]
+        [string]$Mode = 'Path',
+
+        [Parameter(ParameterSetName = 'Add')]
+        [string]$FilePath,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [string]$Path,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [ValidateSet('Enabled', 'AuditOnly')]
+        [string]$Enforcement,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [Parameter(ParameterSetName = 'Revert')]
+        [string]$BackupDirectory = $env:TEMP,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [switch]$PersistServiceStartup,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [Parameter(ParameterSetName = 'Revert')]
+        [switch]$NoGroupPolicyRefresh,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [string]$VerifyPath,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [Parameter(ParameterSetName = 'Revert')]
+        [switch]$Force,
+
+
+        [Parameter(ParameterSetName = 'List')]
+        [switch]$Format,
+
+        [Parameter(ParameterSetName = 'List', Mandatory = $true)]
+        [switch]$List,
+
+        [Parameter(ParameterSetName = 'Revert', Mandatory = $true)]
+        [switch]$Revert
+    )
+
+    $ErrorActionPreference = 'Stop'
+
+    Import-Module AppLocker -ErrorAction Stop
+
+    $managedMarker = $_AppLockerInternal.ManagedMarker
+    $everyoneSid = $_AppLockerInternal.EveryoneSid
+
+    # Listing only reads the policy, so it works without elevation.
+    if ($PSCmdlet.ParameterSetName -eq 'List') {
+        $local = Read-AppLockerPolicy
+        $effective = Read-AppLockerPolicy -Effective
+
+        $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($local.Document, 'Exe')
+        $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($local.Document, 'Appx')
+        $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Exe')
+        $effectiveAppx = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Appx')
+
+        $localExeRules = if ($localExe) { @($_ProfileHelpers.GetAppLockerRules($localExe)) } else { @() }
+        $localAppxRules = if ($localAppx) { @($_ProfileHelpers.GetAppLockerRules($localAppx)) } else { @() }
+        $effectiveExeRules = if ($effectiveExe) { @($_ProfileHelpers.GetAppLockerRules($effectiveExe)) } else { @() }
+        $effectiveAppxRules = if ($effectiveAppx) { @($_ProfileHelpers.GetAppLockerRules($effectiveAppx)) } else { @() }
+
+        $localExeIds = @($localExeRules | ForEach-Object { $_.GetAttribute('Id') })
+        $localAppxIds = @($localAppxRules | ForEach-Object { $_.GetAttribute('Id') })
+
+        # The effective policy is a snapshot that only catches up with the
+        # local policy after a Group Policy refresh, so the local rules are
+        # read live and the effective policy only adds the rules that a Group
+        # Policy contributes. Listing the snapshot alone would hide a rule
+        # that was just added and keep showing a rule that was just removed.
+        $domainExeRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveExeRules, $localExeIds, $managedMarker)
+        $domainAppxRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveAppxRules, $localAppxIds, $managedMarker)
+        $mergedExeRules = @($localExeRules) + @($domainExeRules)
+        $mergedAppxRules = @($localAppxRules) + @($domainAppxRules)
+
+        $report = @($_ProfileHelpers.GetAppLockerBlockReport($mergedExeRules, $managedMarker, $localExeIds))
+
+        Write-Host ''
+        Write-Host '== AppLocker executable filename blocks ==' -ForegroundColor Cyan
+        $exeMode = if ($localExe) { $localExe.GetAttribute('EnforcementMode') }
+                   elseif ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') }
+                   else { 'NotConfigured' }
+        $allowCount = @($mergedExeRules | Where-Object { $_.GetAttribute('Action') -eq 'Allow' }).Count
+        $appxCount = $mergedAppxRules.Count
+        Write-Host ("   EXE enforcement mode : {0}" -f $exeMode) -ForegroundColor DarkGray
+        Write-Host ("   EXE allow rules      : {0}" -f $allowCount) -ForegroundColor DarkGray
+        Write-Host ("   Packaged app rules   : {0}" -f $appxCount) -ForegroundColor DarkGray
+        Write-Host ("   Filename blocks      : {0}" -f $report.Count) -ForegroundColor DarkGray
+
+        if ($Format) {
+            if ($report.Count -gt 0) {
+                Write-Host ''
+                $report | Format-Table FileName, Mode, Action, Scope, Managed, Target -AutoSize | Out-Host
+            }
+            else {
+                Write-Host '   (none)' -ForegroundColor DarkGray
+            }
+            return
+        }
+
+        # Without -Format the objects are returned so they can be piped or
+        # filtered; printing them here as well would duplicate the output.
+        return $report
+    }
+
+    if ($PSCmdlet.ParameterSetName -eq 'Revert') {
+        # The revert path reuses Remove-AppLockerBlock; -WhatIf and -Confirm
+        # propagate because both functions support ShouldProcess.
+        Remove-AppLockerBlock -Name $Name -Force:$Force -BackupDirectory $BackupDirectory `
+            -NoGroupPolicyRefresh:$NoGroupPolicyRefresh
+        return
+    }
+
+    # Changing the policy needs administrator rights.
+    if (-not (Test-IsAdministrator)) {
+        throw 'Add-AppLockerBlock requires an elevated PowerShell session. Re-run as Administrator.'
+    }
+
+    # --- resolve the rule target for every requested file name ---------------
+    $targets = @()
+    foreach ($item in $Name) {
+        if ([string]::IsNullOrWhiteSpace($item)) { throw 'File name must not be empty.' }
+        if ($item -match '[\\/]') {
+            throw "'$item' must be a file name without a directory. Use -Path to scope the rule to a directory."
+        }
+        if ($item.Contains('*') -or $item.Contains('?')) {
+            throw "'$item' must not contain wildcard characters."
+        }
+        $targets += [pscustomobject]@{ FileName = $item }
+    }
+
+    if ($Mode -eq 'Path' -and $Path -and $FilePath) {
+        throw '-Path and -FilePath cannot be combined; -Path scopes a path rule to a directory, -FilePath points at the file to fingerprint.'
+    }
+
+    $local = Read-AppLockerPolicy
+    $effective = Read-AppLockerPolicy -Effective
+    $localDoc = $local.Document
+    $effectiveDoc = $effective.Document
+
+    $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Exe')
+    $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Appx')
+    $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effectiveDoc, 'Exe')
+    $effectiveAppx = $_ProfileHelpers.GetAppLockerRuleCollection($effectiveDoc, 'Appx')
+
+    $localExeRules = if ($localExe) { @($_ProfileHelpers.GetAppLockerRules($localExe)) } else { @() }
+    $localAppxRules = if ($localAppx) { @($_ProfileHelpers.GetAppLockerRules($localAppx)) } else { @() }
+    $effectiveExeRules = if ($effectiveExe) { @($_ProfileHelpers.GetAppLockerRules($effectiveExe)) } else { @() }
+    $effectiveAppxRules = if ($effectiveAppx) { @($_ProfileHelpers.GetAppLockerRules($effectiveAppx)) } else { @() }
+
+    # Rules that come from a Group Policy rather than from the local policy.
+    # Merging is additive, so the effective set is local rules plus the
+    # domain-only rules from the effective policy. Working from that merged
+    # view keeps the decision stable even before a Group Policy refresh.
+    $localExeIds = @($localExeRules | ForEach-Object { $_.GetAttribute('Id') })
+    $localAppxIds = @($localAppxRules | ForEach-Object { $_.GetAttribute('Id') })
+    $domainExeRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveExeRules, $localExeIds, $managedMarker)
+    $domainAppxRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveAppxRules, $localAppxIds, $managedMarker)
+
+    $mergedExeRules = @($localExeRules) + @($domainExeRules)
+    $mergedAppxRules = @($localAppxRules) + @($domainAppxRules)
+    $mergedAllowCount = @($mergedExeRules | Where-Object { $_.GetAttribute('Action') -eq 'Allow' }).Count
+
+    # Skip names that are already blocked by a rule of the same kind.
+    $existingTargets = @()
+    foreach ($rule in $localExeRules) {
+        if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
+        $info = $_ProfileHelpers.GetAppLockerRuleInfo($rule)
+        if ($info.Mode -eq 'Path') { $existingTargets += $info.Path }
+        elseif ($info.Mode -eq 'Hash') { $existingTargets += $info.Hash }
+        elseif ($info.Mode -eq 'Publisher') { $existingTargets += $info.Publisher }
+    }
+
+    $blocked = @()
+    $alreadyBlocked = @()
+    foreach ($target in $targets) {
+        $rulePath = $null
+        $ruleHash = $null
+        $rulePublisher = $null
+        $fileInfo = $null
+        $resolvedPath = $null
+        $isBlocked = $false
+
+        if ($Mode -eq 'Path') {
+            # Concatenation rather than interpolation: PowerShell only expands
+            # a member in a double-quoted string when the member exists on the
+            # object's .NET type, which a PSCustomObject property does not.
+            $rulePath = if ($Path) { [System.IO.Path]::Combine($Path, $target.FileName) } else { '*\' + $target.FileName }
+            $isBlocked = @($existingTargets | Where-Object {
+                [string]::Equals($_, $rulePath, [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count -gt 0
+        }
+        else {
+            # Hash and Publisher rules are built from the real file, so it has
+            # to be found first.
+            $resolved = Resolve-AppLockerTargetFile -FileName $target.FileName -FilePath $FilePath
+            if (-not $resolved) {
+                throw ("Could not resolve '{0}' to exactly one file. Pass -FilePath with the full path to the executable." -f $target.FileName)
+            }
+            $fileInfo = Get-AppLockerFileInformation -Path $resolved -ErrorAction Stop
+            $resolvedPath = $resolved
+
+            if ($Mode -eq 'Hash') {
+                # The Authenticode PE image hash AppLocker uses, not the flat
+                # file hash: the flat hash never matches.
+                $ruleHash = $_ProfileHelpers.ConvertToAppLockerHashValue($fileInfo.Hash)
+                $isBlocked = @($existingTargets | Where-Object {
+                    [string]::Equals($_, $ruleHash, [System.StringComparison]::OrdinalIgnoreCase)
+                }).Count -gt 0
+            }
+            else {
+                $rulePublisher = $fileInfo.Publisher.PublisherName
+                $isBlocked = @($existingTargets | Where-Object {
+                    [string]::Equals($_, $rulePublisher, [System.StringComparison]::OrdinalIgnoreCase)
+                }).Count -gt 0
+            }
+        }
+
+        if ($isBlocked) {
+            $alreadyBlocked += $target.FileName
+            continue
+        }
+
+        $blocked += [pscustomobject]@{
+            FileName  = $target.FileName
+            RulePath  = $rulePath
+            RuleHash  = $ruleHash
+            Publisher = $rulePublisher
+            FileInfo  = $fileInfo
+            FilePath  = $resolvedPath
+        }
+    }
+
+    if ($blocked.Count -eq 0) {
+        Write-Host "Already blocked: $($alreadyBlocked -join ', ')" -ForegroundColor Yellow
+        return [pscustomobject]@{
+            Action           = 'AlreadyBlocked'
+            BlockedFiles     = @($alreadyBlocked)
+            Mode             = $Mode
+            BackupPath       = $null
+            EnforcementMode  = $(if ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') } else { 'NotConfigured' })
+        }
+    }
+
+    # A publisher rule matches by signing identity, which can also cover other
+    # files from the same publisher. The affected files are reported, and a rule
+    # that reaches beyond the requested file needs -Force to be written.
+    $collateral = @()
+    if ($Mode -eq 'Publisher') {
+        $publisher = $blocked[0].FileInfo.Publisher
+        # The product and binary names narrow the rule; an empty product name
+        # still matches every file of that publisher that has no product name.
+        $productName = if ($publisher.HasProductName) { $publisher.ProductName } else { '' }
+        $binaryName = if ($publisher.HasBinaryName) { $publisher.BinaryName } else { '*' }
+
+        $probe = New-Object System.Xml.XmlDocument
+        $probe.LoadXml('<AppLockerPolicy Version="1" />')
+        $probeExe = $_ProfileHelpers.NewAppLockerRuleCollection($probe, 'Exe', 'Enabled')
+        [void]$probe.DocumentElement.AppendChild($probeExe)
+        $probeRule = $_ProfileHelpers.NewAppLockerFilePublisherRule($probe, 'probe', 'probe', 'Deny', $everyoneSid, $publisher.PublisherName, $productName, $binaryName)
+        [void]$probeExe.AppendChild($probeRule)
+        $probeFile = Join-Path ([System.IO.Path]::GetTempPath()) ('applocker-probe-{0}.xml' -f [guid]::NewGuid().ToString('N'))
+        [System.IO.File]::WriteAllText($probeFile, $probe.OuterXml, [System.Text.UTF8Encoding]::new($false))
+        try {
+            $searchRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA, $env:ProgramData)
+            $candidates = @()
+            foreach ($searchRoot in $searchRoots) {
+                if (-not $searchRoot -or -not (Test-Path -LiteralPath $searchRoot)) { continue }
+                $candidates += @(Get-ChildItem -LiteralPath $searchRoot -Filter '*.exe' -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.PSIsContainer } |
+                    Select-Object -ExpandProperty FullName)
+            }
+            foreach ($candidate in $candidates) {
+                $decision = Test-AppLockerPolicy -XmlPolicy $probeFile -Path $candidate -User 'Everyone' -ErrorAction SilentlyContinue
+                if (-not $decision) { continue }
+                if ($decision.PolicyDecision -eq 'Denied' -and $decision.FilePath -ne $blocked[0].FilePath) {
+                    $collateral += $decision.FilePath
+                }
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue
+        }
+
+        if ($collateral.Count -gt 0 -and -not $Force) {
+            Write-Host ("A publisher rule for this file also matches {0} other executable(s):" -f $collateral.Count) -ForegroundColor Yellow
+            $collateral | Sort-Object -Unique | Select-Object -First 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+            if ($collateral.Count -gt 20) { Write-Host '  ...' -ForegroundColor Yellow }
+            throw 'Re-run with -Force to add a rule that also blocks those files.'
+        }
+        if ($collateral.Count -gt 0) {
+            Write-Host ("Publisher rule also matches {0} other executable(s)." -f $collateral.Count) -ForegroundColor Yellow
+        }
+    }
+
+    # An allow-all rule is required so that the new Deny rule does not turn the
+    # EXE collection into an allowlist that blocks everything else. It is only
+    # safe to add it when the merged policy has no allow rule at all.
+    $needAllowBaseline = ($mergedAllowCount -eq 0)
+    # Packaged apps are blocked as soon as EXE rules are enforced and the
+    # packaged-app collection has no rules, so the same rule applies there.
+    $needAppxBaseline = ($mergedExeRules.Count -eq 0 -and $mergedAppxRules.Count -eq 0)
+
+    if (-not $PSCmdlet.ShouldProcess(
+            "AppLocker EXE policy ($($blocked.FileName -join ', '))",
+            'Block executable by filename')) {
+        return
+    }
+
+    if (-not $localExe) {
+        $newEnforcementMode = if ($Enforcement) { $Enforcement } else { 'Enabled' }
+        $localExe = $_ProfileHelpers.NewAppLockerRuleCollection($localDoc, 'Exe', $newEnforcementMode)
+        [void]$localDoc.DocumentElement.AppendChild($localExe)
+    }
+    elseif ($Enforcement) {
+        $localExe.SetAttribute('EnforcementMode', $Enforcement)
+    }
+
+    if ($needAllowBaseline) {
+        $hasAllowAll = @($localExeRules | Where-Object {
+            $_.GetAttribute('Action') -eq 'Allow' -and
+            [string]::Equals($_ProfileHelpers.GetAppLockerRulePath($_), '*', [System.StringComparison]::OrdinalIgnoreCase)
+        }).Count -gt 0
+        if (-not $hasAllowAll) {
+            $baseline = $_ProfileHelpers.NewAppLockerFilePathRule($localDoc, 'Allow all executables', $managedMarker, 'Allow', $everyoneSid, '*')
+            [void]$localExe.AppendChild($baseline)
+        }
+    }
+
+    if ($needAppxBaseline) {
+        if (-not $localAppx) {
+            $localAppx = $_ProfileHelpers.NewAppLockerRuleCollection($localDoc, 'Appx', 'Enabled')
+            [void]$localDoc.DocumentElement.AppendChild($localAppx)
+        }
+        $appxRule = $_ProfileHelpers.NewAppLockerFilePublisherRule($localDoc, 'Allow all signed packaged apps', $managedMarker, 'Allow', $everyoneSid)
+        [void]$localAppx.AppendChild($appxRule)
+    }
+
+    foreach ($target in $blocked) {
+        $description = '{0} (mode={1})' -f $managedMarker, $Mode.ToLowerInvariant()
+        if ($Mode -eq 'Path') {
+            $rule = $_ProfileHelpers.NewAppLockerFilePathRule($localDoc, "Block $($target.FileName)", $description, 'Deny', $everyoneSid, $target.RulePath)
+            [void]$localExe.AppendChild($rule)
+        }
+        elseif ($Mode -eq 'Hash') {
+            # The length is informational only; AppLocker matches on the hash.
+            $fileLength = 0
+            $fileItem = Get-Item -LiteralPath $target.FilePath -ErrorAction SilentlyContinue
+            if ($fileItem) { $fileLength = $fileItem.Length }
+            $rule = $_ProfileHelpers.NewAppLockerFileHashRule($localDoc, "Block $($target.FileName)", $description, $everyoneSid, $target.RuleHash, $target.FileName, $fileLength)
+            [void]$localExe.AppendChild($rule)
+        }
+        else {
+            $publisher = $target.FileInfo.Publisher
+            # The product and binary names narrow the rule to the requested
+            # program; without them it would cover every file of that publisher.
+            $productName = if ($publisher.HasProductName) { $publisher.ProductName } else { '' }
+            $binaryName = if ($publisher.HasBinaryName) { $publisher.BinaryName } else { '*' }
+            $rule = $_ProfileHelpers.NewAppLockerFilePublisherRule($localDoc, "Block $($target.FileName)", $description, 'Deny', $everyoneSid, $publisher.PublisherName, $productName, $binaryName)
+            [void]$localExe.AppendChild($rule)
+        }
+    }
+
+    # Back up the policy exactly as it was before the change.
+    if (-not (Test-Path -LiteralPath $BackupDirectory)) {
+        $null = New-Item -ItemType Directory -Path $BackupDirectory -Force
+    }
+    $backupPath = Join-Path $BackupDirectory ("AppLocker-backup-{0}.xml" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [System.IO.File]::WriteAllText($backupPath, $local.Raw, [System.Text.UTF8Encoding]::new($false))
+
+    $policyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("AppLocker-{0}.xml" -f [guid]::NewGuid().ToString('N'))
+    [System.IO.File]::WriteAllText($policyFile, $localDoc.OuterXml, [System.Text.UTF8Encoding]::new($false))
+    try {
+        Set-AppLockerPolicy -XmlPolicy $policyFile -ErrorAction Stop
+    }
+    finally {
+        Remove-Item -LiteralPath $policyFile -Force -ErrorAction SilentlyContinue
+    }
+
+    # AppLocker enforcement depends on the Application Identity service.
+    $service = Get-Service -Name 'AppIDSvc' -ErrorAction SilentlyContinue
+    if (-not $service) {
+        Write-Warning 'The Application Identity service (AppIDSvc) was not found; AppLocker rules may not be enforced.'
+    }
+    else {
+        if ($PersistServiceStartup -and $service.StartType -ne 'Disabled') {
+            try {
+                Set-Service -Name 'AppIDSvc' -StartupType Automatic -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "Could not set the Application Identity service to start automatically: $($_.Exception.Message)"
+            }
+        }
+        elseif ($service.StartType -eq 'Disabled') {
+            Write-Warning 'The Application Identity service is disabled; AppLocker rules will not be enforced.'
+        }
+        if ($service.Status -ne 'Running') {
+            try {
+                Start-Service -Name 'AppIDSvc' -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "Could not start the Application Identity service: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    if (-not $NoGroupPolicyRefresh) {
+        & gpupdate.exe /force | Out-Null
+    }
+
+    $effectiveAfter = Read-AppLockerPolicy -Effective
+    $effectiveExeAfter = $_ProfileHelpers.GetAppLockerRuleCollection($effectiveAfter.Document, 'Exe')
+    $modeAfter = if ($effectiveExeAfter) { $effectiveExeAfter.GetAttribute('EnforcementMode') } else { 'NotConfigured' }
+
+    $decision = $null
+    if ($VerifyPath) {
+        if (-not (Test-Path -LiteralPath $VerifyPath)) {
+            throw "VerifyPath does not exist: $VerifyPath"
+        }
+        $decision = Get-AppLockerPolicy -Effective |
+            Test-AppLockerPolicy -Path $VerifyPath -User "$env:USERDOMAIN\$env:USERNAME"
+    }
+
+    Write-Host ''
+    Write-Host ("Blocked: {0}" -f ($blocked.FileName -join ', ')) -ForegroundColor Green
+    if ($alreadyBlocked.Count -gt 0) {
+        Write-Host ("Already blocked: {0}" -f ($alreadyBlocked -join ', ')) -ForegroundColor DarkGray
+    }
+    Write-Host ("Mode: {0}" -f $Mode) -ForegroundColor DarkGray
+    if ($Mode -eq 'Hash') {
+        Write-Host ("Hash: {0}" -f ($blocked.RuleHash -join ', ')) -ForegroundColor DarkGray
+        Write-Host 'A hash rule stops matching after the program updates.' -ForegroundColor Yellow
+    }
+    if ($Mode -eq 'Publisher') {
+        Write-Host ("Publisher: {0}" -f ($blocked.Publisher -join ', ')) -ForegroundColor DarkGray
+    }
+    Write-Host ("EXE enforcement mode: {0}" -f $modeAfter) -ForegroundColor DarkGray
+    Write-Host ("Policy backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+    if ($decision) {
+        Write-Host ("Verify {0}: {1}" -f $VerifyPath, $decision.PolicyDecision) -ForegroundColor DarkGray
+    }
+
+    return [pscustomobject]@{
+        Action           = 'Blocked'
+        BlockedFiles     = @($blocked.FileName)
+        BlockedPaths     = @($blocked.RulePath)
+        BlockedHashes    = @($blocked.RuleHash)
+        BlockedPublishers = @($blocked.Publisher)
+        Mode             = $Mode
+        AlreadyBlocked   = @($alreadyBlocked)
+        BackupPath       = $backupPath
+        EnforcementMode  = $modeAfter
+        Verification     = $(if ($decision) { $decision.PolicyDecision } else { $null })
+    }
+}
+
+function Remove-AppLockerBlock {
+    <#
+.SYNOPSIS
+    Removes AppLocker executable filename blocks from the local policy.
+
+.DESCRIPTION
+    Deletes the EXE Deny rules that match the given file names, rule names, or
+    rule ids, and drops the allow-all and packaged-app rules that this profile
+    added once no Deny rule is left. Rules that were not created by
+    Add-AppLockerBlock are kept unless -Force is given, so hand-written policy
+    is never removed by accident.
+
+.PARAMETER Name
+    File name(s), rule name(s), or rule id(s) of the blocks to remove.
+
+.PARAMETER Force
+    Also remove matching rules that Add-AppLockerBlock did not create.
+
+.PARAMETER BackupDirectory
+    Directory that receives a copy of the local policy before it is changed.
+    Defaults to the user temp directory.
+
+.PARAMETER NoGroupPolicyRefresh
+    Skip the gpupdate refresh that makes the change effective.
+
+.EXAMPLE
+    PS C:\> Remove-AppLockerBlock -Name example.exe
+    Removes the filename block for example.exe.
+
+.EXAMPLE
+    PS C:\> Remove-AppLockerBlock -Name example.exe -Force
+    Removes the block even when it was created outside this profile.
+
+.OUTPUTS
+    A summary object describing what was removed.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+
+    Requires an elevated PowerShell session.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string[]]$Name,
+
+        [switch]$Force,
+
+        [string]$BackupDirectory = $env:TEMP,
+
+        [switch]$NoGroupPolicyRefresh
+    )
+
+    $ErrorActionPreference = 'Stop'
+
+    if (-not (Test-IsAdministrator)) {
+        throw 'Remove-AppLockerBlock requires an elevated PowerShell session. Re-run as Administrator.'
+    }
+
+    Import-Module AppLocker -ErrorAction Stop
+
+    $managedMarker = $_AppLockerInternal.ManagedMarker
+
+    $local = Read-AppLockerPolicy
+    $effective = Read-AppLockerPolicy -Effective
+    $localDoc = $local.Document
+
+    $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Exe')
+    $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Appx')
+    $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Exe')
+
+    $removed = @()
+    $removedDetails = @()
+    $kept = @()
+
+    if ($localExe) {
+        foreach ($rule in @($_ProfileHelpers.GetAppLockerRules($localExe))) {
+            if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
+            $info = $_ProfileHelpers.GetAppLockerRuleInfo($rule)
+            $leaf = if ($info.Path) { ($info.Path -split '[\\/]')[-1] } else { '' }
+            $isManaged = ($info.Description -like "*$managedMarker*")
+
+            $matches = @($Name | Where-Object {
+                $candidate = $_
+                [string]::Equals($info.RuleId, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($info.Name, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($leaf, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($info.Target, $candidate, [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count -gt 0
+            if (-not $matches) { continue }
+
+            if (-not $isManaged -and -not $Force) {
+                $kept += "$($info.Name) ($($info.Mode): $($info.Target))"
+                continue
+            }
+            [void]$localExe.RemoveChild($rule)
+            $removed += $info.Target
+            $removedDetails += "$($info.Mode): $($info.Target)"
+        }
+    }
+
+    if ($removed.Count -eq 0) {
+        if ($kept.Count -gt 0) {
+            Write-Host 'Matching rules were not created by Add-AppLockerBlock and were left in place:' -ForegroundColor Yellow
+            $kept | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+            Write-Host 'Re-run with -Force to remove them anyway.' -ForegroundColor Yellow
+        }
+        else {
+            # Nothing local matched; the block may come from a Group Policy.
+            # Only rules that a Group Policy contributes are considered: the
+            # effective policy is a snapshot and can still hold a rule this
+            # profile created and that has since been removed.
+            $localExeIds = Get-AppLockerRuleIdList $localExe
+            $effectiveExeRules = if ($effectiveExe) { @($_ProfileHelpers.GetAppLockerRules($effectiveExe)) } else { @() }
+            $domainExeRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveExeRules, $localExeIds, $managedMarker)
+            $report = @($_ProfileHelpers.GetAppLockerBlockReport($domainExeRules, $managedMarker, @()))
+            $foreign = @($report | Where-Object {
+                $_.Scope -eq 'GroupPolicy' -and
+                ($_.FileName -in $Name -or $_.Target -in $Name)
+            })
+            if ($foreign.Count -gt 0) {
+                Write-Host 'The matching block comes from a Group Policy and cannot be removed from this machine:' -ForegroundColor Yellow
+                $foreign | ForEach-Object { Write-Host "  $($_.Mode): $($_.Target)" -ForegroundColor Yellow }
+            }
+            else {
+                Write-Host 'No matching filename block was found.' -ForegroundColor Yellow
+            }
+        }
+
+        return [pscustomobject]@{
+            Action      = 'NotFound'
+            Removed     = @()
+            RemovedDetails = @()
+            Kept        = @($kept)
+            BackupPath  = $null
+        }
+    }
+
+    if (-not $PSCmdlet.ShouldProcess(
+            "AppLocker EXE policy ($($removed -join ', '))",
+            'Remove executable filename block')) {
+        return
+    }
+
+    # The allow-all rule exists only to keep other executables running while a
+    # Deny rule is present, so it goes once no Deny rule is left.
+    $remaining = if ($localExe) { @($_ProfileHelpers.GetAppLockerRules($localExe)) } else { @() }
+    $remainingDeny = @($remaining | Where-Object { $_.GetAttribute('Action') -eq 'Deny' })
+    if ($remainingDeny.Count -eq 0) {
+        foreach ($rule in @($remaining | Where-Object {
+            $_.GetAttribute('Description') -like "*$managedMarker*" -and
+            [string]::Equals($_ProfileHelpers.GetAppLockerRulePath($_), '*', [System.StringComparison]::OrdinalIgnoreCase)
+        })) {
+            [void]$localExe.RemoveChild($rule)
+        }
+        $remaining = @($_ProfileHelpers.GetAppLockerRules($localExe))
+    }
+    if ($remaining.Count -eq 0) {
+        [void]$localDoc.DocumentElement.RemoveChild($localExe)
+        $localExe = $null
+    }
+
+    # The packaged-app rule only matters while EXE rules are enforced locally.
+    if ($null -eq $localExe -and $localAppx) {
+        foreach ($rule in @($_ProfileHelpers.GetAppLockerRules($localAppx) |
+                Where-Object { $_.GetAttribute('Description') -like "*$managedMarker*" })) {
+            [void]$localAppx.RemoveChild($rule)
+        }
+        if (@($_ProfileHelpers.GetAppLockerRules($localAppx)).Count -eq 0) {
+            [void]$localDoc.DocumentElement.RemoveChild($localAppx)
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $BackupDirectory)) {
+        $null = New-Item -ItemType Directory -Path $BackupDirectory -Force
+    }
+    $backupPath = Join-Path $BackupDirectory ("AppLocker-backup-{0}.xml" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [System.IO.File]::WriteAllText($backupPath, $local.Raw, [System.Text.UTF8Encoding]::new($false))
+
+    $policyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("AppLocker-{0}.xml" -f [guid]::NewGuid().ToString('N'))
+    [System.IO.File]::WriteAllText($policyFile, $localDoc.OuterXml, [System.Text.UTF8Encoding]::new($false))
+    try {
+        Set-AppLockerPolicy -XmlPolicy $policyFile -ErrorAction Stop
+    }
+    finally {
+        Remove-Item -LiteralPath $policyFile -Force -ErrorAction SilentlyContinue
+    }
+
+    if (-not $NoGroupPolicyRefresh) {
+        & gpupdate.exe /force | Out-Null
+    }
+
+    Write-Host ''
+    Write-Host ("Removed: {0}" -f ($removedDetails -join ', ')) -ForegroundColor Green
+    if ($kept.Count -gt 0) {
+        Write-Host ("Kept (not created here): {0}" -f ($kept -join ', ')) -ForegroundColor Yellow
+    }
+    Write-Host ("Policy backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+
+    return [pscustomobject]@{
+        Action         = 'Removed'
+        Removed        = @($removed)
+        RemovedDetails = @($removedDetails)
+        Kept           = @($kept)
+        BackupPath     = $backupPath
+    }
+}
+
 function Invoke-WindowsUpdateScan {
     <#
 .SYNOPSIS
@@ -13880,4 +15533,3 @@ function Invoke-WindowsUpdate {
 # Auto-load vault credentials at profile load time so every session starts with
 # keys available. Uses -Quiet to avoid printing key counts in transient shells.
 Load-AiApiKeysFromCS -Quiet
-
