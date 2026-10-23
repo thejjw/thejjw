@@ -12519,7 +12519,173 @@ function Get-KimiUsage {
     return $resp
 }
 
-# --- Get-QwenUsage ---------------------------------------------------------
+# --- QwenCloud Token Plan payload mapping -----------------------------------
+# Maps the private console gateway payload onto the quota windows the Token
+# Plan console reports. Split out of Get-QwenUsage so the mapping can be
+# exercised without the network, and so a change in the console's response
+# shape has a single place to be fixed.
+
+function Get-QwenJsonProperty {
+    <#
+.SYNOPSIS
+    Reads a named property from a deserialized JSON object.
+.DESCRIPTION
+    Returns the property value, or $null when the object is missing or has no
+    such property. The QwenCloud gateway nests the quota payload under several
+    optional envelopes, so every lookup has to tolerate an absent property.
+.PARAMETER InputObject
+    The deserialized JSON object to read from.
+.PARAMETER Name
+    The property name to look up.
+#>
+    [CmdletBinding()]
+    param(
+        [object]$InputObject,
+        [string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $null }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function ConvertFrom-QwenCloudUsagePayload {
+    <#
+.SYNOPSIS
+    Maps a QwenCloud gateway payload onto normalized quota windows.
+.DESCRIPTION
+    Unwraps the console gateway envelopes (Data, DataV2.data, data) and reads
+    the credit buckets the Token Plan console reports: the five-hour and
+    seven-day windows, plus the monthly bucket that monthly-only plans expose
+    on their own. Returns the raw payload together with the normalized limits.
+    Throws a tagged error when the payload reports a failed request or carries
+    no quota field this profile knows about.
+.PARAMETER Payload
+    The deserialized response body of the Token Plan quota request.
+.EXAMPLE
+    ConvertFrom-QwenCloudUsagePayload -Payload $response
+.NOTES
+    The window list follows the oh-my-pi implementation (packages/ai/src/usage/
+    alibaba-token-plan.ts); the console reports only the buckets a given plan
+    uses, so a plan without a five-hour or seven-day window is normal.
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Payload
+    )
+
+    # The console reports a used fraction, but also accepts whole percentages,
+    # so a value above 1 is a percentage rather than a fraction of one.
+    function ConvertTo-UsedPercent([object]$Value) {
+        if ($null -eq $Value) { return $null }
+        $parsed = 0.0
+        if (-not [double]::TryParse(
+            [string]$Value,
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$parsed
+        ) -or $parsed -lt 0) {
+            return $null
+        }
+        $percent = if ($parsed -le 1) { $parsed * 100 } else { $parsed }
+        # 100.0, not 100: the Int32 overload of Min would truncate a
+        # fractional percentage to a whole number.
+        return [Math]::Min(100.0, $percent)
+    }
+
+    # Reset deadlines arrive as epoch milliseconds, or as seconds on some
+    # responses; both are normalized to a local-time DateTimeOffset.
+    function ConvertTo-ResetTime([object]$Value) {
+        if ($null -eq $Value) { return $null }
+        $parsed = 0.0
+        if (-not [double]::TryParse(
+            [string]$Value,
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$parsed
+        ) -or $parsed -le 0) {
+            return $null
+        }
+        $milliseconds = if ($parsed -lt 1000000000000) { $parsed * 1000 } else { $parsed }
+        try {
+            return [DateTimeOffset]::FromUnixTimeMilliseconds([long]$milliseconds)
+        } catch {
+            return $null
+        }
+    }
+
+    $successResponse = Get-QwenJsonProperty $Payload 'successResponse'
+    $responseData = Get-QwenJsonProperty $Payload 'data'
+    if ($successResponse -eq $false -or $null -eq $responseData) {
+        $failureShape = $Payload | ConvertTo-Json -Depth 6 -Compress
+        if ($failureShape -match '(?i)ConsoleNeedLogin|NeedLogin|not.?logged.?in|login.{0,24}expired|unauthorized|forbidden') {
+            throw '[QwenAuth] QwenCloud requires a fresh console login.'
+        }
+        throw '[QwenResponse] QwenCloud usage lookup returned an unsuccessful response.'
+    }
+
+    # The gateway can reject a request with success=false while still replying
+    # HTTP 200. Surface its error code instead of reporting a missing field.
+    if ((Get-QwenJsonProperty $responseData 'success') -eq $false) {
+        $errorCode = [string](Get-QwenJsonProperty $responseData 'errorCode')
+        if (-not $errorCode) { $errorCode = 'unknown' }
+        throw "[QwenResponse] QwenCloud usage request was rejected (errorCode: $errorCode)."
+    }
+
+    $stringData = Get-QwenJsonProperty $responseData 'Data'
+    if ($stringData -is [string]) {
+        try { $responseData = $stringData | ConvertFrom-Json } catch {}
+    }
+    $dataV2 = Get-QwenJsonProperty $responseData 'DataV2'
+    $dataV2Data = Get-QwenJsonProperty $dataV2 'data'
+    if ($null -ne $dataV2Data) { $responseData = $dataV2Data }
+    $nestedData = Get-QwenJsonProperty $responseData 'data'
+    if ($null -ne $nestedData) { $responseData = $nestedData }
+
+    $limits = New-Object System.Collections.Generic.List[object]
+    $fiveHourUsed = ConvertTo-UsedPercent (Get-QwenJsonProperty $responseData 'per5HourPercentage')
+    $sevenDayUsed = ConvertTo-UsedPercent (Get-QwenJsonProperty $responseData 'per1WeekPercentage')
+    $monthlyUsed = ConvertTo-UsedPercent (Get-QwenJsonProperty $responseData 'per1MonthPercentage')
+    if ($null -ne $fiveHourUsed) {
+        $limits.Add([pscustomobject]@{
+            Window      = '5 Hour Credits'
+            UsedPercent = $fiveHourUsed
+            ResetAt     = ConvertTo-ResetTime (Get-QwenJsonProperty $responseData 'per5HourResetTime')
+        })
+    }
+    if ($null -ne $sevenDayUsed) {
+        $limits.Add([pscustomobject]@{
+            Window      = '7 Day Credits'
+            UsedPercent = $sevenDayUsed
+            ResetAt     = ConvertTo-ResetTime (Get-QwenJsonProperty $responseData 'per1WeekResetTime')
+        })
+    }
+    # Monthly-only plans report just this bucket. The console never states the
+    # monthly span, so the window carries a reset deadline without a duration.
+    if ($null -ne $monthlyUsed) {
+        $limits.Add([pscustomobject]@{
+            Window      = 'Monthly Credits'
+            UsedPercent = $monthlyUsed
+            ResetAt     = ConvertTo-ResetTime (Get-QwenJsonProperty $responseData 'per1MonthResetTime')
+        })
+    }
+    if ($limits.Count -eq 0) {
+        # Name the fields that were present: the console has changed its
+        # response shape before, and the field names are what identifies it.
+        $available = @($responseData.PSObject.Properties.Name | Sort-Object)
+        $fieldList = if ($available.Count -gt 0) { $available -join ', ' } else { '(none)' }
+        throw ('[QwenResponse] QwenCloud returned no recognized quota fields (available fields: {0}).' -f $fieldList)
+    }
+
+    return [pscustomobject]@{
+        Raw    = $Payload
+        Limits = [object[]]$limits
+    }
+}
+
+# --- Get-QwenUsage ----------------------------------------------------------
 # Queries QwenCloud Token Plan's private console quota endpoint. The browser
 # session cookie is stored separately in Windows Credential Manager and is
 # never copied into an environment variable or returned with query results.
@@ -12527,7 +12693,7 @@ function Get-KimiUsage {
 function Get-QwenUsage {
 <#
 .SYNOPSIS
-    Queries QwenCloud Token Plan five-hour and seven-day Credit usage.
+    Queries QwenCloud Token Plan five-hour, seven-day, and monthly Credit usage.
 .DESCRIPTION
     Retrieves a QwenCloud console Cookie header from Windows Credential Manager,
     obtains a temporary console security token, and calls the Token Plan Personal
@@ -12656,13 +12822,6 @@ function Get-QwenUsage {
     # Execute both private console requests and return only the raw quota payload
     # plus normalized limits. Cookie and secToken never leave this helper.
     function Invoke-QwenCloudUsageQuery([string]$Cookie) {
-        function Get-JsonProperty([object]$InputObject, [string]$Name) {
-            if ($null -eq $InputObject) { return $null }
-            $property = $InputObject.PSObject.Properties[$Name]
-            if ($null -eq $property) { return $null }
-            return $property.Value
-        }
-
         function Send-JsonRequest(
             [System.Net.Http.HttpClient]$Client,
             [System.Net.Http.HttpRequestMessage]$Request,
@@ -12687,40 +12846,6 @@ function Get-QwenUsage {
             } finally {
                 if ($null -ne $response) { $response.Dispose() }
                 $Request.Dispose()
-            }
-        }
-
-        function ConvertTo-UsedPercent([object]$Value) {
-            if ($null -eq $Value) { return $null }
-            $parsed = 0.0
-            if (-not [double]::TryParse(
-                [string]$Value,
-                [Globalization.NumberStyles]::Float,
-                [Globalization.CultureInfo]::InvariantCulture,
-                [ref]$parsed
-            ) -or $parsed -lt 0) {
-                return $null
-            }
-            $percent = if ($parsed -le 1) { $parsed * 100 } else { $parsed }
-            return [Math]::Min(100, $percent)
-        }
-
-        function ConvertTo-ResetTime([object]$Value) {
-            if ($null -eq $Value) { return $null }
-            $parsed = 0.0
-            if (-not [double]::TryParse(
-                [string]$Value,
-                [Globalization.NumberStyles]::Float,
-                [Globalization.CultureInfo]::InvariantCulture,
-                [ref]$parsed
-            ) -or $parsed -le 0) {
-                return $null
-            }
-            $milliseconds = if ($parsed -lt 1000000000000) { $parsed * 1000 } else { $parsed }
-            try {
-                return [DateTimeOffset]::FromUnixTimeMilliseconds([long]$milliseconds)
-            } catch {
-                return $null
             }
         }
 
@@ -12753,9 +12878,9 @@ function Get-QwenUsage {
             [void]$userRequest.Headers.TryAddWithoutValidation('Referer', "$consoleOrigin/")
             [void]$userRequest.Headers.TryAddWithoutValidation('User-Agent', $browserUserAgent)
             $userPayload = Send-JsonRequest $client $userRequest 'QwenCloud session lookup'
-            $userData = Get-JsonProperty $userPayload 'data'
-            $secToken = Get-JsonProperty $userData 'secToken'
-            $errorCode = [string](Get-JsonProperty $userPayload 'code')
+            $userData = Get-QwenJsonProperty $userPayload 'data'
+            $secToken = Get-QwenJsonProperty $userData 'secToken'
+            $errorCode = [string](Get-QwenJsonProperty $userPayload 'code')
             if ($errorCode -eq 'ConsoleNeedLogin' -or $secToken -isnot [string] -or -not $secToken) {
                 throw '[QwenAuth] QwenCloud requires a fresh console login.'
             }
@@ -12799,51 +12924,7 @@ function Get-QwenUsage {
             }
 
             $payload = Send-JsonRequest $client $usageRequest 'QwenCloud usage lookup'
-            $successResponse = Get-JsonProperty $payload 'successResponse'
-            $responseData = Get-JsonProperty $payload 'data'
-            if ($successResponse -eq $false -or $null -eq $responseData) {
-                $failureShape = $payload | ConvertTo-Json -Depth 6 -Compress
-                if ($failureShape -match '(?i)ConsoleNeedLogin|NeedLogin|not.?logged.?in|login.{0,24}expired|unauthorized|forbidden') {
-                    throw '[QwenAuth] QwenCloud requires a fresh console login.'
-                }
-                throw '[QwenResponse] QwenCloud usage lookup returned an unsuccessful response.'
-            }
-
-            $stringData = Get-JsonProperty $responseData 'Data'
-            if ($stringData -is [string]) {
-                try { $responseData = $stringData | ConvertFrom-Json } catch {}
-            }
-            $dataV2 = Get-JsonProperty $responseData 'DataV2'
-            $dataV2Data = Get-JsonProperty $dataV2 'data'
-            if ($null -ne $dataV2Data) { $responseData = $dataV2Data }
-            $nestedData = Get-JsonProperty $responseData 'data'
-            if ($null -ne $nestedData) { $responseData = $nestedData }
-
-            $limits = New-Object System.Collections.Generic.List[object]
-            $fiveHourUsed = ConvertTo-UsedPercent (Get-JsonProperty $responseData 'per5HourPercentage')
-            $sevenDayUsed = ConvertTo-UsedPercent (Get-JsonProperty $responseData 'per1WeekPercentage')
-            if ($null -ne $fiveHourUsed) {
-                $limits.Add([pscustomobject]@{
-                    Window      = '5 Hour Credits'
-                    UsedPercent = $fiveHourUsed
-                    ResetAt     = ConvertTo-ResetTime (Get-JsonProperty $responseData 'per5HourResetTime')
-                })
-            }
-            if ($null -ne $sevenDayUsed) {
-                $limits.Add([pscustomobject]@{
-                    Window      = '7 Day Credits'
-                    UsedPercent = $sevenDayUsed
-                    ResetAt     = ConvertTo-ResetTime (Get-JsonProperty $responseData 'per1WeekResetTime')
-                })
-            }
-            if ($limits.Count -eq 0) {
-                throw '[QwenResponse] QwenCloud returned no recognized quota fields.'
-            }
-
-            return [pscustomobject]@{
-                Raw    = $payload
-                Limits = [object[]]$limits
-            }
+            return ConvertFrom-QwenCloudUsagePayload -Payload $payload
         } catch [System.Threading.Tasks.TaskCanceledException] {
             throw '[QwenTransient] QwenCloud usage query timed out.'
         } catch [System.Net.Http.HttpRequestException] {
@@ -12921,7 +13002,7 @@ function Get-QwenUsage {
     $concerns = New-Object System.Collections.Generic.List[string]
     $now = [DateTimeOffset]::Now
     foreach ($limit in @($query.Limits)) {
-        $usedPercent = [Math]::Max(0, [Math]::Min(100, [double]$limit.UsedPercent))
+        $usedPercent = [Math]::Max(0.0, [Math]::Min(100.0, [double]$limit.UsedPercent))
         $remainingPercent = 100 - $usedPercent
         $status = if ($usedPercent -ge 100) {
             'EXHAUSTED'
