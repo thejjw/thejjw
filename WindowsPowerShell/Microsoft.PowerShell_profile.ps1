@@ -8801,7 +8801,7 @@ function claudek {
     $env:CLAUDE_CODE_SUBAGENT_MODEL = $env:ANTHROPIC_MODEL
 
     $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = '1000000'
-    $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = '1000000'
+    $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = '1048576'
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'
 
     # Map this ID onto a model Claude Code knows, so it stops reporting
@@ -8931,7 +8931,7 @@ Last Edit: 2026-10
         OpusModel         = $model
         SubagentModel     = $model
         AutoCompactWindow = '1000000'
-        MaxContextTokens = '1000000'
+        MaxContextTokens = '1048576'
         TimeoutMs        = '3000000'
         Disable1M        = '0'
     }

@@ -1641,7 +1641,7 @@ fi
 # claudek / claudekd - Kimi Claude Code functions
 # ---------------------------------------------------------------------------
 CLAUDEK_MARKER="# >>> claudek >>>"
-CLAUDEK_VERSION_MARKER="# claudek credential loader version 3"
+CLAUDEK_VERSION_MARKER="# claudek credential loader version 4"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> claudek >>>" "# <<< claudek <<<"
@@ -1656,7 +1656,7 @@ else
   cat >> "$PROFILE" << 'EOF'
 
 # >>> claudek >>>
-# claudek credential loader version 3
+# claudek credential loader version 4
 # Custom Claude Code functions with Kimi endpoint
 # claudek - Launch the maximum-effort Kimi profile.
 claudek() {
@@ -1676,7 +1676,7 @@ claudek() {
     ANTHROPIC_DEFAULT_HAIKU_MODEL="k3.1-pro[1m]" \
     CLAUDE_CODE_SUBAGENT_MODEL="k3.1-pro[1m]" \
     CLAUDE_CODE_AUTO_COMPACT_WINDOW="1000000" \
-    CLAUDE_CODE_MAX_CONTEXT_TOKENS="1000000" \
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS="1048576" \
     claude "$@"
 }
 
@@ -1978,7 +1978,7 @@ fi
 # claudek-remote (claudekr) - remote Claude Code via Kimi
 # ---------------------------------------------------------------------------
 CLAUDEKR_MARKER="# >>> claudek-remote >>>"
-CLAUDEKR_VERSION_MARKER="# claudek-remote credential loader version 3"
+CLAUDEKR_VERSION_MARKER="# claudek-remote credential loader version 4"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> claudek-remote >>>" "# <<< claudek-remote <<<"
@@ -1992,7 +1992,7 @@ if grep -qF "$CLAUDEKR_MARKER" "$PROFILE" 2>/dev/null; then
 else
   cat >> "$PROFILE" << 'CLAUDEKR_EOF'
 # >>> claudek-remote >>>
-# claudek-remote credential loader version 3
+# claudek-remote credential loader version 4
 
 # claudekr - One-shot remote Claude Code via Kimi K3.1 Pro 1M.
 #   Usage: claudekr <user@host> [port]
@@ -2018,7 +2018,7 @@ claudekr() {
     "1000000" \
     "k3.1-pro[1m]" \
     "k3.1-pro[1m]" \
-    "1000000" \
+    "1048576" \
     '{"modelOverrides":{"claude-opus-4-6":"k3.1-pro[1m]"}}'
 }
 
