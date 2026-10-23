@@ -8800,14 +8800,34 @@ function claudek {
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = $env:ANTHROPIC_MODEL
     $env:CLAUDE_CODE_SUBAGENT_MODEL = $env:ANTHROPIC_MODEL
 
-    $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = '1048576'
-    $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = '1048576'
+    $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = '1000000'
+    $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = '1000000'
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'
+
+    # Map this ID onto a model Claude Code knows, so it stops reporting
+    # [claude-code:unrecognized_model] and applies that model's capabilities.
+    # --settings is scoped to this launch, so plain `claude` sessions keep their
+    # own Anthropic model routing. A file is used because Windows PowerShell 5.1
+    # mangles inline JSON when passing it to a native command.
+    $claudeArgs = @($args)
+    if ($claudeArgs -notcontains '--settings') {
+        $settingsDir = Join-Path $HOME '.claude'
+        if (-not (Test-Path -LiteralPath $settingsDir)) {
+            $null = New-Item -ItemType Directory -Path $settingsDir -Force
+        }
+        $settingsPath = Join-Path $settingsDir 'kimi-model-overrides.json'
+        $settingsJson = @{ modelOverrides = @{ 'claude-opus-4-6' = $env:ANTHROPIC_MODEL } } | ConvertTo-Json -Compress
+        $current = if (Test-Path -LiteralPath $settingsPath) { [System.IO.File]::ReadAllText($settingsPath) } else { $null }
+        if ($current -ne $settingsJson) {
+            [System.IO.File]::WriteAllText($settingsPath, $settingsJson)
+        }
+        $claudeArgs += @('--settings', $settingsPath)
+    }
 
     try {
         Install-GlobalClaudeMd
         Install-GlobalClaudeSettings
-        claude @args
+        claude @claudeArgs
     }
     finally {
         $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
@@ -8910,8 +8930,8 @@ Last Edit: 2026-10
         SonnetModel       = $model
         OpusModel         = $model
         SubagentModel     = $model
-        AutoCompactWindow = '1048576'
-        MaxContextTokens = '1048576'
+        AutoCompactWindow = '1000000'
+        MaxContextTokens = '1000000'
         TimeoutMs        = '3000000'
         Disable1M        = '0'
     }
