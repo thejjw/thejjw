@@ -11738,7 +11738,6 @@ function Install-ClaudeCode {
     [pscustomobject]@{ Version = $version; Platform = $platform }
 }
 
-Set-Alias -Name icc -Value Install-ClaudeCode
 
 Set-Alias -Name aiu -Value Invoke-AiUpgrade
 
