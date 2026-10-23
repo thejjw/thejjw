@@ -14140,7 +14140,7 @@ function Get-CodexUsage {
     }
 
     if ([string]::IsNullOrWhiteSpace($AccessToken)) {
-        Write-Error 'No Codex access token found. Run "codex login" to sign in to ChatGPT, then retry; or pass -AccessToken.'
+        Write-Error ("No Codex access token found in {0} or `$env:CODEX_ACCESS_TOKEN. Run ""codex login"" to sign in to ChatGPT, then retry; or pass -AccessToken." -f $authPath)
         return
     }
 
@@ -14440,7 +14440,7 @@ function Get-ClaudeUsage {
     }
 
     if ([string]::IsNullOrWhiteSpace($AccessToken)) {
-        Write-Error 'No Claude access token found. Run "claude login" to sign in, then retry; or pass -AccessToken.'
+        Write-Error ("No Claude access token found in {0} or `$env:CLAUDE_CODE_OAUTH_TOKEN. Run ""claude login"" to sign in, then retry; or pass -AccessToken." -f $credPath)
         return
     }
 
