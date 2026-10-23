@@ -10655,8 +10655,8 @@ function Install-AiTools {
     }
 
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-        Write-Host "claude CLI not found; installing via $($_AiToolsInternal.Urls.ClaudeCli)..." -ForegroundColor Yellow
-        try { & powershell -NoProfile -Command "iex (irm '$($_AiToolsInternal.Urls.ClaudeCli)')" } catch { Write-Host "Failed to install claude: $_" -ForegroundColor Red }
+        Write-Host "claude CLI not found; installing via Install-ClaudeCode..." -ForegroundColor Yellow
+        try { Install-ClaudeCode } catch { Write-Host "Failed to install claude: $_" -ForegroundColor Red }
         # The claude installer places the binary in ~/.local/bin; ensure it's on the user PATH.
         $claudeBin = Join-Path $env:USERPROFILE '.local\bin'
         $null = Add-UserPathEntry -Path $claudeBin
@@ -11684,6 +11684,7 @@ function Install-ClaudeCode {
 .NOTES
     Author: jjw(@thejjw)
     Last Edit: 2026-10
+    Source reference (upstream installer this mirrors): https://claude.ai/install.ps1
 #>
     [CmdletBinding()]
     param(
