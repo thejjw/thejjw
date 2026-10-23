@@ -1,4 +1,4 @@
-Describe 'ConvertFrom-CodexUsagePayload' {
+Describe 'ConvertFromCodexUsagePayload' {
     BeforeAll {
         $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'
         $tokens = $null
@@ -10,7 +10,7 @@ Describe 'ConvertFrom-CodexUsagePayload' {
         )
         if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
 
-        foreach ($name in @('Get-AiUsageJsonProperty', 'Get-AiUsageWindowLabel', 'ConvertFrom-CodexUsagePayload')) {
+        foreach ($name in @('GetAiUsageJsonProperty', 'GetAiUsageWindowLabel', 'ConvertFromCodexUsagePayload')) {
             $functionAst = $ast.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -26,7 +26,7 @@ Describe 'ConvertFrom-CodexUsagePayload' {
     It 'maps the windows the ChatGPT backend reports' {
         $payload = Get-Content -LiteralPath $script:fixturePath -Raw | ConvertFrom-Json
 
-        $result = ConvertFrom-CodexUsagePayload -Payload $payload
+        $result = ConvertFromCodexUsagePayload -Payload $payload
 
         $result.Plan | Should -Be 'pro'
         $result.Windows.Count | Should -Be 3
@@ -45,7 +45,7 @@ Describe 'ConvertFrom-CodexUsagePayload' {
     It 'reads the workspace spend limit' {
         $payload = Get-Content -LiteralPath $script:fixturePath -Raw | ConvertFrom-Json
 
-        $result = ConvertFrom-CodexUsagePayload -Payload $payload
+        $result = ConvertFromCodexUsagePayload -Payload $payload
 
         $result.SpendLimit | Should -Not -BeNullOrEmpty
         $result.SpendLimit.UsedPercent | Should -Be 32
@@ -72,7 +72,7 @@ Describe 'ConvertFrom-CodexUsagePayload' {
             }
         }
 
-        $result = ConvertFrom-CodexUsagePayload -Payload $payload
+        $result = ConvertFromCodexUsagePayload -Payload $payload
 
         $result.Windows.Count | Should -Be 1
         $result.Windows[0].Window | Should -Be '7 Day Credits'
@@ -90,7 +90,7 @@ Describe 'ConvertFrom-CodexUsagePayload' {
             }
         }
 
-        $result = ConvertFrom-CodexUsagePayload -Payload $payload
+        $result = ConvertFromCodexUsagePayload -Payload $payload
 
         $result.Windows[0].UsedPercent | Should -Be 100
     }
@@ -98,7 +98,7 @@ Describe 'ConvertFrom-CodexUsagePayload' {
     It 'reports no windows when the payload carries none' {
         $payload = [pscustomobject]@{ plan_type = 'free'; rate_limit = [pscustomobject]@{} }
 
-        $result = ConvertFrom-CodexUsagePayload -Payload $payload
+        $result = ConvertFromCodexUsagePayload -Payload $payload
 
         $result.Windows.Count | Should -Be 0
     }

@@ -10,11 +10,7 @@ Describe 'Get-ClaudeUsage' {
         )
         if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
 
-        foreach ($name in @(
-            'Get-AiUsageJsonProperty',
-            'ConvertFrom-ClaudeUsagePayload',
-            'Get-ClaudeUsage'
-        )) {
+        foreach ($name in @('Get-ClaudeUsage')) {
             $functionAst = $ast.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -24,19 +20,25 @@ Describe 'Get-ClaudeUsage' {
             . ([scriptblock]::Create($functionAst.Extent.Text))
         }
 
-        $Global:_ProfileHelpers = [pscustomobject]@{}
-        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteUsageTimestamp -Value { param($CommandName) }
-        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteSection -Value { param($Title) }
-        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name FormatDuration -Value {
-            param([TimeSpan]$Duration)
-            return ('{0:N0}m' -f $Duration.TotalMinutes)
-        }
+        # The profile helper module is loaded whole, so the function under test
+        # finds every helper it calls. The members that write to the host are
+        # then replaced with stubs, because a module's own Write-Host cannot be
+        # intercepted from the test scope.
+        $helperAssignment = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$_ProfileHelpers'
+        }, $true)
+        if (-not $helperAssignment) { throw 'Could not load the profile helper module.' }
+        . ([scriptblock]::Create($helperAssignment.Extent.Text))
+
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteUsageTimestamp -Value { param($CommandName) } -Force
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteSection -Value { param($Title) } -Force
 
         $script:fixture = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures\claude-oauth-usage-flat.json') -Raw | ConvertFrom-Json
     }
 
     AfterAll {
-        Remove-Variable -Name _ProfileHelpers -Scope Global -ErrorAction SilentlyContinue
         Remove-Variable -Name claudeLastQuery -Scope Global -ErrorAction SilentlyContinue
     }
 

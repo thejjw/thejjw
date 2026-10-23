@@ -1,4 +1,4 @@
-Describe 'ConvertFrom-QwenCloudUsagePayload' {
+Describe 'ConvertFromQwenCloudUsagePayload' {
     BeforeAll {
         $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'
         $tokens = $null
@@ -10,7 +10,7 @@ Describe 'ConvertFrom-QwenCloudUsagePayload' {
         )
         if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
 
-        foreach ($name in @('Get-AiUsageJsonProperty', 'ConvertFrom-QwenCloudUsagePayload')) {
+        foreach ($name in @('GetAiUsageJsonProperty', 'ConvertFromQwenCloudUsagePayload')) {
             $functionAst = $ast.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -38,7 +38,7 @@ Describe 'ConvertFrom-QwenCloudUsagePayload' {
             }
         }
 
-        $result = ConvertFrom-QwenCloudUsagePayload -Payload $payload
+        $result = ConvertFromQwenCloudUsagePayload -Payload $payload
 
         $result.Limits.Count | Should -Be 2
         $result.Limits[0].Window | Should -Be '5 Hour Credits'
@@ -66,7 +66,7 @@ Describe 'ConvertFrom-QwenCloudUsagePayload' {
             }
         }
 
-        $result = ConvertFrom-QwenCloudUsagePayload -Payload $payload
+        $result = ConvertFromQwenCloudUsagePayload -Payload $payload
 
         $result.Limits.Count | Should -Be 1
         $result.Limits[0].Window | Should -Be 'Monthly Credits'
@@ -84,7 +84,7 @@ Describe 'ConvertFrom-QwenCloudUsagePayload' {
             }
         }
 
-        { ConvertFrom-QwenCloudUsagePayload -Payload $payload } |
+        { ConvertFromQwenCloudUsagePayload -Payload $payload } |
             Should -Throw '*was rejected (errorCode: BailianGateway.Workspace.NotAuthorised)*'
     }
 
@@ -99,7 +99,7 @@ Describe 'ConvertFrom-QwenCloudUsagePayload' {
             }
         }
 
-        { ConvertFrom-QwenCloudUsagePayload -Payload $payload } |
+        { ConvertFromQwenCloudUsagePayload -Payload $payload } |
             Should -Throw '*no recognized quota fields (available fields: anotherField, someNewField)*'
     }
 
@@ -111,7 +111,7 @@ Describe 'ConvertFrom-QwenCloudUsagePayload' {
         }
 
         # Wildcards, not a literal match: Pester reads '[' as a character class.
-        { ConvertFrom-QwenCloudUsagePayload -Payload $payload } |
+        { ConvertFromQwenCloudUsagePayload -Payload $payload } |
             Should -Throw '*QwenAuth*requires a fresh console login*'
     }
 
@@ -125,7 +125,7 @@ Describe 'ConvertFrom-QwenCloudUsagePayload' {
             }
         }
 
-        $result = ConvertFrom-QwenCloudUsagePayload -Payload $payload
+        $result = ConvertFromQwenCloudUsagePayload -Payload $payload
 
         $result.Limits[0].UsedPercent | Should -Be 25.5
     }

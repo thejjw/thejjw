@@ -1,4 +1,4 @@
-Describe 'ConvertFrom-ClaudeUsagePayload' {
+Describe 'ConvertFromClaudeUsagePayload' {
     BeforeAll {
         $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'
         $tokens = $null
@@ -10,7 +10,7 @@ Describe 'ConvertFrom-ClaudeUsagePayload' {
         )
         if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
 
-        foreach ($name in @('Get-AiUsageJsonProperty', 'ConvertFrom-ClaudeUsagePayload')) {
+        foreach ($name in @('GetAiUsageJsonProperty', 'ConvertFromClaudeUsagePayload')) {
             $functionAst = $ast.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -27,7 +27,7 @@ Describe 'ConvertFrom-ClaudeUsagePayload' {
     It 'maps the flat window shape' {
         $payload = Get-Content -LiteralPath $script:flatPath -Raw | ConvertFrom-Json
 
-        $result = ConvertFrom-ClaudeUsagePayload -Payload $payload
+        $result = ConvertFromClaudeUsagePayload -Payload $payload
 
         $result.Windows.Count | Should -Be 3
         $result.Windows[0].Window | Should -Be '5 Hour Credits'
@@ -42,7 +42,7 @@ Describe 'ConvertFrom-ClaudeUsagePayload' {
         # The console reports the legacy per-model weekly buckets as null.
         $payload = Get-Content -LiteralPath $script:flatPath -Raw | ConvertFrom-Json
 
-        $result = ConvertFrom-ClaudeUsagePayload -Payload $payload
+        $result = ConvertFromClaudeUsagePayload -Payload $payload
 
         @($result.Windows | Where-Object { $_.Window -like '*Opus*' }).Count | Should -Be 0
     }
@@ -50,7 +50,7 @@ Describe 'ConvertFrom-ClaudeUsagePayload' {
     It 'maps the limits array shape' {
         $payload = Get-Content -LiteralPath $script:limitsPath -Raw | ConvertFrom-Json
 
-        $result = ConvertFrom-ClaudeUsagePayload -Payload $payload
+        $result = ConvertFromClaudeUsagePayload -Payload $payload
 
         $result.Windows.Count | Should -Be 3
         $result.Windows[0].Window | Should -Be '5 Hour Credits'
@@ -67,7 +67,7 @@ Describe 'ConvertFrom-ClaudeUsagePayload' {
         # the limits array, and they describe the same windows.
         $payload = Get-Content -LiteralPath $script:limitsPath -Raw | ConvertFrom-Json
 
-        $result = ConvertFrom-ClaudeUsagePayload -Payload $payload
+        $result = ConvertFromClaudeUsagePayload -Payload $payload
 
         $result.Windows.Count | Should -Be 3
         @($result.Windows | Where-Object { $_.Window -eq '5 Hour Credits' }).Count | Should -Be 1
@@ -79,7 +79,7 @@ Describe 'ConvertFrom-ClaudeUsagePayload' {
         # array entry carries the real one.
         $payload = Get-Content -LiteralPath $script:limitsPath -Raw | ConvertFrom-Json
 
-        $result = ConvertFrom-ClaudeUsagePayload -Payload $payload
+        $result = ConvertFromClaudeUsagePayload -Payload $payload
 
         $result.Windows[0].ResetAt | Should -BeOfType [DateTimeOffset]
         $result.Windows[0].ResetAt.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss') | Should -Be '2026-09-11T03:38:39'
@@ -96,7 +96,7 @@ Describe 'ConvertFrom-ClaudeUsagePayload' {
             }
         }
 
-        $result = ConvertFrom-ClaudeUsagePayload -Payload $payload
+        $result = ConvertFromClaudeUsagePayload -Payload $payload
 
         $result.ExtraPercent | Should -BeNullOrEmpty
     }
@@ -104,7 +104,7 @@ Describe 'ConvertFrom-ClaudeUsagePayload' {
     It 'parses the reset deadline as a local time' {
         $payload = Get-Content -LiteralPath $script:limitsPath -Raw | ConvertFrom-Json
 
-        $result = ConvertFrom-ClaudeUsagePayload -Payload $payload
+        $result = ConvertFromClaudeUsagePayload -Payload $payload
 
         $result.Windows[0].ResetAt | Should -BeOfType [DateTimeOffset]
         $result.Windows[0].ResetAt.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss') | Should -Be '2026-09-11T03:38:39'
@@ -113,13 +113,13 @@ Describe 'ConvertFrom-ClaudeUsagePayload' {
     It 'keeps a fractional percentage instead of truncating it' {
         $payload = Get-Content -LiteralPath $script:limitsPath -Raw | ConvertFrom-Json
 
-        $result = ConvertFrom-ClaudeUsagePayload -Payload $payload
+        $result = ConvertFromClaudeUsagePayload -Payload $payload
 
         $result.Windows[0].UsedPercent | Should -Be 35.5
     }
 
     It 'reports no windows when the payload carries none' {
-        $result = ConvertFrom-ClaudeUsagePayload -Payload ([pscustomobject]@{ extra_usage = [pscustomobject]@{ is_enabled = $false } })
+        $result = ConvertFromClaudeUsagePayload -Payload ([pscustomobject]@{ extra_usage = [pscustomobject]@{ is_enabled = $false } })
 
         $result.Windows.Count | Should -Be 0
     }

@@ -1,4 +1,4 @@
-# OSC 9;9 hyperlink lets Windows Terminal / VS Code detect and click the working directory
+﻿# OSC 9;9 hyperlink lets Windows Terminal / VS Code detect and click the working directory
 function prompt {
     <#
 .SYNOPSIS
@@ -801,7 +801,587 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
         return ,$rows
     }
 
-    $profileHelperFunctions = @(
+        function GetAiUsageJsonProperty {
+        <#
+    .SYNOPSIS
+        Reads a named property from a deserialized JSON object.
+    .DESCRIPTION
+        Returns the property value, or $null when the object is missing or has no
+        such property. Every usage endpoint nests its payload under a different
+        set of optional envelopes, so every lookup has to tolerate an absent
+        property.
+    .PARAMETER InputObject
+        The deserialized JSON object to read from.
+    .PARAMETER Name
+        The property name to look up.
+    #>
+        [CmdletBinding()]
+        param(
+            [object]$InputObject,
+            [string]$Name
+        )
+
+        if ($null -eq $InputObject) { return $null }
+        $property = $InputObject.PSObject.Properties[$Name]
+        if ($null -eq $property) { return $null }
+        return $property.Value
+    }
+
+    function GetAiUsageJwtClaims {
+        <#
+    .SYNOPSIS
+        Decodes the claim set of a JSON Web Token.
+    .DESCRIPTION
+        Returns the decoded payload object, or $null when the token is missing,
+        malformed, or not a JWT. The signature is not verified: the tokens are
+        only read to learn the account id and plan that the backend already
+        reports, never to make a trust decision.
+    .PARAMETER Token
+        The encoded JWT.
+    #>
+        [CmdletBinding()]
+        param([string]$Token)
+
+        if ([string]::IsNullOrWhiteSpace($Token)) { return $null }
+        $parts = $Token.Split('.')
+        if ($parts.Count -lt 2) { return $null }
+        $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+        switch ($payload.Length % 4) {
+            2 { $payload += '==' }
+            3 { $payload += '=' }
+        }
+        try {
+            $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
+            return $json | ConvertFrom-Json
+        } catch {
+            return $null
+        }
+    }
+
+    function GetAiUsageWindowLabel {
+        <#
+    .SYNOPSIS
+        Names a quota window from its length in seconds.
+    .DESCRIPTION
+        Turns a window duration into the same naming style the other usage
+        functions use, for example '5 Hour Credits' or '7 Day Credits'.
+    .PARAMETER Seconds
+        The window length in seconds.
+    #>
+        [CmdletBinding()]
+        param([object]$Seconds)
+
+        $parsed = 0
+        if (-not [int]::TryParse([string]$Seconds, [ref]$parsed) -or $parsed -le 0) { return 'Credits' }
+        if ($parsed -ge 86400) { return ('{0} Day Credits' -f [Math]::Round($parsed / 86400)) }
+        if ($parsed -ge 3600) { return ('{0} Hour Credits' -f [Math]::Round($parsed / 3600)) }
+        return ('{0} Minute Credits' -f [Math]::Round($parsed / 60))
+    }
+
+    function NewAiUsageHttpSession {
+        <#
+    .SYNOPSIS
+        Creates an HTTP session for an AI usage query.
+    .DESCRIPTION
+        Returns the client, the handler, and the certificate callback that was in
+        place, so the caller can restore the previous callback afterwards.
+
+        TLS 1.2 is enabled because .NET Framework's HttpClient still negotiates
+        TLS 1.0 by default, and both providers reject that.
+
+        Unless -Strict is given, server certificates are accepted without
+        validation. Corporate networks sometimes re-sign TLS traffic with an
+        inspection proxy whose certificate the local store does not trust, and
+        the usage query then fails before it reaches the provider. The callback is
+        a compiled static method because a PowerShell scriptblock delegate fails
+        on the worker thread that performs the handshake ("There is no Runspace
+        available to run scripts in this thread").
+    .PARAMETER TimeoutSec
+        HTTP timeout in seconds.
+    .PARAMETER Strict
+        Keeps the default certificate validation, so an untrusted certificate
+        fails the request instead of being accepted.
+    #>
+        [CmdletBinding()]
+        param(
+            [int]$TimeoutSec = 15,
+            [switch]$Strict
+        )
+
+        Add-Type -AssemblyName System.Net.Http
+
+        try {
+            [Net.ServicePointManager]::SecurityProtocol =
+                [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]12288
+        } catch {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        }
+
+        $previousCallback = [Net.ServicePointManager]::ServerCertificateValidationCallback
+        if (-not $Strict) {
+            if (-not ([System.Management.Automation.PSTypeName]'AiUsageTls').Type) {
+                $code = @"
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+
+public class AiUsageTls {
+    public static bool AcceptAny(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors) {
+        return true;
+    }
+    public static void Relax() {
+        ServicePointManager.ServerCertificateValidationCallback = AcceptAny;
+    }
+}
+"@
+                Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
+            }
+            [AiUsageTls]::Relax()
+        }
+
+        $handler = New-Object System.Net.Http.HttpClientHandler
+        $handler.AllowAutoRedirect = $false
+        $handler.UseCookies = $false
+        $client = New-Object System.Net.Http.HttpClient($handler)
+        $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
+
+        return [pscustomobject]@{
+            Client                   = $client
+            Handler                  = $handler
+            PreviousCertificateCheck = $previousCallback
+        }
+    }
+
+    function CloseAiUsageHttpSession {
+        <#
+    .SYNOPSIS
+        Disposes an HTTP session created by New-AiUsageHttpSession.
+    .DESCRIPTION
+        Disposes the client and the handler, and restores the certificate
+        validation callback that was in place before the session was created.
+    .PARAMETER Session
+        The session object returned by New-AiUsageHttpSession.
+    #>
+        [CmdletBinding()]
+        param([object]$Session)
+
+        if (-not $Session) { return }
+        if ($Session.Client) { $Session.Client.Dispose() }
+        if ($Session.Handler) { $Session.Handler.Dispose() }
+        [Net.ServicePointManager]::ServerCertificateValidationCallback = $Session.PreviousCertificateCheck
+    }
+
+    function ConvertFromCodexUsagePayload {
+        <#
+    .SYNOPSIS
+        Maps a ChatGPT rate-limit payload onto normalized quota windows.
+    .DESCRIPTION
+        Reads the windows the ChatGPT backend reports for a Codex subscription and
+        returns them together with the plan, the credit balance, and the workspace
+        spend limit.
+
+        The window a response slot belongs to is decided by its
+        limit_window_seconds, never by its position: a Team plan reports the
+        weekly window in primary_window and leaves secondary_window null, and
+        OpenAI has both added and removed the short window without notice.
+
+        The percentages are used percent, so higher is worse.
+    .PARAMETER Payload
+        The deserialized body of a /backend-api/wham/usage response.
+    .EXAMPLE
+        ConvertFrom-CodexUsagePayload -Payload $response
+    #>
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)]
+            [object]$Payload
+        )
+
+        function ConvertTo-UsedPercent([object]$Value) {
+            if ($null -eq $Value) { return $null }
+            $parsed = 0.0
+            if (-not [double]::TryParse(
+                [string]$Value,
+                [Globalization.NumberStyles]::Float,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsed
+            ) -or $parsed -lt 0) {
+                return $null
+            }
+            # 100.0, not 100: the Int32 overload of Min would truncate the value.
+            return [Math]::Min(100.0, $parsed)
+        }
+
+        function ConvertTo-ResetTime([object]$Value) {
+            if ($null -eq $Value) { return $null }
+            $parsed = 0.0
+            if (-not [double]::TryParse(
+                [string]$Value,
+                [Globalization.NumberStyles]::Float,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsed
+            ) -or $parsed -le 0) {
+                return $null
+            }
+            # The backend reports epoch seconds; some responses use milliseconds.
+            $milliseconds = if ($parsed -lt 1000000000000) { $parsed * 1000 } else { $parsed }
+            try {
+                return [DateTimeOffset]::FromUnixTimeMilliseconds([long]$milliseconds)
+            } catch {
+                return $null
+            }
+        }
+
+        $windows = New-Object System.Collections.Generic.List[object]
+        $rateLimit = GetAiUsageJsonProperty $Payload 'rate_limit'
+        foreach ($slot in @('primary_window', 'secondary_window')) {
+            $window = GetAiUsageJsonProperty $rateLimit $slot
+            if (-not $window) { continue }
+            $used = ConvertTo-UsedPercent (GetAiUsageJsonProperty $window 'used_percent')
+            if ($null -eq $used) { continue }
+            $windows.Add([pscustomobject]@{
+                Window      = GetAiUsageWindowLabel (GetAiUsageJsonProperty $window 'limit_window_seconds')
+                UsedPercent = $used
+                ResetAt     = ConvertTo-ResetTime (GetAiUsageJsonProperty $window 'reset_at')
+            })
+        }
+
+        # Additional metered buckets (for example codex-spark) carry their own
+        # windows and are reported after the plan's own windows.
+        foreach ($extra in @(GetAiUsageJsonProperty $Payload 'additional_rate_limits')) {
+            if (-not $extra) { continue }
+            $extraLimit = GetAiUsageJsonProperty $extra 'rate_limit'
+            foreach ($slot in @('primary_window', 'secondary_window')) {
+                $window = GetAiUsageJsonProperty $extraLimit $slot
+                if (-not $window) { continue }
+                $used = ConvertTo-UsedPercent (GetAiUsageJsonProperty $window 'used_percent')
+                if ($null -eq $used) { continue }
+                $name = [string](GetAiUsageJsonProperty $extra 'limit_name')
+                if (-not $name) { $name = [string](GetAiUsageJsonProperty $extra 'metered_feature') }
+                if (-not $name) { $name = 'Additional' }
+                $windows.Add([pscustomobject]@{
+                    Window      = ('{0} ({1})' -f (GetAiUsageWindowLabel (GetAiUsageJsonProperty $window 'limit_window_seconds')), $name)
+                    UsedPercent = $used
+                    ResetAt     = ConvertTo-ResetTime (GetAiUsageJsonProperty $window 'reset_at')
+                })
+            }
+        }
+
+        $credits = GetAiUsageJsonProperty $Payload 'credits'
+        $spendControl = GetAiUsageJsonProperty $Payload 'spend_control'
+        $individualLimit = GetAiUsageJsonProperty $spendControl 'individual_limit'
+
+        $plan = [string](GetAiUsageJsonProperty $Payload 'plan_type')
+        $balance = $null
+        if ($credits) {
+            $balance = GetAiUsageJsonProperty $credits 'balance'
+        }
+
+        $spendLimit = $null
+        if ($individualLimit) {
+            $spendLimit = [pscustomobject]@{
+                UsedPercent      = ConvertTo-UsedPercent (GetAiUsageJsonProperty $individualLimit 'used_percent')
+                RemainingPercent = ConvertTo-UsedPercent (GetAiUsageJsonProperty $individualLimit 'remaining_percent')
+                Limit            = [string](GetAiUsageJsonProperty $individualLimit 'limit')
+                Used             = [string](GetAiUsageJsonProperty $individualLimit 'used')
+                ResetAt          = ConvertTo-ResetTime (GetAiUsageJsonProperty $individualLimit 'reset_at')
+            }
+        }
+
+        # The plan windows and the additional metered buckets can describe the
+        # same window, so a window is only reported once.
+        $seen = @{}
+        $unique = New-Object System.Collections.Generic.List[object]
+        foreach ($window in $windows) {
+            if ($seen.ContainsKey($window.Window)) { continue }
+            $seen[$window.Window] = $true
+            $unique.Add($window)
+        }
+
+        return [pscustomobject]@{
+            Raw       = $Payload
+            Plan      = $plan
+            Windows   = [object[]]$unique
+            Credits   = $credits
+            Balance   = $balance
+            SpendLimit = $spendLimit
+            LimitReached = [bool](GetAiUsageJsonProperty $rateLimit 'limit_reached')
+        }
+    }
+
+    function ConvertFromClaudeUsagePayload {
+        <#
+    .SYNOPSIS
+        Maps an Anthropic OAuth usage payload onto normalized quota windows.
+    .DESCRIPTION
+        Reads the credit windows the Token Plan console reports and returns them
+        together with the extra-usage block.
+
+        Two response shapes are in the wild for the same endpoint: flat
+        five_hour and seven_day objects, and a limits array whose entries carry a
+        kind (session, weekly_all, weekly_scoped). Both are accepted, and the
+        per-model weekly buckets are reported under the model they belong to.
+
+        The utilization values are used percent, so higher is worse.
+    .PARAMETER Payload
+        The deserialized body of an /api/oauth/usage response.
+    .EXAMPLE
+        ConvertFrom-ClaudeUsagePayload -Payload $response
+    #>
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)]
+            [object]$Payload
+        )
+
+        function ConvertTo-UsedPercent([object]$Value) {
+            if ($null -eq $Value) { return $null }
+            $parsed = 0.0
+            if (-not [double]::TryParse(
+                [string]$Value,
+                [Globalization.NumberStyles]::Float,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsed
+            ) -or $parsed -lt 0) {
+                return $null
+            }
+            # 100.0, not 100: the Int32 overload of Min would truncate the value.
+            return [Math]::Min(100.0, $parsed)
+        }
+
+        function ConvertTo-ResetTime([object]$Value) {
+            if ($null -eq $Value) { return $null }
+            if ($Value -is [DateTimeOffset]) { return $Value }
+            if ($Value -is [datetime]) { return [DateTimeOffset]::new($Value) }
+            $text = [string]$Value
+            if (-not $text) { return $null }
+            try {
+                return [DateTimeOffset]::Parse($text, [Globalization.CultureInfo]::InvariantCulture)
+            } catch {
+                return $null
+            }
+        }
+
+        # The console sometimes wraps the windows in a rate_limits envelope.
+        $container = GetAiUsageJsonProperty $Payload 'rate_limits'
+        if (-not $container) { $container = $Payload }
+
+        $windows = New-Object System.Collections.Generic.List[object]
+        $limits = @(GetAiUsageJsonProperty $container 'limits' | Where-Object { $_ })
+
+        if ($limits.Count -gt 0) {
+            # The limits array is the richer shape: it carries the reset deadline
+            # and the model-scoped weekly windows. The console returns it next to
+            # the flat five_hour and seven_day objects, which describe the same
+            # windows, so the array is used on its own and a window is never
+            # reported twice.
+            foreach ($entry in $limits) {
+                $used = ConvertTo-UsedPercent (GetAiUsageJsonProperty $entry 'percent')
+                if ($null -eq $used) { $used = ConvertTo-UsedPercent (GetAiUsageJsonProperty $entry 'utilization') }
+                if ($null -eq $used) { continue }
+                $kind = [string](GetAiUsageJsonProperty $entry 'kind')
+                $label = switch ($kind) {
+                    'session' { '5 Hour Credits' }
+                    'weekly_all' { '7 Day Credits' }
+                    'weekly_scoped' {
+                        $scope = GetAiUsageJsonProperty $entry 'scope'
+                        $model = GetAiUsageJsonProperty $scope 'model'
+                        $name = [string](GetAiUsageJsonProperty $model 'display_name')
+                        if (-not $name) { $name = [string](GetAiUsageJsonProperty $model 'id') }
+                        if ($name) { '7 Day Credits ({0})' -f $name } else { '7 Day Credits' }
+                    }
+                    default { if ($kind) { $kind } else { 'Credits' } }
+                }
+                $windows.Add([pscustomobject]@{
+                    Window      = $label
+                    UsedPercent = $used
+                    ResetAt     = ConvertTo-ResetTime (GetAiUsageJsonProperty $entry 'resets_at')
+                })
+            }
+        } else {
+            # Flat shape: five_hour, seven_day, and the legacy per-model buckets.
+            foreach ($pair in @(
+                @('five_hour', '5 Hour Credits'),
+                @('seven_day', '7 Day Credits'),
+                @('seven_day_opus', '7 Day Credits (Opus)'),
+                @('seven_day_sonnet', '7 Day Credits (Sonnet)')
+            )) {
+                $entry = GetAiUsageJsonProperty $container $pair[0]
+                if (-not $entry) { continue }
+                $used = ConvertTo-UsedPercent (GetAiUsageJsonProperty $entry 'utilization')
+                if ($null -eq $used) { $used = ConvertTo-UsedPercent (GetAiUsageJsonProperty $entry 'used_percentage') }
+                if ($null -eq $used) { continue }
+                $reset = GetAiUsageJsonProperty $entry 'resets_at'
+                if ($null -eq $reset) { $reset = GetAiUsageJsonProperty $entry 'resets_at_epoch' }
+                $windows.Add([pscustomobject]@{
+                    Window      = $pair[1]
+                    UsedPercent = $used
+                    ResetAt     = ConvertTo-ResetTime $reset
+                })
+            }
+        }
+
+        $extraUsage = GetAiUsageJsonProperty $container 'extra_usage'
+        if (-not $extraUsage) { $extraUsage = GetAiUsageJsonProperty $Payload 'extra_usage' }
+        $extraPercent = $null
+        if ($extraUsage -and (GetAiUsageJsonProperty $extraUsage 'is_enabled')) {
+            # A plan without extra usage reports a limit and a utilization of
+            # zero, so the block is only meaningful when the plan enabled it.
+            $extraPercent = ConvertTo-UsedPercent (GetAiUsageJsonProperty $extraUsage 'utilization')
+        }
+
+        return [pscustomobject]@{
+            Raw        = $Payload
+            Windows    = [object[]]$windows
+            ExtraUsage = $extraUsage
+            ExtraPercent = $extraPercent
+        }
+    }
+
+    function ConvertFromQwenCloudUsagePayload {
+        <#
+    .SYNOPSIS
+        Maps a QwenCloud gateway payload onto normalized quota windows.
+    .DESCRIPTION
+        Unwraps the console gateway envelopes (Data, DataV2.data, data) and reads
+        the credit buckets the Token Plan console reports: the five-hour and
+        seven-day windows, plus the monthly bucket that monthly-only plans expose
+        on their own. Returns the raw payload together with the normalized limits.
+        Throws a tagged error when the payload reports a failed request or carries
+        no quota field this profile knows about.
+    .PARAMETER Payload
+        The deserialized response body of the Token Plan quota request.
+    .EXAMPLE
+        ConvertFrom-QwenCloudUsagePayload -Payload $response
+    .NOTES
+        The window list follows the oh-my-pi implementation (packages/ai/src/usage/
+        alibaba-token-plan.ts); the console reports only the buckets a given plan
+        uses, so a plan without a five-hour or seven-day window is normal.
+    #>
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)]
+            [object]$Payload
+        )
+
+        # The console reports a used fraction, but also accepts whole percentages,
+        # so a value above 1 is a percentage rather than a fraction of one.
+        function ConvertTo-UsedPercent([object]$Value) {
+            if ($null -eq $Value) { return $null }
+            $parsed = 0.0
+            if (-not [double]::TryParse(
+                [string]$Value,
+                [Globalization.NumberStyles]::Float,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsed
+            ) -or $parsed -lt 0) {
+                return $null
+            }
+            $percent = if ($parsed -le 1) { $parsed * 100 } else { $parsed }
+            # 100.0, not 100: the Int32 overload of Min would truncate a
+            # fractional percentage to a whole number.
+            return [Math]::Min(100.0, $percent)
+        }
+
+        # Reset deadlines arrive as epoch milliseconds, or as seconds on some
+        # responses; both are normalized to a local-time DateTimeOffset.
+        function ConvertTo-ResetTime([object]$Value) {
+            if ($null -eq $Value) { return $null }
+            $parsed = 0.0
+            if (-not [double]::TryParse(
+                [string]$Value,
+                [Globalization.NumberStyles]::Float,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsed
+            ) -or $parsed -le 0) {
+                return $null
+            }
+            $milliseconds = if ($parsed -lt 1000000000000) { $parsed * 1000 } else { $parsed }
+            try {
+                return [DateTimeOffset]::FromUnixTimeMilliseconds([long]$milliseconds)
+            } catch {
+                return $null
+            }
+        }
+
+        $successResponse = GetAiUsageJsonProperty $Payload 'successResponse'
+        $responseData = GetAiUsageJsonProperty $Payload 'data'
+        if ($successResponse -eq $false -or $null -eq $responseData) {
+            $failureShape = $Payload | ConvertTo-Json -Depth 6 -Compress
+            if ($failureShape -match '(?i)ConsoleNeedLogin|NeedLogin|not.?logged.?in|login.{0,24}expired|unauthorized|forbidden') {
+                throw '[QwenAuth] QwenCloud requires a fresh console login.'
+            }
+            throw '[QwenResponse] QwenCloud usage lookup returned an unsuccessful response.'
+        }
+
+        # The gateway can reject a request with success=false while still replying
+        # HTTP 200. Surface its error code instead of reporting a missing field.
+        if ((GetAiUsageJsonProperty $responseData 'success') -eq $false) {
+            $errorCode = [string](GetAiUsageJsonProperty $responseData 'errorCode')
+            if (-not $errorCode) { $errorCode = 'unknown' }
+            throw "[QwenResponse] QwenCloud usage request was rejected (errorCode: $errorCode)."
+        }
+
+        $stringData = GetAiUsageJsonProperty $responseData 'Data'
+        if ($stringData -is [string]) {
+            try { $responseData = $stringData | ConvertFrom-Json } catch {}
+        }
+        $dataV2 = GetAiUsageJsonProperty $responseData 'DataV2'
+        $dataV2Data = GetAiUsageJsonProperty $dataV2 'data'
+        if ($null -ne $dataV2Data) { $responseData = $dataV2Data }
+        $nestedData = GetAiUsageJsonProperty $responseData 'data'
+        if ($null -ne $nestedData) { $responseData = $nestedData }
+
+        $limits = New-Object System.Collections.Generic.List[object]
+        $fiveHourUsed = ConvertTo-UsedPercent (GetAiUsageJsonProperty $responseData 'per5HourPercentage')
+        $sevenDayUsed = ConvertTo-UsedPercent (GetAiUsageJsonProperty $responseData 'per1WeekPercentage')
+        $monthlyUsed = ConvertTo-UsedPercent (GetAiUsageJsonProperty $responseData 'per1MonthPercentage')
+        if ($null -ne $fiveHourUsed) {
+            $limits.Add([pscustomobject]@{
+                Window      = '5 Hour Credits'
+                UsedPercent = $fiveHourUsed
+                ResetAt     = ConvertTo-ResetTime (GetAiUsageJsonProperty $responseData 'per5HourResetTime')
+            })
+        }
+        if ($null -ne $sevenDayUsed) {
+            $limits.Add([pscustomobject]@{
+                Window      = '7 Day Credits'
+                UsedPercent = $sevenDayUsed
+                ResetAt     = ConvertTo-ResetTime (GetAiUsageJsonProperty $responseData 'per1WeekResetTime')
+            })
+        }
+        # Monthly-only plans report just this bucket. The console never states the
+        # monthly span, so the window carries a reset deadline without a duration.
+        if ($null -ne $monthlyUsed) {
+            $limits.Add([pscustomobject]@{
+                Window      = 'Monthly Credits'
+                UsedPercent = $monthlyUsed
+                ResetAt     = ConvertTo-ResetTime (GetAiUsageJsonProperty $responseData 'per1MonthResetTime')
+            })
+        }
+        if ($limits.Count -eq 0) {
+            # Name the fields that were present: the console has changed its
+            # response shape before, and the field names are what identifies it.
+            $available = @($responseData.PSObject.Properties.Name | Sort-Object)
+            $fieldList = if ($available.Count -gt 0) { $available -join ', ' } else { '(none)' }
+            throw ('[QwenResponse] QwenCloud returned no recognized quota fields (available fields: {0}).' -f $fieldList)
+        }
+
+        return [pscustomobject]@{
+            Raw    = $Payload
+            Limits = [object[]]$limits
+        }
+    }
+
+$profileHelperFunctions = @(
+        'GetAiUsageJsonProperty',
+        'GetAiUsageJwtClaims',
+        'GetAiUsageWindowLabel',
+        'NewAiUsageHttpSession',
+        'CloseAiUsageHttpSession',
+        'ConvertFromCodexUsagePayload',
+        'ConvertFromClaudeUsagePayload',
+        'ConvertFromQwenCloudUsagePayload',
         'ResolveWUResultCode',
         'ResolveWUHResult',
         'FormatDuration',
@@ -7382,7 +7962,6 @@ function claudeds2 {
     }
 }
 
-
 function claudeds2d {
     <#
 .SYNOPSIS
@@ -7404,7 +7983,6 @@ function claudeds2d {
     $claudeArgs = $args + '--dangerously-skip-permissions'
     claudeds2 @claudeArgs
 }
-
 
 function Invoke-RemoteClaudeCodeBase {
     <#
@@ -10210,7 +10788,6 @@ function Install-AiTools {
         throw "Cannot use -UserScope in an elevated PowerShell session. Run from a standard, non-elevated session."
     }
 
-
     # -All expands into every optional group; Docker is chosen over Podman since they are alternatives.
     # If -Podman was explicitly passed alongside -All, honour Podman instead of Docker.
     if ($All) {
@@ -10550,7 +11127,6 @@ function Install-AiTools {
     else {
         Write-Host "All winget packages already present." -ForegroundColor Green
     }
-
 
     # Ensure Git is present; use an interactive installer unless user scope requires unattended setup.
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -11057,7 +11633,7 @@ function Remove-AiApiKeysFromCS {
 # The opusplan model alias provides an automated hybrid approach:
 # In plan mode - Uses opus for complex reasoning and architecture decisions
 # In execution mode - Automatically switches to sonnet for code generation and implementation
-# This gives you the best of both worlds: Opus’s superior reasoning for planning, and Sonnet’s efficiency for execution.
+# This gives you the best of both worlds: Opusâ€™s superior reasoning for planning, and Sonnetâ€™s efficiency for execution.
 # The plan-mode Opus phase uses the same context window as the opus model setting.
 # When opus and sonnet resolve to models that run with the 1M context window by default (as the
 # current models do on the Anthropic API), both phases run with it.
@@ -11746,7 +12322,6 @@ function Install-ClaudeCode {
     [pscustomobject]@{ Version = $version; Platform = $platform }
 }
 
-
 Set-Alias -Name aiu -Value Invoke-AiUpgrade
 
 # === AI provider usage-query functions ===
@@ -11755,7 +12330,6 @@ Set-Alias -Name aiu -Value Invoke-AiUpgrade
 # the vault credentials load further down (Load-AiApiKeysFromCS) so
 # $env:MINIMAX_API_KEY, $env:ZAI_API_KEY, $env:DEEPSEEK_API_KEY, and
 # $env:KIMI_CODE_PLAN_API_KEY and $env:OPENCODE_GO_API_KEY are populated.
-
 
 # --- Get-MinimaxUsage ------------------------------------------------------
 # Queries MiniMax's token-plan endpoint for remaining quotas and burn rates
@@ -12608,141 +13182,6 @@ function Get-KimiUsage {
 # shape has a single place to be fixed. The JSON property helper it shares
 # with the other usage functions lives with them.
 
-function ConvertFrom-QwenCloudUsagePayload {
-    <#
-.SYNOPSIS
-    Maps a QwenCloud gateway payload onto normalized quota windows.
-.DESCRIPTION
-    Unwraps the console gateway envelopes (Data, DataV2.data, data) and reads
-    the credit buckets the Token Plan console reports: the five-hour and
-    seven-day windows, plus the monthly bucket that monthly-only plans expose
-    on their own. Returns the raw payload together with the normalized limits.
-    Throws a tagged error when the payload reports a failed request or carries
-    no quota field this profile knows about.
-.PARAMETER Payload
-    The deserialized response body of the Token Plan quota request.
-.EXAMPLE
-    ConvertFrom-QwenCloudUsagePayload -Payload $response
-.NOTES
-    The window list follows the oh-my-pi implementation (packages/ai/src/usage/
-    alibaba-token-plan.ts); the console reports only the buckets a given plan
-    uses, so a plan without a five-hour or seven-day window is normal.
-#>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$Payload
-    )
-
-    # The console reports a used fraction, but also accepts whole percentages,
-    # so a value above 1 is a percentage rather than a fraction of one.
-    function ConvertTo-UsedPercent([object]$Value) {
-        if ($null -eq $Value) { return $null }
-        $parsed = 0.0
-        if (-not [double]::TryParse(
-            [string]$Value,
-            [Globalization.NumberStyles]::Float,
-            [Globalization.CultureInfo]::InvariantCulture,
-            [ref]$parsed
-        ) -or $parsed -lt 0) {
-            return $null
-        }
-        $percent = if ($parsed -le 1) { $parsed * 100 } else { $parsed }
-        # 100.0, not 100: the Int32 overload of Min would truncate a
-        # fractional percentage to a whole number.
-        return [Math]::Min(100.0, $percent)
-    }
-
-    # Reset deadlines arrive as epoch milliseconds, or as seconds on some
-    # responses; both are normalized to a local-time DateTimeOffset.
-    function ConvertTo-ResetTime([object]$Value) {
-        if ($null -eq $Value) { return $null }
-        $parsed = 0.0
-        if (-not [double]::TryParse(
-            [string]$Value,
-            [Globalization.NumberStyles]::Float,
-            [Globalization.CultureInfo]::InvariantCulture,
-            [ref]$parsed
-        ) -or $parsed -le 0) {
-            return $null
-        }
-        $milliseconds = if ($parsed -lt 1000000000000) { $parsed * 1000 } else { $parsed }
-        try {
-            return [DateTimeOffset]::FromUnixTimeMilliseconds([long]$milliseconds)
-        } catch {
-            return $null
-        }
-    }
-
-    $successResponse = Get-AiUsageJsonProperty $Payload 'successResponse'
-    $responseData = Get-AiUsageJsonProperty $Payload 'data'
-    if ($successResponse -eq $false -or $null -eq $responseData) {
-        $failureShape = $Payload | ConvertTo-Json -Depth 6 -Compress
-        if ($failureShape -match '(?i)ConsoleNeedLogin|NeedLogin|not.?logged.?in|login.{0,24}expired|unauthorized|forbidden') {
-            throw '[QwenAuth] QwenCloud requires a fresh console login.'
-        }
-        throw '[QwenResponse] QwenCloud usage lookup returned an unsuccessful response.'
-    }
-
-    # The gateway can reject a request with success=false while still replying
-    # HTTP 200. Surface its error code instead of reporting a missing field.
-    if ((Get-AiUsageJsonProperty $responseData 'success') -eq $false) {
-        $errorCode = [string](Get-AiUsageJsonProperty $responseData 'errorCode')
-        if (-not $errorCode) { $errorCode = 'unknown' }
-        throw "[QwenResponse] QwenCloud usage request was rejected (errorCode: $errorCode)."
-    }
-
-    $stringData = Get-AiUsageJsonProperty $responseData 'Data'
-    if ($stringData -is [string]) {
-        try { $responseData = $stringData | ConvertFrom-Json } catch {}
-    }
-    $dataV2 = Get-AiUsageJsonProperty $responseData 'DataV2'
-    $dataV2Data = Get-AiUsageJsonProperty $dataV2 'data'
-    if ($null -ne $dataV2Data) { $responseData = $dataV2Data }
-    $nestedData = Get-AiUsageJsonProperty $responseData 'data'
-    if ($null -ne $nestedData) { $responseData = $nestedData }
-
-    $limits = New-Object System.Collections.Generic.List[object]
-    $fiveHourUsed = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $responseData 'per5HourPercentage')
-    $sevenDayUsed = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $responseData 'per1WeekPercentage')
-    $monthlyUsed = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $responseData 'per1MonthPercentage')
-    if ($null -ne $fiveHourUsed) {
-        $limits.Add([pscustomobject]@{
-            Window      = '5 Hour Credits'
-            UsedPercent = $fiveHourUsed
-            ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $responseData 'per5HourResetTime')
-        })
-    }
-    if ($null -ne $sevenDayUsed) {
-        $limits.Add([pscustomobject]@{
-            Window      = '7 Day Credits'
-            UsedPercent = $sevenDayUsed
-            ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $responseData 'per1WeekResetTime')
-        })
-    }
-    # Monthly-only plans report just this bucket. The console never states the
-    # monthly span, so the window carries a reset deadline without a duration.
-    if ($null -ne $monthlyUsed) {
-        $limits.Add([pscustomobject]@{
-            Window      = 'Monthly Credits'
-            UsedPercent = $monthlyUsed
-            ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $responseData 'per1MonthResetTime')
-        })
-    }
-    if ($limits.Count -eq 0) {
-        # Name the fields that were present: the console has changed its
-        # response shape before, and the field names are what identifies it.
-        $available = @($responseData.PSObject.Properties.Name | Sort-Object)
-        $fieldList = if ($available.Count -gt 0) { $available -join ', ' } else { '(none)' }
-        throw ('[QwenResponse] QwenCloud returned no recognized quota fields (available fields: {0}).' -f $fieldList)
-    }
-
-    return [pscustomobject]@{
-        Raw    = $Payload
-        Limits = [object[]]$limits
-    }
-}
-
 # --- Get-QwenUsage ----------------------------------------------------------
 # Queries QwenCloud Token Plan's private console quota endpoint. The browser
 # session cookie is stored separately in Windows Credential Manager and is
@@ -12936,9 +13375,9 @@ function Get-QwenUsage {
             [void]$userRequest.Headers.TryAddWithoutValidation('Referer', "$consoleOrigin/")
             [void]$userRequest.Headers.TryAddWithoutValidation('User-Agent', $browserUserAgent)
             $userPayload = Send-JsonRequest $client $userRequest 'QwenCloud session lookup'
-            $userData = Get-AiUsageJsonProperty $userPayload 'data'
-            $secToken = Get-AiUsageJsonProperty $userData 'secToken'
-            $errorCode = [string](Get-AiUsageJsonProperty $userPayload 'code')
+            $userData = $_ProfileHelpers.GetAiUsageJsonProperty($userPayload, 'data')
+            $secToken = $_ProfileHelpers.GetAiUsageJsonProperty($userData, 'secToken')
+            $errorCode = [string]($_ProfileHelpers.GetAiUsageJsonProperty($userPayload, 'code'))
             if ($errorCode -eq 'ConsoleNeedLogin' -or $secToken -isnot [string] -or -not $secToken) {
                 throw '[QwenAuth] QwenCloud requires a fresh console login.'
             }
@@ -12982,7 +13421,7 @@ function Get-QwenUsage {
             }
 
             $payload = Send-JsonRequest $client $usageRequest 'QwenCloud usage lookup'
-            return ConvertFrom-QwenCloudUsagePayload -Payload $payload
+            return $_ProfileHelpers.ConvertFromQwenCloudUsagePayload($payload)
         } catch [System.Threading.Tasks.TaskCanceledException] {
             throw '[QwenTransient] QwenCloud usage query timed out.'
         } catch [System.Net.Http.HttpRequestException] {
@@ -13588,443 +14027,6 @@ function Get-OpencodeGoUsage {
 # read those tokens, speak to the endpoints, and map the responses onto the
 # same window rows the other Get-*Usage functions report.
 
-function Get-AiUsageJsonProperty {
-    <#
-.SYNOPSIS
-    Reads a named property from a deserialized JSON object.
-.DESCRIPTION
-    Returns the property value, or $null when the object is missing or has no
-    such property. Every usage endpoint nests its payload under a different
-    set of optional envelopes, so every lookup has to tolerate an absent
-    property.
-.PARAMETER InputObject
-    The deserialized JSON object to read from.
-.PARAMETER Name
-    The property name to look up.
-#>
-    [CmdletBinding()]
-    param(
-        [object]$InputObject,
-        [string]$Name
-    )
-
-    if ($null -eq $InputObject) { return $null }
-    $property = $InputObject.PSObject.Properties[$Name]
-    if ($null -eq $property) { return $null }
-    return $property.Value
-}
-
-function Get-AiUsageJwtClaims {
-    <#
-.SYNOPSIS
-    Decodes the claim set of a JSON Web Token.
-.DESCRIPTION
-    Returns the decoded payload object, or $null when the token is missing,
-    malformed, or not a JWT. The signature is not verified: the tokens are
-    only read to learn the account id and plan that the backend already
-    reports, never to make a trust decision.
-.PARAMETER Token
-    The encoded JWT.
-#>
-    [CmdletBinding()]
-    param([string]$Token)
-
-    if ([string]::IsNullOrWhiteSpace($Token)) { return $null }
-    $parts = $Token.Split('.')
-    if ($parts.Count -lt 2) { return $null }
-    $payload = $parts[1].Replace('-', '+').Replace('_', '/')
-    switch ($payload.Length % 4) {
-        2 { $payload += '==' }
-        3 { $payload += '=' }
-    }
-    try {
-        $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
-        return $json | ConvertFrom-Json
-    } catch {
-        return $null
-    }
-}
-
-function New-AiUsageHttpSession {
-    <#
-.SYNOPSIS
-    Creates an HTTP session for an AI usage query.
-.DESCRIPTION
-    Returns the client, the handler, and the certificate callback that was in
-    place, so the caller can restore the previous callback afterwards.
-
-    TLS 1.2 is enabled because .NET Framework's HttpClient still negotiates
-    TLS 1.0 by default, and both providers reject that.
-
-    Unless -Strict is given, server certificates are accepted without
-    validation. Corporate networks sometimes re-sign TLS traffic with an
-    inspection proxy whose certificate the local store does not trust, and
-    the usage query then fails before it reaches the provider. The callback is
-    a compiled static method because a PowerShell scriptblock delegate fails
-    on the worker thread that performs the handshake ("There is no Runspace
-    available to run scripts in this thread").
-.PARAMETER TimeoutSec
-    HTTP timeout in seconds.
-.PARAMETER Strict
-    Keeps the default certificate validation, so an untrusted certificate
-    fails the request instead of being accepted.
-#>
-    [CmdletBinding()]
-    param(
-        [int]$TimeoutSec = 15,
-        [switch]$Strict
-    )
-
-    Add-Type -AssemblyName System.Net.Http
-
-    try {
-        [Net.ServicePointManager]::SecurityProtocol =
-            [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]12288
-    } catch {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    }
-
-    $previousCallback = [Net.ServicePointManager]::ServerCertificateValidationCallback
-    if (-not $Strict) {
-        if (-not ([System.Management.Automation.PSTypeName]'AiUsageTls').Type) {
-            $code = @"
-using System.Net;
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
-
-public class AiUsageTls {
-    public static bool AcceptAny(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors) {
-        return true;
-    }
-    public static void Relax() {
-        ServicePointManager.ServerCertificateValidationCallback = AcceptAny;
-    }
-}
-"@
-            Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
-        }
-        [AiUsageTls]::Relax()
-    }
-
-    $handler = New-Object System.Net.Http.HttpClientHandler
-    $handler.AllowAutoRedirect = $false
-    $handler.UseCookies = $false
-    $client = New-Object System.Net.Http.HttpClient($handler)
-    $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
-
-    return [pscustomobject]@{
-        Client                   = $client
-        Handler                  = $handler
-        PreviousCertificateCheck = $previousCallback
-    }
-}
-
-function Close-AiUsageHttpSession {
-    <#
-.SYNOPSIS
-    Disposes an HTTP session created by New-AiUsageHttpSession.
-.DESCRIPTION
-    Disposes the client and the handler, and restores the certificate
-    validation callback that was in place before the session was created.
-.PARAMETER Session
-    The session object returned by New-AiUsageHttpSession.
-#>
-    [CmdletBinding()]
-    param([object]$Session)
-
-    if (-not $Session) { return }
-    if ($Session.Client) { $Session.Client.Dispose() }
-    if ($Session.Handler) { $Session.Handler.Dispose() }
-    [Net.ServicePointManager]::ServerCertificateValidationCallback = $Session.PreviousCertificateCheck
-}
-
-function Get-AiUsageWindowLabel {
-    <#
-.SYNOPSIS
-    Names a quota window from its length in seconds.
-.DESCRIPTION
-    Turns a window duration into the same naming style the other usage
-    functions use, for example '5 Hour Credits' or '7 Day Credits'.
-.PARAMETER Seconds
-    The window length in seconds.
-#>
-    [CmdletBinding()]
-    param([object]$Seconds)
-
-    $parsed = 0
-    if (-not [int]::TryParse([string]$Seconds, [ref]$parsed) -or $parsed -le 0) { return 'Credits' }
-    if ($parsed -ge 86400) { return ('{0} Day Credits' -f [Math]::Round($parsed / 86400)) }
-    if ($parsed -ge 3600) { return ('{0} Hour Credits' -f [Math]::Round($parsed / 3600)) }
-    return ('{0} Minute Credits' -f [Math]::Round($parsed / 60))
-}
-
-function ConvertFrom-CodexUsagePayload {
-    <#
-.SYNOPSIS
-    Maps a ChatGPT rate-limit payload onto normalized quota windows.
-.DESCRIPTION
-    Reads the windows the ChatGPT backend reports for a Codex subscription and
-    returns them together with the plan, the credit balance, and the workspace
-    spend limit.
-
-    The window a response slot belongs to is decided by its
-    limit_window_seconds, never by its position: a Team plan reports the
-    weekly window in primary_window and leaves secondary_window null, and
-    OpenAI has both added and removed the short window without notice.
-
-    The percentages are used percent, so higher is worse.
-.PARAMETER Payload
-    The deserialized body of a /backend-api/wham/usage response.
-.EXAMPLE
-    ConvertFrom-CodexUsagePayload -Payload $response
-#>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$Payload
-    )
-
-    function ConvertTo-UsedPercent([object]$Value) {
-        if ($null -eq $Value) { return $null }
-        $parsed = 0.0
-        if (-not [double]::TryParse(
-            [string]$Value,
-            [Globalization.NumberStyles]::Float,
-            [Globalization.CultureInfo]::InvariantCulture,
-            [ref]$parsed
-        ) -or $parsed -lt 0) {
-            return $null
-        }
-        # 100.0, not 100: the Int32 overload of Min would truncate the value.
-        return [Math]::Min(100.0, $parsed)
-    }
-
-    function ConvertTo-ResetTime([object]$Value) {
-        if ($null -eq $Value) { return $null }
-        $parsed = 0.0
-        if (-not [double]::TryParse(
-            [string]$Value,
-            [Globalization.NumberStyles]::Float,
-            [Globalization.CultureInfo]::InvariantCulture,
-            [ref]$parsed
-        ) -or $parsed -le 0) {
-            return $null
-        }
-        # The backend reports epoch seconds; some responses use milliseconds.
-        $milliseconds = if ($parsed -lt 1000000000000) { $parsed * 1000 } else { $parsed }
-        try {
-            return [DateTimeOffset]::FromUnixTimeMilliseconds([long]$milliseconds)
-        } catch {
-            return $null
-        }
-    }
-
-    $windows = New-Object System.Collections.Generic.List[object]
-    $rateLimit = Get-AiUsageJsonProperty $Payload 'rate_limit'
-    foreach ($slot in @('primary_window', 'secondary_window')) {
-        $window = Get-AiUsageJsonProperty $rateLimit $slot
-        if (-not $window) { continue }
-        $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $window 'used_percent')
-        if ($null -eq $used) { continue }
-        $windows.Add([pscustomobject]@{
-            Window      = Get-AiUsageWindowLabel (Get-AiUsageJsonProperty $window 'limit_window_seconds')
-            UsedPercent = $used
-            ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $window 'reset_at')
-        })
-    }
-
-    # Additional metered buckets (for example codex-spark) carry their own
-    # windows and are reported after the plan's own windows.
-    foreach ($extra in @(Get-AiUsageJsonProperty $Payload 'additional_rate_limits')) {
-        if (-not $extra) { continue }
-        $extraLimit = Get-AiUsageJsonProperty $extra 'rate_limit'
-        foreach ($slot in @('primary_window', 'secondary_window')) {
-            $window = Get-AiUsageJsonProperty $extraLimit $slot
-            if (-not $window) { continue }
-            $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $window 'used_percent')
-            if ($null -eq $used) { continue }
-            $name = [string](Get-AiUsageJsonProperty $extra 'limit_name')
-            if (-not $name) { $name = [string](Get-AiUsageJsonProperty $extra 'metered_feature') }
-            if (-not $name) { $name = 'Additional' }
-            $windows.Add([pscustomobject]@{
-                Window      = ('{0} ({1})' -f (Get-AiUsageWindowLabel (Get-AiUsageJsonProperty $window 'limit_window_seconds')), $name)
-                UsedPercent = $used
-                ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $window 'reset_at')
-            })
-        }
-    }
-
-    $credits = Get-AiUsageJsonProperty $Payload 'credits'
-    $spendControl = Get-AiUsageJsonProperty $Payload 'spend_control'
-    $individualLimit = Get-AiUsageJsonProperty $spendControl 'individual_limit'
-
-    $plan = [string](Get-AiUsageJsonProperty $Payload 'plan_type')
-    $balance = $null
-    if ($credits) {
-        $balance = Get-AiUsageJsonProperty $credits 'balance'
-    }
-
-    $spendLimit = $null
-    if ($individualLimit) {
-        $spendLimit = [pscustomobject]@{
-            UsedPercent      = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $individualLimit 'used_percent')
-            RemainingPercent = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $individualLimit 'remaining_percent')
-            Limit            = [string](Get-AiUsageJsonProperty $individualLimit 'limit')
-            Used             = [string](Get-AiUsageJsonProperty $individualLimit 'used')
-            ResetAt          = ConvertTo-ResetTime (Get-AiUsageJsonProperty $individualLimit 'reset_at')
-        }
-    }
-
-    # The plan windows and the additional metered buckets can describe the
-    # same window, so a window is only reported once.
-    $seen = @{}
-    $unique = New-Object System.Collections.Generic.List[object]
-    foreach ($window in $windows) {
-        if ($seen.ContainsKey($window.Window)) { continue }
-        $seen[$window.Window] = $true
-        $unique.Add($window)
-    }
-
-    return [pscustomobject]@{
-        Raw       = $Payload
-        Plan      = $plan
-        Windows   = [object[]]$unique
-        Credits   = $credits
-        Balance   = $balance
-        SpendLimit = $spendLimit
-        LimitReached = [bool](Get-AiUsageJsonProperty $rateLimit 'limit_reached')
-    }
-}
-
-function ConvertFrom-ClaudeUsagePayload {
-    <#
-.SYNOPSIS
-    Maps an Anthropic OAuth usage payload onto normalized quota windows.
-.DESCRIPTION
-    Reads the credit windows the Token Plan console reports and returns them
-    together with the extra-usage block.
-
-    Two response shapes are in the wild for the same endpoint: flat
-    five_hour and seven_day objects, and a limits array whose entries carry a
-    kind (session, weekly_all, weekly_scoped). Both are accepted, and the
-    per-model weekly buckets are reported under the model they belong to.
-
-    The utilization values are used percent, so higher is worse.
-.PARAMETER Payload
-    The deserialized body of an /api/oauth/usage response.
-.EXAMPLE
-    ConvertFrom-ClaudeUsagePayload -Payload $response
-#>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$Payload
-    )
-
-    function ConvertTo-UsedPercent([object]$Value) {
-        if ($null -eq $Value) { return $null }
-        $parsed = 0.0
-        if (-not [double]::TryParse(
-            [string]$Value,
-            [Globalization.NumberStyles]::Float,
-            [Globalization.CultureInfo]::InvariantCulture,
-            [ref]$parsed
-        ) -or $parsed -lt 0) {
-            return $null
-        }
-        # 100.0, not 100: the Int32 overload of Min would truncate the value.
-        return [Math]::Min(100.0, $parsed)
-    }
-
-    function ConvertTo-ResetTime([object]$Value) {
-        if ($null -eq $Value) { return $null }
-        if ($Value -is [DateTimeOffset]) { return $Value }
-        if ($Value -is [datetime]) { return [DateTimeOffset]::new($Value) }
-        $text = [string]$Value
-        if (-not $text) { return $null }
-        try {
-            return [DateTimeOffset]::Parse($text, [Globalization.CultureInfo]::InvariantCulture)
-        } catch {
-            return $null
-        }
-    }
-
-    # The console sometimes wraps the windows in a rate_limits envelope.
-    $container = Get-AiUsageJsonProperty $Payload 'rate_limits'
-    if (-not $container) { $container = $Payload }
-
-    $windows = New-Object System.Collections.Generic.List[object]
-    $limits = @(Get-AiUsageJsonProperty $container 'limits' | Where-Object { $_ })
-
-    if ($limits.Count -gt 0) {
-        # The limits array is the richer shape: it carries the reset deadline
-        # and the model-scoped weekly windows. The console returns it next to
-        # the flat five_hour and seven_day objects, which describe the same
-        # windows, so the array is used on its own and a window is never
-        # reported twice.
-        foreach ($entry in $limits) {
-            $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $entry 'percent')
-            if ($null -eq $used) { $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $entry 'utilization') }
-            if ($null -eq $used) { continue }
-            $kind = [string](Get-AiUsageJsonProperty $entry 'kind')
-            $label = switch ($kind) {
-                'session' { '5 Hour Credits' }
-                'weekly_all' { '7 Day Credits' }
-                'weekly_scoped' {
-                    $scope = Get-AiUsageJsonProperty $entry 'scope'
-                    $model = Get-AiUsageJsonProperty $scope 'model'
-                    $name = [string](Get-AiUsageJsonProperty $model 'display_name')
-                    if (-not $name) { $name = [string](Get-AiUsageJsonProperty $model 'id') }
-                    if ($name) { '7 Day Credits ({0})' -f $name } else { '7 Day Credits' }
-                }
-                default { if ($kind) { $kind } else { 'Credits' } }
-            }
-            $windows.Add([pscustomobject]@{
-                Window      = $label
-                UsedPercent = $used
-                ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $entry 'resets_at')
-            })
-        }
-    } else {
-        # Flat shape: five_hour, seven_day, and the legacy per-model buckets.
-        foreach ($pair in @(
-            @('five_hour', '5 Hour Credits'),
-            @('seven_day', '7 Day Credits'),
-            @('seven_day_opus', '7 Day Credits (Opus)'),
-            @('seven_day_sonnet', '7 Day Credits (Sonnet)')
-        )) {
-            $entry = Get-AiUsageJsonProperty $container $pair[0]
-            if (-not $entry) { continue }
-            $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $entry 'utilization')
-            if ($null -eq $used) { $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $entry 'used_percentage') }
-            if ($null -eq $used) { continue }
-            $reset = Get-AiUsageJsonProperty $entry 'resets_at'
-            if ($null -eq $reset) { $reset = Get-AiUsageJsonProperty $entry 'resets_at_epoch' }
-            $windows.Add([pscustomobject]@{
-                Window      = $pair[1]
-                UsedPercent = $used
-                ResetAt     = ConvertTo-ResetTime $reset
-            })
-        }
-    }
-
-    $extraUsage = Get-AiUsageJsonProperty $container 'extra_usage'
-    if (-not $extraUsage) { $extraUsage = Get-AiUsageJsonProperty $Payload 'extra_usage' }
-    $extraPercent = $null
-    if ($extraUsage -and (Get-AiUsageJsonProperty $extraUsage 'is_enabled')) {
-        # A plan without extra usage reports a limit and a utilization of
-        # zero, so the block is only meaningful when the plan enabled it.
-        $extraPercent = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $extraUsage 'utilization')
-    }
-
-    return [pscustomobject]@{
-        Raw        = $Payload
-        Windows    = [object[]]$windows
-        ExtraUsage = $extraUsage
-        ExtraPercent = $extraPercent
-    }
-}
-
 function Get-CodexUsage {
     <#
 .SYNOPSIS
@@ -14132,8 +14134,8 @@ function Get-CodexUsage {
         $AccessToken = [string]$env:CODEX_ACCESS_TOKEN
     }
     if ([string]::IsNullOrWhiteSpace($AccountId) -and $auth -and $auth.tokens -and $auth.tokens.id_token) {
-        $claims = Get-AiUsageJwtClaims ([string]$auth.tokens.id_token)
-        $namespace = Get-AiUsageJsonProperty $claims 'https://api.openai.com/auth'
+        $claims = $_ProfileHelpers.GetAiUsageJwtClaims(([string]$auth.tokens.id_token))
+        $namespace = $_ProfileHelpers.GetAiUsageJsonProperty($claims, 'https://api.openai.com/auth')
         if ($namespace -and $namespace.chatgpt_account_id) {
             $AccountId = [string]$namespace.chatgpt_account_id
         }
@@ -14145,7 +14147,7 @@ function Get-CodexUsage {
     }
 
     function Invoke-CodexUsageQuery([string]$Token, [string]$Account) {
-        $session = New-AiUsageHttpSession -TimeoutSec $TimeoutSec -Strict:$Strict
+        $session = $_ProfileHelpers.NewAiUsageHttpSession($TimeoutSec, $false)
         try {
             $request = New-Object System.Net.Http.HttpRequestMessage(
                 [System.Net.Http.HttpMethod]::Get,
@@ -14162,10 +14164,10 @@ function Get-CodexUsage {
                 $detail = ''
                 try {
                     $parsed = $body | ConvertFrom-Json
-                    $detail = [string](Get-AiUsageJsonProperty $parsed 'detail')
+                    $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'detail'))
                     if (-not $detail) {
-                        $error = Get-AiUsageJsonProperty $parsed 'error'
-                        $detail = [string](Get-AiUsageJsonProperty $error 'message')
+                        $error = $_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'error')
+                        $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($error, 'message'))
                     }
                 } catch {
                     $detail = $body
@@ -14188,7 +14190,7 @@ function Get-CodexUsage {
         } catch [System.Threading.Tasks.TaskCanceledException] {
             throw '[CodexTransient] The Codex usage query timed out.'
         } finally {
-            Close-AiUsageHttpSession $session
+            $_ProfileHelpers.CloseAiUsageHttpSession($session)
         }
     }
 
@@ -14197,7 +14199,7 @@ function Get-CodexUsage {
     # CLI holds the same refresh token and would be signed out otherwise.
     function Invoke-CodexTokenRefresh([string]$Token) {
         $clientId = 'app_EMoamEEZ73f0CkXaXp7hrann'
-        $session = New-AiUsageHttpSession -TimeoutSec $TimeoutSec -Strict:$Strict
+        $session = $_ProfileHelpers.NewAiUsageHttpSession($TimeoutSec, $false)
         try {
             foreach ($url in @(
                 'https://auth.openai.com/api/accounts/oauth/token',
@@ -14218,7 +14220,7 @@ function Get-CodexUsage {
         } catch {
             return $null
         } finally {
-            Close-AiUsageHttpSession $session
+            $_ProfileHelpers.CloseAiUsageHttpSession($session)
         }
     }
 
@@ -14267,7 +14269,7 @@ function Get-CodexUsage {
         }
     }
 
-    $query = ConvertFrom-CodexUsagePayload -Payload $payload
+    $query = $_ProfileHelpers.ConvertFromCodexUsagePayload($payload)
     if (-not $query.Windows -or $query.Windows.Count -eq 0) {
         Write-Error 'Codex returned no rate-limit windows.'
         return
@@ -14445,7 +14447,7 @@ function Get-ClaudeUsage {
     }
 
     function Invoke-ClaudeUsageQuery([string]$Token) {
-        $session = New-AiUsageHttpSession -TimeoutSec $TimeoutSec -Strict:$Strict
+        $session = $_ProfileHelpers.NewAiUsageHttpSession($TimeoutSec, $false)
         try {
             $request = New-Object System.Net.Http.HttpRequestMessage(
                 [System.Net.Http.HttpMethod]::Get,
@@ -14465,9 +14467,9 @@ function Get-ClaudeUsage {
                 $detail = ''
                 try {
                     $parsed = $body | ConvertFrom-Json
-                    $error = Get-AiUsageJsonProperty $parsed 'error'
-                    $detail = [string](Get-AiUsageJsonProperty $error 'message')
-                    if (-not $detail) { $detail = [string](Get-AiUsageJsonProperty $parsed 'message') }
+                    $error = $_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'error')
+                    $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($error, 'message'))
+                    if (-not $detail) { $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'message')) }
                 } catch {
                     $detail = $body
                 }
@@ -14486,7 +14488,7 @@ function Get-ClaudeUsage {
         } catch [System.Threading.Tasks.TaskCanceledException] {
             throw '[ClaudeTransient] The Claude usage query timed out.'
         } finally {
-            Close-AiUsageHttpSession $session
+            $_ProfileHelpers.CloseAiUsageHttpSession($session)
         }
     }
 
@@ -14496,7 +14498,7 @@ function Get-ClaudeUsage {
     # the refresh was in flight.
     function Invoke-ClaudeTokenRefresh([string]$Token) {
         $clientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
-        $session = New-AiUsageHttpSession -TimeoutSec $TimeoutSec -Strict:$Strict
+        $session = $_ProfileHelpers.NewAiUsageHttpSession($TimeoutSec, $false)
         try {
             $body = "grant_type=refresh_token&refresh_token=$([Uri]::EscapeDataString($Token))&client_id=$clientId"
             $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Post, 'https://platform.claude.com/v1/oauth/token')
@@ -14510,7 +14512,7 @@ function Get-ClaudeUsage {
         } catch {
             return $null
         } finally {
-            Close-AiUsageHttpSession $session
+            $_ProfileHelpers.CloseAiUsageHttpSession($session)
         }
     }
 
@@ -14556,7 +14558,7 @@ function Get-ClaudeUsage {
         }
     }
 
-    $query = ConvertFrom-ClaudeUsagePayload -Payload $payload
+    $query = $_ProfileHelpers.ConvertFromClaudeUsagePayload($payload)
     if (-not $query.Windows -or $query.Windows.Count -eq 0) {
         Write-Error 'Claude returned no credit windows.'
         return
@@ -15808,7 +15810,6 @@ function Add-AppLockerBlock {
     create. With the Publisher mode, accept a rule that also matches other
     files from the same publisher.
 
-
 .PARAMETER Format
     With -List, print the blocks as a table instead of returning objects.
 
@@ -15891,7 +15892,6 @@ function Add-AppLockerBlock {
         [Parameter(ParameterSetName = 'Add')]
         [Parameter(ParameterSetName = 'Revert')]
         [switch]$Force,
-
 
         [Parameter(ParameterSetName = 'List')]
         [switch]$Format,
