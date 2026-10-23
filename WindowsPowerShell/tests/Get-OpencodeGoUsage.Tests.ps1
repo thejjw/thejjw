@@ -19,15 +19,38 @@ Describe 'Get-OpencodeGoUsage' {
 
         . ([scriptblock]::Create($functionAst.Extent.Text))
 
-        # The isolated usage function must never access the real credential vault.
-        function Get-AiApiKey { param([string]$Name) }
+        # The credential helper is a helper-module member now. A module member
+        # cannot be mocked, so the test replaces it with a recording stub that
+        # answers with a configured value and records what it was asked for.
+        $script:aiApiKeyCalls = @()
+        $script:aiApiKeyValue = $null
+        $script:aiApiKeyThrows = $false
 
-        $Global:_ProfileHelpers = [pscustomobject]@{}
-        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteUsageTimestamp -Value { param($CommandName) }
-        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteSection -Value { param($Title) }
-        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name FormatDuration -Value {
+        # The profile helper module is loaded whole, so the function under test
+        # finds every helper it calls. The members that write to the host are
+        # then replaced with stubs, because a module's own Write-Host cannot be
+        # intercepted from the test scope.
+        $helperAssignment = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$_ProfileHelpers'
+        }, $true)
+        if (-not $helperAssignment) { throw 'Could not load the profile helper module.' }
+        . ([scriptblock]::Create($helperAssignment.Extent.Text))
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteUsageTimestamp -Force -Value { param($CommandName) }
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteSection -Force -Value { param($Title) }
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name FormatDuration -Force -Value {
             param([TimeSpan]$Duration)
             return ('{0:N0}m' -f $Duration.TotalMinutes)
+        }
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name GetAiApiKey -Force -Value {
+            param([string]$Name)
+            $script:aiApiKeyCalls += $Name
+            if ($script:aiApiKeyThrows) { throw 'must not access credential storage' }
+            if ($null -ne $script:aiApiKeyValue) { return $script:aiApiKeyValue }
+            # Without a configured value the session variable is read here, at
+            # call time, the way the credential helper does.
+            return $env:OPENCODE_GO_API_KEY
         }
     }
 
@@ -56,7 +79,9 @@ Describe 'Get-OpencodeGoUsage' {
 
         Mock Write-Host { [void]$script:hostMessages.Add([string]$Object) }
         Mock Out-Host {}
-        Mock Get-AiApiKey { return $env:OPENCODE_GO_API_KEY }
+        $script:aiApiKeyValue = $null
+        $script:aiApiKeyCalls = @()
+        $script:aiApiKeyThrows = $false
         Mock New-Object {
             if ($TypeName -eq 'System.Collections.Generic.List[object]') {
                 Write-Output -NoEnumerate ([System.Collections.Generic.List[object]]::new())
@@ -77,7 +102,7 @@ Describe 'Get-OpencodeGoUsage' {
     }
 
     It 'prefers a stored Go credential over the shared key and CLI auth store' {
-        Mock Get-AiApiKey { return 'stored-go-key' }
+        $script:aiApiKeyValue = 'stored-go-key'
         Mock Test-Path { $true }
         Mock Get-Content { '{"opencode-go":{"type":"api","key":"cli-key"}}' }
         $env:OPENCODE_API_KEY = 'shared-key'
@@ -90,12 +115,12 @@ Describe 'Get-OpencodeGoUsage' {
         Get-OpencodeGoUsage -QueryInvoker $query | Out-Null
 
         $script:queriedKey | Should -Be 'stored-go-key'
-        Should -Invoke Get-AiApiKey -Times 1 -Exactly -ParameterFilter { $Name -eq 'OPENCODE_GO_API_KEY' }
+        @($script:aiApiKeyCalls | Where-Object { $_ -eq 'OPENCODE_GO_API_KEY' }).Count | Should -Be 1
         Should -Invoke Get-Content -Times 0 -Exactly
     }
 
     It 'uses an explicit API key without accessing credential storage' {
-        Mock Get-AiApiKey { throw 'must not access credential storage' }
+        $script:aiApiKeyThrows = $true
         $env:OPENCODE_GO_API_KEY = 'go-env-key'
         $env:OPENCODE_API_KEY = 'shared-key'
         $query = {
@@ -107,11 +132,11 @@ Describe 'Get-OpencodeGoUsage' {
         Get-OpencodeGoUsage -ApiKey 'explicit-key' -QueryInvoker $query | Out-Null
 
         $script:queriedKey | Should -Be 'explicit-key'
-        Should -Invoke Get-AiApiKey -Times 0 -Exactly
+        $script:aiApiKeyCalls.Count | Should -Be 0
     }
 
     It 'falls back to the CLI auth store when credential and shared keys are whitespace' {
-        Mock Get-AiApiKey { return ' ' }
+        $script:aiApiKeyValue = ' '
         Mock Test-Path { $true }
         Mock Get-Content { '{"opencode-go":{"type":"api","key":"cli-key"}}' }
         $env:OPENCODE_API_KEY = ' '
@@ -124,7 +149,7 @@ Describe 'Get-OpencodeGoUsage' {
         Get-OpencodeGoUsage -ApiKey ' ' -QueryInvoker $query | Out-Null
 
         $script:queriedKey | Should -Be 'cli-key'
-        Should -Invoke Get-AiApiKey -Times 1 -Exactly -ParameterFilter { $Name -eq 'OPENCODE_GO_API_KEY' }
+        @($script:aiApiKeyCalls | Where-Object { $_ -eq 'OPENCODE_GO_API_KEY' }).Count | Should -Be 1
     }
 
     It 'accepts the shared OPENCODE_API_KEY when no Go-specific key is set' {

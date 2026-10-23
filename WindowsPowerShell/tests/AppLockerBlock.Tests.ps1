@@ -30,7 +30,6 @@ Describe 'AppLocker block helpers' {
 
         foreach ($functionName in @(
                 'Read-AppLockerPolicy',
-                'Get-AppLockerRuleIdList',
                 'Resolve-AppLockerTargetFile',
                 'Add-AppLockerBlock',
                 'Remove-AppLockerBlock',

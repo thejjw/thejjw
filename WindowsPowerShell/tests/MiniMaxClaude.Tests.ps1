@@ -22,8 +22,6 @@ Describe 'MiniMax Claude Code profile' {
             return $functionAst.Extent.Text
         }
 
-        . ([scriptblock]::Create((Get-ProfileFunctionText 'Save-ProcessEnvVars')))
-        . ([scriptblock]::Create((Get-ProfileFunctionText 'Restore-ProcessEnvVars')))
         . ([scriptblock]::Create((Get-ProfileFunctionText 'claudemm')))
         . ([scriptblock]::Create((Get-ProfileFunctionText 'claudemmd')))
         . ([scriptblock]::Create((Get-ProfileFunctionText 'Invoke-RemoteClaudeCodeBase')))
@@ -32,11 +30,23 @@ Describe 'MiniMax Claude Code profile' {
         # Profile-scope pins the remote launcher reads at call time.
         $script:_NvmVersion = 'v0.40.8'
         $script:_UvInstallUrl = 'https://astral.sh/uv/install.sh'
-        $script:_ProfileHelpers = [pscustomobject]@{}
+
+        # The profile helper module is loaded whole, so the functions under
+        # test find every helper they call.
+        $helperAssignment = $script:profileAst.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$_ProfileHelpers'
+        }, $true)
+        if (-not $helperAssignment) { throw 'Could not load the profile helper module.' }
+        . ([scriptblock]::Create($helperAssignment.Extent.Text))
 
         # The launcher resolves the key through the vault helper; the profile's
         # shared setup steps must not touch the real machine.
-        function Get-AiApiKey { param([string]$Name) return 'test-key' }
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name GetAiApiKey -Force -Value {
+            param([string]$Name)
+            return 'test-key'
+        }
         function Install-GlobalClaudeMd {}
         function Install-GlobalClaudeSettings {}
         function Install-ClaudemmSetup { param([string]$Token, [switch]$Force) return $true }

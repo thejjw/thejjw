@@ -24,7 +24,17 @@ Describe 'Install-OpenCodeSettings' {
         if (-not $runConfigAst) { throw 'Could not load $_OpenCodeInternal from the profile.' }
         . ([scriptblock]::Create($runConfigAst.Extent.Text))
 
-        foreach ($helperName in @('Save-ProcessEnvVars', 'Restore-ProcessEnvVars', 'Install-OpenCodeSettings')) {
+        # The profile helper module is loaded whole, so the function under test
+        # finds every helper it calls.
+        $helperAst = $runAst.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$_ProfileHelpers'
+        }, $true)
+        if (-not $helperAst) { throw 'Could not load the profile helper module from the profile.' }
+        . ([scriptblock]::Create($helperAst.Extent.Text))
+
+        foreach ($helperName in @('Install-OpenCodeSettings')) {
             $helperAst = $runAst.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and

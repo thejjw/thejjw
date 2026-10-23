@@ -955,12 +955,12 @@ public class AiUsageTls {
     function CloseAiUsageHttpSession {
         <#
     .SYNOPSIS
-        Disposes an HTTP session created by New-AiUsageHttpSession.
+        Disposes an HTTP session created by NewAiUsageHttpSession.
     .DESCRIPTION
         Disposes the client and the handler, and restores the certificate
         validation callback that was in place before the session was created.
     .PARAMETER Session
-        The session object returned by New-AiUsageHttpSession.
+        The session object returned by NewAiUsageHttpSession.
     #>
         [CmdletBinding()]
         param([object]$Session)
@@ -989,7 +989,7 @@ public class AiUsageTls {
     .PARAMETER Payload
         The deserialized body of a /backend-api/wham/usage response.
     .EXAMPLE
-        ConvertFrom-CodexUsagePayload -Payload $response
+        ConvertFromCodexUsagePayload -Payload $response
     #>
         [CmdletBinding()]
         param(
@@ -1126,7 +1126,7 @@ public class AiUsageTls {
     .PARAMETER Payload
         The deserialized body of an /api/oauth/usage response.
     .EXAMPLE
-        ConvertFrom-ClaudeUsagePayload -Payload $response
+        ConvertFromClaudeUsagePayload -Payload $response
     #>
         [CmdletBinding()]
         param(
@@ -1252,7 +1252,7 @@ public class AiUsageTls {
     .PARAMETER Payload
         The deserialized response body of the Token Plan quota request.
     .EXAMPLE
-        ConvertFrom-QwenCloudUsagePayload -Payload $response
+        ConvertFromQwenCloudUsagePayload -Payload $response
     .NOTES
         The window list follows the oh-my-pi implementation (packages/ai/src/usage/
         alibaba-token-plan.ts); the console reports only the buckets a given plan
@@ -1373,7 +1373,207 @@ public class AiUsageTls {
         }
     }
 
+    function GetAiApiKey {
+        <#
+        .SYNOPSIS
+            Retrieves an API key, prioritizing current process environment, then Windows Credential Manager,
+            and finally legacy User environment variables.
+
+        .NOTES
+            Author: jjw(@thejjw)
+            Last Edit: 2026-05
+    #>
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$Name
+        )
+        # 1. Process environment (allows temporary session overrides)
+        $v = [Environment]::GetEnvironmentVariable($Name, 'Process')
+        if ($v) { return $v }
+
+        # 2. Windows Credential Manager (DPAPI-backed, survives reboots, no plaintext in registry)
+        [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+        $vault = New-Object Windows.Security.Credentials.PasswordVault
+        try {
+            $cred = $vault.Retrieve($Name, $_AiKeysInternal.UserName)
+            $cred.RetrievePassword()
+            return $cred.Password
+        }
+        catch {
+            # 3. Fallback: legacy plaintext env vars for keys stored before Credential Manager migration
+            return [Environment]::GetEnvironmentVariable($Name, 'User')
+        }
+    }
+
+    function SaveProcessEnvVars {
+        <#
+    .SYNOPSIS
+        Snapshot process-scope environment variables so they can be restored later.
+
+    .DESCRIPTION
+        Returns an ordered hashtable mapping each name to its current process-scope
+        value (or $null when unset). Pass the result to RestoreProcessEnvVars in a
+        finally block to undo any temporary overrides cleanly.
+
+    .PARAMETER Names
+        The environment variable names to capture.
+    #>
+        param([Parameter(Mandatory)][string[]]$Names)
+
+        $saved = [ordered]@{}
+        foreach ($n in $Names) {
+            $saved[$n] = [Environment]::GetEnvironmentVariable($n, 'Process')
+        }
+        return $saved
+    }
+
+    function RestoreProcessEnvVars {
+        <#
+    .SYNOPSIS
+        Restore environment variables captured by SaveProcessEnvVars.
+
+    .DESCRIPTION
+        Re-applies each saved value, or removes the variable entirely when it was
+        unset at snapshot time, leaving the process environment as it was found.
+
+    .PARAMETER Saved
+        The hashtable produced by SaveProcessEnvVars.
+    #>
+        param([Parameter(Mandatory)][System.Collections.IDictionary]$Saved)
+
+        foreach ($n in $Saved.Keys) {
+            if ($null -eq $Saved[$n]) {
+                Remove-Item "Env:\$n" -ErrorAction SilentlyContinue
+            } else {
+                [Environment]::SetEnvironmentVariable($n, $Saved[$n], 'Process')
+            }
+        }
+    }
+
+    function NewSafeFileNameFromCertificateName {
+        <#
+    .SYNOPSIS
+    Creates a filesystem-safe filename from a certificate subject or other string.
+
+    .DESCRIPTION
+    Removes or replaces characters that are invalid in filenames, extracts CN from subject strings,
+    and ensures the result is not empty.
+
+    .PARAMETER InputString
+    The string to convert to a safe filename.
+
+    .PARAMETER DefaultName
+    Default name to use if the input results in an empty string.
+
+    .EXAMPLE
+    NewSafeFileNameFromCertificateName -InputString "CN=*.example.com, O=Example Corp" -DefaultName "cert"
+    # Returns: example.com
+
+    .NOTES
+    Author: jjw(@thejjw)
+    Last Edit: Aug 2025
+    #>
+        [CmdletBinding()]
+        [OutputType([string])]
+        param(
+            [Parameter(Mandatory = $true)]
+            [string] $InputString,
+
+            [string] $DefaultName = "cert"
+        )
+
+        # Extract CN if it's a certificate subject
+        $cleaned = $InputString -replace 'CN=', '' -replace ',.*', ''
+
+        # Replace invalid filesystem characters
+        $safeName = ($cleaned -replace '[^\w\.-]+', '_').Trim('_')
+
+        # Return default if empty
+        if ([string]::IsNullOrWhiteSpace($safeName)) {
+            return $DefaultName
+        }
+
+        return $safeName
+    }
+
+    function GetCertutilPath {
+        <#
+    .SYNOPSIS
+    Locates the certutil.exe executable on the system.
+
+    .DESCRIPTION
+    Searches common paths for certutil.exe and returns the full path if found.
+
+    .EXAMPLE
+    $certutilPath = GetCertutilPath
+
+    .NOTES
+    Author: jjw(@thejjw)
+    Last Edit: Aug 2025
+    #>
+        [CmdletBinding()]
+        [OutputType([string])]
+        param()
+
+        $commonPaths = @(
+            "${env:SystemRoot}\System32\certutil.exe",
+            "${env:SystemRoot}\SysWOW64\certutil.exe",
+            "${env:windir}\Sysnative\certutil.exe"
+        )
+
+        foreach ($path in $commonPaths) {
+            if (Test-Path $path) {
+                return $path
+            }
+        }
+
+        # Try to find it in PATH
+        $pathResult = Get-Command certutil.exe -ErrorAction SilentlyContinue
+        if ($pathResult) {
+            return $pathResult.Source
+        }
+
+        throw "certutil.exe not found on this system"
+    }
+
+    function GetAppLockerRuleIdList {
+        <#
+    .SYNOPSIS
+        Lists the rule ids of an AppLocker rule collection.
+
+    .DESCRIPTION
+        Returns the Id attribute of every rule element in the collection, so the
+        local rules can be told apart from the ones a Group Policy contributes.
+
+    .PARAMETER Collection
+        The rule collection element, or $null.
+
+    .OUTPUTS
+        System.String[] of rule ids.
+
+    .NOTES
+        Author: jjw(@thejjw)
+        Last Edit: 2026-10
+    #>
+        [CmdletBinding()]
+        param(
+            $Collection
+        )
+
+        # The leading comma keeps an empty result an array instead of nothing, so
+        # callers always get a string array back.
+        if (-not $Collection) { return , @() }
+        return , @($_ProfileHelpers.GetAppLockerRules($Collection) |
+            ForEach-Object { $_.GetAttribute('Id') })
+    }
+
 $profileHelperFunctions = @(
+        'GetAiApiKey',
+        'SaveProcessEnvVars',
+        'RestoreProcessEnvVars',
+        'NewSafeFileNameFromCertificateName',
+        'GetCertutilPath',
+        'GetAppLockerRuleIdList',
         'GetAiUsageJsonProperty',
         'GetAiUsageJwtClaims',
         'GetAiUsageWindowLabel',
@@ -3822,92 +4022,6 @@ Last Edit: Jul 2026
     }
 }
 
-function New-SafeFileNameFromCertificateName {
-    <#
-.SYNOPSIS
-Creates a filesystem-safe filename from a certificate subject or other string.
-
-.DESCRIPTION
-Removes or replaces characters that are invalid in filenames, extracts CN from subject strings,
-and ensures the result is not empty.
-
-.PARAMETER InputString
-The string to convert to a safe filename.
-
-.PARAMETER DefaultName
-Default name to use if the input results in an empty string.
-
-.EXAMPLE
-New-SafeFileNameFromCertificateName -InputString "CN=*.example.com, O=Example Corp" -DefaultName "cert"
-# Returns: example.com
-
-.NOTES
-Author: jjw(@thejjw)
-Last Edit: Aug 2025
-#>
-    [CmdletBinding()]
-    [OutputType([string])]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string] $InputString,
-        
-        [string] $DefaultName = "cert"
-    )
-    
-    # Extract CN if it's a certificate subject
-    $cleaned = $InputString -replace 'CN=', '' -replace ',.*', ''
-    
-    # Replace invalid filesystem characters
-    $safeName = ($cleaned -replace '[^\w\.-]+', '_').Trim('_')
-    
-    # Return default if empty
-    if ([string]::IsNullOrWhiteSpace($safeName)) {
-        return $DefaultName
-    }
-    
-    return $safeName
-}
-
-function Get-CertutilPath {
-    <#
-.SYNOPSIS
-Locates the certutil.exe executable on the system.
-
-.DESCRIPTION
-Searches common paths for certutil.exe and returns the full path if found.
-
-.EXAMPLE
-$certutilPath = Get-CertutilPath
-
-.NOTES
-Author: jjw(@thejjw)
-Last Edit: Aug 2025
-#>
-    [CmdletBinding()]
-    [OutputType([string])]
-    param()
-    
-    $commonPaths = @(
-        "${env:SystemRoot}\System32\certutil.exe",
-        "${env:SystemRoot}\SysWOW64\certutil.exe",
-        "${env:windir}\Sysnative\certutil.exe"
-    )
-    
-    foreach ($path in $commonPaths) {
-        if (Test-Path $path) {
-            return $path
-        }
-    }
-    
-    # Try to find it in PATH
-    $pathResult = Get-Command certutil.exe -ErrorAction SilentlyContinue
-    if ($pathResult) {
-        return $pathResult.Source
-    }
-    
-    throw "certutil.exe not found on this system"
-}
-
 function Install-ServerCertificateTrust {
     <#
 .SYNOPSIS
@@ -4084,7 +4198,7 @@ Last Edit: Aug 2025
 
         # Double-underscore separates human-readable name from thumbprint so
         # filenames stay unique across renewals without collisions.
-        $safeName = New-SafeFileNameFromCertificateName -InputString $cn -DefaultName "cert"
+        $safeName = $_ProfileHelpers.NewSafeFileNameFromCertificateName($cn, "cert")
         $thumb = $Certificate.Thumbprint -replace '\s', ''
         $fileBase = "{0}__{1}" -f $safeName, $thumb
         $path = Join-Path $Directory ($fileBase + '.cer')
@@ -4115,7 +4229,7 @@ Last Edit: Aug 2025
             [switch] $MachineStore
         )
         
-        $certutil = Get-CertutilPath
+        $certutil = $_ProfileHelpers.GetCertutilPath()
         $args = @()
         if (-not $MachineStore) { $args += '-user' }
         $args += '-addstore'
@@ -4287,7 +4401,7 @@ Last Edit: Aug 2025
             }
             else {
                 # X509Store method uses simpler export
-                $safeName = New-SafeFileNameFromCertificateName -InputString $cert.Subject
+                $safeName = $_ProfileHelpers.NewSafeFileNameFromCertificateName($cert.Subject)
                 $filePath = Join-Path $OutDir ("${safeName}-${cert.Thumbprint}.cer")
                 [IO.File]::WriteAllBytes($filePath, $cert.Export('Cert'))
                 Write-Verbose "Exported: ${filePath}"
@@ -4304,7 +4418,7 @@ Last Edit: Aug 2025
             $type = Classify-Certificate -Certificate $cert
             $path = if ($SaveToFiles) {
                 # Already saved, just get the path
-                $safeName = New-SafeFileNameFromCertificateName -InputString $cert.Subject
+                $safeName = $_ProfileHelpers.NewSafeFileNameFromCertificateName($cert.Subject)
                 Join-Path $OutDir ("${safeName}-${cert.Thumbprint}.cer")
             }
             else {
@@ -4646,7 +4760,7 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         
         foreach ($cert in $toExport) {
             # Safe filename generation
-            $safeName = New-SafeFileNameFromCertificateName -InputString $cert.Subject
+            $safeName = $_ProfileHelpers.NewSafeFileNameFromCertificateName($cert.Subject)
             $certType = Get-CertificateType -Certificate $cert `
                 -IsFirstInChain ($cert -eq $elements[0]) `
                 -IsLastInChain ($cert -eq $elements[-1])
@@ -6452,7 +6566,7 @@ function Install-OpenCodeSettings {
         Remove-Item -LiteralPath $CloneDir -Recurse -Force
     }
 
-    $originalEnvVars = Save-ProcessEnvVars @('GIT_TERMINAL_PROMPT')
+    $originalEnvVars = $_ProfileHelpers.SaveProcessEnvVars(@('GIT_TERMINAL_PROMPT'))
     $env:GIT_TERMINAL_PROMPT = '0'
     try {
         # Full (blobless) history is kept so the plugin's own last-change commit
@@ -6542,7 +6656,7 @@ function Install-OpenCodeSettings {
         }
     }
     finally {
-        Restore-ProcessEnvVars $originalEnvVars
+        $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
         if ($KeepClone) {
             Write-Host "Clone kept: $CloneDir" -ForegroundColor Cyan
         }
@@ -7488,51 +7602,6 @@ function Install-ClaudezSetup {
     return $true
 }
 
-function Save-ProcessEnvVars {
-    <#
-.SYNOPSIS
-    Snapshot process-scope environment variables so they can be restored later.
-
-.DESCRIPTION
-    Returns an ordered hashtable mapping each name to its current process-scope
-    value (or $null when unset). Pass the result to Restore-ProcessEnvVars in a
-    finally block to undo any temporary overrides cleanly.
-
-.PARAMETER Names
-    The environment variable names to capture.
-#>
-    param([Parameter(Mandatory)][string[]]$Names)
-
-    $saved = [ordered]@{}
-    foreach ($n in $Names) {
-        $saved[$n] = [Environment]::GetEnvironmentVariable($n, 'Process')
-    }
-    return $saved
-}
-
-function Restore-ProcessEnvVars {
-    <#
-.SYNOPSIS
-    Restore environment variables captured by Save-ProcessEnvVars.
-
-.DESCRIPTION
-    Re-applies each saved value, or removes the variable entirely when it was
-    unset at snapshot time, leaving the process environment as it was found.
-
-.PARAMETER Saved
-    The hashtable produced by Save-ProcessEnvVars.
-#>
-    param([Parameter(Mandatory)][System.Collections.IDictionary]$Saved)
-
-    foreach ($n in $Saved.Keys) {
-        if ($null -eq $Saved[$n]) {
-            Remove-Item "Env:\$n" -ErrorAction SilentlyContinue
-        } else {
-            [Environment]::SetEnvironmentVariable($n, $Saved[$n], 'Process')
-        }
-    }
-}
-
 # Briefly warn when Z.AI's UTC+8 peak window is active.
 # Peak-hours and quota policy: https://docs.z.ai/devpack/overview
 function Show-ZaiPeakWarning {
@@ -7591,8 +7660,8 @@ function claudez {
     Author: jjw(@thejjw)
     Last Edit: 2026-08
 #>
-    # Read token using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
-    $token = Get-AiApiKey 'ZAI_API_KEY'
+    # Read token using GetAiApiKey helper (process first, then Credential Manager, then legacy User env)
+    $token = $_ProfileHelpers.GetAiApiKey('ZAI_API_KEY')
 
     if (-not $token) {
         Write-Host "ZAI_API_KEY is not set. Aborting." -ForegroundColor Red
@@ -7601,14 +7670,14 @@ function claudez {
         return
     }
 
-    $originalEnvVars = Save-ProcessEnvVars @(
+    $originalEnvVars = $_ProfileHelpers.SaveProcessEnvVars(@(
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'API_TIMEOUT_MS',
         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
         'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
         'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
         'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
         'ENABLE_PROMPT_CACHING_1H'
-    )
+    ))
 
     $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $token
@@ -7638,7 +7707,7 @@ function claudez {
         claude @args
     }
     finally {
-        Restore-ProcessEnvVars $originalEnvVars
+        $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
     }
 }
 
@@ -7661,8 +7730,8 @@ function claudezm {
     Author: jjw(@thejjw)
     Last Edit: 2026-08
 #>
-    # Read token using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
-    $token = Get-AiApiKey 'ZAI_API_KEY'
+    # Read token using GetAiApiKey helper (process first, then Credential Manager, then legacy User env)
+    $token = $_ProfileHelpers.GetAiApiKey('ZAI_API_KEY')
 
     if (-not $token) {
         Write-Host "ZAI_API_KEY is not set. Aborting." -ForegroundColor Red
@@ -7671,14 +7740,14 @@ function claudezm {
         return
     }
 
-    $originalEnvVars = Save-ProcessEnvVars @(
+    $originalEnvVars = $_ProfileHelpers.SaveProcessEnvVars(@(
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'API_TIMEOUT_MS',
         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
         'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
         'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
         'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
         'ENABLE_PROMPT_CACHING_1H'
-    )
+    ))
 
     $env:ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $token
@@ -7708,7 +7777,7 @@ function claudezm {
         claude @args
     }
     finally {
-        Restore-ProcessEnvVars $originalEnvVars
+        $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
     }
 }
 
@@ -7826,8 +7895,8 @@ function claudeds {
     Author: jjw(@thejjw)
     Last Edit: 2026-08
 #>
-    # Read key using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
-    $key = Get-AiApiKey 'DEEPSEEK_API_KEY'
+    # Read key using GetAiApiKey helper (process first, then Credential Manager, then legacy User env)
+    $key = $_ProfileHelpers.GetAiApiKey('DEEPSEEK_API_KEY')
 
     if (-not $key) {
         Write-Host "DEEPSEEK_API_KEY is not set. Aborting." -ForegroundColor Red
@@ -7836,14 +7905,14 @@ function claudeds {
         return
     }
 
-    $originalEnvVars = Save-ProcessEnvVars @(
+    $originalEnvVars = $_ProfileHelpers.SaveProcessEnvVars(@(
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_MODEL',
         'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
         'CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
         'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ENABLE_PROMPT_CACHING_1H',
         'CLAUDE_CODE_AUTO_COMPACT_WINDOW'
-    )
+    ))
 
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
@@ -7866,7 +7935,7 @@ function claudeds {
         claude @args
     }
     finally {
-        Restore-ProcessEnvVars $originalEnvVars
+        $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
     }
 }
 
@@ -7919,8 +7988,8 @@ function claudeds2 {
     Author: jjw(@thejjw)
     Last Edit: 2026-09
 #>
-    # Read key using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
-    $key = Get-AiApiKey 'DEEPSEEK_API_KEY'
+    # Read key using GetAiApiKey helper (process first, then Credential Manager, then legacy User env)
+    $key = $_ProfileHelpers.GetAiApiKey('DEEPSEEK_API_KEY')
 
     if (-not $key) {
         Write-Host "DEEPSEEK_API_KEY is not set. Aborting." -ForegroundColor Red
@@ -7929,14 +7998,14 @@ function claudeds2 {
         return
     }
 
-    $originalEnvVars = Save-ProcessEnvVars @(
+    $originalEnvVars = $_ProfileHelpers.SaveProcessEnvVars(@(
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_MODEL',
         'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
         'CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
         'CLAUDE_CODE_USE_POWERSHELL_TOOL', 'ENABLE_PROMPT_CACHING_1H',
         'CLAUDE_CODE_AUTO_COMPACT_WINDOW'
-    )
+    ))
 
     $env:ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
@@ -7958,7 +8027,7 @@ function claudeds2 {
         claude @args
     }
     finally {
-        Restore-ProcessEnvVars $originalEnvVars
+        $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
     }
 }
 
@@ -8447,7 +8516,7 @@ Last Edit: 2026-10
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        $ApiKey = Get-AiApiKey 'ZAI_API_KEY'
+        $ApiKey = $_ProfileHelpers.GetAiApiKey('ZAI_API_KEY')
     }
 
     if (-not $ApiKey) {
@@ -8604,8 +8673,8 @@ function claudemm {
     Author: jjw(@thejjw)
     Last Edit: 2026-05
 #>
-    # Read key using Get-AiApiKey helper (process first, then Credential Manager, then legacy User env)
-    $key = Get-AiApiKey 'MINIMAX_API_KEY'
+    # Read key using GetAiApiKey helper (process first, then Credential Manager, then legacy User env)
+    $key = $_ProfileHelpers.GetAiApiKey('MINIMAX_API_KEY')
 
     if (-not $key) {
         Write-Host "MINIMAX_API_KEY is not set. Aborting." -ForegroundColor Red
@@ -8614,7 +8683,7 @@ function claudemm {
         return
     }
 
-    $originalEnvVars = Save-ProcessEnvVars @(
+    $originalEnvVars = $_ProfileHelpers.SaveProcessEnvVars(@(
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_MODEL',
         'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'API_TIMEOUT_MS',
@@ -8622,7 +8691,7 @@ function claudemm {
         'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
         'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
         'ENABLE_PROMPT_CACHING_1H'
-    )
+    ))
 
     $env:ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic"
     $env:ANTHROPIC_AUTH_TOKEN = $key
@@ -8653,7 +8722,7 @@ function claudemm {
         claude @args
     }
     finally {
-        Restore-ProcessEnvVars $originalEnvVars
+        $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
     }
 }
 
@@ -8699,7 +8768,7 @@ function claudek {
     Author: jjw(@thejjw)
     Last Edit: 2026-07
 #>
-    $key = Get-AiApiKey 'KIMI_CODE_PLAN_API_KEY'
+    $key = $_ProfileHelpers.GetAiApiKey('KIMI_CODE_PLAN_API_KEY')
 
     if (-not $key) {
         Write-Host "KIMI_CODE_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
@@ -8708,14 +8777,14 @@ function claudek {
         return
     }
 
-    $originalEnvVars = Save-ProcessEnvVars @(
+    $originalEnvVars = $_ProfileHelpers.SaveProcessEnvVars(@(
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
         'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL',
         'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
         'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL',
         'CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
         'CLAUDE_CODE_USE_POWERSHELL_TOOL'
-    )
+    ))
 
     $env:ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/'
     $env:ANTHROPIC_API_KEY = $key
@@ -8739,7 +8808,7 @@ function claudek {
         claude @args
     }
     finally {
-        Restore-ProcessEnvVars $originalEnvVars
+        $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
     }
 }
 
@@ -8816,7 +8885,7 @@ Last Edit: 2026-10
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        $ApiKey = Get-AiApiKey 'KIMI_CODE_PLAN_API_KEY'
+        $ApiKey = $_ProfileHelpers.GetAiApiKey('KIMI_CODE_PLAN_API_KEY')
     }
 
     if (-not $ApiKey) {
@@ -8910,7 +8979,7 @@ function claudeq {
     Author: jjw(@thejjw)
     Last Edit: 2026-08
 #>
-    $key = Get-AiApiKey 'QWEN_TOKEN_PLAN_API_KEY'
+    $key = $_ProfileHelpers.GetAiApiKey('QWEN_TOKEN_PLAN_API_KEY')
 
     if (-not $key) {
         Write-Host "QWEN_TOKEN_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
@@ -8919,14 +8988,14 @@ function claudeq {
         return
     }
 
-    $originalEnvVars = Save-ProcessEnvVars @(
+    $originalEnvVars = $_ProfileHelpers.SaveProcessEnvVars(@(
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
         'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
         'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
         'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
         'CLAUDE_CODE_MAX_CONTEXT_TOKENS', 'CLAUDE_CODE_USE_POWERSHELL_TOOL'
-    )
+    ))
 
     $env:ANTHROPIC_BASE_URL = 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic'
     $env:ANTHROPIC_AUTH_TOKEN = $key
@@ -8949,7 +9018,7 @@ function claudeq {
         claude @args
     }
     finally {
-        Restore-ProcessEnvVars $originalEnvVars
+        $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
     }
 }
 
@@ -8996,7 +9065,7 @@ function claudeq2 {
     Author: jjw(@thejjw)
     Last Edit: 2026-08
 #>
-    $key = Get-AiApiKey 'QWEN_TOKEN_PLAN_API_KEY'
+    $key = $_ProfileHelpers.GetAiApiKey('QWEN_TOKEN_PLAN_API_KEY')
 
     if (-not $key) {
         Write-Host "QWEN_TOKEN_PLAN_API_KEY is not set. Aborting." -ForegroundColor Red
@@ -9005,14 +9074,14 @@ function claudeq2 {
         return
     }
 
-    $originalEnvVars = Save-ProcessEnvVars @(
+    $originalEnvVars = $_ProfileHelpers.SaveProcessEnvVars(@(
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
         'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
         'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
         'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
         'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
         'CLAUDE_CODE_MAX_CONTEXT_TOKENS', 'CLAUDE_CODE_USE_POWERSHELL_TOOL'
-    )
+    ))
 
     $env:ANTHROPIC_BASE_URL = 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic'
     $env:ANTHROPIC_AUTH_TOKEN = $key
@@ -9035,7 +9104,7 @@ function claudeq2 {
         claude @args
     }
     finally {
-        Restore-ProcessEnvVars $originalEnvVars
+        $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
     }
 }
 
@@ -9077,18 +9146,18 @@ function Install-ClaudeCCRSetup {
     setup helpers so cccr can use the same MCP servers as claudez and claudemm.
 
 .PARAMETER ZaiToken
-    Z.AI token. Defaults to Get-AiApiKey 'ZAI_API_KEY'.
+    Z.AI token. Defaults to GetAiApiKey 'ZAI_API_KEY'.
 
 .PARAMETER MiniMaxKey
-    MiniMax API key. Defaults to Get-AiApiKey 'MINIMAX_API_KEY'. Optional; if missing, MiniMax
+    MiniMax API key. Defaults to GetAiApiKey 'MINIMAX_API_KEY'. Optional; if missing, MiniMax
     is omitted from Providers and the longContext route falls back to DeepSeek.
 
 .PARAMETER DeepSeekKey
-    DeepSeek API key. Defaults to Get-AiApiKey 'DEEPSEEK_API_KEY'. Optional; required only if
+    DeepSeek API key. Defaults to GetAiApiKey 'DEEPSEEK_API_KEY'. Optional; required only if
     longContext would otherwise have no fallback provider.
 
 .PARAMETER GeminiKey
-    Google Gemini API key. Defaults to Get-AiApiKey 'GEMINI_API_KEY'. Optional; if missing, the
+    Google Gemini API key. Defaults to GetAiApiKey 'GEMINI_API_KEY'. Optional; if missing, the
     Gemini provider is omitted (and the webSearch router role becomes a no-op).
 
 .PARAMETER Force
@@ -9113,10 +9182,10 @@ function Install-ClaudeCCRSetup {
         [switch]$Force
     )
 
-    if ([string]::IsNullOrWhiteSpace($ZaiToken))    { $ZaiToken    = Get-AiApiKey 'ZAI_API_KEY' }
-    if ([string]::IsNullOrWhiteSpace($MiniMaxKey))  { $MiniMaxKey  = Get-AiApiKey 'MINIMAX_API_KEY' }
-    if ([string]::IsNullOrWhiteSpace($DeepSeekKey)) { $DeepSeekKey = Get-AiApiKey 'DEEPSEEK_API_KEY' }
-    if ([string]::IsNullOrWhiteSpace($GeminiKey))   { $GeminiKey   = Get-AiApiKey 'GEMINI_API_KEY' }
+    if ([string]::IsNullOrWhiteSpace($ZaiToken))    { $ZaiToken    = $_ProfileHelpers.GetAiApiKey('ZAI_API_KEY') }
+    if ([string]::IsNullOrWhiteSpace($MiniMaxKey))  { $MiniMaxKey  = $_ProfileHelpers.GetAiApiKey('MINIMAX_API_KEY') }
+    if ([string]::IsNullOrWhiteSpace($DeepSeekKey)) { $DeepSeekKey = $_ProfileHelpers.GetAiApiKey('DEEPSEEK_API_KEY') }
+    if ([string]::IsNullOrWhiteSpace($GeminiKey))   { $GeminiKey   = $_ProfileHelpers.GetAiApiKey('GEMINI_API_KEY') }
 
     if (-not $GeminiKey) {
         Write-Host "cccr: GEMINI_API_KEY not set -- Gemini provider and webSearch route skipped" -ForegroundColor Yellow
@@ -9287,20 +9356,20 @@ function cccr {
         else                                           { $claudeArgArr += $arg }
     }
 
-    $zaiToken    = Get-AiApiKey 'ZAI_API_KEY'
+    $zaiToken    = $_ProfileHelpers.GetAiApiKey('ZAI_API_KEY')
     if (-not $zaiToken) {
         Write-Host "ZAI_API_KEY is not set. Aborting." -ForegroundColor Red
         Write-Host ""
         Write-Host "Please set it securely using: Set-AiApiKeysCS" -ForegroundColor Yellow
         return
     }
-    $miniMaxKey  = Get-AiApiKey 'MINIMAX_API_KEY'
-    $deepSeekKey = Get-AiApiKey 'DEEPSEEK_API_KEY'
-    $geminiKey   = Get-AiApiKey 'GEMINI_API_KEY'
+    $miniMaxKey  = $_ProfileHelpers.GetAiApiKey('MINIMAX_API_KEY')
+    $deepSeekKey = $_ProfileHelpers.GetAiApiKey('DEEPSEEK_API_KEY')
+    $geminiKey   = $_ProfileHelpers.GetAiApiKey('GEMINI_API_KEY')
 
     # Snapshot every env var we may transiently mutate so the caller's session is untouched
     # once claude exits (or this function returns early).
-    $originalEnvVars = Save-ProcessEnvVars @(
+    $originalEnvVars = $_ProfileHelpers.SaveProcessEnvVars(@(
         'ZAI_API_KEY', 'MINIMAX_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY',
         'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY',
         'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
@@ -9310,7 +9379,7 @@ function cccr {
         'CLAUDE_CODE_USE_POWERSHELL_TOOL',
         'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_EFFORT_LEVEL',
         'ENABLE_PROMPT_CACHING_1H'
-    )
+    ))
 
     try {
         # CCR reads provider api_key values from the env at startup. The keys normally live in
@@ -9378,7 +9447,7 @@ function cccr {
         claude @claudeArgArr
     }
     finally {
-        Restore-ProcessEnvVars $originalEnvVars
+        $_ProfileHelpers.RestoreProcessEnvVars($originalEnvVars)
     }
 }
 
@@ -9457,7 +9526,7 @@ Last Edit: 2026-10
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        $ApiKey = Get-AiApiKey 'MINIMAX_API_KEY'
+        $ApiKey = $_ProfileHelpers.GetAiApiKey('MINIMAX_API_KEY')
     }
 
     if (-not $ApiKey) {
@@ -11319,38 +11388,6 @@ function Install-AiTools {
     }
 
     Write-Host "Install-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
-}
-
-function Get-AiApiKey {
-    <#
-    .SYNOPSIS
-        Retrieves an API key, prioritizing current process environment, then Windows Credential Manager,
-        and finally legacy User environment variables.
-
-    .NOTES
-        Author: jjw(@thejjw)
-        Last Edit: 2026-05
-#>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Name
-    )
-    # 1. Process environment (allows temporary session overrides)
-    $v = [Environment]::GetEnvironmentVariable($Name, 'Process')
-    if ($v) { return $v }
-
-    # 2. Windows Credential Manager (DPAPI-backed, survives reboots, no plaintext in registry)
-    [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
-    $vault = New-Object Windows.Security.Credentials.PasswordVault
-    try {
-        $cred = $vault.Retrieve($Name, $_AiKeysInternal.UserName)
-        $cred.RetrievePassword()
-        return $cred.Password
-    }
-    catch {
-        # 3. Fallback: legacy plaintext env vars for keys stored before Credential Manager migration
-        return [Environment]::GetEnvironmentVariable($Name, 'User')
-    }
 }
 
 function Set-AiApiKeysCS {
@@ -13249,7 +13286,7 @@ function Get-QwenUsage {
     $browserUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
 
     # Read the Cookie directly from the per-user Credential Locker. It is
-    # deliberately not routed through Get-AiApiKey or an environment variable.
+    # deliberately not routed through GetAiApiKey or an environment variable.
     function Get-StoredCookie {
         [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
         $vault = New-Object Windows.Security.Credentials.PasswordVault
@@ -13816,7 +13853,7 @@ function Get-OpencodeGoUsage {
     Queries OpenCode Go subscription usage windows (rolling, weekly, monthly).
 .DESCRIPTION
     Calls https://opencode.ai/zen/go/v1/usage with a workspace API key.
-    An explicit -ApiKey takes precedence. Otherwise Get-AiApiKey resolves
+    An explicit -ApiKey takes precedence. Otherwise GetAiApiKey resolves
     OPENCODE_GO_API_KEY from the process environment, Windows Credential Manager,
     then legacy User environment variables. If unavailable, falls back to
     $env:OPENCODE_API_KEY, then the "opencode-go" entry in the OpenCode CLI
@@ -13833,7 +13870,7 @@ function Get-OpencodeGoUsage {
 
     Stores the parsed response in $Global:opencodeGoLastQuery and returns it.
 .PARAMETER ApiKey
-    OpenCode Go workspace API key. When omitted, uses Get-AiApiKey for
+    OpenCode Go workspace API key. When omitted, uses GetAiApiKey for
     OPENCODE_GO_API_KEY, then $env:OPENCODE_API_KEY (shared with the Zen
     provider), then the OpenCode CLI auth store. Save the Go key with Set-AiApiKeysCS.
 .PARAMETER TimeoutSec
@@ -13885,7 +13922,7 @@ function Get-OpencodeGoUsage {
 
     # Reuse the profile's credential lookup so a newly saved Go key works even
     # before Load-AiApiKeysFromCS runs. Keep the shared Zen key as a fallback.
-    if ([string]::IsNullOrWhiteSpace($ApiKey)) { $ApiKey = Get-AiApiKey 'OPENCODE_GO_API_KEY' }
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) { $ApiKey = $_ProfileHelpers.GetAiApiKey('OPENCODE_GO_API_KEY') }
     if ([string]::IsNullOrWhiteSpace($ApiKey)) { $ApiKey = $env:OPENCODE_API_KEY }
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
@@ -15636,37 +15673,6 @@ function Read-AppLockerPolicy {
     return [pscustomobject]@{ Raw = $raw; Document = $document }
 }
 
-function Get-AppLockerRuleIdList {
-    <#
-.SYNOPSIS
-    Lists the rule ids of an AppLocker rule collection.
-
-.DESCRIPTION
-    Returns the Id attribute of every rule element in the collection, so the
-    local rules can be told apart from the ones a Group Policy contributes.
-
-.PARAMETER Collection
-    The rule collection element, or $null.
-
-.OUTPUTS
-    System.String[] of rule ids.
-
-.NOTES
-    Author: jjw(@thejjw)
-    Last Edit: 2026-10
-#>
-    [CmdletBinding()]
-    param(
-        $Collection
-    )
-
-    # The leading comma keeps an empty result an array instead of nothing, so
-    # callers always get a string array back.
-    if (-not $Collection) { return , @() }
-    return , @($_ProfileHelpers.GetAppLockerRules($Collection) |
-        ForEach-Object { $_.GetAttribute('Id') })
-}
-
 function Resolve-AppLockerTargetFile {
     <#
 .SYNOPSIS
@@ -16432,7 +16438,7 @@ function Remove-AppLockerBlock {
             # Only rules that a Group Policy contributes are considered: the
             # effective policy is a snapshot and can still hold a rule this
             # profile created and that has since been removed.
-            $localExeIds = Get-AppLockerRuleIdList $localExe
+            $localExeIds = $_ProfileHelpers.GetAppLockerRuleIdList($localExe)
             $effectiveExeRules = if ($effectiveExe) { @($_ProfileHelpers.GetAppLockerRules($effectiveExe)) } else { @() }
             $domainExeRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveExeRules, $localExeIds, $managedMarker)
             $report = @($_ProfileHelpers.GetAppLockerBlockReport($domainExeRules, $managedMarker, @()))

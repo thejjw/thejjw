@@ -19,13 +19,23 @@ Describe 'Get-DeepseekUsage' {
 
         . ([scriptblock]::Create($functionAst.Extent.Text))
 
-        $Global:_ProfileHelpers = [pscustomobject]@{}
-        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteUsageTimestamp -Value { param($CommandName) }
-        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteSection -Value {
+        # The profile helper module is loaded whole, so the function under test
+        # finds every helper it calls. The members that write to the host are
+        # then replaced with stubs, because a module's own Write-Host cannot be
+        # intercepted from the test scope.
+        $helperAssignment = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$_ProfileHelpers'
+        }, $true)
+        if (-not $helperAssignment) { throw 'Could not load the profile helper module.' }
+        . ([scriptblock]::Create($helperAssignment.Extent.Text))
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteUsageTimestamp -Force -Value { param($CommandName) }
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name WriteSection -Force -Value {
             param($Title)
             [void]$script:sections.Add($Title)
         }
-        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name FormatTokens -Value {
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name FormatTokens -Force -Value {
             param([double]$Value)
             if ($Value -le 0) { return '0' }
             if ($Value -ge 1e9) { return ('{0:N2}B' -f ($Value / 1e9)) }
@@ -33,7 +43,7 @@ Describe 'Get-DeepseekUsage' {
             if ($Value -ge 1e3) { return ('{0:N2}K' -f ($Value / 1e3)) }
             return ('{0:N0}' -f $Value)
         }
-        $Global:_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name FormatPrice -Value {
+        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name FormatPrice -Force -Value {
             param([double]$Value)
             $s = ('{0:N6}' -f $Value).TrimEnd('0')
             if ($s.EndsWith('.')) { $s = $s.Substring(0, $s.Length - 1) }

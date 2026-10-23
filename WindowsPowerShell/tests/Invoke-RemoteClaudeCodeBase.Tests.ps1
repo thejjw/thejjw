@@ -21,7 +21,17 @@ Describe 'Invoke-RemoteClaudeCodeBase remote environment composition' {
         # NewTemporarySshIdentity is only touched when -KeyFile is supplied.
         $script:_NvmVersion = 'v0.40.8'
         $script:_UvInstallUrl = 'https://astral.sh/uv/install.sh'
-        $script:_ProfileHelpers = [pscustomobject]@{}
+        # The profile helper module is loaded whole, so the function under test
+        # finds every helper it calls. The members that write to the host are
+        # then replaced with stubs, because a module's own Write-Host cannot be
+        # intercepted from the test scope.
+        $helperAssignment = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq '$_ProfileHelpers'
+        }, $true)
+        if (-not $helperAssignment) { throw 'Could not load the profile helper module.' }
+        . ([scriptblock]::Create($helperAssignment.Extent.Text))
 
         . ([scriptblock]::Create($functionAst.Extent.Text))
 
