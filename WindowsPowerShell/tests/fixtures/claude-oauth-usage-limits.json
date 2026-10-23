@@ -1,0 +1,63 @@
+{
+  "five_hour": {
+    "utilization": 0.0,
+    "resets_at": null,
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "seven_day": {
+    "utilization": 0.0,
+    "resets_at": "2026-09-17T00:00:00.000+00:00",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "seven_day_opus": null,
+  "seven_day_sonnet": null,
+  "limits": [
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": 35.5,
+      "severity": "normal",
+      "resets_at": "2026-09-11T03:38:39.995+00:00",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_all",
+      "group": "weekly",
+      "percent": 12.25,
+      "severity": "normal",
+      "resets_at": "2026-09-17T00:00:00.000+00:00",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_scoped",
+      "group": "weekly",
+      "percent": 4.5,
+      "severity": "normal",
+      "resets_at": "2026-09-17T00:00:00.000+00:00",
+      "scope": {
+        "model": {
+          "id": null,
+          "display_name": "Fable"
+        },
+        "surface": null
+      },
+      "is_active": false
+    }
+  ],
+  "extra_usage": {
+    "is_enabled": true,
+    "monthly_limit": 200,
+    "used_credits": 35,
+    "utilization": 17.5,
+    "currency": "USD",
+    "decimal_places": 2
+  }
+}

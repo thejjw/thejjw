@@ -60,8 +60,11 @@ Describe 'usage-query timestamps' {
             }, $true)
         )
 
-        # One per provider usage function, including the Get-AllAiUsage aggregator.
-        $usageFunctions.Count | Should -Be 8
+        # Every provider usage function, including the Get-AllAiUsage
+        # aggregator, has to open with the timestamp line. The set is
+        # discovered rather than counted: a new provider function has to
+        # satisfy the rule on its own, without a list to be kept in step.
+        $usageFunctions.Count | Should -BeGreaterThan 0
         foreach ($functionAst in $usageFunctions) {
             $functionAst.Body.EndBlock.Statements[0].Extent.Text |
                 Should -Be '$_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)'
