@@ -12605,32 +12605,8 @@ function Get-KimiUsage {
 # Maps the private console gateway payload onto the quota windows the Token
 # Plan console reports. Split out of Get-QwenUsage so the mapping can be
 # exercised without the network, and so a change in the console's response
-# shape has a single place to be fixed.
-
-function Get-QwenJsonProperty {
-    <#
-.SYNOPSIS
-    Reads a named property from a deserialized JSON object.
-.DESCRIPTION
-    Returns the property value, or $null when the object is missing or has no
-    such property. The QwenCloud gateway nests the quota payload under several
-    optional envelopes, so every lookup has to tolerate an absent property.
-.PARAMETER InputObject
-    The deserialized JSON object to read from.
-.PARAMETER Name
-    The property name to look up.
-#>
-    [CmdletBinding()]
-    param(
-        [object]$InputObject,
-        [string]$Name
-    )
-
-    if ($null -eq $InputObject) { return $null }
-    $property = $InputObject.PSObject.Properties[$Name]
-    if ($null -eq $property) { return $null }
-    return $property.Value
-}
+# shape has a single place to be fixed. The JSON property helper it shares
+# with the other usage functions lives with them.
 
 function ConvertFrom-QwenCloudUsagePayload {
     <#
@@ -12698,8 +12674,8 @@ function ConvertFrom-QwenCloudUsagePayload {
         }
     }
 
-    $successResponse = Get-QwenJsonProperty $Payload 'successResponse'
-    $responseData = Get-QwenJsonProperty $Payload 'data'
+    $successResponse = Get-AiUsageJsonProperty $Payload 'successResponse'
+    $responseData = Get-AiUsageJsonProperty $Payload 'data'
     if ($successResponse -eq $false -or $null -eq $responseData) {
         $failureShape = $Payload | ConvertTo-Json -Depth 6 -Compress
         if ($failureShape -match '(?i)ConsoleNeedLogin|NeedLogin|not.?logged.?in|login.{0,24}expired|unauthorized|forbidden') {
@@ -12710,38 +12686,38 @@ function ConvertFrom-QwenCloudUsagePayload {
 
     # The gateway can reject a request with success=false while still replying
     # HTTP 200. Surface its error code instead of reporting a missing field.
-    if ((Get-QwenJsonProperty $responseData 'success') -eq $false) {
-        $errorCode = [string](Get-QwenJsonProperty $responseData 'errorCode')
+    if ((Get-AiUsageJsonProperty $responseData 'success') -eq $false) {
+        $errorCode = [string](Get-AiUsageJsonProperty $responseData 'errorCode')
         if (-not $errorCode) { $errorCode = 'unknown' }
         throw "[QwenResponse] QwenCloud usage request was rejected (errorCode: $errorCode)."
     }
 
-    $stringData = Get-QwenJsonProperty $responseData 'Data'
+    $stringData = Get-AiUsageJsonProperty $responseData 'Data'
     if ($stringData -is [string]) {
         try { $responseData = $stringData | ConvertFrom-Json } catch {}
     }
-    $dataV2 = Get-QwenJsonProperty $responseData 'DataV2'
-    $dataV2Data = Get-QwenJsonProperty $dataV2 'data'
+    $dataV2 = Get-AiUsageJsonProperty $responseData 'DataV2'
+    $dataV2Data = Get-AiUsageJsonProperty $dataV2 'data'
     if ($null -ne $dataV2Data) { $responseData = $dataV2Data }
-    $nestedData = Get-QwenJsonProperty $responseData 'data'
+    $nestedData = Get-AiUsageJsonProperty $responseData 'data'
     if ($null -ne $nestedData) { $responseData = $nestedData }
 
     $limits = New-Object System.Collections.Generic.List[object]
-    $fiveHourUsed = ConvertTo-UsedPercent (Get-QwenJsonProperty $responseData 'per5HourPercentage')
-    $sevenDayUsed = ConvertTo-UsedPercent (Get-QwenJsonProperty $responseData 'per1WeekPercentage')
-    $monthlyUsed = ConvertTo-UsedPercent (Get-QwenJsonProperty $responseData 'per1MonthPercentage')
+    $fiveHourUsed = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $responseData 'per5HourPercentage')
+    $sevenDayUsed = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $responseData 'per1WeekPercentage')
+    $monthlyUsed = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $responseData 'per1MonthPercentage')
     if ($null -ne $fiveHourUsed) {
         $limits.Add([pscustomobject]@{
             Window      = '5 Hour Credits'
             UsedPercent = $fiveHourUsed
-            ResetAt     = ConvertTo-ResetTime (Get-QwenJsonProperty $responseData 'per5HourResetTime')
+            ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $responseData 'per5HourResetTime')
         })
     }
     if ($null -ne $sevenDayUsed) {
         $limits.Add([pscustomobject]@{
             Window      = '7 Day Credits'
             UsedPercent = $sevenDayUsed
-            ResetAt     = ConvertTo-ResetTime (Get-QwenJsonProperty $responseData 'per1WeekResetTime')
+            ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $responseData 'per1WeekResetTime')
         })
     }
     # Monthly-only plans report just this bucket. The console never states the
@@ -12750,7 +12726,7 @@ function ConvertFrom-QwenCloudUsagePayload {
         $limits.Add([pscustomobject]@{
             Window      = 'Monthly Credits'
             UsedPercent = $monthlyUsed
-            ResetAt     = ConvertTo-ResetTime (Get-QwenJsonProperty $responseData 'per1MonthResetTime')
+            ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $responseData 'per1MonthResetTime')
         })
     }
     if ($limits.Count -eq 0) {
@@ -12960,9 +12936,9 @@ function Get-QwenUsage {
             [void]$userRequest.Headers.TryAddWithoutValidation('Referer', "$consoleOrigin/")
             [void]$userRequest.Headers.TryAddWithoutValidation('User-Agent', $browserUserAgent)
             $userPayload = Send-JsonRequest $client $userRequest 'QwenCloud session lookup'
-            $userData = Get-QwenJsonProperty $userPayload 'data'
-            $secToken = Get-QwenJsonProperty $userData 'secToken'
-            $errorCode = [string](Get-QwenJsonProperty $userPayload 'code')
+            $userData = Get-AiUsageJsonProperty $userPayload 'data'
+            $secToken = Get-AiUsageJsonProperty $userData 'secToken'
+            $errorCode = [string](Get-AiUsageJsonProperty $userPayload 'code')
             if ($errorCode -eq 'ConsoleNeedLogin' -or $secToken -isnot [string] -or -not $secToken) {
                 throw '[QwenAuth] QwenCloud requires a fresh console login.'
             }
@@ -13604,6 +13580,1053 @@ function Get-OpencodeGoUsage {
     }
 
     return $resp
+}
+
+# --- Shared helpers for the Claude and Codex usage queries ------------------
+# Both providers expose subscription quota only through private endpoints that
+# their own CLIs call, and both CLIs keep an OAuth token on disk. These helpers
+# read those tokens, speak to the endpoints, and map the responses onto the
+# same window rows the other Get-*Usage functions report.
+
+function Get-AiUsageJsonProperty {
+    <#
+.SYNOPSIS
+    Reads a named property from a deserialized JSON object.
+.DESCRIPTION
+    Returns the property value, or $null when the object is missing or has no
+    such property. Every usage endpoint nests its payload under a different
+    set of optional envelopes, so every lookup has to tolerate an absent
+    property.
+.PARAMETER InputObject
+    The deserialized JSON object to read from.
+.PARAMETER Name
+    The property name to look up.
+#>
+    [CmdletBinding()]
+    param(
+        [object]$InputObject,
+        [string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $null }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Get-AiUsageJwtClaims {
+    <#
+.SYNOPSIS
+    Decodes the claim set of a JSON Web Token.
+.DESCRIPTION
+    Returns the decoded payload object, or $null when the token is missing,
+    malformed, or not a JWT. The signature is not verified: the tokens are
+    only read to learn the account id and plan that the backend already
+    reports, never to make a trust decision.
+.PARAMETER Token
+    The encoded JWT.
+#>
+    [CmdletBinding()]
+    param([string]$Token)
+
+    if ([string]::IsNullOrWhiteSpace($Token)) { return $null }
+    $parts = $Token.Split('.')
+    if ($parts.Count -lt 2) { return $null }
+    $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+    switch ($payload.Length % 4) {
+        2 { $payload += '==' }
+        3 { $payload += '=' }
+    }
+    try {
+        $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
+        return $json | ConvertFrom-Json
+    } catch {
+        return $null
+    }
+}
+
+function New-AiUsageHttpSession {
+    <#
+.SYNOPSIS
+    Creates an HTTP session for an AI usage query.
+.DESCRIPTION
+    Returns the client, the handler, and the certificate callback that was in
+    place, so the caller can restore the previous callback afterwards.
+
+    TLS 1.2 is enabled because .NET Framework's HttpClient still negotiates
+    TLS 1.0 by default, and both providers reject that.
+
+    Unless -Strict is given, server certificates are accepted without
+    validation. Corporate networks sometimes re-sign TLS traffic with an
+    inspection proxy whose certificate the local store does not trust, and
+    the usage query then fails before it reaches the provider. The callback is
+    a compiled static method because a PowerShell scriptblock delegate fails
+    on the worker thread that performs the handshake ("There is no Runspace
+    available to run scripts in this thread").
+.PARAMETER TimeoutSec
+    HTTP timeout in seconds.
+.PARAMETER Strict
+    Keeps the default certificate validation, so an untrusted certificate
+    fails the request instead of being accepted.
+#>
+    [CmdletBinding()]
+    param(
+        [int]$TimeoutSec = 15,
+        [switch]$Strict
+    )
+
+    Add-Type -AssemblyName System.Net.Http
+
+    try {
+        [Net.ServicePointManager]::SecurityProtocol =
+            [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]12288
+    } catch {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    }
+
+    $previousCallback = [Net.ServicePointManager]::ServerCertificateValidationCallback
+    if (-not $Strict) {
+        if (-not ([System.Management.Automation.PSTypeName]'AiUsageTls').Type) {
+            $code = @"
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+
+public class AiUsageTls {
+    public static bool AcceptAny(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors) {
+        return true;
+    }
+    public static void Relax() {
+        ServicePointManager.ServerCertificateValidationCallback = AcceptAny;
+    }
+}
+"@
+            Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
+        }
+        [AiUsageTls]::Relax()
+    }
+
+    $handler = New-Object System.Net.Http.HttpClientHandler
+    $handler.AllowAutoRedirect = $false
+    $handler.UseCookies = $false
+    $client = New-Object System.Net.Http.HttpClient($handler)
+    $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
+
+    return [pscustomobject]@{
+        Client                   = $client
+        Handler                  = $handler
+        PreviousCertificateCheck = $previousCallback
+    }
+}
+
+function Close-AiUsageHttpSession {
+    <#
+.SYNOPSIS
+    Disposes an HTTP session created by New-AiUsageHttpSession.
+.DESCRIPTION
+    Disposes the client and the handler, and restores the certificate
+    validation callback that was in place before the session was created.
+.PARAMETER Session
+    The session object returned by New-AiUsageHttpSession.
+#>
+    [CmdletBinding()]
+    param([object]$Session)
+
+    if (-not $Session) { return }
+    if ($Session.Client) { $Session.Client.Dispose() }
+    if ($Session.Handler) { $Session.Handler.Dispose() }
+    [Net.ServicePointManager]::ServerCertificateValidationCallback = $Session.PreviousCertificateCheck
+}
+
+function Get-AiUsageWindowLabel {
+    <#
+.SYNOPSIS
+    Names a quota window from its length in seconds.
+.DESCRIPTION
+    Turns a window duration into the same naming style the other usage
+    functions use, for example '5 Hour Credits' or '7 Day Credits'.
+.PARAMETER Seconds
+    The window length in seconds.
+#>
+    [CmdletBinding()]
+    param([object]$Seconds)
+
+    $parsed = 0
+    if (-not [int]::TryParse([string]$Seconds, [ref]$parsed) -or $parsed -le 0) { return 'Credits' }
+    if ($parsed -ge 86400) { return ('{0} Day Credits' -f [Math]::Round($parsed / 86400)) }
+    if ($parsed -ge 3600) { return ('{0} Hour Credits' -f [Math]::Round($parsed / 3600)) }
+    return ('{0} Minute Credits' -f [Math]::Round($parsed / 60))
+}
+
+function ConvertFrom-CodexUsagePayload {
+    <#
+.SYNOPSIS
+    Maps a ChatGPT rate-limit payload onto normalized quota windows.
+.DESCRIPTION
+    Reads the windows the ChatGPT backend reports for a Codex subscription and
+    returns them together with the plan, the credit balance, and the workspace
+    spend limit.
+
+    The window a response slot belongs to is decided by its
+    limit_window_seconds, never by its position: a Team plan reports the
+    weekly window in primary_window and leaves secondary_window null, and
+    OpenAI has both added and removed the short window without notice.
+
+    The percentages are used percent, so higher is worse.
+.PARAMETER Payload
+    The deserialized body of a /backend-api/wham/usage response.
+.EXAMPLE
+    ConvertFrom-CodexUsagePayload -Payload $response
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Payload
+    )
+
+    function ConvertTo-UsedPercent([object]$Value) {
+        if ($null -eq $Value) { return $null }
+        $parsed = 0.0
+        if (-not [double]::TryParse(
+            [string]$Value,
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$parsed
+        ) -or $parsed -lt 0) {
+            return $null
+        }
+        # 100.0, not 100: the Int32 overload of Min would truncate the value.
+        return [Math]::Min(100.0, $parsed)
+    }
+
+    function ConvertTo-ResetTime([object]$Value) {
+        if ($null -eq $Value) { return $null }
+        $parsed = 0.0
+        if (-not [double]::TryParse(
+            [string]$Value,
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$parsed
+        ) -or $parsed -le 0) {
+            return $null
+        }
+        # The backend reports epoch seconds; some responses use milliseconds.
+        $milliseconds = if ($parsed -lt 1000000000000) { $parsed * 1000 } else { $parsed }
+        try {
+            return [DateTimeOffset]::FromUnixTimeMilliseconds([long]$milliseconds)
+        } catch {
+            return $null
+        }
+    }
+
+    $windows = New-Object System.Collections.Generic.List[object]
+    $rateLimit = Get-AiUsageJsonProperty $Payload 'rate_limit'
+    foreach ($slot in @('primary_window', 'secondary_window')) {
+        $window = Get-AiUsageJsonProperty $rateLimit $slot
+        if (-not $window) { continue }
+        $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $window 'used_percent')
+        if ($null -eq $used) { continue }
+        $windows.Add([pscustomobject]@{
+            Window      = Get-AiUsageWindowLabel (Get-AiUsageJsonProperty $window 'limit_window_seconds')
+            UsedPercent = $used
+            ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $window 'reset_at')
+        })
+    }
+
+    # Additional metered buckets (for example codex-spark) carry their own
+    # windows and are reported after the plan's own windows.
+    foreach ($extra in @(Get-AiUsageJsonProperty $Payload 'additional_rate_limits')) {
+        if (-not $extra) { continue }
+        $extraLimit = Get-AiUsageJsonProperty $extra 'rate_limit'
+        foreach ($slot in @('primary_window', 'secondary_window')) {
+            $window = Get-AiUsageJsonProperty $extraLimit $slot
+            if (-not $window) { continue }
+            $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $window 'used_percent')
+            if ($null -eq $used) { continue }
+            $name = [string](Get-AiUsageJsonProperty $extra 'limit_name')
+            if (-not $name) { $name = [string](Get-AiUsageJsonProperty $extra 'metered_feature') }
+            if (-not $name) { $name = 'Additional' }
+            $windows.Add([pscustomobject]@{
+                Window      = ('{0} ({1})' -f (Get-AiUsageWindowLabel (Get-AiUsageJsonProperty $window 'limit_window_seconds')), $name)
+                UsedPercent = $used
+                ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $window 'reset_at')
+            })
+        }
+    }
+
+    $credits = Get-AiUsageJsonProperty $Payload 'credits'
+    $spendControl = Get-AiUsageJsonProperty $Payload 'spend_control'
+    $individualLimit = Get-AiUsageJsonProperty $spendControl 'individual_limit'
+
+    $plan = [string](Get-AiUsageJsonProperty $Payload 'plan_type')
+    $balance = $null
+    if ($credits) {
+        $balance = Get-AiUsageJsonProperty $credits 'balance'
+    }
+
+    $spendLimit = $null
+    if ($individualLimit) {
+        $spendLimit = [pscustomobject]@{
+            UsedPercent      = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $individualLimit 'used_percent')
+            RemainingPercent = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $individualLimit 'remaining_percent')
+            Limit            = [string](Get-AiUsageJsonProperty $individualLimit 'limit')
+            Used             = [string](Get-AiUsageJsonProperty $individualLimit 'used')
+            ResetAt          = ConvertTo-ResetTime (Get-AiUsageJsonProperty $individualLimit 'reset_at')
+        }
+    }
+
+    # The plan windows and the additional metered buckets can describe the
+    # same window, so a window is only reported once.
+    $seen = @{}
+    $unique = New-Object System.Collections.Generic.List[object]
+    foreach ($window in $windows) {
+        if ($seen.ContainsKey($window.Window)) { continue }
+        $seen[$window.Window] = $true
+        $unique.Add($window)
+    }
+
+    return [pscustomobject]@{
+        Raw       = $Payload
+        Plan      = $plan
+        Windows   = [object[]]$unique
+        Credits   = $credits
+        Balance   = $balance
+        SpendLimit = $spendLimit
+        LimitReached = [bool](Get-AiUsageJsonProperty $rateLimit 'limit_reached')
+    }
+}
+
+function ConvertFrom-ClaudeUsagePayload {
+    <#
+.SYNOPSIS
+    Maps an Anthropic OAuth usage payload onto normalized quota windows.
+.DESCRIPTION
+    Reads the credit windows the Token Plan console reports and returns them
+    together with the extra-usage block.
+
+    Two response shapes are in the wild for the same endpoint: flat
+    five_hour and seven_day objects, and a limits array whose entries carry a
+    kind (session, weekly_all, weekly_scoped). Both are accepted, and the
+    per-model weekly buckets are reported under the model they belong to.
+
+    The utilization values are used percent, so higher is worse.
+.PARAMETER Payload
+    The deserialized body of an /api/oauth/usage response.
+.EXAMPLE
+    ConvertFrom-ClaudeUsagePayload -Payload $response
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Payload
+    )
+
+    function ConvertTo-UsedPercent([object]$Value) {
+        if ($null -eq $Value) { return $null }
+        $parsed = 0.0
+        if (-not [double]::TryParse(
+            [string]$Value,
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$parsed
+        ) -or $parsed -lt 0) {
+            return $null
+        }
+        # 100.0, not 100: the Int32 overload of Min would truncate the value.
+        return [Math]::Min(100.0, $parsed)
+    }
+
+    function ConvertTo-ResetTime([object]$Value) {
+        if ($null -eq $Value) { return $null }
+        if ($Value -is [DateTimeOffset]) { return $Value }
+        if ($Value -is [datetime]) { return [DateTimeOffset]::new($Value) }
+        $text = [string]$Value
+        if (-not $text) { return $null }
+        try {
+            return [DateTimeOffset]::Parse($text, [Globalization.CultureInfo]::InvariantCulture)
+        } catch {
+            return $null
+        }
+    }
+
+    # The console sometimes wraps the windows in a rate_limits envelope.
+    $container = Get-AiUsageJsonProperty $Payload 'rate_limits'
+    if (-not $container) { $container = $Payload }
+
+    $windows = New-Object System.Collections.Generic.List[object]
+    $limits = @(Get-AiUsageJsonProperty $container 'limits' | Where-Object { $_ })
+
+    if ($limits.Count -gt 0) {
+        # The limits array is the richer shape: it carries the reset deadline
+        # and the model-scoped weekly windows. The console returns it next to
+        # the flat five_hour and seven_day objects, which describe the same
+        # windows, so the array is used on its own and a window is never
+        # reported twice.
+        foreach ($entry in $limits) {
+            $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $entry 'percent')
+            if ($null -eq $used) { $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $entry 'utilization') }
+            if ($null -eq $used) { continue }
+            $kind = [string](Get-AiUsageJsonProperty $entry 'kind')
+            $label = switch ($kind) {
+                'session' { '5 Hour Credits' }
+                'weekly_all' { '7 Day Credits' }
+                'weekly_scoped' {
+                    $scope = Get-AiUsageJsonProperty $entry 'scope'
+                    $model = Get-AiUsageJsonProperty $scope 'model'
+                    $name = [string](Get-AiUsageJsonProperty $model 'display_name')
+                    if (-not $name) { $name = [string](Get-AiUsageJsonProperty $model 'id') }
+                    if ($name) { '7 Day Credits ({0})' -f $name } else { '7 Day Credits' }
+                }
+                default { if ($kind) { $kind } else { 'Credits' } }
+            }
+            $windows.Add([pscustomobject]@{
+                Window      = $label
+                UsedPercent = $used
+                ResetAt     = ConvertTo-ResetTime (Get-AiUsageJsonProperty $entry 'resets_at')
+            })
+        }
+    } else {
+        # Flat shape: five_hour, seven_day, and the legacy per-model buckets.
+        foreach ($pair in @(
+            @('five_hour', '5 Hour Credits'),
+            @('seven_day', '7 Day Credits'),
+            @('seven_day_opus', '7 Day Credits (Opus)'),
+            @('seven_day_sonnet', '7 Day Credits (Sonnet)')
+        )) {
+            $entry = Get-AiUsageJsonProperty $container $pair[0]
+            if (-not $entry) { continue }
+            $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $entry 'utilization')
+            if ($null -eq $used) { $used = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $entry 'used_percentage') }
+            if ($null -eq $used) { continue }
+            $reset = Get-AiUsageJsonProperty $entry 'resets_at'
+            if ($null -eq $reset) { $reset = Get-AiUsageJsonProperty $entry 'resets_at_epoch' }
+            $windows.Add([pscustomobject]@{
+                Window      = $pair[1]
+                UsedPercent = $used
+                ResetAt     = ConvertTo-ResetTime $reset
+            })
+        }
+    }
+
+    $extraUsage = Get-AiUsageJsonProperty $container 'extra_usage'
+    if (-not $extraUsage) { $extraUsage = Get-AiUsageJsonProperty $Payload 'extra_usage' }
+    $extraPercent = $null
+    if ($extraUsage -and (Get-AiUsageJsonProperty $extraUsage 'is_enabled')) {
+        # A plan without extra usage reports a limit and a utilization of
+        # zero, so the block is only meaningful when the plan enabled it.
+        $extraPercent = ConvertTo-UsedPercent (Get-AiUsageJsonProperty $extraUsage 'utilization')
+    }
+
+    return [pscustomobject]@{
+        Raw        = $Payload
+        Windows    = [object[]]$windows
+        ExtraUsage = $extraUsage
+        ExtraPercent = $extraPercent
+    }
+}
+
+function Get-CodexUsage {
+    <#
+.SYNOPSIS
+    Queries the Codex (ChatGPT plan) rate-limit windows and credit balance.
+.DESCRIPTION
+    Reads the ChatGPT OAuth token that the Codex CLI stores in
+    %USERPROFILE%\.codex\auth.json (or $CODEX_HOME\auth.json) and calls
+    https://chatgpt.com/backend-api/wham/usage, the endpoint the Codex CLI
+    itself uses. Reports the used percent and reset time of every rate-limit
+    window the account has, plus the credit balance and the workspace spend
+    limit when the backend returns them.
+
+    The window a response slot belongs to is decided by its
+    limit_window_seconds, never by its position: a Team plan reports the
+    weekly window in primary_window and leaves secondary_window null, and
+    OpenAI has both added and removed the short window without notice.
+
+    The percentages are used percent, so higher is worse.
+
+    A Codex access token lasts about an hour. When the stored token has
+    expired the refresh token is used to obtain a new one; the rotated pair is
+    written back to auth.json so the Codex CLI keeps working, but only when
+    the stored refresh token still matches the one that was used.
+.PARAMETER AccessToken
+    ChatGPT OAuth access token. When omitted, the token is read from the
+    Codex CLI auth store, then from $env:CODEX_ACCESS_TOKEN.
+.PARAMETER AccountId
+    ChatGPT account id sent in the ChatGPT-Account-Id header. When omitted,
+    it is read from the auth store, then from the account id claim of the
+    stored id token.
+.PARAMETER TimeoutSec
+    HTTP request timeout in seconds. Defaults to 15.
+.PARAMETER LowPercent
+    Used-percent threshold at or above which a window is reported as LOW.
+.PARAMETER CriticalPercent
+    Used-percent threshold at or above which a window is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Reports an informational concern when a window resets within this many hours.
+.PARAMETER Strict
+    Requires a trusted server certificate. Without it the query accepts the
+    certificate an inspection proxy presents, which a corporate network may
+    re-sign.
+.PARAMETER All
+    Prints the raw API response inline. Otherwise the raw response stays in
+    $Global:codexLastQuery.
+.EXAMPLE
+    Get-CodexUsage
+.EXAMPLE
+    Get-CodexUsage -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+    The endpoint is private and undocumented; its shape is pinned by the Codex
+    CLI's own test suite, not by a published contract.
+#>
+    [CmdletBinding()]
+    param(
+        [string]$AccessToken,
+        [string]$AccountId,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 15,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 80,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 95,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$Strict,
+        [switch]$All,
+        [Parameter(DontShow = $true)]
+        [scriptblock]$QueryInvoker
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    # These are used-percent thresholds, so the critical level sits above the
+    # low level (the opposite ordering from the remaining-percent providers).
+    if ($CriticalPercent -lt $LowPercent) {
+        Write-Error 'CriticalPercent must be greater than or equal to LowPercent.'
+        return
+    }
+
+    $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+    $authPath = Join-Path $codexHome 'auth.json'
+    $auth = $null
+    if (Test-Path -LiteralPath $authPath) {
+        try {
+            $auth = Get-Content -LiteralPath $authPath -Raw | ConvertFrom-Json
+        } catch {
+            Write-Host ("  Could not read the Codex auth store: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray
+        }
+    }
+
+    $refreshToken = $null
+    if ($auth -and $auth.tokens) {
+        if ([string]::IsNullOrWhiteSpace($AccessToken) -and $auth.tokens.access_token) {
+            $AccessToken = [string]$auth.tokens.access_token
+        }
+        if ([string]::IsNullOrWhiteSpace($AccountId) -and $auth.tokens.account_id) {
+            $AccountId = [string]$auth.tokens.account_id
+        }
+        if ($auth.tokens.refresh_token) { $refreshToken = [string]$auth.tokens.refresh_token }
+    }
+    if ([string]::IsNullOrWhiteSpace($AccessToken) -and $env:CODEX_ACCESS_TOKEN) {
+        $AccessToken = [string]$env:CODEX_ACCESS_TOKEN
+    }
+    if ([string]::IsNullOrWhiteSpace($AccountId) -and $auth -and $auth.tokens -and $auth.tokens.id_token) {
+        $claims = Get-AiUsageJwtClaims ([string]$auth.tokens.id_token)
+        $namespace = Get-AiUsageJsonProperty $claims 'https://api.openai.com/auth'
+        if ($namespace -and $namespace.chatgpt_account_id) {
+            $AccountId = [string]$namespace.chatgpt_account_id
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($AccessToken)) {
+        Write-Error 'No Codex access token found. Run "codex login" to sign in to ChatGPT, then retry; or pass -AccessToken.'
+        return
+    }
+
+    function Invoke-CodexUsageQuery([string]$Token, [string]$Account) {
+        $session = New-AiUsageHttpSession -TimeoutSec $TimeoutSec -Strict:$Strict
+        try {
+            $request = New-Object System.Net.Http.HttpRequestMessage(
+                [System.Net.Http.HttpMethod]::Get,
+                'https://chatgpt.com/backend-api/wham/usage'
+            )
+            [void]$request.Headers.TryAddWithoutValidation('Authorization', "Bearer $Token")
+            [void]$request.Headers.TryAddWithoutValidation('Accept', 'application/json')
+            [void]$request.Headers.TryAddWithoutValidation('User-Agent', 'codex_cli_rs/0.164.0 (windows; x86_64)')
+            if ($Account) { [void]$request.Headers.TryAddWithoutValidation('ChatGPT-Account-Id', $Account) }
+            $response = $session.Client.SendAsync($request).GetAwaiter().GetResult()
+            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $status = [int]$response.StatusCode
+            if ($status -ne 200) {
+                $detail = ''
+                try {
+                    $parsed = $body | ConvertFrom-Json
+                    $detail = [string](Get-AiUsageJsonProperty $parsed 'detail')
+                    if (-not $detail) {
+                        $error = Get-AiUsageJsonProperty $parsed 'error'
+                        $detail = [string](Get-AiUsageJsonProperty $error 'message')
+                    }
+                } catch {
+                    $detail = $body
+                }
+                if ($status -eq 401) {
+                    throw "[CodexAuth] ChatGPT rejected the Codex session token ($detail). Run ""codex login"" to sign in again."
+                }
+                if ($status -eq 403) {
+                    throw "[CodexAuth] ChatGPT refused the usage request for this account ($detail). A Business workspace needs its own account id."
+                }
+                if ($status -eq 404) {
+                    throw "[CodexResponse] The Codex usage endpoint was not found ($detail). The ChatGPT base URL may have changed, or chatgpt_base_url in config.toml points elsewhere."
+                }
+                if ($status -eq 429) {
+                    throw "[CodexTransient] The Codex usage endpoint is rate limiting this session ($detail)."
+                }
+                throw "[CodexTransient] The Codex usage query failed with HTTP $status ($detail)."
+            }
+            return $body | ConvertFrom-Json
+        } catch [System.Threading.Tasks.TaskCanceledException] {
+            throw '[CodexTransient] The Codex usage query timed out.'
+        } finally {
+            Close-AiUsageHttpSession $session
+        }
+    }
+
+    # The Codex access token lives about an hour. The refresh token is
+    # single-use, so the rotated pair is written back to the auth store: the
+    # CLI holds the same refresh token and would be signed out otherwise.
+    function Invoke-CodexTokenRefresh([string]$Token) {
+        $clientId = 'app_EMoamEEZ73f0CkXaXp7hrann'
+        $session = New-AiUsageHttpSession -TimeoutSec $TimeoutSec -Strict:$Strict
+        try {
+            foreach ($url in @(
+                'https://auth.openai.com/api/accounts/oauth/token',
+                'https://auth.openai.com/oauth/token'
+            )) {
+                $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Post, $url)
+                $body = "grant_type=refresh_token&refresh_token=$([Uri]::EscapeDataString($Token))&client_id=$clientId"
+                $request.Content = New-Object System.Net.Http.StringContent($body, [Text.Encoding]::UTF8, 'application/x-www-form-urlencoded')
+                [void]$request.Headers.TryAddWithoutValidation('Accept', 'application/json')
+                [void]$request.Headers.TryAddWithoutValidation('User-Agent', 'codex_cli_rs/0.164.0 (windows; x86_64)')
+                $response = $session.Client.SendAsync($request).GetAwaiter().GetResult()
+                $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                if ([int]$response.StatusCode -eq 200) {
+                    return $text | ConvertFrom-Json
+                }
+            }
+            return $null
+        } catch {
+            return $null
+        } finally {
+            Close-AiUsageHttpSession $session
+        }
+    }
+
+    try {
+        $payload = if ($QueryInvoker) { & $QueryInvoker $AccessToken $AccountId } else { Invoke-CodexUsageQuery $AccessToken $AccountId }
+    } catch {
+        $message = $_.Exception.Message
+        # An expired access token is recoverable while the refresh token is
+        # still alive; try once before giving up.
+        if ($message.StartsWith('[CodexAuth]', [StringComparison]::Ordinal) -and $refreshToken) {
+            $refreshed = Invoke-CodexTokenRefresh $refreshToken
+            if ($refreshed -and $refreshed.access_token) {
+                Write-Host 'Refreshed the expired Codex access token.' -ForegroundColor DarkGray
+                if ($auth -and $refreshed.refresh_token) {
+                    $current = $null
+                    try { $current = Get-Content -LiteralPath $authPath -Raw | ConvertFrom-Json } catch { }
+                    if ($current -and [string]$current.tokens.refresh_token -eq $refreshToken) {
+                        $current.tokens.access_token = [string]$refreshed.access_token
+                        $current.tokens.refresh_token = [string]$refreshed.refresh_token
+                        if ($refreshed.id_token) { $current.tokens.id_token = [string]$refreshed.id_token }
+                        $current.last_refresh = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                        try {
+                            Set-Content -LiteralPath $authPath -Value ($current | ConvertTo-Json -Depth 20) -Encoding UTF8
+                            Write-Host 'Wrote the rotated token back to the Codex auth store so the CLI keeps working.' -ForegroundColor DarkGray
+                        } catch {
+                            Write-Host ("  Could not update the Codex auth store: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray
+                        }
+                    } else {
+                        Write-Host 'The Codex auth store changed while refreshing; the rotated token was not written back.' -ForegroundColor DarkGray
+                    }
+                }
+                try {
+                    $payload = if ($QueryInvoker) { & $QueryInvoker ([string]$refreshed.access_token) $AccountId } else { Invoke-CodexUsageQuery ([string]$refreshed.access_token) $AccountId }
+                } catch {
+                    Write-Error $_.Exception.Message
+                    return
+                }
+            } else {
+                Write-Error $message
+                Write-Host 'The stored refresh token is no longer accepted; run "codex login" to sign in again.' -ForegroundColor Yellow
+                return
+            }
+        } else {
+            Write-Error $message
+            return
+        }
+    }
+
+    $query = ConvertFrom-CodexUsagePayload -Payload $payload
+    if (-not $query.Windows -or $query.Windows.Count -eq 0) {
+        Write-Error 'Codex returned no rate-limit windows.'
+        return
+    }
+
+    $Global:codexLastQuery = $query.Raw
+
+    $_ProfileHelpers.WriteSection('Raw API response (Codex)')
+    if ($All) { $query.Raw | ConvertTo-Json -Depth 10 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:codexLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $_ProfileHelpers.WriteSection('Quota summary (Codex)')
+    if ($query.Plan) {
+        Write-Host ("  Plan: {0}" -f $query.Plan) -ForegroundColor DarkGray
+    }
+    $rows = New-Object System.Collections.Generic.List[object]
+    $concerns = New-Object System.Collections.Generic.List[string]
+    $now = [DateTimeOffset]::Now
+    foreach ($limit in @($query.Windows)) {
+        $usedPercent = [Math]::Max(0.0, [Math]::Min(100.0, [double]$limit.UsedPercent))
+        $remainingPercent = 100 - $usedPercent
+        $status = if ($usedPercent -ge 100) {
+            'EXHAUSTED'
+        } elseif ($usedPercent -ge $CriticalPercent) {
+            'CRITICAL'
+        } elseif ($usedPercent -ge $LowPercent) {
+            'LOW'
+        } else {
+            'OK'
+        }
+
+        $resetText = 'n/a'
+        if ($limit.ResetAt -is [DateTimeOffset]) {
+            $resetLocal = $limit.ResetAt.ToLocalTime()
+            $delta = $resetLocal - $now
+            if ($delta.TotalSeconds -gt 0) {
+                $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($delta))
+                if ($delta.TotalHours -le $ResetWarnHours) {
+                    $concerns.Add(('[INFO] {0}: resets in {1}' -f $limit.Window, ($_ProfileHelpers.FormatDuration($delta))))
+                }
+            } else {
+                $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Window    = $limit.Window
+            Used      = '{0:N1}%' -f $usedPercent
+            Remaining = '{0:N1}%' -f $remainingPercent
+            Status    = $status
+            Reset     = $resetText
+        })
+        if ($status -ne 'OK') {
+            $concerns.Add(('[{0}] {1}: {2:N1}% remaining' -f $status, $limit.Window, $remainingPercent))
+        }
+    }
+    $rows | Format-Table -AutoSize -Wrap | Out-Host
+
+    if ($query.Balance) {
+        Write-Host ("  Credit balance: {0}" -f $query.Balance) -ForegroundColor DarkGray
+    }
+    if ($query.SpendLimit) {
+        Write-Host ("  Workspace spend limit: {0} used of {1}{2}" -f $query.SpendLimit.Used, $query.SpendLimit.Limit, $(if ($query.SpendLimit.ResetAt) { ', resets ' + $query.SpendLimit.ResetAt.ToLocalTime().ToString('yyyy-MM-dd HH:mm') } else { '' })) -ForegroundColor DarkGray
+    }
+
+    $_ProfileHelpers.WriteSection('Concerns (Codex)')
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) { Write-Host ('  - ' + $concern) -ForegroundColor Yellow }
+    }
+
+    return $query.Raw
+}
+
+function Get-ClaudeUsage {
+    <#
+.SYNOPSIS
+    Queries the Claude Code (Pro and Max plan) credit windows.
+.DESCRIPTION
+    Reads the Claude OAuth token that Claude Code stores in
+    %USERPROFILE%\.claude\.credentials.json and calls
+    https://api.anthropic.com/api/oauth/usage, the endpoint Claude Code itself
+    uses for its own usage bars. Reports the used percent and reset time of
+    every credit window the account has, including the model-scoped weekly
+    windows, plus the extra-usage block when the plan has one.
+
+    The percentages are used percent, so higher is worse.
+
+    The endpoint is rate limited per access token, so a query that is refused
+    is retried only after a fresh token is obtained.
+.PARAMETER AccessToken
+    Claude OAuth access token. When omitted, the token is read from the
+    Claude Code credential store, then from $env:CLAUDE_CODE_OAUTH_TOKEN.
+.PARAMETER TimeoutSec
+    HTTP request timeout in seconds. Defaults to 15.
+.PARAMETER LowPercent
+    Used-percent threshold at or above which a window is reported as LOW.
+.PARAMETER CriticalPercent
+    Used-percent threshold at or above which a window is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Reports an informational concern when a window resets within this many hours.
+.PARAMETER Strict
+    Requires a trusted server certificate. Without it the query accepts the
+    certificate an inspection proxy presents, which a corporate network may
+    re-sign.
+.PARAMETER All
+    Prints the raw API response inline. Otherwise the raw response stays in
+    $Global:claudeLastQuery.
+.EXAMPLE
+    Get-ClaudeUsage
+.EXAMPLE
+    Get-ClaudeUsage -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+    The endpoint is private and undocumented, and Anthropic gates it on the
+    Claude Code user agent.
+#>
+    [CmdletBinding()]
+    param(
+        [string]$AccessToken,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 15,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 80,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 95,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$Strict,
+        [switch]$All,
+        [Parameter(DontShow = $true)]
+        [scriptblock]$QueryInvoker
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    if ($CriticalPercent -lt $LowPercent) {
+        Write-Error 'CriticalPercent must be greater than or equal to LowPercent.'
+        return
+    }
+
+    # Claude Code relocates its whole configuration with CLAUDE_CONFIG_DIR.
+    $claudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
+    $credPath = Join-Path $claudeDir '.credentials.json'
+    $credential = $null
+    if (Test-Path -LiteralPath $credPath) {
+        try {
+            $credential = Get-Content -LiteralPath $credPath -Raw | ConvertFrom-Json
+        } catch {
+            Write-Host ("  Could not read the Claude credential store: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray
+        }
+    }
+
+    $oauth = $null
+    $plan = $null
+    $refreshToken = $null
+    if ($credential -and $credential.claudeAiOauth) {
+        $oauth = $credential.claudeAiOauth
+        if ($oauth.subscriptionType) { $plan = [string]$oauth.subscriptionType }
+        elseif ($oauth.rateLimitTier) { $plan = [string]$oauth.rateLimitTier }
+        if ($oauth.refreshToken) { $refreshToken = [string]$oauth.refreshToken }
+    }
+    if ([string]::IsNullOrWhiteSpace($AccessToken) -and $oauth -and $oauth.accessToken) {
+        $AccessToken = [string]$oauth.accessToken
+    }
+    if ([string]::IsNullOrWhiteSpace($AccessToken) -and $env:CLAUDE_CODE_OAUTH_TOKEN) {
+        $AccessToken = [string]$env:CLAUDE_CODE_OAUTH_TOKEN
+    }
+
+    if ([string]::IsNullOrWhiteSpace($AccessToken)) {
+        Write-Error 'No Claude access token found. Run "claude login" to sign in, then retry; or pass -AccessToken.'
+        return
+    }
+
+    function Invoke-ClaudeUsageQuery([string]$Token) {
+        $session = New-AiUsageHttpSession -TimeoutSec $TimeoutSec -Strict:$Strict
+        try {
+            $request = New-Object System.Net.Http.HttpRequestMessage(
+                [System.Net.Http.HttpMethod]::Get,
+                'https://api.anthropic.com/api/oauth/usage'
+            )
+            [void]$request.Headers.TryAddWithoutValidation('Authorization', "Bearer $Token")
+            [void]$request.Headers.TryAddWithoutValidation('Accept', 'application/json')
+            [void]$request.Headers.TryAddWithoutValidation('Content-Type', 'application/json')
+            [void]$request.Headers.TryAddWithoutValidation('anthropic-beta', 'oauth-2025-04-20')
+            # The endpoint is gated on the Claude Code user agent; other agents
+            # are refused or put into a heavily rate-limited bucket.
+            [void]$request.Headers.TryAddWithoutValidation('User-Agent', 'claude-cli/2.1.309 (external, cli)')
+            $response = $session.Client.SendAsync($request).GetAwaiter().GetResult()
+            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $status = [int]$response.StatusCode
+            if ($status -ne 200) {
+                $detail = ''
+                try {
+                    $parsed = $body | ConvertFrom-Json
+                    $error = Get-AiUsageJsonProperty $parsed 'error'
+                    $detail = [string](Get-AiUsageJsonProperty $error 'message')
+                    if (-not $detail) { $detail = [string](Get-AiUsageJsonProperty $parsed 'message') }
+                } catch {
+                    $detail = $body
+                }
+                if ($status -eq 401) {
+                    throw "[ClaudeAuth] Anthropic rejected the Claude access token ($detail). Run ""claude login"" to sign in again."
+                }
+                if ($status -eq 403) {
+                    throw "[ClaudeSubscription] Anthropic refused the usage request ($detail). The account has no Claude Pro or Max subscription, or the organization disabled OAuth."
+                }
+                if ($status -eq 429) {
+                    throw "[ClaudeTransient] Anthropic is rate limiting this Claude access token ($detail). The bucket holds about five requests; try again in a few minutes."
+                }
+                throw "[ClaudeTransient] The Claude usage query failed with HTTP $status ($detail)."
+            }
+            return $body | ConvertFrom-Json
+        } catch [System.Threading.Tasks.TaskCanceledException] {
+            throw '[ClaudeTransient] The Claude usage query timed out.'
+        } finally {
+            Close-AiUsageHttpSession $session
+        }
+    }
+
+    # Claude OAuth refresh tokens rotate, so the rotated pair is written back
+    # to the credential store: Claude Code holds the same token and would be
+    # signed out otherwise. The write is skipped when the store changed while
+    # the refresh was in flight.
+    function Invoke-ClaudeTokenRefresh([string]$Token) {
+        $clientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+        $session = New-AiUsageHttpSession -TimeoutSec $TimeoutSec -Strict:$Strict
+        try {
+            $body = "grant_type=refresh_token&refresh_token=$([Uri]::EscapeDataString($Token))&client_id=$clientId"
+            $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Post, 'https://platform.claude.com/v1/oauth/token')
+            $request.Content = New-Object System.Net.Http.StringContent($body, [Text.Encoding]::UTF8, 'application/x-www-form-urlencoded')
+            [void]$request.Headers.TryAddWithoutValidation('Accept', 'application/json')
+            [void]$request.Headers.TryAddWithoutValidation('User-Agent', 'claude-cli/2.1.309 (external, cli)')
+            $response = $session.Client.SendAsync($request).GetAwaiter().GetResult()
+            $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            if ([int]$response.StatusCode -ne 200) { return $null }
+            return $text | ConvertFrom-Json
+        } catch {
+            return $null
+        } finally {
+            Close-AiUsageHttpSession $session
+        }
+    }
+
+    try {
+        $payload = if ($QueryInvoker) { & $QueryInvoker $AccessToken } else { Invoke-ClaudeUsageQuery $AccessToken }
+    } catch {
+        $message = $_.Exception.Message
+        if ($message.StartsWith('[ClaudeAuth]', [StringComparison]::Ordinal) -and $refreshToken) {
+            $refreshed = Invoke-ClaudeTokenRefresh $refreshToken
+            if ($refreshed -and $refreshed.access_token) {
+                Write-Host 'Refreshed the expired Claude access token.' -ForegroundColor DarkGray
+                $current = $null
+                try { $current = Get-Content -LiteralPath $credPath -Raw | ConvertFrom-Json } catch { }
+                if ($current -and $current.claudeAiOauth -and [string]$current.claudeAiOauth.refreshToken -eq $refreshToken) {
+                    $current.claudeAiOauth.accessToken = [string]$refreshed.access_token
+                    if ($refreshed.refresh_token) { $current.claudeAiOauth.refreshToken = [string]$refreshed.refresh_token }
+                    if ($refreshed.expires_in) {
+                        $current.claudeAiOauth.expiresAt = [DateTimeOffset]::UtcNow.AddSeconds([double]$refreshed.expires_in).ToUnixTimeMilliseconds()
+                    }
+                    try {
+                        Set-Content -LiteralPath $credPath -Value ($current | ConvertTo-Json -Depth 20) -Encoding UTF8
+                        Write-Host 'Wrote the rotated token back to the Claude credential store so Claude Code keeps working.' -ForegroundColor DarkGray
+                    } catch {
+                        Write-Host ("  Could not update the Claude credential store: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray
+                    }
+                } else {
+                    Write-Host 'The Claude credential store changed while refreshing; the rotated token was not written back.' -ForegroundColor DarkGray
+                }
+                try {
+                    $payload = if ($QueryInvoker) { & $QueryInvoker ([string]$refreshed.access_token) } else { Invoke-ClaudeUsageQuery ([string]$refreshed.access_token) }
+                } catch {
+                    Write-Error $_.Exception.Message
+                    return
+                }
+            } else {
+                Write-Error $message
+                Write-Host 'The stored refresh token is no longer accepted; run "claude login" to sign in again.' -ForegroundColor Yellow
+                return
+            }
+        } else {
+            Write-Error $message
+            return
+        }
+    }
+
+    $query = ConvertFrom-ClaudeUsagePayload -Payload $payload
+    if (-not $query.Windows -or $query.Windows.Count -eq 0) {
+        Write-Error 'Claude returned no credit windows.'
+        return
+    }
+
+    $Global:claudeLastQuery = $query.Raw
+
+    $_ProfileHelpers.WriteSection('Raw API response (Claude Code)')
+    if ($All) { $query.Raw | ConvertTo-Json -Depth 10 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:claudeLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $_ProfileHelpers.WriteSection('Quota summary (Claude Code)')
+    if ($plan) {
+        Write-Host ("  Plan: {0}" -f $plan) -ForegroundColor DarkGray
+    }
+    $rows = New-Object System.Collections.Generic.List[object]
+    $concerns = New-Object System.Collections.Generic.List[string]
+    $now = [DateTimeOffset]::Now
+    foreach ($limit in @($query.Windows)) {
+        $usedPercent = [Math]::Max(0.0, [Math]::Min(100.0, [double]$limit.UsedPercent))
+        $remainingPercent = 100 - $usedPercent
+        $status = if ($usedPercent -ge 100) {
+            'EXHAUSTED'
+        } elseif ($usedPercent -ge $CriticalPercent) {
+            'CRITICAL'
+        } elseif ($usedPercent -ge $LowPercent) {
+            'LOW'
+        } else {
+            'OK'
+        }
+
+        $resetText = 'n/a'
+        if ($limit.ResetAt -is [DateTimeOffset]) {
+            $resetLocal = $limit.ResetAt.ToLocalTime()
+            $delta = $resetLocal - $now
+            if ($delta.TotalSeconds -gt 0) {
+                $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($delta))
+                if ($delta.TotalHours -le $ResetWarnHours) {
+                    $concerns.Add(('[INFO] {0}: resets in {1}' -f $limit.Window, ($_ProfileHelpers.FormatDuration($delta))))
+                }
+            } else {
+                $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Window    = $limit.Window
+            Used      = '{0:N1}%' -f $usedPercent
+            Remaining = '{0:N1}%' -f $remainingPercent
+            Status    = $status
+            Reset     = $resetText
+        })
+        if ($status -ne 'OK') {
+            $concerns.Add(('[{0}] {1}: {2:N1}% remaining' -f $status, $limit.Window, $remainingPercent))
+        }
+    }
+    $rows | Format-Table -AutoSize -Wrap | Out-Host
+
+    if ($query.ExtraPercent -ne $null) {
+        Write-Host ("  Extra usage: {0:N1}% of the monthly allowance" -f $query.ExtraPercent) -ForegroundColor DarkGray
+    }
+
+    $_ProfileHelpers.WriteSection('Concerns (Claude Code)')
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) { Write-Host ('  - ' + $concern) -ForegroundColor Yellow }
+    }
+
+    return $query.Raw
 }
 
 # --- Get-AllAiUsage --------------------------------------------------------

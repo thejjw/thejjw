@@ -10,7 +10,7 @@ Describe 'ConvertFrom-QwenCloudUsagePayload' {
         )
         if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
 
-        foreach ($name in @('Get-QwenJsonProperty', 'ConvertFrom-QwenCloudUsagePayload')) {
+        foreach ($name in @('Get-AiUsageJsonProperty', 'ConvertFrom-QwenCloudUsagePayload')) {
             $functionAst = $ast.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
