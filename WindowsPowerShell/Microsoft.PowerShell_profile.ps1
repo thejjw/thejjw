@@ -1032,6 +1032,7 @@ Use built-in web fetch and web search tools directly -- they will yield the best
 
 If an MCP tool is unavailable or underperforming, inform the user and suggest alternatives.
 "@
+    DownloadBaseUrl = 'https://downloads.claude.ai/claude-code-releases'
 }
 
 # Internal configuration for the AI API key credential helpers (Set-AiApiKeysCS,
@@ -11665,6 +11666,80 @@ function Invoke-AiUpgrade {
         }
     }
 }
+function Install-ClaudeCode {
+    <#
+.SYNOPSIS
+    Downloads and installs Claude Code (native binary launcher).
+.DESCRIPTION
+    Fetches the latest release from downloads.claude.ai, verifies its SHA-256
+    against the manifest, then runs `claude install <Target>`. Complements
+    Invoke-AiUpgrade (aiu), which only self-updates an already-installed
+    Claude Code via `claude update`.
+.PARAMETER Target
+    stable | latest | x.y.z[-suffix]. Default latest.
+.EXAMPLE
+    Install-ClaudeCode
+.EXAMPLE
+    Install-ClaudeCode -Target stable
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        [ValidatePattern('^(stable|latest|\d+\.\d+\.\d+(-[^\s]+)?)$')]
+        [string]$Target = 'latest'
+    )
+
+    if (-not [Environment]::Is64BitProcess) { throw 'Claude Code requires 64-bit Windows.' }
+
+    $base = $_ClaudeInternal.DownloadBaseUrl
+    $platform = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'win32-arm64' } else { 'win32-x64' }
+    $downloadDir = Join-Path $env:USERPROFILE '.claude\downloads'
+    New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+    $version = Invoke-RestMethod -Uri "$base/latest" -ErrorAction Stop
+    if ($version -notmatch '^\d+\.\d+\.\d+') { throw "Invalid version from $base (got '$version')." }
+
+    $manifest = Invoke-RestMethod -Uri "$base/$version/manifest.json" -ErrorAction Stop
+    $checksum = $manifest.platforms.$platform.checksum
+    if (-not $checksum) { throw "Platform $platform not present in manifest for $version." }
+
+    $binaryPath = Join-Path $downloadDir "claude-$version-$platform.exe"
+
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri "$base/$version/$platform/claude.exe" -OutFile $binaryPath -UseBasicParsing -ErrorAction Stop
+    } finally {
+        $ProgressPreference = $prevProgress
+    }
+
+    $actual = (Get-FileHash -Path $binaryPath -Algorithm SHA256).Hash.ToLower()
+    if ($actual -ne $checksum.ToLower()) {
+        Remove-Item -Force $binaryPath -ErrorAction SilentlyContinue
+        throw 'Checksum verification failed; downloaded file removed.'
+    }
+
+    Write-Host "Setting up Claude Code $version ($platform)..." -ForegroundColor Cyan
+    $installExit = 0
+    try {
+        & $binaryPath install $Target
+        $installExit = $LASTEXITCODE
+    } finally {
+        Start-Sleep -Seconds 1
+        Remove-Item -Force $binaryPath -ErrorAction SilentlyContinue
+    }
+
+    if ($installExit -ne 0) { throw "Installation failed (exit code $installExit)." }
+    Write-Host "Installation complete." -ForegroundColor Green
+    [pscustomobject]@{ Version = $version; Platform = $platform }
+}
+
+Set-Alias -Name icc -Value Install-ClaudeCode
+
 Set-Alias -Name aiu -Value Invoke-AiUpgrade
 
 # === AI provider usage-query functions ===
