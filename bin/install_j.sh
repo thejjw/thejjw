@@ -1736,7 +1736,6 @@ remote_claude_base() {
   local timeout="$8" disable_1m="$9"
   local subagent="${10:-}" effort="${11:-}" auto_compact="${12:-}"
   local anthropic_model="${13:-}" fable="${14:-}" max_context="${15:-}"
-  local settings_json="${16:-}"
 
   [[ -z "$host" ]] && { echo "remote_claude_base: host is required" >&2; return 1; }
   [[ -z "$key"  ]] && { echo "remote_claude_base: api_key is required" >&2; return 1; }
@@ -1750,12 +1749,6 @@ trap 'echo "[cleanup] Wiping $CC_TMP ..."; rm -rf "$CC_TMP"' EXIT
 CC_NPM="$CC_TMP/npm"; CC_BIN="$CC_TMP/bin"; CC_HOME="$CC_TMP/home"; CC_WORK="$CC_TMP/workspace"
 CC_START_DIR="$PWD"; CC_REAL_HOME="$HOME"; CC_ORIGINAL_PATH="$PATH"
 mkdir -p "$CC_NPM" "$CC_BIN" "$CC_HOME" "$CC_WORK"
-# Optional per-session settings JSON, written into the isolated HOME so it only
-# affects this launch (used to map custom model IDs onto recognized ones).
-if [ -n "${CC_CLAUDE_SETTINGS:-}" ]; then
-    mkdir -p "$CC_HOME/.claude"
-    printf '%s' "$CC_CLAUDE_SETTINGS" > "$CC_HOME/.claude/settings.json"
-fi
 # Use an installed English UTF-8 locale for the entire remote session.
 CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^c\.utf-?8$/ { print; exit }')"
 [ -n "$CC_LOCALE" ] || CC_LOCALE="$(locale -a 2>/dev/null | awk 'tolower($0) ~ /^en_us\.utf-?8$/ { print; exit }')"
@@ -1934,7 +1927,6 @@ REMOTE_SCRIPT
   [[ -n "$fable" ]] && env+=" ANTHROPIC_DEFAULT_FABLE_MODEL=$(_claude_sq "$fable")"
   [[ -n "$effort" ]] && env+=" CLAUDE_CODE_EFFORT_LEVEL=$(_claude_sq "$effort")"
   [[ -n "$max_context" ]] && env+=" CLAUDE_CODE_MAX_CONTEXT_TOKENS=$(_claude_sq "$max_context")"
-  [[ -n "$settings_json" ]] && env+=" CC_CLAUDE_SETTINGS=$(_claude_sq "$settings_json")"
 
   # Process substitution supplies the script as a file while preserving the SSH PTY on stdin.
   ssh -tt -o StrictHostKeyChecking=accept-new -p "$port" "$host" \
@@ -2018,8 +2010,7 @@ claudekr() {
     "1000000" \
     "k3.1-pro[1m]" \
     "k3.1-pro[1m]" \
-    "1048576" \
-    '{"modelOverrides":{"claude-opus-4-6":"k3.1-pro[1m]"}}'
+    "1048576"
 }
 
 # <<< claudek-remote <<<
