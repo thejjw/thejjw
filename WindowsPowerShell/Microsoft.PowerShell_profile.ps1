@@ -8756,7 +8756,7 @@ function claudek {
 .DESCRIPTION
     Reads KIMI_CODE_PLAN_API_KEY from the current process, Windows Credential Manager, or
     legacy User environment, then temporarily configures Claude Code to use Kimi
-    K3 with a 1M context window. Restores the previous environment after Claude exits.
+    K3.1 Pro with a 1M context window. Restores the previous environment after Claude exits.
 
 .EXAMPLE
     claudek
@@ -8766,7 +8766,7 @@ function claudek {
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-07
+    Last Edit: 2026-10
 #>
     $key = $_ProfileHelpers.GetAiApiKey('KIMI_CODE_PLAN_API_KEY')
 
@@ -8790,8 +8790,10 @@ function claudek {
     $env:ANTHROPIC_API_KEY = $key
     Remove-Item Env:\ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
 
-    # Kimi K3 uses one model for every Claude Code routing slot.
-    $env:ANTHROPIC_MODEL = 'k3[1m]'
+    # Kimi K3.1 Pro uses one model for every Claude Code routing slot.
+    # [1m] is a Claude Code client-side marker: it budgets a 1M window and is
+    # stripped before the request, so Kimi receives the bare k3.1-pro id.
+    $env:ANTHROPIC_MODEL = 'k3.1-pro[1m]'
     $env:ANTHROPIC_DEFAULT_FABLE_MODEL = $env:ANTHROPIC_MODEL
     $env:ANTHROPIC_DEFAULT_OPUS_MODEL = $env:ANTHROPIC_MODEL
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = $env:ANTHROPIC_MODEL
@@ -8841,7 +8843,7 @@ Runs Claude Code on a remote SSH endpoint through Kimi Code.
 
 .DESCRIPTION
 Reads KIMI_CODE_PLAN_API_KEY when ApiKey is omitted, then launches the shared temporary
-remote Claude environment with the same K3 1M model routing as claudek. A root
+remote Claude environment with the same K3.1 Pro 1M model routing as claudek. A root
 login additionally sets IS_SANDBOX=1 so Claude Code accepts
 --dangerously-skip-permissions under uid 0.
 
@@ -8895,8 +8897,8 @@ Last Edit: 2026-10
         return
     }
 
-    # Mirror claudek: route every Claude Code model slot through Kimi K3 1M.
-    $model = 'k3[1m]'
+    # Mirror claudek: route every Claude Code model slot through Kimi K3.1 Pro 1M.
+    $model = 'k3.1-pro[1m]'
     $baseParams = @{
         RemoteHost        = $RemoteHost
         ApiKey            = $ApiKey

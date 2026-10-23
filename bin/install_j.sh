@@ -1641,7 +1641,7 @@ fi
 # claudek / claudekd - Kimi Claude Code functions
 # ---------------------------------------------------------------------------
 CLAUDEK_MARKER="# >>> claudek >>>"
-CLAUDEK_VERSION_MARKER="# claudek credential loader version 2"
+CLAUDEK_VERSION_MARKER="# claudek credential loader version 3"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> claudek >>>" "# <<< claudek <<<"
@@ -1656,7 +1656,7 @@ else
   cat >> "$PROFILE" << 'EOF'
 
 # >>> claudek >>>
-# claudek credential loader version 2
+# claudek credential loader version 3
 # Custom Claude Code functions with Kimi endpoint
 # claudek - Launch the maximum-effort Kimi profile.
 claudek() {
@@ -1664,15 +1664,17 @@ claudek() {
   _jjw_prepare_secret "${KIMI_CODE_PLAN_API_KEY:-}" || return 1
   key="$(_jjw_secret k "${KIMI_CODE_PLAN_API_KEY:-}")" || return 1
 
+  # [1m] is a Claude Code client-side marker: it budgets a 1M window and is
+  # stripped before the request, so Kimi receives the bare k3.1-pro id.
   env -u ANTHROPIC_AUTH_TOKEN \
     ANTHROPIC_BASE_URL="https://api.kimi.com/coding/" \
     ANTHROPIC_API_KEY="$key" \
-    ANTHROPIC_MODEL="k3[1m]" \
-    ANTHROPIC_DEFAULT_FABLE_MODEL="k3[1m]" \
-    ANTHROPIC_DEFAULT_OPUS_MODEL="k3[1m]" \
-    ANTHROPIC_DEFAULT_SONNET_MODEL="k3[1m]" \
-    ANTHROPIC_DEFAULT_HAIKU_MODEL="k3[1m]" \
-    CLAUDE_CODE_SUBAGENT_MODEL="k3[1m]" \
+    ANTHROPIC_MODEL="k3.1-pro[1m]" \
+    ANTHROPIC_DEFAULT_FABLE_MODEL="k3.1-pro[1m]" \
+    ANTHROPIC_DEFAULT_OPUS_MODEL="k3.1-pro[1m]" \
+    ANTHROPIC_DEFAULT_SONNET_MODEL="k3.1-pro[1m]" \
+    ANTHROPIC_DEFAULT_HAIKU_MODEL="k3.1-pro[1m]" \
+    CLAUDE_CODE_SUBAGENT_MODEL="k3.1-pro[1m]" \
     CLAUDE_CODE_AUTO_COMPACT_WINDOW="1048576" \
     CLAUDE_CODE_MAX_CONTEXT_TOKENS="1048576" \
     claude "$@"
@@ -1968,7 +1970,7 @@ fi
 # claudek-remote (claudekr) - remote Claude Code via Kimi
 # ---------------------------------------------------------------------------
 CLAUDEKR_MARKER="# >>> claudek-remote >>>"
-CLAUDEKR_VERSION_MARKER="# claudek-remote credential loader version 2"
+CLAUDEKR_VERSION_MARKER="# claudek-remote credential loader version 3"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> claudek-remote >>>" "# <<< claudek-remote <<<"
@@ -1982,9 +1984,9 @@ if grep -qF "$CLAUDEKR_MARKER" "$PROFILE" 2>/dev/null; then
 else
   cat >> "$PROFILE" << 'CLAUDEKR_EOF'
 # >>> claudek-remote >>>
-# claudek-remote credential loader version 2
+# claudek-remote credential loader version 3
 
-# claudekr - One-shot remote Claude Code via Kimi K3 1M.
+# claudekr - One-shot remote Claude Code via Kimi K3.1 Pro 1M.
 #   Usage: claudekr <user@host> [port]
 claudekr() {
   local host="$1" port="${2:-22}"
@@ -1995,19 +1997,19 @@ claudekr() {
   _jjw_prepare_secret "${KIMI_CODE_PLAN_API_KEY:-}" || return 1
   key="$(_jjw_secret k "${KIMI_CODE_PLAN_API_KEY:-}")" || return 1
 
-  # Mirror claudek: route every Claude Code model slot through Kimi K3 1M.
+  # Mirror claudek: route every Claude Code model slot through Kimi K3.1 Pro 1M.
   remote_claude_base "$host" "$key" "$port" \
     "https://api.kimi.com/coding/" \
-    "k3[1m]" \
-    "k3[1m]" \
-    "k3[1m]" \
+    "k3.1-pro[1m]" \
+    "k3.1-pro[1m]" \
+    "k3.1-pro[1m]" \
     "3000000" \
     "0" \
-    "k3[1m]" \
+    "k3.1-pro[1m]" \
     "" \
     "1048576" \
-    "k3[1m]" \
-    "k3[1m]" \
+    "k3.1-pro[1m]" \
+    "k3.1-pro[1m]" \
     "1048576"
 }
 
