@@ -28,6 +28,20 @@ Describe 'Invoke-AiUpgrade managed packages' {
         }
         function Find-Module { param($Name, $Repository, $ErrorAction) }
         function Update-Module { param($Name, $Scope, [switch]$Force, $ErrorAction) }
+        # A stub, so the mock does not depend on which PowerShellGet build the
+        # machine happens to have.
+        function Install-Module {
+            param(
+                $Name,
+                $MinimumVersion,
+                $Repository,
+                $Scope,
+                [switch]$Force,
+                [switch]$SkipPublisherCheck,
+                $Confirm,
+                $ErrorAction
+            )
+        }
         $script:testHostTitle = $null
         try {
             $script:testHostTitle = $Host.UI.RawUI.WindowTitle
@@ -371,13 +385,14 @@ Describe 'Invoke-AiUpgrade managed packages' {
             return [pscustomobject]@{ Name = 'Pester'; Version = '6.2.0' }
         }
         Mock Update-Module {}
+        Mock Install-Module {}
 
         Invoke-AiUpgrade
 
         Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
             $Object -eq '>>> powershell modules: all managed modules are already up to date.'
         }
-        Should -Invoke Update-Module -Times 0 -Exactly
+        Should -Invoke Install-Module -Times 0 -Exactly
     }
 
     It 'updates an outdated managed PowerShell module when a newer version is available' {
@@ -388,21 +403,34 @@ Describe 'Invoke-AiUpgrade managed packages' {
             if ($Name -in @('npm', 'winget', 'Find-Module', 'Update-Module')) { return [pscustomobject]@{ Name = $Name } }
             return $null
         }
+        # The installed version changes once the module has been installed, so
+        # the new version is discoverable the way it is after a real install.
+        $script:moduleInstalled = $false
         Mock Get-Module {
-            return [pscustomobject]@{ Name = 'Pester'; Version = [version]'6.0.1' }
+            if ($script:moduleInstalled) {
+                return [pscustomobject]@{
+                    Name = 'Pester'; Version = [version]'6.2.0'; ModuleBase = 'C:\Modules\Pester\6.2.0'
+                }
+            }
+            return [pscustomobject]@{
+                Name = 'Pester'; Version = [version]'6.0.1'; ModuleBase = 'C:\Modules\Pester\6.0.1'
+            }
         }
         Mock Find-Module {
             return [pscustomobject]@{ Name = 'Pester'; Version = '6.2.0' }
         }
-        Mock Update-Module {}
+        Mock Install-Module { $script:moduleInstalled = $true }
 
         Invoke-AiUpgrade
 
         Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
             $Object -eq '>>> powershell modules: 1 update(s) available:'
         }
-        Should -Invoke Update-Module -Times 1 -Exactly -ParameterFilter {
-            $Name -eq 'Pester' -and $Scope -eq 'CurrentUser' -and $Force
+        # Install-Module rather than Update-Module: the inbox PowerShellGet
+        # 1.x build has no -Scope, and the newer module has to land in the
+        # scope the profile manages.
+        Should -Invoke Install-Module -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'Pester' -and $Repository -eq 'PSGallery' -and $Scope -eq 'CurrentUser' -and $Force
         }
         Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
             $Object -eq 'PowerShell-managed modules updated successfully.'

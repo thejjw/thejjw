@@ -181,8 +181,23 @@ Describe 'AI API key credential helpers' {
         )
     }
 
-    It 'does not backfill Bailian when an existing Qwen credential is skipped' {
+    It 'backfills a missing Bailian alias from the existing Qwen credential' {
+        # A key saved before the alias existed is repaired without a prompt,
+        # so the alias does not stay out of step with its source.
         $script:existingCredentials['QWEN_TOKEN_PLAN_API_KEY'] = 'existing-qwen-token'
+
+        Set-AiApiKeysCS
+
+        $script:savedCredentials.Count | Should -Be 1
+        $script:savedCredentials[0].Resource | Should -Be 'BAILIAN_TOKEN_PLAN_API_KEY'
+        $script:savedCredentials[0].UserName | Should -Be 'api-key'
+        $script:savedCredentials[0].Password | Should -Be 'existing-qwen-token'
+        $script:hostMessages | Should -Contain 'Backfilled BAILIAN_TOKEN_PLAN_API_KEY from existing QWEN_TOKEN_PLAN_API_KEY.'
+    }
+
+    It 'leaves an existing Bailian alias untouched when Qwen is skipped' {
+        $script:existingCredentials['QWEN_TOKEN_PLAN_API_KEY'] = 'existing-qwen-token'
+        $script:existingCredentials['BAILIAN_TOKEN_PLAN_API_KEY'] = 'existing-bailian-token'
 
         Set-AiApiKeysCS
 
