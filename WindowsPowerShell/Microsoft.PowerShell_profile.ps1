@@ -11735,6 +11735,10 @@ function Install-ClaudeCode {
     }
 
     if ($installExit -ne 0) { throw "Installation failed (exit code $installExit)." }
+    # The claude installer places the binary in ~/.local/bin; ensure it's on the
+    # user PATH (and in this session) so `claude` is usable immediately.
+    $claudeBin = Join-Path $env:USERPROFILE '.local\bin'
+    $null = Add-UserPathEntry -Path $claudeBin
     Write-Host "Installation complete." -ForegroundColor Green
     [pscustomobject]@{ Version = $version; Platform = $platform }
 }
