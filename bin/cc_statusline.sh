@@ -113,7 +113,8 @@ case "$effort_level" in
   medium) effort_short="M" ;;
   high)   effort_short="H" ;;
   xhigh)  effort_short="XH" ;;
-  *)      effort_short="$effort_level" ;;
+  max)    effort_short="MX" ;;
+  *)      effort_short=$(echo "$effort_level" | tr 'a-z' 'A-Z') ;;  # tr: portable to bash 3.2
 esac
 
 think_tag=""
