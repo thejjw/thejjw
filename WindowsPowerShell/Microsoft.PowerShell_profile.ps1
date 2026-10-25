@@ -5949,7 +5949,7 @@ function Install-GlobalClaudeMd {
     }
 }
 
-function Install-GlobalClaudeSettings {
+function Install-ClaudeGlobalSettings {
     <#
 .SYNOPSIS
     Ensures ~/.claude/settings.json has attribution disabled (no Co-Authored-By).
@@ -5960,10 +5960,10 @@ function Install-GlobalClaudeSettings {
     Shared by all Claude Code provider setup functions (claudez, claudemm, etc.).
 
 .EXAMPLE
-    Install-GlobalClaudeSettings
+    Install-ClaudeGlobalSettings
 
 .EXAMPLE
-    Install-GlobalClaudeSettings -Force
+    Install-ClaudeGlobalSettings -Force
 
 .PARAMETER Force
     Bypass the sentinel check and reapply settings even if setup was previously completed.
@@ -7700,7 +7700,7 @@ function claudez {
 
     try {
         Install-GlobalClaudeMd
-        Install-GlobalClaudeSettings
+        Install-ClaudeGlobalSettings
         [void](Install-ClaudezSetup -Token $token)
 
         Show-ZaiPeakWarning
@@ -7770,7 +7770,7 @@ function claudezm {
 
     try {
         Install-GlobalClaudeMd
-        Install-GlobalClaudeSettings
+        Install-ClaudeGlobalSettings
         [void](Install-ClaudezSetup -Token $token)
 
         Show-ZaiPeakWarning
@@ -8716,7 +8716,7 @@ function claudemm {
 
     try {
         Install-GlobalClaudeMd
-        Install-GlobalClaudeSettings
+        Install-ClaudeGlobalSettings
         [void](Install-ClaudemmSetup -Token $key)
 
         claude @args
@@ -8806,7 +8806,7 @@ function claudek {
 
     try {
         Install-GlobalClaudeMd
-        Install-GlobalClaudeSettings
+        Install-ClaudeGlobalSettings
         claude @args
     }
     finally {
@@ -9015,7 +9015,7 @@ function claudeq {
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'
     try {
         Install-GlobalClaudeMd
-        Install-GlobalClaudeSettings
+        Install-ClaudeGlobalSettings
         Show-QwenPeakWarning
         claude @args
     }
@@ -9101,7 +9101,7 @@ function claudeq2 {
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'
     try {
         Install-GlobalClaudeMd
-        Install-GlobalClaudeSettings
+        Install-ClaudeGlobalSettings
         Show-QwenPeakWarning
         claude @args
     }
@@ -9211,7 +9211,7 @@ function Install-ClaudeCCRSetup {
     # Run shared Claude Code global setup + the existing provider MCP setup helpers so cccr
     # has the same ~/.claude/CLAUDE.md, settings.json, and MCP servers as claudez/claudemm.
     Install-GlobalClaudeMd
-    Install-GlobalClaudeSettings
+    Install-ClaudeGlobalSettings
     [void](Install-ClaudezSetup -Token $ZaiToken -Force:$Force)
 
     if ($MiniMaxKey) {
@@ -11309,7 +11309,7 @@ function Install-AiTools {
         $null = Add-UserPathEntry -Path $claudeBin
     } else {
         # If claude is present, ensure it's configured with the default settings
-        Install-GlobalClaudeSettings
+        Install-ClaudeGlobalSettings
     }
 
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {

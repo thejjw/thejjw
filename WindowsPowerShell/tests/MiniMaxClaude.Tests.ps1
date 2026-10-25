@@ -48,7 +48,7 @@ Describe 'MiniMax Claude Code profile' {
             return 'test-key'
         }
         function Install-GlobalClaudeMd {}
-        function Install-GlobalClaudeSettings {}
+        function Install-ClaudeGlobalSettings {}
         function Install-ClaudemmSetup { param([string]$Token, [switch]$Force) return $true }
 
         # Captures the environment the launcher hands to Claude Code.
