@@ -45,7 +45,8 @@ parsed=$(echo "$input" | jq -rj '[
   (.fast_mode // false | tostring),
   .rate_limits.five_hour.resets_at // "",
   .rate_limits.seven_day.resets_at // "",
-  (.exceeds_200k_tokens // false | tostring)
+  (.exceeds_200k_tokens // false | tostring),
+  (.prompt_cache.expires_at // "" | if type == "number" then floor else . end)
 ] | map(tostring) | join("")')
 
 IFS=$'\x1f' read -r \
@@ -53,7 +54,7 @@ IFS=$'\x1f' read -r \
   cache_write cache_read cost dur_ms api_ms lines_add lines_rm \
   rate_5h rate_7d session_name agent_name worktree_name \
   version session_id output_style ws_current ws_project \
-  effort_level thinking_enabled fast_mode rate_5h_resets rate_7d_resets exceeds_200k \
+  effort_level thinking_enabled fast_mode rate_5h_resets rate_7d_resets exceeds_200k cache_expires \
   <<< "$parsed"
 
 # --- Git info: single porcelain call returns branch + ahead/behind + dirty + untracked ---
@@ -190,6 +191,16 @@ fmt_reset_delta() {
   fi
 }
 
+# Prompt cache countdown from epoch expires_at: "4m" / "42s" (yellow <60s), red "cold" once expired
+fmt_cache_left() {
+  local ts=$1 delta
+  [ -z "$ts" ] && return
+  delta=$(( ts - $(date +%s) ))
+  if [ "$delta" -le 0 ]; then printf '%scold%s' "$RED" "$RESET"
+  elif [ "$delta" -lt 60 ]; then printf '%s%ds%s' "$YELLOW" "$delta" "$RESET"
+  else printf '%s%dm%s' "$DIM" "$(( delta / 60 ))" "$RESET"; fi
+}
+
 # --- Context color based on usage percentage ---
 if [ "$exceeds_200k" = "true" ] || [ "$ctx_pct" -ge 90 ] 2>/dev/null; then CTX_COLOR="$RED"
 elif [ "$ctx_pct" -ge 70 ] 2>/dev/null; then CTX_COLOR="$YELLOW"
@@ -250,6 +261,8 @@ ctx_pfx=""
 line1+="${ctx_pfx}${CTX_COLOR}${tok_used}${RESET}/${DIM}${tok_max}${RESET}"
 if [ "$cache_read" -gt 0 ] 2>/dev/null || [ "$cache_write" -gt 0 ] 2>/dev/null; then
   line1+="  ${DIM}(c) r:${cache_r_fmt} w:${cache_w_fmt}${RESET}"
+  cache_left=$(fmt_cache_left "$cache_expires")
+  [ -n "$cache_left" ] && line1+=" ${cache_left}"
 fi
 if [ -n "$git_branch" ]; then
   line1+="  ${CYAN}${dirty}${git_branch}${RESET}"
