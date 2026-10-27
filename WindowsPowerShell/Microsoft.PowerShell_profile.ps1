@@ -15742,6 +15742,193 @@ function Resolve-AppLockerTargetFile {
     return $candidates[0]
 }
 
+function Test-AppLockerLiveEnforcement {
+    <#
+.SYNOPSIS
+    Live-tests whether AppLocker actually blocks a launch by file name.
+
+.DESCRIPTION
+    Get-AppLockerPolicy and Test-AppLockerPolicy only evaluate the policy XML;
+    they report a working policy even when the kernel-side AppID pipeline is not
+    evaluating process creation (service running, policy-applied events logged,
+    yet every launch succeeds). This helper copies a harmless binary (cmd.exe)
+    to the given file name and tries to launch it: a failed launch proves the
+    block is enforced end to end, a successful one proves it is not, regardless
+    of what the policy says.
+
+.PARAMETER FileName
+    Bare executable file name to probe with. It must be covered by a Deny rule,
+    which is true for Path-mode rules in any directory.
+
+.PARAMETER Directory
+    Directory to place the probe in. Defaults to %TEMP%, which any Path-mode
+    rule of the form *\name.exe matches.
+
+.OUTPUTS
+    PSCustomObject with Enforced ($true/$false, $null when the probe was
+    skipped) and Detail (string).
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName,
+
+        [string]$Directory
+    )
+
+    if ($FileName -match '[\\/:*?"<>|]') { throw "FileName must be a bare file name: $FileName" }
+    $directory = if ($Directory -and (Test-Path -LiteralPath $Directory -PathType Container)) { $Directory }
+                 else { [System.IO.Path]::GetTempPath() }
+    $probeFile = Join-Path $directory $FileName
+
+    # Never overwrite an existing file: the probe must not clobber a real
+    # executable just because it happens to carry the blocked name.
+    if (Test-Path -LiteralPath $probeFile) {
+        return [pscustomobject]@{ Enforced = $null; Detail = "probe file already exists, skipped: $probeFile" }
+    }
+
+    Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $probeFile -Force
+    try {
+        try {
+            Start-Process -FilePath $probeFile -ArgumentList '/c', 'exit' -WindowStyle Hidden -Wait -ErrorAction Stop
+            return [pscustomobject]@{ Enforced = $false; Detail = 'probe launch succeeded' }
+        }
+        catch {
+            return [pscustomobject]@{ Enforced = $true; Detail = ($_.Exception.Message -replace '\r?\n', ' ').Trim() }
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Repair-AppLockerEnforcement {
+    <#
+.SYNOPSIS
+    Verifies AppLocker enforcement with a live probe and repairs what is
+    repairable without a reboot.
+
+.DESCRIPTION
+    Probes a live launch of the given file name. On a miss the policy refresh
+    is retried once, then the Application Identity service is bounced and the
+    probe retried -- the standard fix for a driver that loaded but never
+    evaluates. Only a reboot remains when the probe still launches.
+
+.PARAMETER FileName
+    Bare executable file name covered by a Deny rule.
+
+.PARAMETER Directory
+    Directory for the probe file; defaults to %TEMP%.
+
+.OUTPUTS
+    PSCustomObject with Enforcement ('Verified', 'Recovered', 'NotEnforced',
+    or 'Unverified'), Recovery (string[]), NeedsReboot (bool).
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName,
+
+        [string]$Directory,
+
+        [switch]$NoGroupPolicyRefresh
+    )
+
+    $recovery = @()
+    $probe = Test-AppLockerLiveEnforcement -FileName $FileName -Directory $Directory
+    # The policy write reaches the AppID driver asynchronously, so a miss is
+    # first retried after a plain policy refresh, then after a service bounce.
+    if ($probe.Enforced -eq $false -and -not $NoGroupPolicyRefresh) {
+        & gpupdate.exe /force | Out-Null
+        Start-Sleep -Seconds 4
+        $probe = Test-AppLockerLiveEnforcement -FileName $FileName -Directory $Directory
+    }
+    if ($probe.Enforced -eq $false) {
+        try {
+            Restart-Service -Name 'AppIDSvc' -Force -ErrorAction Stop -WhatIf:$WhatIfPreference
+            $recovery += 'AppIDSvc restart'
+        }
+        catch {
+            Write-Warning ("Could not restart the Application Identity service: {0}" -f $_.Exception.Message)
+        }
+        if (-not $NoGroupPolicyRefresh) { & gpupdate.exe /force | Out-Null }
+        foreach ($attempt in 1..3) {
+            Start-Sleep -Seconds 3
+            $probe = Test-AppLockerLiveEnforcement -FileName $FileName -Directory $Directory
+            if ($probe.Enforced) { break }
+        }
+    }
+
+    $enforcement = if ($probe.Enforced -eq $true) {
+        if ($recovery.Count -gt 0) { 'Recovered' } else { 'Verified' }
+    }
+    elseif ($probe.Enforced -eq $false) { 'NotEnforced' }
+    else { 'Unverified' }
+
+    return [pscustomobject]@{
+        Enforcement = $enforcement
+        Recovery    = $recovery
+        NeedsReboot = ($probe.Enforced -eq $false)
+    }
+}
+
+function Write-AppLockerEnforcementStatus {
+    <#
+.SYNOPSIS
+    Prints the enforcement verdict of a live probe.
+
+.DESCRIPTION
+    One line per state, with the remaining manual step (reboot) and a Smart App
+    Control check when enforcement could not be recovered.
+#>
+    param(
+        [Parameter(Mandatory = $true)][string]$Enforcement,
+        [object[]]$Recovery = @()
+    )
+
+    if ($Enforcement -eq 'Verified') {
+        Write-Host 'Enforcement: verified with a live launch probe' -ForegroundColor Green
+    }
+    elseif ($Enforcement -eq 'Recovered') {
+        Write-Host ("Enforcement: recovered after {0}" -f ($Recovery -join ' + ')) -ForegroundColor Yellow
+    }
+    elseif ($Enforcement -eq 'NotEnforced') {
+        Write-Host 'Enforcement: NOT ACTIVE - the AppID pipeline is not evaluating launches.' -ForegroundColor Red
+        Write-Host 'Reboot required; launches of the blocked file keep succeeding until then.' -ForegroundColor Red
+        $sacState = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState
+        if ($sacState -in 1, 2) {
+            Write-Host 'Smart App Control is on/evaluating; it suppresses AppLocker enforcement.' -ForegroundColor Red
+        }
+    }
+}
+
+function Stop-AppLockerProcesses {
+    <#
+.SYNOPSIS
+    Stops running processes whose image name matches a blocked file name.
+
+.DESCRIPTION
+    An AppLocker Deny rule never terminates processes that are already running;
+    this stops them by name so a block takes full effect immediately.
+#>
+    param(
+        [Parameter(Mandatory = $true)][string]$FileName
+    )
+
+    $processName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
+    @(Get-Process -Name $processName -ErrorAction SilentlyContinue | ForEach-Object {
+        try { Stop-Process -Id $_.Id -Force -ErrorAction Stop -WhatIf:$WhatIfPreference; $_.Id } catch { }
+    })
+}
+
 function Add-AppLockerBlock {
     <#
 .SYNOPSIS
@@ -15852,6 +16039,18 @@ function Add-AppLockerBlock {
     PS C:\> Add-AppLockerBlock -Revert -Name example.exe
     Removes the block for example.exe again.
 
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe -StopRunning
+    Blocks example.exe, verifies enforcement with a live launch probe, and
+    stops processes of that name that are already running.
+
+.PARAMETER NoLiveVerify
+    Skips the live launch probe that verifies the block is actually enforced.
+
+.PARAMETER StopRunning
+    Also stops processes of the blocked file name that are already running.
+    An AppLocker Deny rule never terminates existing processes.
+
 .OUTPUTS
     For -List, one object per filename block. Otherwise a summary object.
 
@@ -15896,6 +16095,12 @@ function Add-AppLockerBlock {
 
         [Parameter(ParameterSetName = 'Add')]
         [string]$VerifyPath,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [switch]$NoLiveVerify,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [switch]$StopRunning,
 
         [Parameter(ParameterSetName = 'Add')]
         [Parameter(ParameterSetName = 'Revert')]
@@ -16106,12 +16311,36 @@ function Add-AppLockerBlock {
 
     if ($blocked.Count -eq 0) {
         Write-Host "Already blocked: $($alreadyBlocked -join ', ')" -ForegroundColor Yellow
+        $enforcement = 'Unverified'
+        $recovery = @()
+        $needsReboot = $false
+        $stopped = @()
+        if ($Mode -eq 'Path' -and -not $NoLiveVerify) {
+            # The rule exists on paper; make sure it is also actually enforced,
+            # and recover the pipeline if it is not (this is how a block that
+            # was added before an installer ran can still fail to stop it).
+            $status = Repair-AppLockerEnforcement -FileName $alreadyBlocked[0] -Directory $Path -NoGroupPolicyRefresh:$NoGroupPolicyRefresh -WhatIf:$WhatIfPreference
+            $enforcement = $status.Enforcement
+            $recovery = @($status.Recovery)
+            $needsReboot = $status.NeedsReboot
+            Write-AppLockerEnforcementStatus -Enforcement $enforcement -Recovery $recovery
+        }
+        if ($StopRunning) {
+            $stopped = @(Stop-AppLockerProcesses -FileName $alreadyBlocked[0])
+            if ($stopped.Count -gt 0) {
+                Write-Host ("Stopped running processes: {0}" -f ($stopped -join ', ')) -ForegroundColor DarkGray
+            }
+        }
         return [pscustomobject]@{
             Action           = 'AlreadyBlocked'
             BlockedFiles     = @($alreadyBlocked)
             Mode             = $Mode
             BackupPath       = $null
             EnforcementMode  = $(if ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') } else { 'NotConfigured' })
+            Enforcement      = $enforcement
+            NeedsReboot      = $needsReboot
+            StoppedPids      = $stopped
+            Verification     = $null
         }
     }
 
@@ -16294,6 +16523,26 @@ function Add-AppLockerBlock {
             Test-AppLockerPolicy -Path $VerifyPath -User "$env:USERDOMAIN\$env:USERNAME"
     }
 
+    $enforcement = 'Unverified'
+    $recovery = @()
+    $needsReboot = $false
+    if ($Mode -eq 'Path' -and -not $NoLiveVerify) {
+        # Policy checks only evaluate XML; AppLocker can be fully configured
+        # (service running, policy-applied events logged) while the kernel-side
+        # AppID pipeline evaluates nothing. Probe a real launch and recover.
+        $status = Repair-AppLockerEnforcement -FileName $blocked[0].FileName -Directory $Path -NoGroupPolicyRefresh:$NoGroupPolicyRefresh -WhatIf:$WhatIfPreference
+        $enforcement = $status.Enforcement
+        $recovery = @($status.Recovery)
+        $needsReboot = $status.NeedsReboot
+    }
+
+    # A Deny rule never terminates processes that are already running, so a
+    # block only takes full effect once those are stopped by hand.
+    $stopped = @()
+    if ($StopRunning) {
+        $stopped = @(Stop-AppLockerProcesses -FileName $blocked[0].FileName)
+    }
+
     Write-Host ''
     Write-Host ("Blocked: {0}" -f ($blocked.FileName -join ', ')) -ForegroundColor Green
     if ($alreadyBlocked.Count -gt 0) {
@@ -16312,6 +16561,10 @@ function Add-AppLockerBlock {
     if ($decision) {
         Write-Host ("Verify {0}: {1}" -f $VerifyPath, $decision.PolicyDecision) -ForegroundColor DarkGray
     }
+    Write-AppLockerEnforcementStatus -Enforcement $enforcement -Recovery $recovery
+    if ($stopped.Count -gt 0) {
+        Write-Host ("Stopped running processes: {0}" -f ($stopped -join ', ')) -ForegroundColor DarkGray
+    }
 
     return [pscustomobject]@{
         Action           = 'Blocked'
@@ -16323,6 +16576,9 @@ function Add-AppLockerBlock {
         AlreadyBlocked   = @($alreadyBlocked)
         BackupPath       = $backupPath
         EnforcementMode  = $modeAfter
+        Enforcement      = $enforcement
+        NeedsReboot      = $needsReboot
+        StoppedPids      = @($stopped)
         Verification     = $(if ($decision) { $decision.PolicyDecision } else { $null })
     }
 }
