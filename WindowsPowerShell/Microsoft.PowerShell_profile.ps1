@@ -1,4 +1,4 @@
-﻿# OSC 9;9 hyperlink lets Windows Terminal / VS Code detect and click the working directory
+# OSC 9;9 hyperlink lets Windows Terminal / VS Code detect and click the working directory
 function prompt {
     <#
 .SYNOPSIS
@@ -15867,14 +15867,14 @@ function Repair-AppLockerEnforcement {
         }
     }
 
-    $enforcement = if ($probe.Enforced -eq $true) {
+    $enforcementStatus = if ($probe.Enforced -eq $true) {
         if ($recovery.Count -gt 0) { 'Recovered' } else { 'Verified' }
     }
     elseif ($probe.Enforced -eq $false) { 'NotEnforced' }
     else { 'Unverified' }
 
     return [pscustomobject]@{
-        Enforcement = $enforcement
+        Enforcement = $enforcementStatus
         Recovery    = $recovery
         NeedsReboot = ($probe.Enforced -eq $false)
     }
@@ -16311,7 +16311,7 @@ function Add-AppLockerBlock {
 
     if ($blocked.Count -eq 0) {
         Write-Host "Already blocked: $($alreadyBlocked -join ', ')" -ForegroundColor Yellow
-        $enforcement = 'Unverified'
+        $enforcementStatus = 'Unverified'
         $recovery = @()
         $needsReboot = $false
         $stopped = @()
@@ -16320,10 +16320,10 @@ function Add-AppLockerBlock {
             # and recover the pipeline if it is not (this is how a block that
             # was added before an installer ran can still fail to stop it).
             $status = Repair-AppLockerEnforcement -FileName $alreadyBlocked[0] -Directory $Path -NoGroupPolicyRefresh:$NoGroupPolicyRefresh -WhatIf:$WhatIfPreference
-            $enforcement = $status.Enforcement
+            $enforcementStatus = $status.Enforcement
             $recovery = @($status.Recovery)
             $needsReboot = $status.NeedsReboot
-            Write-AppLockerEnforcementStatus -Enforcement $enforcement -Recovery $recovery
+            Write-AppLockerEnforcementStatus -Enforcement $enforcementStatus -Recovery $recovery
         }
         if ($StopRunning) {
             $stopped = @(Stop-AppLockerProcesses -FileName $alreadyBlocked[0])
@@ -16337,7 +16337,7 @@ function Add-AppLockerBlock {
             Mode             = $Mode
             BackupPath       = $null
             EnforcementMode  = $(if ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') } else { 'NotConfigured' })
-            Enforcement      = $enforcement
+            Enforcement      = $enforcementStatus
             NeedsReboot      = $needsReboot
             StoppedPids      = $stopped
             Verification     = $null
@@ -16523,7 +16523,7 @@ function Add-AppLockerBlock {
             Test-AppLockerPolicy -Path $VerifyPath -User "$env:USERDOMAIN\$env:USERNAME"
     }
 
-    $enforcement = 'Unverified'
+    $enforcementStatus = 'Unverified'
     $recovery = @()
     $needsReboot = $false
     if ($Mode -eq 'Path' -and -not $NoLiveVerify) {
@@ -16531,7 +16531,7 @@ function Add-AppLockerBlock {
         # (service running, policy-applied events logged) while the kernel-side
         # AppID pipeline evaluates nothing. Probe a real launch and recover.
         $status = Repair-AppLockerEnforcement -FileName $blocked[0].FileName -Directory $Path -NoGroupPolicyRefresh:$NoGroupPolicyRefresh -WhatIf:$WhatIfPreference
-        $enforcement = $status.Enforcement
+        $enforcementStatus = $status.Enforcement
         $recovery = @($status.Recovery)
         $needsReboot = $status.NeedsReboot
     }
@@ -16561,7 +16561,7 @@ function Add-AppLockerBlock {
     if ($decision) {
         Write-Host ("Verify {0}: {1}" -f $VerifyPath, $decision.PolicyDecision) -ForegroundColor DarkGray
     }
-    Write-AppLockerEnforcementStatus -Enforcement $enforcement -Recovery $recovery
+    Write-AppLockerEnforcementStatus -Enforcement $enforcementStatus -Recovery $recovery
     if ($stopped.Count -gt 0) {
         Write-Host ("Stopped running processes: {0}" -f ($stopped -join ', ')) -ForegroundColor DarkGray
     }
@@ -16576,7 +16576,7 @@ function Add-AppLockerBlock {
         AlreadyBlocked   = @($alreadyBlocked)
         BackupPath       = $backupPath
         EnforcementMode  = $modeAfter
-        Enforcement      = $enforcement
+        Enforcement      = $enforcementStatus
         NeedsReboot      = $needsReboot
         StoppedPids      = @($stopped)
         Verification     = $(if ($decision) { $decision.PolicyDecision } else { $null })

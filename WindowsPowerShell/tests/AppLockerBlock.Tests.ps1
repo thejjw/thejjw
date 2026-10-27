@@ -29,6 +29,9 @@ Describe 'AppLocker block helpers' {
         . ([scriptblock]::Create($internalAst.Extent.Text))
 
         foreach ($functionName in @(
+                'Repair-AppLockerEnforcement',
+                'Write-AppLockerEnforcementStatus',
+                'Stop-AppLockerProcesses',
                 'Read-AppLockerPolicy',
                 'Resolve-AppLockerTargetFile',
                 'Add-AppLockerBlock',
@@ -43,6 +46,9 @@ Describe 'AppLocker block helpers' {
             if (-not $functionAst) { throw "Could not load $functionName from the profile." }
             . ([scriptblock]::Create($functionAst.Extent.Text))
         }
+
+        Mock Repair-AppLockerEnforcement { [pscustomobject]@{ Enforcement = 'Unverified'; Recovery = @(); NeedsReboot = $false } }
+        Mock Write-AppLockerEnforcementStatus {}
 
         function New-TestPolicy {
             param(
