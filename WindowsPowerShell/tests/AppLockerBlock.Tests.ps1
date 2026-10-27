@@ -278,6 +278,42 @@ $rules
             Test-Path -LiteralPath $result.BackupPath | Should -BeTrue
         }
 
+        It 'verifies and stops both new and already blocked targets in one batch' {
+            Mock Get-AppLockerPolicy {
+                New-TestPolicy -RuleXml @('<FilePathRule Id="11111111-1111-1111-1111-111111111111" Name="Block example.exe" Description="Created by Add-AppLockerBlock" UserOrGroupSid="S-1-1-0" Action="Deny"><Conditions><FilePathCondition Path="*\example.exe" /></Conditions></FilePathRule>')
+            }
+            Mock Stop-AppLockerProcesses { 101; 202 }
+            Mock Repair-AppLockerEnforcement {
+                [pscustomobject]@{ Enforcement = 'Unverified'; Recovery = @(); NeedsReboot = $false; Probes = @(
+                    [pscustomobject]@{ FileName = 'example.exe'; Enforced = $true }
+                    [pscustomobject]@{ FileName = 'other.exe'; Enforced = $null }
+                ) }
+            }
+            $result = Add-AppLockerBlock -Name 'example.exe','other.exe' -StopRunning -NoGroupPolicyRefresh -Confirm:$false -BackupDirectory $TestDrive
+
+            $result.AlreadyBlocked | Should -Be 'example.exe'
+            $result.ProbeResults.Count | Should -Be 2
+            $result.StoppedPids | Should -Be @(101, 202)
+            Should -Invoke Repair-AppLockerEnforcement -Times 1 -Exactly -ParameterFilter { $FileName.Count -eq 2 -and $FileName -contains 'example.exe' -and $FileName -contains 'other.exe' }
+            Should -Invoke Stop-AppLockerProcesses -Times 1 -Exactly -ParameterFilter { $FileName.Count -eq 2 -and $FileName -contains 'example.exe' -and $FileName -contains 'other.exe' }
+        }
+
+        It 'passes every already blocked target to verification and process stopping' {
+            Mock Get-AppLockerPolicy {
+                New-TestPolicy -RuleXml @(
+                    '<FilePathRule Id="11111111-1111-1111-1111-111111111111" Name="Block example.exe" UserOrGroupSid="S-1-1-0" Action="Deny"><Conditions><FilePathCondition Path="*\example.exe" /></Conditions></FilePathRule>'
+                    '<FilePathRule Id="22222222-2222-2222-2222-222222222222" Name="Block other.exe" UserOrGroupSid="S-1-1-0" Action="Deny"><Conditions><FilePathCondition Path="*\other.exe" /></Conditions></FilePathRule>'
+                )
+            }
+            Mock Stop-AppLockerProcesses { 101; 202 }
+            $result = Add-AppLockerBlock -Name 'example.exe','other.exe' -StopRunning -NoGroupPolicyRefresh -Confirm:$false -BackupDirectory $TestDrive
+
+            $result.Action | Should -Be 'AlreadyBlocked'
+            Should -Invoke Set-AppLockerPolicy -Times 0 -Exactly
+            Should -Invoke Repair-AppLockerEnforcement -Times 1 -Exactly -ParameterFilter { $FileName.Count -eq 2 }
+            Should -Invoke Stop-AppLockerProcesses -Times 1 -Exactly -ParameterFilter { $FileName.Count -eq 2 }
+        }
+
         It 'scopes the rule to a directory when -Path is given' {
             $result = Add-AppLockerBlock -Name 'app.exe' -Path 'C:\Tools' -NoGroupPolicyRefresh -Confirm:$false
 

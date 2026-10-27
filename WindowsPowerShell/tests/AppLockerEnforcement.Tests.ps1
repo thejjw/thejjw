@@ -149,5 +149,104 @@ Describe 'AppLocker live enforcement safety' {
             Should -Invoke Restart-Service -Times 1 -Exactly
         }
     }
-}
 
+    Context 'Batch recovery' {
+        BeforeEach {
+            Mock Test-AppLockerLiveEnforcement { [pscustomobject]@{ Enforced = $true; Detail = 'blocked' } }
+        }
+
+        It 'verifies every target and returns their individual results' {
+            $result = Repair-AppLockerEnforcement -FileName 'one.exe', 'two.exe' -Confirm:$false
+            $result.Enforcement | Should -Be 'Verified'
+            $result.NeedsReboot | Should -BeFalse
+            @($result.Probes).Count | Should -Be 2
+            $result.Probes.FileName | Should -Be @('one.exe', 'two.exe')
+            Should -Invoke Test-AppLockerLiveEnforcement -Times 2 -Exactly
+            Should -Invoke gpupdate.exe -Times 0 -Exactly
+            Should -Invoke Restart-Service -Times 0 -Exactly
+        }
+
+        It 'keeps a mixed blocked and skipped batch unverified' {
+            Mock Test-AppLockerLiveEnforcement { [pscustomobject]@{ Enforced = $null; Detail = 'existing file' } } -ParameterFilter { $FileName -eq 'two.exe' }
+            $result = Repair-AppLockerEnforcement -FileName 'one.exe', 'two.exe' -Confirm:$false
+            $result.Enforcement | Should -Be 'Unverified'
+            $result.NeedsReboot | Should -BeFalse
+            Should -Invoke gpupdate.exe -Times 0 -Exactly
+            Should -Invoke Restart-Service -Times 0 -Exactly
+        }
+
+        It 'shares recovery across targets and does not claim that reboot is required' {
+            Mock Test-AppLockerLiveEnforcement { [pscustomobject]@{ Enforced = $false; Detail = 'launched' } }
+            $result = Repair-AppLockerEnforcement -FileName 'one.exe', 'two.exe' -Confirm:$false
+            $result.Enforcement | Should -Be 'NotEnforced'
+            $result.NeedsReboot | Should -BeFalse
+            @($result.Probes).Count | Should -Be 2
+            Should -Invoke gpupdate.exe -Times 1 -Exactly
+            Should -Invoke Restart-Service -Times 1 -Exactly
+        }
+
+        It 'reports recovered only after all target probes block' {
+            $script:recoveryRestarted = $false
+            Mock Restart-Service { $script:recoveryRestarted = $true }
+            Mock Test-AppLockerLiveEnforcement { [pscustomobject]@{ Enforced = $script:recoveryRestarted; Detail = 'probe' } }
+            $result = Repair-AppLockerEnforcement -FileName 'one.exe', 'two.exe' -Confirm:$false
+            $result.Enforcement | Should -Be 'Recovered'
+            @($result.Probes | Where-Object { $_.Enforced -eq $true }).Count | Should -Be 2
+            Should -Invoke gpupdate.exe -Times 1 -Exactly
+            Should -Invoke Restart-Service -Times 1 -Exactly
+        }
+
+        It 'preserves a definitive miss when another target remains unverified' {
+            Mock Test-AppLockerLiveEnforcement { [pscustomobject]@{ Enforced = $false; Detail = 'launched' } }
+            Mock Test-AppLockerLiveEnforcement { [pscustomobject]@{ Enforced = $null; Detail = 'skipped' } } -ParameterFilter { $FileName -eq 'two.exe' }
+            (Repair-AppLockerEnforcement -FileName 'one.exe', 'two.exe' -Confirm:$false).Enforcement | Should -Be 'NotEnforced'
+        }
+
+        It 'honors NoGroupPolicyRefresh during recovery' {
+            Mock Test-AppLockerLiveEnforcement { [pscustomobject]@{ Enforced = $false; Detail = 'launched' } }
+            $null = Repair-AppLockerEnforcement -FileName 'one.exe', 'two.exe' -NoGroupPolicyRefresh -Confirm:$false
+            Should -Invoke gpupdate.exe -Times 0 -Exactly
+            Should -Invoke Restart-Service -Times 1 -Exactly
+        }
+
+        It 'skips live probes and recovery for AuditOnly' {
+            $result = Repair-AppLockerEnforcement -FileName 'one.exe', 'two.exe' -EnforcementMode AuditOnly -Confirm:$false
+            $result.NeedsReboot | Should -BeFalse
+            Should -Invoke Test-AppLockerLiveEnforcement -Times 0 -Exactly
+            Should -Invoke gpupdate.exe -Times 0 -Exactly
+            Should -Invoke Restart-Service -Times 0 -Exactly
+        }
+
+        It 'performs no probe, refresh, restart or sleep under WhatIf' {
+            $null = Repair-AppLockerEnforcement -FileName 'one.exe', 'two.exe' -WhatIf
+            Should -Invoke Test-AppLockerLiveEnforcement -Times 0 -Exactly
+            Should -Invoke gpupdate.exe -Times 0 -Exactly
+            Should -Invoke Restart-Service -Times 0 -Exactly
+            Should -Invoke Start-Sleep -Times 0 -Exactly
+        }
+    }
+
+    Context 'Stopping blocked processes' {
+        BeforeEach {
+            Mock Get-Process { [pscustomobject]@{ Id = 101; ProcessName = 'one' } } -ParameterFilter { $Name -eq 'one' }
+            Mock Get-Process { [pscustomobject]@{ Id = 202; ProcessName = 'two' } } -ParameterFilter { $Name -eq 'two' }
+        }
+
+        It 'stops each distinct basename once' {
+            $result = @(Stop-AppLockerProcesses -FileName 'one.exe', 'two.exe', 'ONE.EXE' -Confirm:$false)
+            $result | Should -Be @(101, 202)
+            Should -Invoke Get-Process -Times 2 -Exactly
+            Should -Invoke Stop-Process -Times 2 -Exactly
+        }
+
+        It 'reports only processes successfully stopped' {
+            Mock Stop-Process { throw 'Access denied' } -ParameterFilter { $Id -eq 202 }
+            @(Stop-AppLockerProcesses -FileName 'one.exe', 'two.exe' -Confirm:$false) | Should -Be @(101)
+        }
+
+        It 'does not stop or report stopped processes under WhatIf' {
+            @(Stop-AppLockerProcesses -FileName 'one.exe', 'two.exe' -WhatIf).Count | Should -Be 0
+            Should -Invoke Stop-Process -Times 0 -Exactly
+        }
+    }
+}
