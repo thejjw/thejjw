@@ -235,6 +235,21 @@ $rules
             Should -Invoke -CommandName Set-AppLockerPolicy -Times 1 -Exactly
         }
 
+        It 'returns an unverified result when live verification is disabled' {
+            $result = Add-AppLockerBlock -Name 'example.exe' -NoLiveVerify -NoGroupPolicyRefresh -Confirm:$false -BackupDirectory $TestDrive
+
+            $result.Enforcement | Should -Be 'Unverified'
+            Should -Invoke Repair-AppLockerEnforcement -Times 0 -Exactly
+        }
+
+        It 'passes audit mode to recovery without changing the requested policy mode' {
+            $result = Add-AppLockerBlock -Name 'example.exe' -Enforcement AuditOnly -NoGroupPolicyRefresh -Confirm:$false -BackupDirectory $TestDrive
+
+            $result.Enforcement | Should -Be 'Unverified'
+            Should -Invoke Repair-AppLockerEnforcement -Times 1 -Exactly -ParameterFilter { $EnforcementMode -eq 'AuditOnly' }
+            ([xml]$script:applied.Xml).AppLockerPolicy.RuleCollection[0].EnforcementMode | Should -Be 'AuditOnly'
+        }
+
         It 'does not add a second deny rule for an already blocked name' {
             Mock Get-AppLockerPolicy {
                 return [xml]@'
