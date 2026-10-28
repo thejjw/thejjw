@@ -1,65 +1,83 @@
 #!/bin/bash
-# (linux/deb/ubuntu)(bash) Download and extract latest ffmpeg and ab-av1 release from GitHub, overwriting extraction
-# 2025.6 @thejjw
+# Install the latest x86_64 Linux ab-av1 release and its FFmpeg prerequisites.
+# 2025.6-2026.10 @thejjw
+set -euo pipefail
 
-set -e
+fail() { echo "Error: $*" >&2; exit 1; }
 
-# Drop execution if not running on x86_64 architecture
-if [ "$(uname -m)" != "x86_64" ]; then
-  echo "this only supports x86_64 (amd64) architecture."
-  exit 1
-fi
-
-github_repo="alexheretic/ab-av1"
-ext="tar.zst"
-
-# 0. Ensure required tools are installed
-if ! command -v curl >/dev/null; then
-  echo "curl not found. Please install curl."
-  exit 1
-fi
-
-if ! command -v tar >/dev/null; then
-  echo "tar not found. Please install tar."
-  exit 1
-fi
-
+[[ "$(uname -m)" == x86_64 ]] || fail "only x86_64 (amd64) is supported."
+for tool in curl tar jq sudo; do
+  command -v "$tool" >/dev/null || fail "$tool is required. Please install it."
+done
 if ! command -v unzstd >/dev/null; then
-  echo "unzstd (from zstd package) not found. Installing..."
+  echo "Installing zstd..."
   sudo apt update && sudo apt install -y zstd
 fi
 
-# update ffmpeg
-# Check if required codecs are present
-# "ffmpeg newer than git-2022-02-24 with libsvtav1, libvmaf, libopus enabled."
-if ! ffmpeg -buildconf | grep -E "svt_av1|vmaf|opus" > /dev/null; then
-    echo "Required codecs not found for ffmpeg"
-
-    echo "downloading latest ffmpeg x64 binary"
-    wget -qO- https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz | sudo tar -xJv --strip-components=2 -C /usr/local/bin --wildcards '*/bin/*'
-    echo "ffmpeg binaries extracted to /usr/local/bin/."
+installed=$(command -v ab-av1 || true)
+if [[ -n "$installed" ]]; then
+  if version=$("$installed" --version 2>&1); then
+    echo "Current ab-av1: $version ($installed)"
+  else
+    echo "Current ab-av1 at $installed failed to run: $version" >&2
+  fi
 else
-    echo "FFmpeg already supports the required codecs."
+  echo "Current ab-av1: not installed"
 fi
 
-# 1. Get the latest ab-av1 release API URL
-api_url="https://api.github.com/repos/$github_repo/releases/latest"
+tmp=$(mktemp -d)
+trap 'rm -rf -- "$tmp"' EXIT
 
-# 2. Fetch the latest release info
-release_json=$(curl -sL "$api_url")
+# Check each required build flag independently; a single match is insufficient.
+check_ffmpeg() {
+  local config flag missing=0
+  if ! config=$(ffmpeg -buildconf 2>/dev/null); then
+    echo "FFmpeg is missing or could not be run."
+    return 1
+  fi
+  for flag in libsvtav1 libvmaf libopus; do
+    if ! grep -Fq -- "--enable-$flag" <<< "$config"; then
+      echo "FFmpeg missing: $flag"
+      missing=1
+    fi
+  done
+  return "$missing"
+}
 
-# 3. Extract asset download URL (first matching .tar.zst)
-asset_url=$(echo "$release_json" | grep 'browser_download_url' | grep "$ext" | head -n1 | cut -d '"' -f4)
-
-if [ -z "$asset_url" ]; then
-  echo "No .$ext asset found in the latest release."
-  exit 1
+if check_ffmpeg; then
+  echo "FFmpeg supports the required libraries."
+else
+  echo "Downloading latest FFmpeg x64 build..."
+  curl -fSL --show-error --connect-timeout 15 --max-time 600 \
+    -o "$tmp/ffmpeg.tar.xz" https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz || fail "FFmpeg download failed."
+  mkdir "$tmp/ffmpeg"
+  tar -xJf "$tmp/ffmpeg.tar.xz" --strip-components=2 -C "$tmp/ffmpeg" --wildcards '*/bin/*' || fail "FFmpeg extraction failed."
+  sudo cp "$tmp/ffmpeg/"* /usr/local/bin/ || fail "FFmpeg installation failed."
+  hash -r
+  check_ffmpeg || fail "FFmpeg prerequisite check failed after installation; check PATH."
 fi
 
-# 4. Download and extract ab-av1
-echo "downloading latest ab-av1 binary"
-wget -qO- $asset_url | sudo tar --use-compress-program=unzstd -xv -C /usr/local/bin --overwrite
-echo "ab-av1 binaries extracted to /usr/local/bin/."
-
-echo "done. exiting"
-exit 0
+echo "Checking latest ab-av1 release on GitHub..."
+curl -fsSL --show-error --connect-timeout 15 --max-time 60 \
+  -o "$tmp/release.json" https://api.github.com/repos/alexheretic/ab-av1/releases/latest || fail "ab-av1 release lookup failed."
+tag=$(jq -er '.tag_name | select(type == "string" and length > 0)' "$tmp/release.json") || fail "Invalid release metadata: missing tag."
+jq -r '.assets[]? | select(.name | test("-x86_64-unknown-linux-musl\\.tar\\.zst$")) | .browser_download_url // empty' "$tmp/release.json" > "$tmp/assets" || fail "Invalid release asset metadata."
+mapfile -t assets < "$tmp/assets"
+[[ ${#assets[@]} -eq 1 ]] || fail "Expected exactly one Linux x86_64 musl asset; found ${#assets[@]}."
+echo "Target ab-av1 release: $tag (reinstalling if already installed)."
+echo "Downloading ab-av1..."
+curl -fSL --show-error --connect-timeout 15 --max-time 600 -o "$tmp/ab-av1.tar.zst" "${assets[0]}" || fail "ab-av1 download failed."
+mkdir "$tmp/ab-av1"
+tar --use-compress-program=unzstd -xf "$tmp/ab-av1.tar.zst" -C "$tmp/ab-av1" || fail "ab-av1 extraction failed."
+[[ -f "$tmp/ab-av1/ab-av1" ]] || fail "Archive does not contain ab-av1."
+version=$("$tmp/ab-av1/ab-av1" --version 2>&1) || fail "Downloaded ab-av1 failed to run: $version"
+[[ "$version" == "ab-av1 ${tag#v}" ]] || fail "Downloaded version '$version' does not match release $tag."
+sudo install -m 755 "$tmp/ab-av1/ab-av1" /usr/local/bin/ab-av1 || fail "ab-av1 installation failed."
+version=$(/usr/local/bin/ab-av1 --version 2>&1) || fail "Installed ab-av1 failed to run: $version"
+[[ "$version" == "ab-av1 ${tag#v}" ]] || fail "Installed version '$version' does not match release $tag."
+hash -r
+resolved=$(command -v ab-av1 || true)
+if [[ -n "$resolved" && "$resolved" != /usr/local/bin/ab-av1 ]]; then
+  echo "Warning: PATH resolves ab-av1 to $resolved, which may shadow /usr/local/bin/ab-av1." >&2
+fi
+echo "Installed and verified $version at /usr/local/bin/ab-av1."
