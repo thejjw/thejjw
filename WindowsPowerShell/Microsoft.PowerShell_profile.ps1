@@ -2430,6 +2430,97 @@ function Get-ISOWeek {
     )
 }
 
+function Invoke-And {
+    <#
+.SYNOPSIS
+    Runs script blocks in sequence, stopping at the first failure, like bash's &&.
+.DESCRIPTION
+    Emulates bash's && chaining for Windows PowerShell 5.1, which has no &&/||
+    operators. Each block runs only when every earlier block succeeded. A
+    block succeeds when it writes no errors and any native executable in it
+    exits with code 0.
+
+    It reads $Error instead of $?: invoking a script block resets $? in the
+    caller even when the block's last statement failed with a non-terminating
+    error, so only the $Error stream reliably reports what the block wrote.
+
+    Commands joined inside a single block run relative to each other like
+    with ';': a failing cmdlet does not stop a native exe later in the same
+    block, but anything the block wrote to $Error (or a nonzero exe exit
+    code) still fails the whole chain.
+
+    A terminating error in a block is reported as exit code 1 and rethrown,
+    so the error record still reaches the caller.
+.PARAMETER Blocks
+    One or more script blocks to run in order.
+.EXAMPLE
+    PS C:\> then { git add -A } { git commit -m "fix" } { git push }
+
+    git commit runs only if git add succeeded, and git push only if commit
+    succeeded. The failing exit code (or 0) is emitted and $LASTEXITCODE is
+    set to match, so the caller can branch on it.
+.EXAMPLE
+    PS C:\> $result = then { cmd /c exit 3 } { 'skipped' }
+
+    Returns 3 without running the second block; $LASTEXITCODE is 3.
+.OUTPUTS
+    System.Int32. The exit code of the chain: 0 when every block succeeded,
+    otherwise the failing exit code (1 for a terminating error).
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        # ValueFromRemainingArguments is required so "then { a } { b }" binds
+        # both blocks: with plain [scriptblock[]] only the first binds.
+        [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
+        [scriptblock[]]$Blocks
+    )
+
+    # Validation attributes do not run when an optional parameter is omitted,
+    # so a bare "then" needs an explicit runtime guard instead of prompting.
+    if ($null -eq $Blocks -or @($Blocks).Count -eq 0) {
+        throw 'Invoke-And: at least one script block is required.'
+    }
+
+    foreach ($block in $Blocks) {
+        # Reset the global so a stale exit code from an unrelated earlier
+        # command cannot make this block look failed.
+        $global:LASTEXITCODE = 0
+        # An invoked script block resets $? in the caller even after it wrote
+        # non-terminating errors, so the $Error delta is the reliable per-block
+        # failure signal. $Error[0]'s identity also covers the case where
+        # $Error is already at its MaximumErrorCount cap and cannot grow.
+        $errorCount = $Error.Count
+        $firstError = if ($errorCount) { $Error[0] } else { $null }
+        try {
+            & $block
+        } catch {
+            # Terminating error: report failure and rethrow to keep the
+            # original error record visible to the caller.
+            $global:LASTEXITCODE = 1
+            throw
+        }
+        $blockErrored = ($Error.Count -ne $errorCount) -or
+            (($errorCount -gt 0) -and
+                -not [object]::ReferenceEquals($Error[0], $firstError))
+        if (-not $blockErrored -and 0 -eq $global:LASTEXITCODE) { continue }
+
+        # Failing code: propagate a native executable's nonzero exit code, or
+        # 1 when only cmdlets wrote errors.
+        $failing = if ($global:LASTEXITCODE) { $global:LASTEXITCODE } else { 1 }
+        $global:LASTEXITCODE = $failing
+        return $failing
+    }
+
+    # All blocks passed: normalize the global so callers can branch on it.
+    $global:LASTEXITCODE = 0
+    return 0
+}
+
+Set-Alias -Name then -Value Invoke-And
+
 function Get-AAA {
     <#
 .SYNOPSIS
