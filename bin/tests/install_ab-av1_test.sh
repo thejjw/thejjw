@@ -9,10 +9,12 @@ export PATH="$tmp/bin:$PATH" TEST_ROOT="$tmp"
 
 cat > "$tmp/bin/ffmpeg" <<'EOF'
 #!/bin/bash
+echo 'FFmpeg banner' >&2
 echo "--enable-libsvtav1 --enable-libvmaf --enable-libopus" | sed "s/${MISSING:-not-present}//"
 EOF
 cat > "$tmp/bin/curl" <<'EOF'
 #!/bin/bash
+printf '%s\n' "$*" >> "$TEST_ROOT/curl.log"
 [[ ${CURL_FAIL:-0} == 0 ]] || { echo 'connection failed' >&2; exit 7; }
 while [[ $# -gt 0 ]]; do
   if [[ $1 == -o ]]; then output=$2; shift; fi
@@ -67,6 +69,17 @@ run_case() {
   echo "PASS: $pattern"
 }
 run_case success 'Installed and verified ab-av1 1.2.3'
+grep -Fq 'FFmpeg banner' "$tmp/output"
+if grep -Fq -- '--insecure' "$tmp/curl.log"; then echo 'FAIL: insecure by default' >&2; exit 1; fi
+: > "$tmp/curl.log"
+bash "$tmp/installer" --insecure > "$tmp/output" 2>&1
+[[ $(grep -c -- '--insecure' "$tmp/curl.log") -eq 2 ]]
+: > "$tmp/curl.log"
+bash "$tmp/installer" --help > "$tmp/output" 2>&1
+if bash "$tmp/installer" --unknown > "$tmp/output" 2>&1; then exit 1; fi
+[[ ! -s "$tmp/curl.log" ]]
+MISSING=--enable-libopus bash "$tmp/installer" -k > "$tmp/output" 2>&1 || true
+grep -Fq -- '--insecure' "$tmp/curl.log"
 run_case failure 'ab-av1 release lookup failed' CURL_FAIL=1
 run_case failure 'Invalid release metadata' BAD_METADATA=1
 run_case failure 'ab-av1 extraction failed' TAR_FAIL=1
