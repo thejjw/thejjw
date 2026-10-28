@@ -4,6 +4,7 @@
 set -euo pipefail
 
 fail() { echo "Error: $*" >&2; exit 1; }
+helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/github_fetch.sh"
 
 curl_options=()
 while [[ $# -gt 0 ]]; do
@@ -19,6 +20,7 @@ if (( ${#curl_options[@]} )); then
 fi
 
 [[ "$(uname -m)" == x86_64 ]] || fail "only x86_64 (amd64) is supported."
+[[ -f "$helper" ]] || fail "github_fetch.sh must be alongside this installer."
 for tool in curl tar jq sudo; do
   command -v "$tool" >/dev/null || fail "$tool is required. Please install it."
 done
@@ -61,8 +63,7 @@ if check_ffmpeg; then
   echo "FFmpeg supports the required libraries."
 else
   echo "Downloading latest FFmpeg x64 build..."
-  curl "${curl_options[@]}" -fSL --show-error --connect-timeout 15 --max-time 600 \
-    -o "$tmp/ffmpeg.tar.xz" https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz || fail "FFmpeg download failed."
+  bash "$helper" "${curl_options[@]}" --output "$tmp/ffmpeg.tar.xz" https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz || { status=$?; echo 'FFmpeg download failed.' >&2; exit "$status"; }
   mkdir "$tmp/ffmpeg"
   tar -xJf "$tmp/ffmpeg.tar.xz" --strip-components=2 -C "$tmp/ffmpeg" --wildcards '*/bin/*' || fail "FFmpeg extraction failed."
   sudo cp "$tmp/ffmpeg/"* /usr/local/bin/ || fail "FFmpeg installation failed."
@@ -71,15 +72,14 @@ else
 fi
 
 echo "Checking latest ab-av1 release on GitHub..."
-curl "${curl_options[@]}" -fsSL --show-error --connect-timeout 15 --max-time 60 \
-  -o "$tmp/release.json" https://api.github.com/repos/alexheretic/ab-av1/releases/latest || fail "ab-av1 release lookup failed."
+bash "$helper" "${curl_options[@]}" --output "$tmp/release.json" https://api.github.com/repos/alexheretic/ab-av1/releases/latest || { status=$?; echo 'ab-av1 release lookup failed.' >&2; exit "$status"; }
 tag=$(jq -er '.tag_name | select(type == "string" and length > 0)' "$tmp/release.json") || fail "Invalid release metadata: missing tag."
 jq -r '.assets[]? | select(.name | test("-x86_64-unknown-linux-musl\\.tar\\.zst$")) | .browser_download_url // empty' "$tmp/release.json" > "$tmp/assets" || fail "Invalid release asset metadata."
 mapfile -t assets < "$tmp/assets"
 [[ ${#assets[@]} -eq 1 ]] || fail "Expected exactly one Linux x86_64 musl asset; found ${#assets[@]}."
 echo "Target ab-av1 release: $tag (reinstalling if already installed)."
 echo "Downloading ab-av1..."
-curl "${curl_options[@]}" -fSL --show-error --connect-timeout 15 --max-time 600 -o "$tmp/ab-av1.tar.zst" "${assets[0]}" || fail "ab-av1 download failed."
+bash "$helper" "${curl_options[@]}" --output "$tmp/ab-av1.tar.zst" "${assets[0]}" || { status=$?; echo 'ab-av1 download failed.' >&2; exit "$status"; }
 mkdir "$tmp/ab-av1"
 tar --use-compress-program=unzstd -xf "$tmp/ab-av1.tar.zst" -C "$tmp/ab-av1" || fail "ab-av1 extraction failed."
 [[ -f "$tmp/ab-av1/ab-av1" ]] || fail "Archive does not contain ab-av1."

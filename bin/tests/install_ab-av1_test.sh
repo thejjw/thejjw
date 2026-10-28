@@ -5,6 +5,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/install"
 sed "s|/usr/local/bin|$tmp/install|g" "$root/bin/install_ab-av1.sh" > "$tmp/installer"
+cp "$root/bin/github_fetch.sh" "$tmp/github_fetch.sh"
 export PATH="$tmp/bin:$PATH" TEST_ROOT="$tmp"
 
 cat > "$tmp/bin/ffmpeg" <<'EOF'
@@ -21,6 +22,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 echo data > "$output"
+printf 200
 EOF
 cat > "$tmp/bin/jq" <<'EOF'
 #!/bin/bash
