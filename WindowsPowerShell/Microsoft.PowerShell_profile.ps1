@@ -26,6 +26,7 @@ function Use-GhCredential {
     Replaces the repository-local GitHub credential helpers with an empty
     reset entry followed by gh. Repeated calls do not add duplicate entries.
     Uses the active gh account; select it separately with gh auth switch.
+    Prints the active account when available; lookup failures are ignored.
     SSH remotes are unaffected.
 .EXAMPLE
     PS C:\repo> Use-GhCredential
@@ -55,6 +56,19 @@ function Use-GhCredential {
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure the gh credential helper.' }
 
     Write-Host 'This repository now uses gh for GitHub HTTPS credentials.' -ForegroundColor Green
+    # Account lookup is informational and must not fail credential setup.
+    try {
+        $statusJson = gh auth status --active --hostname github.com --json hosts --no-refresh 2>$null
+        if ($LASTEXITCODE -eq 0 -and $statusJson) {
+            $status = $statusJson | ConvertFrom-Json -ErrorAction Stop
+            $account = $status.hosts.'github.com' | Where-Object { $_.active -and $_.login } | Select-Object -First 1
+            if ($account) {
+                Write-Host ("Current gh account: {0} (github.com)" -f $account.login) -ForegroundColor DarkGray
+            }
+        }
+    } catch {
+        # Keep the original output when gh cannot report an account.
+    }
     Write-Host 'Authenticate with gh auth login or select an account with gh auth switch.' -ForegroundColor DarkGray
 }
 
