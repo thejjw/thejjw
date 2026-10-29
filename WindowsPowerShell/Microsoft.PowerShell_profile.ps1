@@ -18,6 +18,46 @@ function prompt {
     "$([char]27)]9;9;`"$loc`"$([char]27)\" + $out
 }
 
+function Use-GhCredential {
+    <#
+.SYNOPSIS
+    Uses GitHub CLI for the current repository's GitHub HTTPS credentials.
+.DESCRIPTION
+    Replaces the repository-local GitHub credential helpers with an empty
+    reset entry followed by gh. Repeated calls do not add duplicate entries.
+    Uses the active gh account; select it separately with gh auth switch.
+    SSH remotes are unaffected.
+.EXAMPLE
+    PS C:\repo> Use-GhCredential
+    Configures this repository to use gh for github.com HTTPS authentication.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param()
+
+    foreach ($command in 'git', 'gh') {
+        if (-not (Get-Command $command -CommandType Application -ErrorAction SilentlyContinue)) {
+            throw "$command must be installed and available on PATH."
+        }
+    }
+
+    git rev-parse --git-dir *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'Run Use-GhCredential inside a Git repository.' }
+
+    # Preserve the empty native argument in Windows PowerShell 5.1.
+    # The empty helper resets helpers inherited from other configuration scopes.
+    git --% config --local --replace-all credential.https://github.com.helper ""
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to reset the repository GitHub credential helpers.' }
+
+    git config --local --add credential.https://github.com.helper '!gh auth git-credential'
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to configure the gh credential helper.' }
+
+    Write-Host 'This repository now uses gh for GitHub HTTPS credentials.' -ForegroundColor Green
+    Write-Host 'Authenticate with gh auth login or select an account with gh auth switch.' -ForegroundColor DarkGray
+}
+
 # Raw content URL used by Update-Profile to self-update; keep in sync with repo path
 $_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
 
