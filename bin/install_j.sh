@@ -911,8 +911,12 @@ fi
 # nrd - embed into shell profile if not already present
 # ---------------------------------------------------------------------------
 MARKER="# >>> nrd >>>"
+NRD_VERSION_MARKER="# nrd version 2"
 
 if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> nrd >>>" "# <<< nrd <<<"
+elif grep -qF "$MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$NRD_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "nrd: upgrading embedded function to version 2"
   remove_profile_section "$PROFILE" "# >>> nrd >>>" "# <<< nrd <<<"
 fi
 
@@ -922,6 +926,9 @@ else
   cat >> "$PROFILE" << 'NRD_EOF'
 
 # >>> nrd >>>
+# nrd version 2
+# Palette mirrored from WindowsPowerShell/Microsoft.PowerShell_profile.ps1
+# ($_NrdInternal.Colors); keep both lists in sync when either changes.
 # nrd - New Random Dir
 # Creates a randomly named directory and cd's into it.
 #   nrd                  random name in $PWD
@@ -960,13 +967,20 @@ nrd() {
   $verbose && echo "base: $base_path"
 
   local colors=(
-    amber aqua azure beige black blue bronze brown coral crimson cyan denim
-    ebony emerald fuchsia gold golden gray green indigo ivory jade lavender
-    lemon lilac lime magenta mahogany marigold maroon mint mocha navy ochre
-    olive onyx orange orchid peach pearl periwinkle pine pink plum purple red
-    rose ruby rust saffron sage salmon sapphire scarlet sepia silver slate tan
-    tangerine taupe teal topaz turquoise umber vermilion violet walnut white
-    wine yellow
+    alabaster alizarin amaranth amber amethyst apricot aqua azure beige
+    bisque black blue bronze brown burgundy cardinal carmine celadon
+    cerise cerulean champagne charcoal chartreuse chestnut chocolate citrine claret
+    cobalt copper coral cream crimson cyan denim ebony ecru
+    eggplant emerald fawn flax fuchsia garnet gold golden gray
+    green heather heliotrope indigo ivory jade jet khaki lavender
+    lemon lilac lime linen magenta mahogany maize malachite marigold
+    maroon mauve mint moccasin mocha mustard navy ochre olive
+    onyx orange orchid peach pearl peridot periwinkle persimmon peru
+    pine pink platinum plum puce pumpkin purple raspberry red
+    rose ruby russet rust saffron sage salmon sand sapphire
+    scarlet sepia sienna silver slate snow strawberry tan tangerine
+    taupe teal thistle tomato topaz turquoise umber vermilion violet
+    viridian walnut wheat white wine wisteria yellow
   )
   local adjectives=(
     ancient bold brisk calm clear cool curious deep eager fast gentle grand
@@ -982,9 +996,34 @@ nrd() {
   )
 
   if [[ -z "$name" ]]; then
+    # Leading colors already used by direct child directories, so a fresh
+    # scratch dir does not look like a sibling. Matched as a space-delimited
+    # set to stay compatible with bash 3.2 and zsh.
+    local used_colors=" " d leaf
+    for d in "$base_path"/*/; do
+      [[ -d "$d" ]] || continue
+      leaf="${d%/}"
+      leaf="${leaf##*/}"
+      used_colors+="${leaf%%-*} "
+    done
+
+    # Up to three draws for an unused color; accept a duplicate afterwards
+    # so creation still succeeds when the color pool is exhausted.
+    local color_attempts=3 c color
+    for ((c = 1; c <= color_attempts; c++)); do
+      color="${colors[RANDOM % ${#colors[@]}]}"
+      if [[ "$used_colors" != *" $color "* ]]; then
+        break
+      fi
+      echo "nrd: color '$color' already leads an existing directory; retrying ($c/$color_attempts)." >&2
+    done
+    if [[ "$used_colors" == *" $color "* ]]; then
+      echo "nrd: all $color_attempts color draws are in use; using '$color' anyway." >&2
+    fi
+
     local i
     for ((i = 1; i <= max_attempts; i++)); do
-      name="${colors[RANDOM % ${#colors[@]}]}-${adjectives[RANDOM % ${#adjectives[@]}]}-${nouns[RANDOM % ${#nouns[@]}]}"
+      name="$color-${adjectives[RANDOM % ${#adjectives[@]}]}-${nouns[RANDOM % ${#nouns[@]}]}"
       $verbose && echo "attempt $i: $name"
       [[ ! -e "$base_path/$name" ]] && break
       name=""
