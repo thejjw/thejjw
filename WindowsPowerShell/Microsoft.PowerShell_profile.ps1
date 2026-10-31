@@ -5145,6 +5145,10 @@ New-RandomDir creates a directory inside the specified BasePath. If -Name is
 not provided, a random human-readable name is generated. The command then
 changes the current location to the newly created directory.
 
+Random names prefer a leading color that no direct child directory of the base
+path already uses. After three duplicate draws the last draw is accepted, and
+both the rejected draws and that fallback are printed.
+
 Optional switches allow initializing a git repository with a synthetic local
 identity and writing the canonical AGENTS.md file. With both -Git and -Agents,
 the generated AGENTS.md is recorded as the repository's initial commit.
@@ -5232,9 +5236,34 @@ Last Edit: 2026-10
     Write-Verbose "Base path: $BasePath"
 
     if (-not $Name) {
+        # Leading colors already used by direct child directories, so a fresh
+        # scratch dir does not look like a sibling. Only tokens that are actual
+        # colors count; "src-api" must not look like a color collision.
+        $usedColors = @{}
+        foreach ($entry in @(Get-ChildItem -LiteralPath $BasePath -Directory -ErrorAction SilentlyContinue)) {
+            $prefix = ($entry.Name -split '-', 2)[0]
+            if ($prefix -and $colors -contains $prefix.ToLowerInvariant()) {
+                $usedColors[$prefix.ToLowerInvariant()] = $true
+            }
+        }
+
+        # Up to three draws for an unused color; accept a duplicate afterwards
+        # so creation still succeeds when the color pool is exhausted.
+        $colorAttempts = 3
+        $color = $null
+        for ($c = 1; $c -le $colorAttempts; $c++) {
+            $pick = $colors[(Get-Random -Minimum 0 -Maximum $colors.Count)]
+            $color = $pick
+            if (-not $usedColors.ContainsKey($pick)) { break }
+            Write-Host ("Color '{0}' already leads an existing directory; retrying ({1}/{2})." -f $pick, $c, $colorAttempts) -ForegroundColor DarkGray
+        }
+        if ($usedColors.ContainsKey($color)) {
+            Write-Host ("All {0} color draws are in use; using '{1}' anyway." -f $colorAttempts, $color) -ForegroundColor Yellow
+        }
+
         for ($i = 1; $i -le $MaxAttempts; $i++) {
             $Name = '{0}-{1}-{2}' -f
-            $colors[(Get-Random -Minimum 0 -Maximum $colors.Count)],
+            $color,
             $adjectives[(Get-Random -Minimum 0 -Maximum $adjectives.Count)],
             $nouns[(Get-Random -Minimum 0 -Maximum $nouns.Count)]
 
