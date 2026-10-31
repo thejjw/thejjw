@@ -18,60 +18,6 @@ function prompt {
     "$([char]27)]9;9;`"$loc`"$([char]27)\" + $out
 }
 
-function Use-GhCredential {
-    <#
-.SYNOPSIS
-    Uses GitHub CLI for the current repository's GitHub HTTPS credentials.
-.DESCRIPTION
-    Replaces the repository-local GitHub credential helpers with an empty
-    reset entry followed by gh. Repeated calls do not add duplicate entries.
-    Uses the active gh account; select it separately with gh auth switch.
-    Prints the active account when available; lookup failures are ignored.
-    SSH remotes are unaffected.
-.EXAMPLE
-    PS C:\repo> Use-GhCredential
-    Configures this repository to use gh for github.com HTTPS authentication.
-.NOTES
-    Author: jjw(@thejjw)
-    Last Edit: 2026-10
-#>
-    [CmdletBinding()]
-    param()
-
-    foreach ($command in 'git', 'gh') {
-        if (-not (Get-Command $command -CommandType Application -ErrorAction SilentlyContinue)) {
-            throw "$command must be installed and available on PATH."
-        }
-    }
-
-    git rev-parse --git-dir *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'Run Use-GhCredential inside a Git repository.' }
-
-    # Preserve the empty native argument in Windows PowerShell 5.1.
-    # The empty helper resets helpers inherited from other configuration scopes.
-    git --% config --local --replace-all credential.https://github.com.helper ""
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to reset the repository GitHub credential helpers.' }
-
-    git config --local --add credential.https://github.com.helper '!gh auth git-credential'
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to configure the gh credential helper.' }
-
-    Write-Host 'This repository now uses gh for GitHub HTTPS credentials.' -ForegroundColor Green
-    # Account lookup is informational and must not fail credential setup.
-    try {
-        $statusJson = gh auth status --active --hostname github.com --json hosts --no-refresh 2>$null
-        if ($LASTEXITCODE -eq 0 -and $statusJson) {
-            $status = $statusJson | ConvertFrom-Json -ErrorAction Stop
-            $account = $status.hosts.'github.com' | Where-Object { $_.active -and $_.login } | Select-Object -First 1
-            if ($account) {
-                Write-Host ("Current gh account: {0} (github.com)" -f $account.login) -ForegroundColor DarkGray
-            }
-        }
-    } catch {
-        # Keep the original output when gh cannot report an account.
-    }
-    Write-Host 'Authenticate with gh auth login or select an account with gh auth switch.' -ForegroundColor DarkGray
-}
-
 # Raw content URL used by Update-Profile to self-update; keep in sync with repo path
 $_ProfileUpdateUrl = "https://raw.githubusercontent.com/thejjw/thejjw/refs/heads/main/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
 
@@ -85,6 +31,629 @@ $_UvInstallUrl = "https://astral.sh/uv/install.sh"
 # Kept here so it can be updated in one place; bump the Chrome major version periodically to
 # stay current (latest stable: https://chromereleases.googleblog.com/).
 $_DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+
+# --- Internal configuration groups --------------------------------------
+# Hashtables read by their owning functions, kept together so the tunable
+# values for every feature are found and edited in one place.
+
+# Internal configuration group for New-RandomDir to keep global namespace clean
+$_NrdInternal = @{
+    Colors         = @(
+        'alabaster', 'alizarin', 'amaranth', 'amber', 'amethyst', 'apricot', 'aqua', 'azure', 'beige',
+        'bisque', 'black', 'blue', 'bronze', 'brown', 'burgundy', 'cardinal', 'carmine', 'celadon',
+        'cerise', 'cerulean', 'champagne', 'charcoal', 'chartreuse', 'chestnut', 'chocolate', 'citrine', 'claret',
+        'cobalt', 'copper', 'coral', 'cream', 'crimson', 'cyan', 'denim', 'ebony', 'ecru',
+        'eggplant', 'emerald', 'fawn', 'flax', 'fuchsia', 'garnet', 'gold', 'golden', 'gray',
+        'green', 'heather', 'heliotrope', 'indigo', 'ivory', 'jade', 'jet', 'khaki', 'lavender',
+        'lemon', 'lilac', 'lime', 'linen', 'magenta', 'mahogany', 'maize', 'malachite', 'marigold',
+        'maroon', 'mauve', 'mint', 'moccasin', 'mocha', 'mustard', 'navy', 'ochre', 'olive',
+        'onyx', 'orange', 'orchid', 'peach', 'pearl', 'peridot', 'periwinkle', 'persimmon', 'peru',
+        'pine', 'pink', 'platinum', 'plum', 'puce', 'pumpkin', 'purple', 'raspberry', 'red',
+        'rose', 'ruby', 'russet', 'rust', 'saffron', 'sage', 'salmon', 'sand', 'sapphire',
+        'scarlet', 'sepia', 'sienna', 'silver', 'slate', 'snow', 'strawberry', 'tan', 'tangerine',
+        'taupe', 'teal', 'thistle', 'tomato', 'topaz', 'turquoise', 'umber', 'vermilion', 'violet',
+        'viridian', 'walnut', 'wheat', 'white', 'wine', 'wisteria', 'yellow'
+    )
+    Adjectives     = @(
+        'ancient', 'bold', 'brisk', 'calm', 'clear', 'cool', 'curious', 'deep', 'eager', 'fast',
+        'gentle', 'grand', 'hidden', 'icy', 'jolly', 'kind', 'lively', 'lucky', 'misty', 'modern',
+        'mossy', 'nimble', 'odd', 'quiet', 'rapid', 'shiny', 'silent', 'small', 'solar', 'steady',
+        'stormy', 'swift', 'tiny', 'urban', 'warm', 'wild', 'wise', 'young'
+    )
+    Nouns          = @(
+        'brook', 'cabin', 'cloud', 'comet', 'delta', 'dream', 'falcon', 'field', 'fire', 'forest',
+        'garden', 'glade', 'harbor', 'hill', 'lab', 'lake', 'leaf', 'meadow', 'moon', 'mountain',
+        'otter', 'owl', 'path', 'peak', 'pine', 'planet', 'pond', 'rabbit', 'river', 'shadow',
+        'sky', 'star', 'stone', 'sun', 'thicket', 'trail', 'tree', 'valley', 'wave', 'wind',
+        'wolf', 'wood', 'workshop'
+    )
+
+    # Canonical agent-guidance template; keep the nrd AGENT_EOF copy in bin/install_j.sh in sync.
+    AgentsMarkdown = @'
+# AGENTS.md
+
+## Grounding
+
+* Always utilize web search to ground your answers, ensuring all technical advice and references are accurate and up-to-date.
+
+## Language
+
+* Reply in the language the user writes in -- an English request gets an English
+  answer, a Korean one Korean -- and never switch to another language (on your
+  own) unless the user wrote in it or explicitly asked. A model's tendency to
+  drift into Chinese on non-Chinese prompts is not a reason to follow it.
+
+## Environment
+
+* Platform: Windows 11.
+* Do not assume a specific shell. Different agent harnesses run this file with
+  different interpreters (pi/omp variants use a persistent POSIX-style bash even
+  on Windows; some other tools use PowerShell). Before writing compound commands,
+  check what you are actually running (`$BASH_VERSION` vs `$PSVersionTable`)
+  and use that interpreter's native syntax. Forward slashes work everywhere;
+  backslashes separate paths only in PowerShell.
+* Prefer your harness's dedicated file-read/search/edit/background-process tools
+  when provided; fall back to plain commands (`git`, `npm`, `rg`, `fd`) otherwise.
+  Never launch interactive TUIs (e.g. fzf) from a non-interactive tool call --
+  they hang without a TTY.
+* If invoking `git`, `npm`, `dotnet`, or other cross-platform CLIs, those are fine as-is.
+
+## Task Scope and Consent
+
+* Resolve the request literally. A question or lookup ("can you look up ...",
+  "how does X work", "what would it take to ...") is answered with findings,
+  options, and a proposed diff -- no file writes, no installs, no config changes.
+* "I want to add/change X" is a statement of intent, not approval to make the
+  change. Present the plan, then wait for an explicit go-ahead.
+* Get explicit approval before anything that mutates the repo or the machine:
+  writing files outside the scope you were handed, installing software or fonts,
+  touching the registry, deleting anything, or any network-mutating command.
+* Never spend the same turn on a scope question and extra work ("while I was at
+  it, I also ...").
+
+## Code Style
+
+* Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
+* Comment every public function/method and any non-obvious logic inline.
+* Prefer ASCII in source code. Use non-ASCII characters only when required for user-facing text, test fixtures, protocol/data literals, or existing project conventions.
+
+## Git Discipline
+
+* If the requested work is inside a cloned Git repository nested under this directory, treat that nested repository as the project root. Verify with `git rev-parse --show-toplevel`, then stage and commit only within that repository; do not stage or commit in any containing parent repository unless explicitly directed.
+* Commit every logical change as its own commit with a descriptive commit message -- self-contained and independently revertable -- so one multi-part request (e.g. backend, frontend, test, ...) lands as several commits; never bundle unrelated changes.
+* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md` and similar local `.md` files used to guide agents.
+* This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
+* Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
+* Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
+* Never append Co-Authored-By trailers to commit messages.
+* Use purpose-based branch names (e.g. `feat/<description>`, `fix/<description>`, `docs/<description>`); never use `agent/`, `ai/`, or `codex/` prefixes unless explicitly directed. Exception: fixes that directly answer an advisor review note present in this session (an `[oc-advisor-note]` message or an `oc-advisor` tool result) stay on the current branch - commit them where the reviewed work lives rather than opening a branch.
+* Never run `git push` unless explicitly directed; keep all commits local.
+
+## Dependencies
+
+* Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
+* Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, prefer a non-deprecated alternative when practical; otherwise warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
+
+## Subagents
+
+* Default to delegating context-heavy work to subagents so the main session
+  accumulates conclusions, not raw process. Strong candidates: codebase
+  exploration/research, reading or summarizing many files, and independent
+  sub-tasks that can run in parallel. The subagent absorbs the noisy tool
+  calls and returns only a summary.
+* Do not wrap trivial or single tool calls in a subagent. A one-file read or a
+  quick `rg`/`fd` search is cheaper run directly than paying the spawn and
+  round-trip overhead.
+* Keep tightly-coupled work in the main context. Do not delegate edits that
+  depend on each other's output, and never have two subagents edit the same
+  file -- they share the working directory and will clobber each other.
+* Subagents start with a fresh context and the task prompt is the only input
+  channel. Pass every needed file path, error message, and decision explicitly;
+  they cannot see the main conversation.
+* Give each subagent explicit success criteria and a structured return format
+  so it reports cleanly instead of exploring open-endedly.
+* Where it cuts cost without hurting quality, route exploration/search
+  subagents to a smaller/faster model and reserve the main session for
+  synthesis and architectural judgment.
+'@
+}
+
+# Internal configuration for Install-GlobalClaudeMd and related Claude Code setup functions
+# DeepSeek Web Search behavior: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
+$_ClaudeInternal = @{
+    GlobalClaudeMd = @"
+## MCP Tool Preferences
+
+**When using Z.ai models (glm-*):**
+Use Z.ai MCP servers for:
+- Web searches
+- Web content
+- Image analysis
+- Text extraction
+
+**When using MiniMax models (MiniMax-*):**
+Note: MiniMax-M3.1 Flash natively supports multimodal input (images and video) in addition to MCP.
+Use MiniMax MCP server for:
+- Web searches (``web_search``)
+- Image understanding (``understand_image``)
+
+**When using DeepSeek models (deepseek-*):**
+Use Claude Code's built-in Web Search tool for web searches; DeepSeek supports it natively through its API with costs.
+deepseek-flash natively supports multimodal image understanding (both OpenAI and Anthropic formats). deepseek-v4-pro is text-only; use MiniMax MCP or Z.ai MCP servers if image analysis is required with legacy pro models.
+**When using genuine Anthropic account (Claude Code with native models):**
+Use built-in web fetch and web search tools directly -- they will yield the best results.
+
+If an MCP tool is unavailable or underperforming, inform the user and suggest alternatives.
+"@
+    DownloadBaseUrl = 'https://downloads.claude.ai/claude-code-releases'
+}
+
+# Internal configuration for the AI API key credential helpers (Set-AiApiKeysCS,
+# Load-AiApiKeysFromCS). Single source of truth: register a provider key once here
+# instead of editing a literal list inside each helper.
+$_AiKeysInternal = @{
+    # Every key shares one resource userName so they form a logical group in Credential
+    # Manager and can be enumerated/cleared together.
+    UserName = 'api-key'
+    # Keys Set-AiApiKeysCS prompts for and Load-AiApiKeysFromCS injects into the session.
+    Names    = @(
+        'DEEPSEEK_API_KEY'
+        'ZAI_API_KEY'
+        'MINIMAX_API_KEY'
+        'KIMI_CODE_PLAN_API_KEY'
+        'QWEN_TOKEN_PLAN_API_KEY'
+        'GEMINI_API_KEY'
+        'NVIDIA_API_KEY'
+        'OPENROUTER_API_KEY'
+        'OPENCODE_GO_API_KEY'
+        'AMDRC_API_KEY'
+        'QWENCLOUD_PAYG_API_KEY'
+    )
+    # Aliases stored alongside Names but never prompted for on their own: saving Source
+    # writes the same secret to Alias. Loaded like any other entry.
+    Aliases  = @(
+        @{ Alias = 'BAILIAN_TOKEN_PLAN_API_KEY'; Source = 'QWEN_TOKEN_PLAN_API_KEY' }
+    )
+}
+
+# Internal configuration for Install-AiTools and Invoke-AiUpgrade
+$_AiToolsInternal = @{
+    PowerShellModules      = @(
+        @{
+            Name               = 'Pester'
+            MinimumVersion     = '6.0'
+            Repository         = 'PSGallery'
+            Scope              = 'CurrentUser'
+            Force              = $true
+            SkipPublisherCheck = $true
+        }
+    )
+    WingetPackages         = @(
+        'Microsoft.Coreutils',
+        'Microsoft.VCRedist.2015+.x64',
+        'Microsoft.VCRedist.2015+.x86',
+        'Microsoft.IntelligentTerminal',
+        'ShiningLight.OpenSSL.Light',
+        'TwibrightLabs.Links',
+        'OpenJS.NodeJS.LTS',
+        'GnuPG.Gpg4win',
+        'Oven-sh.Bun',
+        '7zip.7zip',
+        'FiloSottile.age',
+        'GitHub.cli',
+        'Notepad++.Notepad++',
+        'Lapce.Lapce',
+        'Microsoft.Edit',
+        'Python.PythonInstallManager',
+        'cURL.cURL',
+        'aria2.aria2',
+        'jqlang.jq',
+        'BurntSushi.ripgrep.MSVC',
+        'junegunn.fzf',
+        'sharkdp.fd',
+        'JFLarvoire.Ag',
+        'chmln.sd',
+        'dandavison.delta',
+        'sharkdp.bat',
+        'eza-community.eza',
+        'dalance.procs',
+        'MrKaran.Doggo',
+        'ducaale.xh',
+        'medialab.xan',
+        'oschwartz10612.Poppler',
+        'uutils.diffutils',
+        'EliFulkerson.tcping',
+        'FujiApple.Trippy',
+        'natesales.q',
+        'tstack.lnav',
+        'Microsoft.Pave',
+        'Microsoft.err',
+        'wagoodman.dive',
+        'astral-sh.uv',
+        'pnpm.pnpm',
+        'SQLite.SQLite',
+        'koalaman.shellcheck',
+        'Microsoft.VisualStudioCode',
+        'VSCodium.VSCodium',
+        'marlocarlo.psmux',
+        'marlocarlo.pstop',
+        'marlocarlo.psnet',
+        'MarcoPontello.TrID'
+    )
+    MoreAiWingetPackages   = @(
+        'SST.OpenCodeDesktop',
+        'Google.Antigravity',
+        'Google.AntigravityIDE',
+        'ZhipuAI.ZCode',
+        'MiniMax.MiniMaxCode',
+        'Anysphere.Cursor'
+    )
+    ExtendedWingetPackages = @(
+        'JRSoftware.InnoSetup',
+        'TortoiseGit.TortoiseGit',
+        'Cloudflare.cloudflared',
+        'Insecure.Nmap',
+        'Buct0r.fullfetch',
+        'HTTPie.HTTPie',
+        'Orange-OpenSource.Hurl',
+        'Gyan.FFmpeg',
+        'ImageMagick.ImageMagick',
+        'Inkscape.Inkscape',
+        'Google.Libwebp',
+        'libjxl.libjxl',
+        'JohnMacFarlane.Pandoc',
+        'tesseract-ocr.tesseract',
+        'AquaSecurity.Trivy',
+        'Cisco.ClamAV',
+        'astral-sh.ruff',
+        'Microsoft.Sqlcmd',
+        'HeidiSQL.HeidiSQL',
+        'TheDocumentFoundation.LibreOffice',
+        'OlegShparber.Zeal',
+        'Mozilla.SeaMonkey',
+        'Microsoft.Sysinternals.Suite'
+    )
+    DbWingetPackages       = @(
+        'Oracle.MySQLShell',
+        'Oracle.SQLcl',
+        'PostgreSQL.psqlODBC',
+        'PostgreSQL.pgAdmin'
+    )
+    SdkWingetPackages      = @(
+        'Microsoft.OpenJDK.25',
+        'Rustlang.Rustup',
+        'GoLang.Go',
+        'StrawberryPerl.StrawberryPerl'
+    )
+    DockerWingetPackage    = 'Docker.DockerDesktop'
+    PodmanWingetPackage    = 'RedHat.Podman'
+    GitWingetPackage       = 'Git.Git'
+    Urls                   = @{
+        AgyCli        = 'https://antigravity.google/cli/install.ps1'
+        ClaudeCli     = 'https://claude.ai/install.ps1'
+        CodexCli      = 'https://chatgpt.com/codex/install.ps1'
+        CursorCli     = 'https://cursor.com/install?win32=true'
+        CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
+        AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
+        OmpTps        = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
+    }
+
+    # REA reverse-engineering toolchain used by the -REA stage of Install-AiTools.
+    # The Ghidra release is resolved from the GitHub releases API at run time; the
+    # constants below are the fallback used when the API cannot be reached.
+    ReaNpmPackage    = 'rea-agents'
+    # Same id as SdkWingetPackages; the OpenJDK MSI is per-machine, so the REA
+    # stage installs it without --scope user.
+    ReaGhidraJdkWingetPackage = 'Microsoft.OpenJDK.25'
+    Ghidra           = @{
+        Version      = '12.1.4'
+        AssetName    = 'ghidra_12.1.4_PUBLIC_20260921.zip'
+        Url          = 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip'
+        Bytes        = 569649598
+        Sha256       = 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db'
+        Root         = 'C:\Tools'
+        # Ghidra's own application.properties declares application.java.min=21
+        # with no maximum, so any JDK >= 21 satisfies its launcher check.
+        JavaMajorMin = 21
+    }
+
+    NpmPackages            = @(
+        '@earendil-works/pi-coding-agent',
+        '@oh-my-pi/pi-coding-agent',
+        '@musistudio/claude-code-router',
+        'oh-my-free-models',
+        '@firecrawl/anydoc',
+        'typescript',
+        'eslint',
+        'prettier',
+        'terser'
+    )
+
+    # commented out entries:
+    # '@mimo-ai/cli',
+    MoreAiNpmPackages      = @(
+        '@qwen-code/qwen-code',
+        '@moonshot-ai/kimi-code',
+        '@deepseek-ai/dsh',
+        '@xai-official/grok',
+        'gloomberb'
+    )
+    # Keep this registry synchronized with AI CLIs managed by Install-AiTools
+    # that ship a native self-update command. Probe defaults to Cmd; set it when
+    # a CLI's updater probe differs from the command. npm-installed packages are
+    # not listed here -- aiu updates them straight from NpmPackages and
+    # MoreAiNpmPackages above.
+    UpgradeCommands        = @(
+        @{ Label = 'agy';      Cmd = 'agy';      Args = @('update') },
+        @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
+        @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
+        @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
+        @{ Label = 'cursor';   Cmd = 'agent';    Probe = 'cursor-agent'; Args = @('update') },
+        @{ Label = 'rea';      Cmd = 'rea';      Args = @('update') }
+    )
+}
+
+# Internal configuration for Install-Fonts.
+#
+# Each pack is pinned to a specific upstream release. When bumping a version,
+# update Url, Bytes, and (if the archive layout changed) Include/Probe together.
+#
+# Fields:
+#   Name     Human-readable pack name; also the token matched by -Name filtering.
+#   Url      Direct download URL (GitHub release asset or CDN). Warned on failure.
+#   Bytes    Download size measured at authoring time; used for the pre-run size
+#            report so the user sees the transfer cost before anything downloads.
+#   Fonts    Approx. count of font files this pack installs after Include filtering
+#            (from archive inspection); used only for the pre-run summary total.
+#   Kind     'Zip' = archive to open with .NET; '7z' = archive to extract with
+#            Windows' inbox tar.exe (any archive it reads, so .7z or .tar.xz);
+#            'File' = the URL is itself a single font.
+#   Include  Regex (case-insensitive) matched against each archive entry's relative
+#            path. Only matching entries are extracted+installed. Chosen per pack
+#            to install ONE clean set and skip redundant format folders plus
+#            __MACOSX/AppleDouble junk. When a pack ships multiple formats the
+#            preference is variable -> OTF -> static, EXCEPT where a font's
+#            variable build renames its family (e.g. "Pretendard Variable" instead
+#            of "Pretendard", verified by reading the name table); those fall back
+#            to a static set so a plain family name keeps resolving.
+#            Ignored for Kind='File'.
+#   Probe    A representative installed font filename. If it already exists in the
+#            target Fonts folder, the whole pack is skipped (no download) unless
+#            -Force is passed. This is the cheap pre-download idempotency check.
+#   Extended $true packs are skipped unless -Extended is passed. This keeps the
+#            especially large Source Han CJK downloads, and superseded entries
+#            kept only as a fallback (e.g. JetBrainsMono), explicitly opt-in.
+#   Note     Optional freeform note shown in -ListOnly output.
+$_FontInstallInternal = @{
+    # Per-user (no admin) install target and its font-registration registry key.
+    UserFontsDir = (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts')
+    UserRegPath  = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+    # All-users (-AllUsers, requires admin) install target and its registry key.
+    MachineFontsDir = (Join-Path $env:WINDIR 'Fonts')
+    MachineRegPath  = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
+
+    Packs = @(
+        [pscustomobject]@{ Name = 'IntelOneMono';        Url = 'https://github.com/intel/intel-one-mono/releases/download/V1.4.0/ttf.zip'; Bytes = 505443; Fonts = 8; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$'; Probe = 'IntelOneMono-Regular.ttf'; Extended = $false; Note = 'Screen-optimized TTF, 4 weights with matching italics; family "Intel One Mono".' }
+        [pscustomobject]@{ Name = 'GoormSansCode';       Url = 'https://statics.goorm.io/fonts/GoormSansCode/v1.0.1/goorm-sans-code-1.0.1.zip'; Bytes = 4528715;   Fonts = 1;  Kind = 'Zip';  Include = '(?i)^goorm sans code 2/Public/[^/]+\.ttf$'; Probe = 'goorm_Sans_Code_400.ttf';                 Extended = $false; Note = 'Coding sans (single weight).' }
+        [pscustomobject]@{ Name = 'Jetendard';           Url = 'https://github.com/kuskhan/jetendard/releases/download/v0.1.0/Jetendard-TTF.zip'; Bytes = 37427141; Fonts = 16; Kind = 'Zip';  Include = '(?i)^ttf/[^/]+\.ttf$';                     Probe = 'Jetendard-Regular.ttf';                  Extended = $false; Note = 'Static TTF weights.' }
+        [pscustomobject]@{ Name = 'YeomilMono';          Url = 'https://github.com/taevel02/yeomil-mono/releases/download/v1.1.1/YeomilMono-TTF.zip'; Bytes = 3055540; Fonts = 3; Kind = 'Zip';  Include = '(?i)^[^/]+\.ttf$';                         Probe = 'YeomilMono-Regular.ttf';                 Extended = $false; Note = 'Monospace, 3 weights.' }
+        [pscustomobject]@{ Name = 'Pretendard';          Url = 'https://github.com/orioncactus/pretendard/releases/download/v1.3.9/Pretendard-1.3.9.zip'; Bytes = 47304526; Fonts = 9; Kind = 'Zip'; Include = '(?i)^public/static/alternative/[^/]+\.ttf$'; Probe = 'Pretendard-Regular.ttf';        Extended = $false; Note = 'Static TTF: its variable build registers as family "Pretendard Variable", so static is used for a clean "Pretendard" family.' }
+        [pscustomobject]@{ Name = 'WantedSans';          Url = 'https://github.com/wanteddev/wanted-sans/releases/download/v1.0.3/WantedSans-1.0.3.zip'; Bytes = 21656532; Fonts = 7; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$';                     Probe = 'WantedSans-Regular.ttf';                 Extended = $false; Note = 'Static TTF: variable build registers as "Wanted Sans Variable"; static keeps a clean "Wanted Sans" family.' }
+        [pscustomobject]@{ Name = 'Galmuri';             Url = 'https://github.com/quiple/galmuri/releases/download/v2.40.3/Galmuri-v2.40.3.zip'; Bytes = 19936233; Fonts = 20; Kind = 'Zip'; Include = '(?i)^[^/]+\.(ttf|ttc)$';                   Probe = 'Galmuri11.ttf';                          Extended = $false; Note = 'Pixel font family; all root-level ttf/ttc.' }
+        [pscustomobject]@{ Name = 'OpenDyslexic';        Url = 'https://github.com/antijingoist/opendyslexic/releases/download/v0.91.12/opendyslexic-0.910.12-rc2-2019.10.17.zip'; Bytes = 3627458; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';               Probe = 'OpenDyslexic-Regular.otf';               Extended = $false; Note = 'OTF; skips eot/woff web formats.' }
+        [pscustomobject]@{ Name = 'FiraCode';            Url = 'https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip'; Bytes = 2462987; Fonts = 6; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$';                          Probe = 'FiraCode-Regular.ttf';                   Extended = $false; Note = 'Static TTF: the VF defaults to Light weight and legacy apps see "Fira Code Light"; static defaults to Regular with a clean "Fira Code" family.' }
+        [pscustomobject]@{ Name = 'SarasaGothicK';       Url = 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaGothicK-TTF-1.0.40.7z'; Bytes = 63464316; Fonts = 10; Kind = '7z'; Include = '(?i)^SarasaGothicK-[^/]+\.ttf$'; Probe = 'SarasaGothicK-Regular.ttf'; Extended = $false; Note = 'Korean Sarasa Gothic, 5 hinted weights with italics. Requires Windows tar.exe.' }
+        [pscustomobject]@{ Name = 'SarasaMonoK';         Url = 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaMonoK-TTF-1.0.40.7z'; Bytes = 66316218; Fonts = 10; Kind = '7z'; Include = '(?i)^SarasaMonoK-[^/]+\.ttf$'; Probe = 'SarasaMonoK-Regular.ttf'; Extended = $false; Note = 'Korean monospaced Sarasa, 5 hinted weights with italics. Requires Windows tar.exe.' }
+        [pscustomobject]@{ Name = 'SourceHanSans';       Url = 'https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/02_SourceHanSans-VF.zip'; Bytes = 888816761; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSans-VF\.ttf\.ttc$'; Probe = 'SourceHanSans-VF.ttf.ttc';       Extended = $true;  Note = 'LARGE ~848 MB. Installs only the pan-CJK OTC variable collection.' }
+        [pscustomobject]@{ Name = 'SourceHanSerif';      Url = 'https://github.com/adobe-fonts/source-han-serif/releases/download/2.003R/02_SourceHanSerif-VF.zip'; Bytes = 750817685; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSerif-VF\.ttf\.ttc$'; Probe = 'SourceHanSerif-VF.ttf.ttc';   Extended = $true;  Note = 'LARGE ~716 MB. Installs only the pan-CJK OTC variable collection.' }
+        [pscustomobject]@{ Name = 'SourceHanMono';       Url = 'https://github.com/adobe-fonts/source-han-mono/releases/download/1.002/SourceHanMono.ttc'; Bytes = 122117628; Fonts = 1; Kind = 'File'; Include = $null;                              Probe = 'SourceHanMono.ttc';                      Extended = $true;  Note = 'LARGE ~116 MB. Direct .ttc download (no archive).' }
+        # Opt-in fallback: the default set installs JetBrainsMonoNerdMono, the same
+        # typeface plus the Nerd icon glyphs. Restore Extended = $false below if
+        # JetBrainsMonoNerdMono ever ceases to exist upstream.
+        [pscustomobject]@{ Name = 'JetBrainsMono';       Url = 'https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip'; Bytes = 5622857; Fonts = 2; Kind = 'Zip'; Include = '(?i)^fonts/variable/[^/]+\.ttf$';         Probe = 'JetBrainsMono[wght].ttf';                Extended = $true;  Note = 'FALLBACK (opt-in): official variable TTF (upright + italic); registers cleanly as "JetBrains Mono", so variable is kept over the static ttf/ set. Superseded in the default set by JetBrainsMonoNerdMono.' }
+        [pscustomobject]@{ Name = 'JetBrainsMonoNerdMono'; Url = 'https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.tar.xz';     Bytes = 7284244; Fonts = 16; Kind = '7z'; Include = '(?i)^JetBrainsMonoNerdFontMono-[^/]+\.ttf$'; Probe = 'JetBrainsMonoNerdFontMono-Regular.ttf'; Extended = $false; Note = 'Nerd Fonts v3.5.1 patched build of JetBrains Mono 2.304 (icons + Powerline glyphs); JetBrains ships no Nerd build, so this comes from the upstream patch project. "Mono" keeps every icon one cell wide so the grid stays aligned; the -NF/-Propo variants and the -NL (no-ligature) set are skipped. The 7.3 MB .tar.xz is used instead of the 134 MB all-variant .zip, which holds the same files.' }
+        [pscustomobject]@{ Name = 'IBMPlexMono';         Url = 'https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-mono%402.5.0/ibm-plex-mono.zip'; Bytes = 6940652; Fonts = 16; Kind = 'Zip'; Include = '(?i)^ibm-plex-mono/fonts/complete/otf/[^/]+\.otf$'; Probe = 'IBMPlexMono-Regular.otf';        Extended = $false; Note = 'OTF, all 16 weights incl. italics; skips ttf/woff/woff2.' }
+        [pscustomobject]@{ Name = 'IBMPlexSansKR';       Url = 'https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-sans-kr%401.1.0/ibm-plex-sans-kr.zip'; Bytes = 73268731; Fonts = 8; Kind = 'Zip'; Include = '(?i)^ibm-plex-sans-kr/fonts/complete/otf/[^/]+\.otf$'; Probe = 'IBMPlexSansKR-Regular.otf';    Extended = $false; Note = 'LARGE ~73 MB (full zip also bundles ttf/woff/woff2); installs OTF, all 8 Korean weights.' }
+        [pscustomobject]@{ Name = 'MonaSans';            Url = 'https://github.com/github/mona-sans/releases/download/v2.0.27/mona-sans-variable-v2.0.27.zip'; Bytes = 2674251; Fonts = 11; Kind = 'Zip'; Include = '(?i)^fonts/variable/[^/]+\.ttf$';          Probe = 'MonaSansVF[opsz,wght].ttf';              Extended = $false; Note = 'Variable-only distribution (multiple width/optical axes).' }
+        [pscustomobject]@{ Name = 'SUIT';                Url = 'https://github.com/sun-typeface/SUIT/releases/download/v2.0.5/SUIT-Variable-ttf.zip'; Bytes = 812043; Fonts = 1; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                            Probe = 'SUIT-Variable.ttf';                      Extended = $false; Note = 'Single variable TTF.' }
+        [pscustomobject]@{ Name = 'MonoplexCJKNerd';     Url = 'https://github.com/y-kim/monoplex/releases/download/monoplex-cjk-nerd-font-1.1.0/MonoplexCJKNerdFont_v1.1.0.zip'; Bytes = 125695049; Fonts = 16; Kind = 'Zip'; Include = '(?i)^MonoplexCJKNerdFont/[^/]+\.ttf$';              Probe = 'MonoplexCJKNerdFont-Regular.ttf';          Extended = $false; Note = 'LARGE ~120 MB. Monospace CJK programming font with Nerd Fonts 3.5.1 icons (3,705 PUA + 6,896 Nerd private-use glyphs); family "Monoplex CJK Nerd Font". Hangul + CJK Ext-A + ~21k CJK unified ideographs. 8 weights (Thin..Bold plus Text) with italics. Replaces the v0.0.2 MonoplexKR pack, whose Nerd family predates the Nerd private-use plane.' }
+        [pscustomobject]@{ Name = 'MinSans';             Url = 'https://github.com/poposnail61/min-sans/releases/download/v1.4.2/fonts.zip'; Bytes = 31533194; Fonts = 10; Kind = 'Zip'; Include = '(?i)^fonts/static/[^/]+\.otf$';              Probe = 'MinSans-Regular.otf';                    Extended = $false; Note = 'Static OTF: variable build registers as "Min Sans VF"; static keeps a clean "Min Sans" family. Skips __MACOSX.' }
+        [pscustomobject]@{ Name = 'Dalmoori';            Url = 'https://github.com/RanolP/dalmoori-font/releases/download/v0.200/dalmoori-font.zip'; Bytes = 775035; Fonts = 1; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                            Probe = 'dalmoori.ttf';                           Extended = $false; Note = 'Single pixel TTF.' }
+        [pscustomobject]@{ Name = 'NanumGothicCoding';   Url = 'https://github.com/naver/nanumfont/releases/download/VER2.5/NanumGothicCoding-2.5.zip'; Bytes = 1707449; Fonts = 2; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                       Probe = 'NanumGothicCoding.ttf';                  Extended = $false; Note = 'Regular + Bold; skips __MACOSX.' }
+        [pscustomobject]@{ Name = 'NanumGothic';         Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-gothic.zip'; Bytes = 12905726; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                Probe = 'NanumGothic.ttf';                        Extended = $false; Note = 'TTF, 4 weights (Light/Regular/Bold/ExtraBold). TTF is used because the bundled OTF renames the family to "NanumGothicOTF".' }
+        [pscustomobject]@{ Name = 'NanumMyeongjo';       Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-myeongjo.zip'; Bytes = 7353677; Fonts = 3; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';               Probe = 'NanumMyeongjo.ttf';                      Extended = $false; Note = 'TTF, 3 weights (Regular/Bold/ExtraBold). TTF keeps a clean "NanumMyeongjo" family (OTF is "NanumMyeongjoOTF").' }
+        [pscustomobject]@{ Name = 'NanumBarunGothic';    Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-barun-gothic.zip'; Bytes = 15416063; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';         Probe = 'NanumBarunGothic.ttf';                   Extended = $false; Note = 'TTF, 4 weights (UltraLight/Light/Regular/Bold). TTF keeps a clean "NanumBarunGothic" family (OTF is "NanumBarunGothicOTF").' }
+        [pscustomobject]@{ Name = 'NanumSquare';         Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-square.zip'; Bytes = 4203717; Fonts = 8; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                 Probe = 'NanumSquareR.ttf';                       Extended = $false; Note = 'TTF, 8 files: "NanumSquare" + "NanumSquare_ac" (alphabet-matched) sub-families, 4 weights each. TTF keeps clean names (OTF appends "OTF").' }
+        [pscustomobject]@{ Name = 'NanumSquareNeo';      Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-square-neo.zip'; Bytes = 9765932; Fonts = 5; Kind = 'Zip'; Include = '(?i)^nanum-square-neo/TTF/[^/]+\.ttf$'; Probe = 'NanumSquareNeo-bRg.ttf';            Extended = $false; Note = 'Static TTF, 5 weights (Light..Heavy). Static TTF is used because both the variable ("NanumSquare Neo variable") and OTF ("NanumSquare Neo OTF") rename the family; static keeps a clean "NanumSquare Neo".' }
+        [pscustomobject]@{ Name = 'NanumSquareRound';    Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-square-round.zip'; Bytes = 2535434; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';          Probe = 'NanumSquareRoundR.ttf';                  Extended = $false; Note = 'TTF, 4 weights (Light/Regular/Bold/ExtraBold). TTF keeps a clean "NanumSquareRound" family (OTF appends "OTF").' }
+        [pscustomobject]@{ Name = 'NanumHuman';          Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/NanumHuman.zip'; Bytes = 6190692; Fonts = 6; Kind = 'Zip'; Include = '(?i)^NanumHuman/[^/]+\.ttf$';           Probe = 'NanumHumanRegular.ttf';                  Extended = $false; Note = 'TTF, 6 weights (ExtraLight..Heavy); skips __MACOSX/woff. Both formats are suffixed upstream, so this registers as "NanumHuman TTF".' }
+        [pscustomobject]@{ Name = 'D2Coding';            Url = 'https://github.com/naver/d2codingfont/releases/download/VER1.3.2/D2Coding-Ver1.3.2-20180524.zip'; Bytes = 21256997; Fonts = 1; Kind = 'Zip'; Include = '(?i)^D2CodingAll/[^/]+\.ttc$';           Probe = 'D2Coding-Ver1.3.2-20180524-all.ttc';     Extended = $false; Note = 'Installs the D2CodingAll .ttc (regular+bold+ligature in one collection).' }
+        [pscustomobject]@{ Name = 'KoPubWorld';          Url = 'https://www.kopus.org/wp-content/uploads/2026/04/KOPUBWORLD_OTF_FONTS2026.zip'; Bytes = 20297063; Fonts = 6; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';        Probe = 'KoPubWorld Batang_Pro Light.otf';        Extended = $false; Note = 'OTF-only (2026 release). KoPubWorld Batang (serif) + Dotum (sans), 3 weights each (Light/Medium/Bold).' }
+        [pscustomobject]@{ Name = 'KoPub';               Url = 'https://www.kopus.org/wp-content/uploads/2022/04/KOPUB2.0_OTF_FONTS.zip'; Bytes = 12640328; Fonts = 6; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';             Probe = 'KoPub Batang_Pro Light.otf';             Extended = $false; Note = 'OTF-only (classic KoPub 2.0). KoPub Batang (serif) + Dotum (sans), 3 weights each (Light/Medium/Bold).' }
+        # Fixed = default Sans design, Normal width, 4 faces (Regular/Bold + Italics).
+        # Intentionally not the Extended/Oblique/Slab/Term/SS/Aile/Etoile variants.
+        [pscustomobject]@{ Name = 'IosevkaFixed';         Url = 'https://github.com/be5invis/Iosevka/releases/download/v34.9.0/PkgTTF-IosevkaFixed-34.9.0.zip'; Bytes = 148235929; Fonts = 4; Kind = 'Zip'; Include = '(?i)^IosevkaFixed-(Regular|Bold|Italic|BoldItalic)\.ttf$'; Probe = 'IosevkaFixed-Regular.ttf'; Extended = $false; Note = 'LARGE ~141 MB archive, installs 4. Default Sans Fixed, Normal width only (Regular/Bold + Italics); Fixed has no ligatures, family "Iosevka Fixed". Excludes Extended/Oblique/Slab/Term/SS/Aile/Etoile.' }
+    )
+}
+
+# Internal configuration for Install-AiSkills
+$_AiSkillsInternal = @{
+    RepoUrl               = 'https://github.com/thejjw/thejjw.git'
+    Branch                = 'main'
+    SparsePath            = 'ai-skills'
+    OpenCodeClaudeSkills  = @('codebase-docs', 'web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query', 'kimi-usage-query', 'deep-research', 'polish-document', 'rust-style', 'cpp-style')
+    AntigravitySharedSkills  = @('codebase-docs', 'deep-research', 'polish-document', 'rust-style', 'cpp-style')
+    AntigravityCliOnlySkills = @('session-exporter', 'agy-usage-query')
+    CodexSkills           = @('export-chat-codex', 'polish-document', 'rust-style', 'cpp-style')
+    OpenCodeSkillsPath    = '.agents\skills'
+    ClaudeSkillsPath      = '.claude\skills'
+    AntigravityAppSkillsPath = '.gemini\config\skills'
+    AntigravityCliSkillsPath = '.gemini\antigravity-cli\skills'
+    CodexSkillsPath       = 'skills'
+    # OpenCode reads whichever global config exists (it merges config.json ->
+    # opencode.json -> opencode.jsonc, last wins) and oc-advisor's install.mjs
+    # prefers an existing opencode.jsonc. Resolve the same way here so the
+    # profile and the plugin installer never write two different config files.
+    OpenCodeConfigDir     = '.config\opencode'
+    OpenCodeConfigNames   = @('opencode.jsonc', 'opencode.json')
+    OpenCodeConfigNew     = 'opencode.jsonc'
+
+    # External skill sources installed into EVERY tool's skill directory in
+    # addition to the internal lists above. Each source is shallow-cloned to its
+    # tip commit at install time; a clone failure warns and skips that source
+    # (internal thejjw skills still install). Fields:
+    #   Name       Unique label; also its subdirectory under the temp clone root.
+    #   RepoUrl    Git remote to clone.
+    #   Branch     Branch or tag (--branch accepts both; pin a tag to freeze).
+    #   SparsePath Optional repo-relative directory containing the skills. When
+    #              set, the clone is blobless+sparse and fetches only that path;
+    #              omit when the repo root IS the skill tree.
+    #   Skills     Skill directory names to install from the source root. The
+    #              same skill name in two sources overwrites on later install,
+    #              so keep the lists disjoint.
+    ExternalSources       = @(
+        @{
+            Name       = 'go-skills'
+            RepoUrl    = 'https://github.com/spf13/go-skills.git'
+            Branch     = 'main'
+            Skills     = @('go', 'cobra-viper', 'go-spec-reviewer', 'go-release', 'wails', 'fileflow-pathologize')
+        },
+        @{
+            Name       = 'apollo-skills'
+            RepoUrl    = 'https://github.com/apollographql/skills.git'
+            Branch     = 'main'
+            SparsePath = 'skills'
+            Skills     = @('rust-best-practices')
+        },
+        @{
+            Name       = 'taste-skill'
+            RepoUrl    = 'https://github.com/Leonxlnx/taste-skill.git'
+            Branch     = 'main'
+            SparsePath = 'skills'
+            Skills     = @('taste-skill')
+        }
+    )
+}
+
+# Internal configuration for Install-OpenCodeSettings (the oc-advisor plugin).
+# PluginPath is a git pathspec, so it keeps forward slashes; the remaining
+# entries are filesystem paths.
+$_OpenCodeInternal = @{
+    RepoUrl         = 'https://github.com/thejjw/thejjw.git'
+    PluginPath      = 'oc/plugins/oc-advisor'
+    InstallerRel    = 'scripts\install.mjs'
+    CopyRel         = '.config\opencode\plugins\oc-advisor'
+    DefaultRef      = 'main'
+    DefaultCloneDir = Join-Path ([System.IO.Path]::GetTempPath()) 'opencode\oc-advisor-clone'
+}
+
+# Internal configuration for Install-ClaudeCCRSetup (Claude Code Router).
+# Underscore prefix hides it from Get-Variable default scope per PowerShell convention.
+# Endpoint URLs, model lists, and router role mappings are the only literals that need to
+# change when retuning the cccr profile.
+$_CcrInternal = @{
+    Host      = '127.0.0.1'
+    Port      = 3456
+    Log       = $true
+    Timeout   = 3000000
+    Threshold = 60000
+    Router = @{
+        default    = 'zai,glm-5.3[1m]'             # Sonnet (daily work)
+        background = 'zai,glm-4.7'                 # Haiku (background subagents)
+        think      = 'zai,glm-5.3[1m]'             # Opus (Plan Mode / reasoning)
+        webSearch  = 'gemini,gemini-2.5-flash'     # Google search grounding via Gemini Flash
+    }
+    Providers = @{
+        zai = @{
+            base        = 'https://api.z.ai/api/anthropic/v1/messages'
+            key         = '$ZAI_API_KEY'
+            models      = @('glm-4.7', 'glm-5.3[1m]', 'glm-4.6v')
+            transformer = 'Anthropic'
+        }
+        minimax = @{
+            base        = 'https://api.minimax.io/anthropic/v1/messages'
+            key         = '$MINIMAX_API_KEY'
+            # Bare id on purpose: the Anthropic transformer forwards this string verbatim, and
+            # MiniMax's API silently falls back to MiniMax-M3 for any id it does not know
+            # (the [1m] suffix is a Claude Code-side marker and is not understood server-side).
+            models      = @('MiniMax-M3.1-Flash')
+            transformer = 'Anthropic'
+        }
+        deepseek = @{
+            base        = 'https://api.deepseek.com/anthropic/v1/messages'
+            key         = '$DEEPSEEK_API_KEY'
+            models      = @('deepseek-flash[1m]', 'deepseek-v4-pro[1m]')
+            transformer = 'Anthropic'
+        }
+        gemini = @{
+            # Gemini's native API. The CCR gemini transformer appends '{model}:generateContent'
+            # to the base URL, so the trailing slash is required.
+            #
+            # Reference:
+            #   https://ai.google.dev/gemini-api/docs              -- API docs
+            #   https://ai.google.dev/gemini-api/docs/pricing     -- per-model pricing
+            #   https://ai.google.dev/gemini-api/docs/rate-limits -- per-tier rate limits
+            #   https://aistudio.google.com/rate-limit            -- AI Studio tier limits dashboard
+            base        = 'https://generativelanguage.googleapis.com/v1beta/models/'
+            key         = '$GEMINI_API_KEY'
+            models      = @('gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro')
+            transformer = 'gemini'
+        }
+    }
+}
+
+# Internal configuration for Add-AppLockerBlock and Remove-AppLockerBlock.
+$_AppLockerInternal = @{
+    # Written into the Description of every rule this profile creates, so that
+    # -List can tell managed rules apart from hand-written ones and -Revert can
+    # remove exactly what was created here.
+    ManagedMarker = 'Created by Add-AppLockerBlock'
+    EveryoneSid   = 'S-1-1-0'
+}
+
+$profileHelperFunctions = @(
+    'GetAiApiKey',
+    'SaveProcessEnvVars',
+    'RestoreProcessEnvVars',
+    'NewSafeFileNameFromCertificateName',
+    'GetCertutilPath',
+    'GetAppLockerRuleIdList',
+    'GetAiUsageJsonProperty',
+    'GetAiUsageJwtClaims',
+    'GetAiUsageWindowLabel',
+    'NewAiUsageHttpSession',
+    'CloseAiUsageHttpSession',
+    'ConvertFromCodexUsagePayload',
+    'ConvertFromClaudeUsagePayload',
+    'ConvertFromQwenCloudUsagePayload',
+    'ResolveWUResultCode',
+    'ResolveWUHResult',
+    'FormatDuration',
+    'WriteSection',
+    'WriteUsageTimestamp',
+    'FromEpochMs',
+    'FormatTokens',
+    'FormatPrice',
+    'GetSeriesStats',
+    'GetSpikes',
+    'UnwrapZaiData',
+    'GetJsoncText',
+    'ShowFontArchive',
+    'Expand7ZipArchive',
+    'NewTemporarySshIdentity',
+    'RemoveTemporarySshIdentity',
+    'GetAppLockerRuleCollection',
+    'GetAppLockerRules',
+    'GetAppLockerRulePath',
+    'GetAppLockerDomainRules',
+    'NewAppLockerFilePathRule',
+    'NewAppLockerFilePublisherRule',
+    'NewAppLockerFileHashRule',
+    'NewAppLockerRuleCollection',
+    'GetAppLockerRuleInfo',
+    'ConvertToAppLockerHashValue',
+    'GetAppLockerBlockReport'
+)
 
 # --- $_ProfileHelpers: shared helper object for the whole profile ----------
 # General-purpose helpers exposed as methods on $_ProfileHelpers (e.g.
@@ -1621,49 +2190,6 @@ public class AiUsageTls {
             ForEach-Object { $_.GetAttribute('Id') })
     }
 
-$profileHelperFunctions = @(
-        'GetAiApiKey',
-        'SaveProcessEnvVars',
-        'RestoreProcessEnvVars',
-        'NewSafeFileNameFromCertificateName',
-        'GetCertutilPath',
-        'GetAppLockerRuleIdList',
-        'GetAiUsageJsonProperty',
-        'GetAiUsageJwtClaims',
-        'GetAiUsageWindowLabel',
-        'NewAiUsageHttpSession',
-        'CloseAiUsageHttpSession',
-        'ConvertFromCodexUsagePayload',
-        'ConvertFromClaudeUsagePayload',
-        'ConvertFromQwenCloudUsagePayload',
-        'ResolveWUResultCode',
-        'ResolveWUHResult',
-        'FormatDuration',
-        'WriteSection',
-        'WriteUsageTimestamp',
-        'FromEpochMs',
-        'FormatTokens',
-        'FormatPrice',
-        'GetSeriesStats',
-        'GetSpikes',
-        'UnwrapZaiData',
-        'GetJsoncText',
-        'ShowFontArchive',
-        'Expand7ZipArchive',
-        'NewTemporarySshIdentity',
-        'RemoveTemporarySshIdentity',
-        'GetAppLockerRuleCollection',
-        'GetAppLockerRules',
-        'GetAppLockerRulePath',
-        'GetAppLockerDomainRules',
-        'NewAppLockerFilePathRule',
-        'NewAppLockerFilePublisherRule',
-        'NewAppLockerFileHashRule',
-        'NewAppLockerRuleCollection',
-        'GetAppLockerRuleInfo',
-        'ConvertToAppLockerHashValue',
-        'GetAppLockerBlockReport'
-    )
     Export-ModuleMember -Function $profileHelperFunctions
 }
 
@@ -1720,572 +2246,6 @@ function Invoke-WebRequest2 {
     }
 
     Invoke-WebRequest @invokeParams
-}
-
-# Internal configuration group for New-RandomDir to keep global namespace clean
-$_NrdInternal = @{
-    Colors         = @(
-        'alabaster', 'alizarin', 'amaranth', 'amber', 'amethyst', 'apricot', 'aqua', 'azure', 'beige',
-        'bisque', 'black', 'blue', 'bronze', 'brown', 'burgundy', 'cardinal', 'carmine', 'celadon',
-        'cerise', 'cerulean', 'champagne', 'charcoal', 'chartreuse', 'chestnut', 'chocolate', 'citrine', 'claret',
-        'cobalt', 'copper', 'coral', 'cream', 'crimson', 'cyan', 'denim', 'ebony', 'ecru',
-        'eggplant', 'emerald', 'fawn', 'flax', 'fuchsia', 'garnet', 'gold', 'golden', 'gray',
-        'green', 'heather', 'heliotrope', 'indigo', 'ivory', 'jade', 'jet', 'khaki', 'lavender',
-        'lemon', 'lilac', 'lime', 'linen', 'magenta', 'mahogany', 'maize', 'malachite', 'marigold',
-        'maroon', 'mauve', 'mint', 'moccasin', 'mocha', 'mustard', 'navy', 'ochre', 'olive',
-        'onyx', 'orange', 'orchid', 'peach', 'pearl', 'peridot', 'periwinkle', 'persimmon', 'peru',
-        'pine', 'pink', 'platinum', 'plum', 'puce', 'pumpkin', 'purple', 'raspberry', 'red',
-        'rose', 'ruby', 'russet', 'rust', 'saffron', 'sage', 'salmon', 'sand', 'sapphire',
-        'scarlet', 'sepia', 'sienna', 'silver', 'slate', 'snow', 'strawberry', 'tan', 'tangerine',
-        'taupe', 'teal', 'thistle', 'tomato', 'topaz', 'turquoise', 'umber', 'vermilion', 'violet',
-        'viridian', 'walnut', 'wheat', 'white', 'wine', 'wisteria', 'yellow'
-    )
-    Adjectives     = @(
-        'ancient', 'bold', 'brisk', 'calm', 'clear', 'cool', 'curious', 'deep', 'eager', 'fast',
-        'gentle', 'grand', 'hidden', 'icy', 'jolly', 'kind', 'lively', 'lucky', 'misty', 'modern',
-        'mossy', 'nimble', 'odd', 'quiet', 'rapid', 'shiny', 'silent', 'small', 'solar', 'steady',
-        'stormy', 'swift', 'tiny', 'urban', 'warm', 'wild', 'wise', 'young'
-    )
-    Nouns          = @(
-        'brook', 'cabin', 'cloud', 'comet', 'delta', 'dream', 'falcon', 'field', 'fire', 'forest',
-        'garden', 'glade', 'harbor', 'hill', 'lab', 'lake', 'leaf', 'meadow', 'moon', 'mountain',
-        'otter', 'owl', 'path', 'peak', 'pine', 'planet', 'pond', 'rabbit', 'river', 'shadow',
-        'sky', 'star', 'stone', 'sun', 'thicket', 'trail', 'tree', 'valley', 'wave', 'wind',
-        'wolf', 'wood', 'workshop'
-    )
-
-    # Canonical agent-guidance template; keep the nrd AGENT_EOF copy in bin/install_j.sh in sync.
-    AgentsMarkdown = @'
-# AGENTS.md
-
-## Grounding
-
-* Always utilize web search to ground your answers, ensuring all technical advice and references are accurate and up-to-date.
-
-## Language
-
-* Reply in the language the user writes in -- an English request gets an English
-  answer, a Korean one Korean -- and never switch to another language (on your
-  own) unless the user wrote in it or explicitly asked. A model's tendency to
-  drift into Chinese on non-Chinese prompts is not a reason to follow it.
-
-## Environment
-
-* Platform: Windows 11.
-* Do not assume a specific shell. Different agent harnesses run this file with
-  different interpreters (pi/omp variants use a persistent POSIX-style bash even
-  on Windows; some other tools use PowerShell). Before writing compound commands,
-  check what you are actually running (`$BASH_VERSION` vs `$PSVersionTable`)
-  and use that interpreter's native syntax. Forward slashes work everywhere;
-  backslashes separate paths only in PowerShell.
-* Prefer your harness's dedicated file-read/search/edit/background-process tools
-  when provided; fall back to plain commands (`git`, `npm`, `rg`, `fd`) otherwise.
-  Never launch interactive TUIs (e.g. fzf) from a non-interactive tool call --
-  they hang without a TTY.
-* If invoking `git`, `npm`, `dotnet`, or other cross-platform CLIs, those are fine as-is.
-
-## Task Scope and Consent
-
-* Resolve the request literally. A question or lookup ("can you look up ...",
-  "how does X work", "what would it take to ...") is answered with findings,
-  options, and a proposed diff -- no file writes, no installs, no config changes.
-* "I want to add/change X" is a statement of intent, not approval to make the
-  change. Present the plan, then wait for an explicit go-ahead.
-* Get explicit approval before anything that mutates the repo or the machine:
-  writing files outside the scope you were handed, installing software or fonts,
-  touching the registry, deleting anything, or any network-mutating command.
-* Never spend the same turn on a scope question and extra work ("while I was at
-  it, I also ...").
-
-## Code Style
-
-* Prefer concise, minimal implementations -- avoid boilerplate and unnecessary abstraction.
-* Comment every public function/method and any non-obvious logic inline.
-* Prefer ASCII in source code. Use non-ASCII characters only when required for user-facing text, test fixtures, protocol/data literals, or existing project conventions.
-
-## Git Discipline
-
-* If the requested work is inside a cloned Git repository nested under this directory, treat that nested repository as the project root. Verify with `git rev-parse --show-toplevel`, then stage and commit only within that repository; do not stage or commit in any containing parent repository unless explicitly directed.
-* Commit every logical change as its own commit with a descriptive commit message -- self-contained and independently revertable -- so one multi-part request (e.g. backend, frontend, test, ...) lands as several commits; never bundle unrelated changes.
-* Do not stage or commit AI-agent instruction/context Markdown files unless explicitly directed. This includes `AGENTS.md` and similar local `.md` files used to guide agents.
-* This restriction does not apply to normal project documentation such as `README.md`, `CHANGELOG.md`, API docs, design docs, or user-facing Markdown files when those files are part of the requested change.
-* Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, etc.
-* Write short, imperative descriptions (e.g. `feat: add input validation`, `fix: off-by-one in retry loop`).
-* Never append Co-Authored-By trailers to commit messages.
-* Use purpose-based branch names (e.g. `feat/<description>`, `fix/<description>`, `docs/<description>`); never use `agent/`, `ai/`, or `codex/` prefixes unless explicitly directed. Exception: fixes that directly answer an advisor review note present in this session (an `[oc-advisor-note]` message or an `oc-advisor` tool result) stay on the current branch - commit them where the reviewed work lives rather than opening a branch.
-* Never run `git push` unless explicitly directed; keep all commits local.
-
-## Dependencies
-
-* Pick the latest version the package manager resolves against existing project constraints, including lockfiles and manifest ranges.
-* Before finalizing a dependency add/update, check the registry (npm, NuGet, PyPI, GitHub, ...) for explicit deprecation signals, such as `deprecated`, yanked releases, or archived repositories, on the chosen package and version. If any are found, prefer a non-deprecated alternative when practical; otherwise warn inline with the package name, signal source, and suggested alternative if the registry provides one, then proceed.
-
-## Subagents
-
-* Default to delegating context-heavy work to subagents so the main session
-  accumulates conclusions, not raw process. Strong candidates: codebase
-  exploration/research, reading or summarizing many files, and independent
-  sub-tasks that can run in parallel. The subagent absorbs the noisy tool
-  calls and returns only a summary.
-* Do not wrap trivial or single tool calls in a subagent. A one-file read or a
-  quick `rg`/`fd` search is cheaper run directly than paying the spawn and
-  round-trip overhead.
-* Keep tightly-coupled work in the main context. Do not delegate edits that
-  depend on each other's output, and never have two subagents edit the same
-  file -- they share the working directory and will clobber each other.
-* Subagents start with a fresh context and the task prompt is the only input
-  channel. Pass every needed file path, error message, and decision explicitly;
-  they cannot see the main conversation.
-* Give each subagent explicit success criteria and a structured return format
-  so it reports cleanly instead of exploring open-endedly.
-* Where it cuts cost without hurting quality, route exploration/search
-  subagents to a smaller/faster model and reserve the main session for
-  synthesis and architectural judgment.
-'@
-}
-
-# Internal configuration for Install-GlobalClaudeMd and related Claude Code setup functions
-# DeepSeek Web Search behavior: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
-$_ClaudeInternal = @{
-    GlobalClaudeMd = @"
-## MCP Tool Preferences
-
-**When using Z.ai models (glm-*):**
-Use Z.ai MCP servers for:
-- Web searches
-- Web content
-- Image analysis
-- Text extraction
-
-**When using MiniMax models (MiniMax-*):**
-Note: MiniMax-M3.1 Flash natively supports multimodal input (images and video) in addition to MCP.
-Use MiniMax MCP server for:
-- Web searches (``web_search``)
-- Image understanding (``understand_image``)
-
-**When using DeepSeek models (deepseek-*):**
-Use Claude Code's built-in Web Search tool for web searches; DeepSeek supports it natively through its API with costs.
-deepseek-flash natively supports multimodal image understanding (both OpenAI and Anthropic formats). deepseek-v4-pro is text-only; use MiniMax MCP or Z.ai MCP servers if image analysis is required with legacy pro models.
-**When using genuine Anthropic account (Claude Code with native models):**
-Use built-in web fetch and web search tools directly -- they will yield the best results.
-
-If an MCP tool is unavailable or underperforming, inform the user and suggest alternatives.
-"@
-    DownloadBaseUrl = 'https://downloads.claude.ai/claude-code-releases'
-}
-
-# Internal configuration for the AI API key credential helpers (Set-AiApiKeysCS,
-# Load-AiApiKeysFromCS). Single source of truth: register a provider key once here
-# instead of editing a literal list inside each helper.
-$_AiKeysInternal = @{
-    # Every key shares one resource userName so they form a logical group in Credential
-    # Manager and can be enumerated/cleared together.
-    UserName = 'api-key'
-    # Keys Set-AiApiKeysCS prompts for and Load-AiApiKeysFromCS injects into the session.
-    Names    = @(
-        'DEEPSEEK_API_KEY'
-        'ZAI_API_KEY'
-        'MINIMAX_API_KEY'
-        'KIMI_CODE_PLAN_API_KEY'
-        'QWEN_TOKEN_PLAN_API_KEY'
-        'GEMINI_API_KEY'
-        'NVIDIA_API_KEY'
-        'OPENROUTER_API_KEY'
-        'OPENCODE_GO_API_KEY'
-        'AMDRC_API_KEY'
-        'QWENCLOUD_PAYG_API_KEY'
-    )
-    # Aliases stored alongside Names but never prompted for on their own: saving Source
-    # writes the same secret to Alias. Loaded like any other entry.
-    Aliases  = @(
-        @{ Alias = 'BAILIAN_TOKEN_PLAN_API_KEY'; Source = 'QWEN_TOKEN_PLAN_API_KEY' }
-    )
-}
-
-# Internal configuration for Install-AiTools and Invoke-AiUpgrade
-$_AiToolsInternal = @{
-    PowerShellModules      = @(
-        @{
-            Name               = 'Pester'
-            MinimumVersion     = '6.0'
-            Repository         = 'PSGallery'
-            Scope              = 'CurrentUser'
-            Force              = $true
-            SkipPublisherCheck = $true
-        }
-    )
-    WingetPackages         = @(
-        'Microsoft.Coreutils',
-        'Microsoft.VCRedist.2015+.x64',
-        'Microsoft.VCRedist.2015+.x86',
-        'Microsoft.IntelligentTerminal',
-        'ShiningLight.OpenSSL.Light',
-        'TwibrightLabs.Links',
-        'OpenJS.NodeJS.LTS',
-        'GnuPG.Gpg4win',
-        'Oven-sh.Bun',
-        '7zip.7zip',
-        'FiloSottile.age',
-        'GitHub.cli',
-        'Notepad++.Notepad++',
-        'Lapce.Lapce',
-        'Microsoft.Edit',
-        'Python.PythonInstallManager',
-        'cURL.cURL',
-        'aria2.aria2',
-        'jqlang.jq',
-        'BurntSushi.ripgrep.MSVC',
-        'junegunn.fzf',
-        'sharkdp.fd',
-        'JFLarvoire.Ag',
-        'chmln.sd',
-        'dandavison.delta',
-        'sharkdp.bat',
-        'eza-community.eza',
-        'dalance.procs',
-        'MrKaran.Doggo',
-        'ducaale.xh',
-        'medialab.xan',
-        'oschwartz10612.Poppler',
-        'uutils.diffutils',
-        'EliFulkerson.tcping',
-        'FujiApple.Trippy',
-        'natesales.q',
-        'tstack.lnav',
-        'Microsoft.Pave',
-        'Microsoft.err',
-        'wagoodman.dive',
-        'astral-sh.uv',
-        'pnpm.pnpm',
-        'SQLite.SQLite',
-        'koalaman.shellcheck',
-        'Microsoft.VisualStudioCode',
-        'VSCodium.VSCodium',
-        'marlocarlo.psmux',
-        'marlocarlo.pstop',
-        'marlocarlo.psnet',
-        'MarcoPontello.TrID'
-    )
-    MoreAiWingetPackages   = @(
-        'SST.OpenCodeDesktop',
-        'Google.Antigravity',
-        'Google.AntigravityIDE',
-        'ZhipuAI.ZCode',
-        'MiniMax.MiniMaxCode',
-        'Anysphere.Cursor'
-    )
-    ExtendedWingetPackages = @(
-        'JRSoftware.InnoSetup',
-        'TortoiseGit.TortoiseGit',
-        'Cloudflare.cloudflared',
-        'Insecure.Nmap',
-        'Buct0r.fullfetch',
-        'HTTPie.HTTPie',
-        'Orange-OpenSource.Hurl',
-        'Gyan.FFmpeg',
-        'ImageMagick.ImageMagick',
-        'Inkscape.Inkscape',
-        'Google.Libwebp',
-        'libjxl.libjxl',
-        'JohnMacFarlane.Pandoc',
-        'tesseract-ocr.tesseract',
-        'AquaSecurity.Trivy',
-        'Cisco.ClamAV',
-        'astral-sh.ruff',
-        'Microsoft.Sqlcmd',
-        'HeidiSQL.HeidiSQL',
-        'TheDocumentFoundation.LibreOffice',
-        'OlegShparber.Zeal',
-        'Mozilla.SeaMonkey',
-        'Microsoft.Sysinternals.Suite'
-    )
-    DbWingetPackages       = @(
-        'Oracle.MySQLShell',
-        'Oracle.SQLcl',
-        'PostgreSQL.psqlODBC',
-        'PostgreSQL.pgAdmin'
-    )
-    SdkWingetPackages      = @(
-        'Microsoft.OpenJDK.25',
-        'Rustlang.Rustup',
-        'GoLang.Go',
-        'StrawberryPerl.StrawberryPerl'
-    )
-    DockerWingetPackage    = 'Docker.DockerDesktop'
-    PodmanWingetPackage    = 'RedHat.Podman'
-    GitWingetPackage       = 'Git.Git'
-    Urls                   = @{
-        AgyCli        = 'https://antigravity.google/cli/install.ps1'
-        ClaudeCli     = 'https://claude.ai/install.ps1'
-        CodexCli      = 'https://chatgpt.com/codex/install.ps1'
-        CursorCli     = 'https://cursor.com/install?win32=true'
-        CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
-        AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
-        OmpTps        = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
-    }
-
-    # REA reverse-engineering toolchain used by the -REA stage of Install-AiTools.
-    # The Ghidra release is resolved from the GitHub releases API at run time; the
-    # constants below are the fallback used when the API cannot be reached.
-    ReaNpmPackage    = 'rea-agents'
-    # Same id as SdkWingetPackages; the OpenJDK MSI is per-machine, so the REA
-    # stage installs it without --scope user.
-    ReaGhidraJdkWingetPackage = 'Microsoft.OpenJDK.25'
-    Ghidra           = @{
-        Version      = '12.1.4'
-        AssetName    = 'ghidra_12.1.4_PUBLIC_20260921.zip'
-        Url          = 'https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip'
-        Bytes        = 569649598
-        Sha256       = 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db'
-        Root         = 'C:\Tools'
-        # Ghidra's own application.properties declares application.java.min=21
-        # with no maximum, so any JDK >= 21 satisfies its launcher check.
-        JavaMajorMin = 21
-    }
-
-    NpmPackages            = @(
-        '@earendil-works/pi-coding-agent',
-        '@oh-my-pi/pi-coding-agent',
-        '@musistudio/claude-code-router',
-        'oh-my-free-models',
-        '@firecrawl/anydoc',
-        'typescript',
-        'eslint',
-        'prettier',
-        'terser'
-    )
-
-    # commented out entries:
-    # '@mimo-ai/cli',
-    MoreAiNpmPackages      = @(
-        '@qwen-code/qwen-code',
-        '@moonshot-ai/kimi-code',
-        '@deepseek-ai/dsh',
-        '@xai-official/grok',
-        'gloomberb'
-    )
-    # Keep this registry synchronized with AI CLIs managed by Install-AiTools
-    # that ship a native self-update command. Probe defaults to Cmd; set it when
-    # a CLI's updater probe differs from the command. npm-installed packages are
-    # not listed here -- aiu updates them straight from NpmPackages and
-    # MoreAiNpmPackages above.
-    UpgradeCommands        = @(
-        @{ Label = 'agy';      Cmd = 'agy';      Args = @('update') },
-        @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
-        @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
-        @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
-        @{ Label = 'cursor';   Cmd = 'agent';    Probe = 'cursor-agent'; Args = @('update') },
-        @{ Label = 'rea';      Cmd = 'rea';      Args = @('update') }
-    )
-}
-
-# Internal configuration for Install-Fonts.
-#
-# Each pack is pinned to a specific upstream release. When bumping a version,
-# update Url, Bytes, and (if the archive layout changed) Include/Probe together.
-#
-# Fields:
-#   Name     Human-readable pack name; also the token matched by -Name filtering.
-#   Url      Direct download URL (GitHub release asset or CDN). Warned on failure.
-#   Bytes    Download size measured at authoring time; used for the pre-run size
-#            report so the user sees the transfer cost before anything downloads.
-#   Fonts    Approx. count of font files this pack installs after Include filtering
-#            (from archive inspection); used only for the pre-run summary total.
-#   Kind     'Zip' = archive to open with .NET; '7z' = archive to extract with
-#            Windows' inbox tar.exe (any archive it reads, so .7z or .tar.xz);
-#            'File' = the URL is itself a single font.
-#   Include  Regex (case-insensitive) matched against each archive entry's relative
-#            path. Only matching entries are extracted+installed. Chosen per pack
-#            to install ONE clean set and skip redundant format folders plus
-#            __MACOSX/AppleDouble junk. When a pack ships multiple formats the
-#            preference is variable -> OTF -> static, EXCEPT where a font's
-#            variable build renames its family (e.g. "Pretendard Variable" instead
-#            of "Pretendard", verified by reading the name table); those fall back
-#            to a static set so a plain family name keeps resolving.
-#            Ignored for Kind='File'.
-#   Probe    A representative installed font filename. If it already exists in the
-#            target Fonts folder, the whole pack is skipped (no download) unless
-#            -Force is passed. This is the cheap pre-download idempotency check.
-#   Extended $true packs are skipped unless -Extended is passed. This keeps the
-#            especially large Source Han CJK downloads, and superseded entries
-#            kept only as a fallback (e.g. JetBrainsMono), explicitly opt-in.
-#   Note     Optional freeform note shown in -ListOnly output.
-$_FontInstallInternal = @{
-    # Per-user (no admin) install target and its font-registration registry key.
-    UserFontsDir = (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts')
-    UserRegPath  = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
-    # All-users (-AllUsers, requires admin) install target and its registry key.
-    MachineFontsDir = (Join-Path $env:WINDIR 'Fonts')
-    MachineRegPath  = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
-
-    Packs = @(
-        [pscustomobject]@{ Name = 'IntelOneMono';        Url = 'https://github.com/intel/intel-one-mono/releases/download/V1.4.0/ttf.zip'; Bytes = 505443; Fonts = 8; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$'; Probe = 'IntelOneMono-Regular.ttf'; Extended = $false; Note = 'Screen-optimized TTF, 4 weights with matching italics; family "Intel One Mono".' }
-        [pscustomobject]@{ Name = 'GoormSansCode';       Url = 'https://statics.goorm.io/fonts/GoormSansCode/v1.0.1/goorm-sans-code-1.0.1.zip'; Bytes = 4528715;   Fonts = 1;  Kind = 'Zip';  Include = '(?i)^goorm sans code 2/Public/[^/]+\.ttf$'; Probe = 'goorm_Sans_Code_400.ttf';                 Extended = $false; Note = 'Coding sans (single weight).' }
-        [pscustomobject]@{ Name = 'Jetendard';           Url = 'https://github.com/kuskhan/jetendard/releases/download/v0.1.0/Jetendard-TTF.zip'; Bytes = 37427141; Fonts = 16; Kind = 'Zip';  Include = '(?i)^ttf/[^/]+\.ttf$';                     Probe = 'Jetendard-Regular.ttf';                  Extended = $false; Note = 'Static TTF weights.' }
-        [pscustomobject]@{ Name = 'YeomilMono';          Url = 'https://github.com/taevel02/yeomil-mono/releases/download/v1.1.1/YeomilMono-TTF.zip'; Bytes = 3055540; Fonts = 3; Kind = 'Zip';  Include = '(?i)^[^/]+\.ttf$';                         Probe = 'YeomilMono-Regular.ttf';                 Extended = $false; Note = 'Monospace, 3 weights.' }
-        [pscustomobject]@{ Name = 'Pretendard';          Url = 'https://github.com/orioncactus/pretendard/releases/download/v1.3.9/Pretendard-1.3.9.zip'; Bytes = 47304526; Fonts = 9; Kind = 'Zip'; Include = '(?i)^public/static/alternative/[^/]+\.ttf$'; Probe = 'Pretendard-Regular.ttf';        Extended = $false; Note = 'Static TTF: its variable build registers as family "Pretendard Variable", so static is used for a clean "Pretendard" family.' }
-        [pscustomobject]@{ Name = 'WantedSans';          Url = 'https://github.com/wanteddev/wanted-sans/releases/download/v1.0.3/WantedSans-1.0.3.zip'; Bytes = 21656532; Fonts = 7; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$';                     Probe = 'WantedSans-Regular.ttf';                 Extended = $false; Note = 'Static TTF: variable build registers as "Wanted Sans Variable"; static keeps a clean "Wanted Sans" family.' }
-        [pscustomobject]@{ Name = 'Galmuri';             Url = 'https://github.com/quiple/galmuri/releases/download/v2.40.3/Galmuri-v2.40.3.zip'; Bytes = 19936233; Fonts = 20; Kind = 'Zip'; Include = '(?i)^[^/]+\.(ttf|ttc)$';                   Probe = 'Galmuri11.ttf';                          Extended = $false; Note = 'Pixel font family; all root-level ttf/ttc.' }
-        [pscustomobject]@{ Name = 'OpenDyslexic';        Url = 'https://github.com/antijingoist/opendyslexic/releases/download/v0.91.12/opendyslexic-0.910.12-rc2-2019.10.17.zip'; Bytes = 3627458; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';               Probe = 'OpenDyslexic-Regular.otf';               Extended = $false; Note = 'OTF; skips eot/woff web formats.' }
-        [pscustomobject]@{ Name = 'FiraCode';            Url = 'https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip'; Bytes = 2462987; Fonts = 6; Kind = 'Zip'; Include = '(?i)^ttf/[^/]+\.ttf$';                          Probe = 'FiraCode-Regular.ttf';                   Extended = $false; Note = 'Static TTF: the VF defaults to Light weight and legacy apps see "Fira Code Light"; static defaults to Regular with a clean "Fira Code" family.' }
-        [pscustomobject]@{ Name = 'SarasaGothicK';       Url = 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaGothicK-TTF-1.0.40.7z'; Bytes = 63464316; Fonts = 10; Kind = '7z'; Include = '(?i)^SarasaGothicK-[^/]+\.ttf$'; Probe = 'SarasaGothicK-Regular.ttf'; Extended = $false; Note = 'Korean Sarasa Gothic, 5 hinted weights with italics. Requires Windows tar.exe.' }
-        [pscustomobject]@{ Name = 'SarasaMonoK';         Url = 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaMonoK-TTF-1.0.40.7z'; Bytes = 66316218; Fonts = 10; Kind = '7z'; Include = '(?i)^SarasaMonoK-[^/]+\.ttf$'; Probe = 'SarasaMonoK-Regular.ttf'; Extended = $false; Note = 'Korean monospaced Sarasa, 5 hinted weights with italics. Requires Windows tar.exe.' }
-        [pscustomobject]@{ Name = 'SourceHanSans';       Url = 'https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/02_SourceHanSans-VF.zip'; Bytes = 888816761; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSans-VF\.ttf\.ttc$'; Probe = 'SourceHanSans-VF.ttf.ttc';       Extended = $true;  Note = 'LARGE ~848 MB. Installs only the pan-CJK OTC variable collection.' }
-        [pscustomobject]@{ Name = 'SourceHanSerif';      Url = 'https://github.com/adobe-fonts/source-han-serif/releases/download/2.003R/02_SourceHanSerif-VF.zip'; Bytes = 750817685; Fonts = 1; Kind = 'Zip'; Include = '(?i)^Variable/OTC/SourceHanSerif-VF\.ttf\.ttc$'; Probe = 'SourceHanSerif-VF.ttf.ttc';   Extended = $true;  Note = 'LARGE ~716 MB. Installs only the pan-CJK OTC variable collection.' }
-        [pscustomobject]@{ Name = 'SourceHanMono';       Url = 'https://github.com/adobe-fonts/source-han-mono/releases/download/1.002/SourceHanMono.ttc'; Bytes = 122117628; Fonts = 1; Kind = 'File'; Include = $null;                              Probe = 'SourceHanMono.ttc';                      Extended = $true;  Note = 'LARGE ~116 MB. Direct .ttc download (no archive).' }
-        # Opt-in fallback: the default set installs JetBrainsMonoNerdMono, the same
-        # typeface plus the Nerd icon glyphs. Restore Extended = $false below if
-        # JetBrainsMonoNerdMono ever ceases to exist upstream.
-        [pscustomobject]@{ Name = 'JetBrainsMono';       Url = 'https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip'; Bytes = 5622857; Fonts = 2; Kind = 'Zip'; Include = '(?i)^fonts/variable/[^/]+\.ttf$';         Probe = 'JetBrainsMono[wght].ttf';                Extended = $true;  Note = 'FALLBACK (opt-in): official variable TTF (upright + italic); registers cleanly as "JetBrains Mono", so variable is kept over the static ttf/ set. Superseded in the default set by JetBrainsMonoNerdMono.' }
-        [pscustomobject]@{ Name = 'JetBrainsMonoNerdMono'; Url = 'https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.tar.xz';     Bytes = 7284244; Fonts = 16; Kind = '7z'; Include = '(?i)^JetBrainsMonoNerdFontMono-[^/]+\.ttf$'; Probe = 'JetBrainsMonoNerdFontMono-Regular.ttf'; Extended = $false; Note = 'Nerd Fonts v3.5.1 patched build of JetBrains Mono 2.304 (icons + Powerline glyphs); JetBrains ships no Nerd build, so this comes from the upstream patch project. "Mono" keeps every icon one cell wide so the grid stays aligned; the -NF/-Propo variants and the -NL (no-ligature) set are skipped. The 7.3 MB .tar.xz is used instead of the 134 MB all-variant .zip, which holds the same files.' }
-        [pscustomobject]@{ Name = 'IBMPlexMono';         Url = 'https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-mono%402.5.0/ibm-plex-mono.zip'; Bytes = 6940652; Fonts = 16; Kind = 'Zip'; Include = '(?i)^ibm-plex-mono/fonts/complete/otf/[^/]+\.otf$'; Probe = 'IBMPlexMono-Regular.otf';        Extended = $false; Note = 'OTF, all 16 weights incl. italics; skips ttf/woff/woff2.' }
-        [pscustomobject]@{ Name = 'IBMPlexSansKR';       Url = 'https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-sans-kr%401.1.0/ibm-plex-sans-kr.zip'; Bytes = 73268731; Fonts = 8; Kind = 'Zip'; Include = '(?i)^ibm-plex-sans-kr/fonts/complete/otf/[^/]+\.otf$'; Probe = 'IBMPlexSansKR-Regular.otf';    Extended = $false; Note = 'LARGE ~73 MB (full zip also bundles ttf/woff/woff2); installs OTF, all 8 Korean weights.' }
-        [pscustomobject]@{ Name = 'MonaSans';            Url = 'https://github.com/github/mona-sans/releases/download/v2.0.27/mona-sans-variable-v2.0.27.zip'; Bytes = 2674251; Fonts = 11; Kind = 'Zip'; Include = '(?i)^fonts/variable/[^/]+\.ttf$';          Probe = 'MonaSansVF[opsz,wght].ttf';              Extended = $false; Note = 'Variable-only distribution (multiple width/optical axes).' }
-        [pscustomobject]@{ Name = 'SUIT';                Url = 'https://github.com/sun-typeface/SUIT/releases/download/v2.0.5/SUIT-Variable-ttf.zip'; Bytes = 812043; Fonts = 1; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                            Probe = 'SUIT-Variable.ttf';                      Extended = $false; Note = 'Single variable TTF.' }
-        [pscustomobject]@{ Name = 'MonoplexCJKNerd';     Url = 'https://github.com/y-kim/monoplex/releases/download/monoplex-cjk-nerd-font-1.1.0/MonoplexCJKNerdFont_v1.1.0.zip'; Bytes = 125695049; Fonts = 16; Kind = 'Zip'; Include = '(?i)^MonoplexCJKNerdFont/[^/]+\.ttf$';              Probe = 'MonoplexCJKNerdFont-Regular.ttf';          Extended = $false; Note = 'LARGE ~120 MB. Monospace CJK programming font with Nerd Fonts 3.5.1 icons (3,705 PUA + 6,896 Nerd private-use glyphs); family "Monoplex CJK Nerd Font". Hangul + CJK Ext-A + ~21k CJK unified ideographs. 8 weights (Thin..Bold plus Text) with italics. Replaces the v0.0.2 MonoplexKR pack, whose Nerd family predates the Nerd private-use plane.' }
-        [pscustomobject]@{ Name = 'MinSans';             Url = 'https://github.com/poposnail61/min-sans/releases/download/v1.4.2/fonts.zip'; Bytes = 31533194; Fonts = 10; Kind = 'Zip'; Include = '(?i)^fonts/static/[^/]+\.otf$';              Probe = 'MinSans-Regular.otf';                    Extended = $false; Note = 'Static OTF: variable build registers as "Min Sans VF"; static keeps a clean "Min Sans" family. Skips __MACOSX.' }
-        [pscustomobject]@{ Name = 'Dalmoori';            Url = 'https://github.com/RanolP/dalmoori-font/releases/download/v0.200/dalmoori-font.zip'; Bytes = 775035; Fonts = 1; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                            Probe = 'dalmoori.ttf';                           Extended = $false; Note = 'Single pixel TTF.' }
-        [pscustomobject]@{ Name = 'NanumGothicCoding';   Url = 'https://github.com/naver/nanumfont/releases/download/VER2.5/NanumGothicCoding-2.5.zip'; Bytes = 1707449; Fonts = 2; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                       Probe = 'NanumGothicCoding.ttf';                  Extended = $false; Note = 'Regular + Bold; skips __MACOSX.' }
-        [pscustomobject]@{ Name = 'NanumGothic';         Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-gothic.zip'; Bytes = 12905726; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                Probe = 'NanumGothic.ttf';                        Extended = $false; Note = 'TTF, 4 weights (Light/Regular/Bold/ExtraBold). TTF is used because the bundled OTF renames the family to "NanumGothicOTF".' }
-        [pscustomobject]@{ Name = 'NanumMyeongjo';       Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-myeongjo.zip'; Bytes = 7353677; Fonts = 3; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';               Probe = 'NanumMyeongjo.ttf';                      Extended = $false; Note = 'TTF, 3 weights (Regular/Bold/ExtraBold). TTF keeps a clean "NanumMyeongjo" family (OTF is "NanumMyeongjoOTF").' }
-        [pscustomobject]@{ Name = 'NanumBarunGothic';    Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-barun-gothic.zip'; Bytes = 15416063; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';         Probe = 'NanumBarunGothic.ttf';                   Extended = $false; Note = 'TTF, 4 weights (UltraLight/Light/Regular/Bold). TTF keeps a clean "NanumBarunGothic" family (OTF is "NanumBarunGothicOTF").' }
-        [pscustomobject]@{ Name = 'NanumSquare';         Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-square.zip'; Bytes = 4203717; Fonts = 8; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';                 Probe = 'NanumSquareR.ttf';                       Extended = $false; Note = 'TTF, 8 files: "NanumSquare" + "NanumSquare_ac" (alphabet-matched) sub-families, 4 weights each. TTF keeps clean names (OTF appends "OTF").' }
-        [pscustomobject]@{ Name = 'NanumSquareNeo';      Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-square-neo.zip'; Bytes = 9765932; Fonts = 5; Kind = 'Zip'; Include = '(?i)^nanum-square-neo/TTF/[^/]+\.ttf$'; Probe = 'NanumSquareNeo-bRg.ttf';            Extended = $false; Note = 'Static TTF, 5 weights (Light..Heavy). Static TTF is used because both the variable ("NanumSquare Neo variable") and OTF ("NanumSquare Neo OTF") rename the family; static keeps a clean "NanumSquare Neo".' }
-        [pscustomobject]@{ Name = 'NanumSquareRound';    Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/nanum-square-round.zip'; Bytes = 2535434; Fonts = 4; Kind = 'Zip'; Include = '(?i)^[^/]+\.ttf$';          Probe = 'NanumSquareRoundR.ttf';                  Extended = $false; Note = 'TTF, 4 weights (Light/Regular/Bold/ExtraBold). TTF keeps a clean "NanumSquareRound" family (OTF appends "OTF").' }
-        [pscustomobject]@{ Name = 'NanumHuman';          Url = 'https://hangeul.naver.com/hangeul_static/webfont/zips/NanumHuman.zip'; Bytes = 6190692; Fonts = 6; Kind = 'Zip'; Include = '(?i)^NanumHuman/[^/]+\.ttf$';           Probe = 'NanumHumanRegular.ttf';                  Extended = $false; Note = 'TTF, 6 weights (ExtraLight..Heavy); skips __MACOSX/woff. Both formats are suffixed upstream, so this registers as "NanumHuman TTF".' }
-        [pscustomobject]@{ Name = 'D2Coding';            Url = 'https://github.com/naver/d2codingfont/releases/download/VER1.3.2/D2Coding-Ver1.3.2-20180524.zip'; Bytes = 21256997; Fonts = 1; Kind = 'Zip'; Include = '(?i)^D2CodingAll/[^/]+\.ttc$';           Probe = 'D2Coding-Ver1.3.2-20180524-all.ttc';     Extended = $false; Note = 'Installs the D2CodingAll .ttc (regular+bold+ligature in one collection).' }
-        [pscustomobject]@{ Name = 'KoPubWorld';          Url = 'https://www.kopus.org/wp-content/uploads/2026/04/KOPUBWORLD_OTF_FONTS2026.zip'; Bytes = 20297063; Fonts = 6; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';        Probe = 'KoPubWorld Batang_Pro Light.otf';        Extended = $false; Note = 'OTF-only (2026 release). KoPubWorld Batang (serif) + Dotum (sans), 3 weights each (Light/Medium/Bold).' }
-        [pscustomobject]@{ Name = 'KoPub';               Url = 'https://www.kopus.org/wp-content/uploads/2022/04/KOPUB2.0_OTF_FONTS.zip'; Bytes = 12640328; Fonts = 6; Kind = 'Zip'; Include = '(?i)^[^/]+\.otf$';             Probe = 'KoPub Batang_Pro Light.otf';             Extended = $false; Note = 'OTF-only (classic KoPub 2.0). KoPub Batang (serif) + Dotum (sans), 3 weights each (Light/Medium/Bold).' }
-        # Fixed = default Sans design, Normal width, 4 faces (Regular/Bold + Italics).
-        # Intentionally not the Extended/Oblique/Slab/Term/SS/Aile/Etoile variants.
-        [pscustomobject]@{ Name = 'IosevkaFixed';         Url = 'https://github.com/be5invis/Iosevka/releases/download/v34.9.0/PkgTTF-IosevkaFixed-34.9.0.zip'; Bytes = 148235929; Fonts = 4; Kind = 'Zip'; Include = '(?i)^IosevkaFixed-(Regular|Bold|Italic|BoldItalic)\.ttf$'; Probe = 'IosevkaFixed-Regular.ttf'; Extended = $false; Note = 'LARGE ~141 MB archive, installs 4. Default Sans Fixed, Normal width only (Regular/Bold + Italics); Fixed has no ligatures, family "Iosevka Fixed". Excludes Extended/Oblique/Slab/Term/SS/Aile/Etoile.' }
-    )
-}
-
-# Internal configuration for Install-AiSkills
-$_AiSkillsInternal = @{
-    RepoUrl               = 'https://github.com/thejjw/thejjw.git'
-    Branch                = 'main'
-    SparsePath            = 'ai-skills'
-    OpenCodeClaudeSkills  = @('codebase-docs', 'web-search-ddg', 'web-search-startpage', 'z-ai-usage-query', 'minimax-usage-query', 'deepseek-usage-query', 'kimi-usage-query', 'deep-research', 'polish-document', 'rust-style', 'cpp-style')
-    AntigravitySharedSkills  = @('codebase-docs', 'deep-research', 'polish-document', 'rust-style', 'cpp-style')
-    AntigravityCliOnlySkills = @('session-exporter', 'agy-usage-query')
-    CodexSkills           = @('export-chat-codex', 'polish-document', 'rust-style', 'cpp-style')
-    OpenCodeSkillsPath    = '.agents\skills'
-    ClaudeSkillsPath      = '.claude\skills'
-    AntigravityAppSkillsPath = '.gemini\config\skills'
-    AntigravityCliSkillsPath = '.gemini\antigravity-cli\skills'
-    CodexSkillsPath       = 'skills'
-    # OpenCode reads whichever global config exists (it merges config.json ->
-    # opencode.json -> opencode.jsonc, last wins) and oc-advisor's install.mjs
-    # prefers an existing opencode.jsonc. Resolve the same way here so the
-    # profile and the plugin installer never write two different config files.
-    OpenCodeConfigDir     = '.config\opencode'
-    OpenCodeConfigNames   = @('opencode.jsonc', 'opencode.json')
-    OpenCodeConfigNew     = 'opencode.jsonc'
-
-    # External skill sources installed into EVERY tool's skill directory in
-    # addition to the internal lists above. Each source is shallow-cloned to its
-    # tip commit at install time; a clone failure warns and skips that source
-    # (internal thejjw skills still install). Fields:
-    #   Name       Unique label; also its subdirectory under the temp clone root.
-    #   RepoUrl    Git remote to clone.
-    #   Branch     Branch or tag (--branch accepts both; pin a tag to freeze).
-    #   SparsePath Optional repo-relative directory containing the skills. When
-    #              set, the clone is blobless+sparse and fetches only that path;
-    #              omit when the repo root IS the skill tree.
-    #   Skills     Skill directory names to install from the source root. The
-    #              same skill name in two sources overwrites on later install,
-    #              so keep the lists disjoint.
-    ExternalSources       = @(
-        @{
-            Name       = 'go-skills'
-            RepoUrl    = 'https://github.com/spf13/go-skills.git'
-            Branch     = 'main'
-            Skills     = @('go', 'cobra-viper', 'go-spec-reviewer', 'go-release', 'wails', 'fileflow-pathologize')
-        },
-        @{
-            Name       = 'apollo-skills'
-            RepoUrl    = 'https://github.com/apollographql/skills.git'
-            Branch     = 'main'
-            SparsePath = 'skills'
-            Skills     = @('rust-best-practices')
-        },
-        @{
-            Name       = 'taste-skill'
-            RepoUrl    = 'https://github.com/Leonxlnx/taste-skill.git'
-            Branch     = 'main'
-            SparsePath = 'skills'
-            Skills     = @('taste-skill')
-        }
-    )
-}
-
-# Internal configuration for Install-OpenCodeSettings (the oc-advisor plugin).
-# PluginPath is a git pathspec, so it keeps forward slashes; the remaining
-# entries are filesystem paths.
-$_OpenCodeInternal = @{
-    RepoUrl         = 'https://github.com/thejjw/thejjw.git'
-    PluginPath      = 'oc/plugins/oc-advisor'
-    InstallerRel    = 'scripts\install.mjs'
-    CopyRel         = '.config\opencode\plugins\oc-advisor'
-    DefaultRef      = 'main'
-    DefaultCloneDir = Join-Path ([System.IO.Path]::GetTempPath()) 'opencode\oc-advisor-clone'
-}
-
-# Internal configuration for Install-ClaudeCCRSetup (Claude Code Router).
-# Underscore prefix hides it from Get-Variable default scope per PowerShell convention.
-# Endpoint URLs, model lists, and router role mappings are the only literals that need to
-# change when retuning the cccr profile.
-$_CcrInternal = @{
-    Host      = '127.0.0.1'
-    Port      = 3456
-    Log       = $true
-    Timeout   = 3000000
-    Threshold = 60000
-    Router = @{
-        default    = 'zai,glm-5.3[1m]'             # Sonnet (daily work)
-        background = 'zai,glm-4.7'                 # Haiku (background subagents)
-        think      = 'zai,glm-5.3[1m]'             # Opus (Plan Mode / reasoning)
-        webSearch  = 'gemini,gemini-2.5-flash'     # Google search grounding via Gemini Flash
-    }
-    Providers = @{
-        zai = @{
-            base        = 'https://api.z.ai/api/anthropic/v1/messages'
-            key         = '$ZAI_API_KEY'
-            models      = @('glm-4.7', 'glm-5.3[1m]', 'glm-4.6v')
-            transformer = 'Anthropic'
-        }
-        minimax = @{
-            base        = 'https://api.minimax.io/anthropic/v1/messages'
-            key         = '$MINIMAX_API_KEY'
-            # Bare id on purpose: the Anthropic transformer forwards this string verbatim, and
-            # MiniMax's API silently falls back to MiniMax-M3 for any id it does not know
-            # (the [1m] suffix is a Claude Code-side marker and is not understood server-side).
-            models      = @('MiniMax-M3.1-Flash')
-            transformer = 'Anthropic'
-        }
-        deepseek = @{
-            base        = 'https://api.deepseek.com/anthropic/v1/messages'
-            key         = '$DEEPSEEK_API_KEY'
-            models      = @('deepseek-flash[1m]', 'deepseek-v4-pro[1m]')
-            transformer = 'Anthropic'
-        }
-        gemini = @{
-            # Gemini's native API. The CCR gemini transformer appends '{model}:generateContent'
-            # to the base URL, so the trailing slash is required.
-            #
-            # Reference:
-            #   https://ai.google.dev/gemini-api/docs              -- API docs
-            #   https://ai.google.dev/gemini-api/docs/pricing     -- per-model pricing
-            #   https://ai.google.dev/gemini-api/docs/rate-limits -- per-tier rate limits
-            #   https://aistudio.google.com/rate-limit            -- AI Studio tier limits dashboard
-            base        = 'https://generativelanguage.googleapis.com/v1beta/models/'
-            key         = '$GEMINI_API_KEY'
-            models      = @('gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro')
-            transformer = 'gemini'
-        }
-    }
 }
 
 function New-RandomPassword {
@@ -15803,15 +15763,6 @@ if (-not `$commandSucceeded) { exit 1 }
     & $sudoPath $nativeCommand.Source @nativeArguments
 }
 
-# Internal configuration for Add-AppLockerBlock and Remove-AppLockerBlock.
-$_AppLockerInternal = @{
-    # Written into the Description of every rule this profile creates, so that
-    # -List can tell managed rules apart from hand-written ones and -Revert can
-    # remove exactly what was created here.
-    ManagedMarker = 'Created by Add-AppLockerBlock'
-    EveryoneSid   = 'S-1-1-0'
-}
-
 function Read-AppLockerPolicy {
     <#
 .SYNOPSIS
@@ -17176,3 +17127,57 @@ function Invoke-WindowsUpdate {
 # Auto-load vault credentials at profile load time so every session starts with
 # keys available. Uses -Quiet to avoid printing key counts in transient shells.
 Load-AiApiKeysFromCS -Quiet
+
+function Use-GhCredential {
+    <#
+.SYNOPSIS
+    Uses GitHub CLI for the current repository's GitHub HTTPS credentials.
+.DESCRIPTION
+    Replaces the repository-local GitHub credential helpers with an empty
+    reset entry followed by gh. Repeated calls do not add duplicate entries.
+    Uses the active gh account; select it separately with gh auth switch.
+    Prints the active account when available; lookup failures are ignored.
+    SSH remotes are unaffected.
+.EXAMPLE
+    PS C:\repo> Use-GhCredential
+    Configures this repository to use gh for github.com HTTPS authentication.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param()
+
+    foreach ($command in 'git', 'gh') {
+        if (-not (Get-Command $command -CommandType Application -ErrorAction SilentlyContinue)) {
+            throw "$command must be installed and available on PATH."
+        }
+    }
+
+    git rev-parse --git-dir *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'Run Use-GhCredential inside a Git repository.' }
+
+    # Preserve the empty native argument in Windows PowerShell 5.1.
+    # The empty helper resets helpers inherited from other configuration scopes.
+    git --% config --local --replace-all credential.https://github.com.helper ""
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to reset the repository GitHub credential helpers.' }
+
+    git config --local --add credential.https://github.com.helper '!gh auth git-credential'
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to configure the gh credential helper.' }
+
+    Write-Host 'This repository now uses gh for GitHub HTTPS credentials.' -ForegroundColor Green
+    # Account lookup is informational and must not fail credential setup.
+    try {
+        $statusJson = gh auth status --active --hostname github.com --json hosts --no-refresh 2>$null
+        if ($LASTEXITCODE -eq 0 -and $statusJson) {
+            $status = $statusJson | ConvertFrom-Json -ErrorAction Stop
+            $account = $status.hosts.'github.com' | Where-Object { $_.active -and $_.login } | Select-Object -First 1
+            if ($account) {
+                Write-Host ("Current gh account: {0} (github.com)" -f $account.login) -ForegroundColor DarkGray
+            }
+        }
+    } catch {
+        # Keep the original output when gh cannot report an account.
+    }
+    Write-Host 'Authenticate with gh auth login or select an account with gh auth switch.' -ForegroundColor DarkGray
+}
