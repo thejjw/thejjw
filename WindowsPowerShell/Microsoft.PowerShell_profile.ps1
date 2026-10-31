@@ -17124,10 +17124,6 @@ function Invoke-WindowsUpdate {
     }) | Format-Table -AutoSize -Wrap | Out-Host
 }
 
-# Auto-load vault credentials at profile load time so every session starts with
-# keys available. Uses -Quiet to avoid printing key counts in transient shells.
-Load-AiApiKeysFromCS -Quiet
-
 function Use-GhCredential {
     <#
 .SYNOPSIS
@@ -17181,3 +17177,7 @@ function Use-GhCredential {
     }
     Write-Host 'Authenticate with gh auth login or select an account with gh auth switch.' -ForegroundColor DarkGray
 }
+
+# Auto-load vault credentials at profile load time so every session starts with
+# keys available. Uses -Quiet to avoid printing key counts in transient shells.
+Load-AiApiKeysFromCS -Quiet
