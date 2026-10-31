@@ -1725,15 +1725,20 @@ function Invoke-WebRequest2 {
 # Internal configuration group for New-RandomDir to keep global namespace clean
 $_NrdInternal = @{
     Colors         = @(
-        'amber', 'aqua', 'azure', 'beige', 'black', 'blue', 'bronze', 'brown', 'coral',
-        'crimson', 'cyan', 'denim', 'ebony', 'emerald', 'fuchsia', 'gold', 'golden',
-        'gray', 'green', 'indigo', 'ivory', 'jade', 'lavender', 'lemon', 'lilac',
-        'lime', 'magenta', 'mahogany', 'marigold', 'maroon', 'mint', 'mocha', 'navy',
-        'ochre', 'olive', 'onyx', 'orange', 'orchid', 'peach', 'pearl', 'periwinkle',
-        'pine', 'pink', 'plum', 'purple', 'red', 'rose', 'ruby', 'rust', 'saffron',
-        'sage', 'salmon', 'sapphire', 'scarlet', 'sepia', 'silver', 'slate', 'tan',
-        'tangerine', 'taupe', 'teal', 'topaz', 'turquoise', 'umber', 'vermilion',
-        'violet', 'walnut', 'white', 'wine', 'yellow'
+        'alabaster', 'alizarin', 'amaranth', 'amber', 'amethyst', 'apricot', 'aqua', 'azure', 'beige',
+        'bisque', 'black', 'blue', 'bronze', 'brown', 'burgundy', 'cardinal', 'carmine', 'celadon',
+        'cerise', 'cerulean', 'champagne', 'charcoal', 'chartreuse', 'chestnut', 'chocolate', 'citrine', 'claret',
+        'cobalt', 'copper', 'coral', 'cream', 'crimson', 'cyan', 'denim', 'ebony', 'ecru',
+        'eggplant', 'emerald', 'fawn', 'flax', 'fuchsia', 'garnet', 'gold', 'golden', 'gray',
+        'green', 'heather', 'heliotrope', 'indigo', 'ivory', 'jade', 'jet', 'khaki', 'lavender',
+        'lemon', 'lilac', 'lime', 'linen', 'magenta', 'mahogany', 'maize', 'malachite', 'marigold',
+        'maroon', 'mauve', 'mint', 'moccasin', 'mocha', 'mustard', 'navy', 'ochre', 'olive',
+        'onyx', 'orange', 'orchid', 'peach', 'pearl', 'peridot', 'periwinkle', 'persimmon', 'peru',
+        'pine', 'pink', 'platinum', 'plum', 'puce', 'pumpkin', 'purple', 'raspberry', 'red',
+        'rose', 'ruby', 'russet', 'rust', 'saffron', 'sage', 'salmon', 'sand', 'sapphire',
+        'scarlet', 'sepia', 'sienna', 'silver', 'slate', 'snow', 'strawberry', 'tan', 'tangerine',
+        'taupe', 'teal', 'thistle', 'tomato', 'topaz', 'turquoise', 'umber', 'vermilion', 'violet',
+        'viridian', 'walnut', 'wheat', 'white', 'wine', 'wisteria', 'yellow'
     )
     Adjectives     = @(
         'ancient', 'bold', 'brisk', 'calm', 'clear', 'cool', 'curious', 'deep', 'eager', 'fast',
