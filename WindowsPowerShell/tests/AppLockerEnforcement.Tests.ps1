@@ -6,7 +6,7 @@ Describe 'AppLocker live enforcement safety' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($profilePath, [ref]$tokens, [ref]$errors)
         if ($errors) { throw "Profile contains parse errors: $($errors -join '; ')" }
         # Extract definitions only: profile initialization must never run in tests.
-        foreach ($name in @('Test-AppLockerLiveEnforcement', 'Repair-AppLockerEnforcement', 'Stop-AppLockerProcesses')) {
+        foreach ($name in @('Test-AppLockerLiveEnforcement', 'Repair-AppLockerEnforcement', 'Stop-AppLockerProcesses', 'Write-AppLockerServiceStatus')) {
             $definition = $ast.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
@@ -30,6 +30,8 @@ Describe 'AppLocker live enforcement safety' {
     }
 
     BeforeEach {
+        $script:probeTime = [datetime]'2026-11-04T12:00:00'
+        Mock Get-Date { $script:probeTime }
         Mock Copy-Item {}
         Mock Remove-Item {}
         Mock Start-Process {}
@@ -70,6 +72,26 @@ Describe 'AppLocker live enforcement safety' {
         It 'requires the current user in the block event' {
             Mock Start-Process { throw 'Access denied' }
             Mock Get-WinEvent { New-TestBlockEvent -Path (Join-Path $TestDrive 'probe.exe') -Sid 'S-1-5-18' }
+            (Test-AppLockerLiveEnforcement -FileName 'probe.exe' -Directory $TestDrive -Confirm:$false).Enforced | Should -BeNullOrEmpty
+        }
+
+        It 'rejects audit events even when path and user match' {
+            Mock Start-Process { throw 'Access denied' }
+            Mock Get-WinEvent {
+                $event = New-TestBlockEvent -Path (Join-Path $TestDrive 'probe.exe') -Sid ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+                $event.Id = 8003
+                $event
+            }
+            (Test-AppLockerLiveEnforcement -FileName 'probe.exe' -Directory $TestDrive -Confirm:$false).Enforced | Should -BeNullOrEmpty
+        }
+
+        It 'rejects stale block events even when path and user match' {
+            Mock Start-Process { throw 'Access denied' }
+            Mock Get-WinEvent {
+                $event = New-TestBlockEvent -Path (Join-Path $TestDrive 'probe.exe') -Sid ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+                $event.TimeCreated = $script:probeTime.AddMinutes(-1)
+                $event
+            }
             (Test-AppLockerLiveEnforcement -FileName 'probe.exe' -Directory $TestDrive -Confirm:$false).Enforced | Should -BeNullOrEmpty
         }
 
@@ -119,6 +141,49 @@ Describe 'AppLocker live enforcement safety' {
             Should -Invoke Start-Process -Times 0 -Exactly
             Should -Invoke Remove-Item -Times 0 -Exactly
             Should -Invoke Get-WinEvent -Times 0 -Exactly
+        }
+    }
+
+    Context 'Service diagnostics' {
+        BeforeEach {
+            Mock Write-Host {}
+            Mock Get-Service { [pscustomobject]@{ Status = 'Running'; StartType = 'Automatic' } }
+        }
+
+        It 'reports running as readiness without claiming enforcement' {
+            @(Write-AppLockerServiceStatus).Count | Should -Be 0
+            Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { $Object -like '*enforcement requires live probe evidence*' }
+            Should -Invoke Get-Service -Times 1 -Exactly -ParameterFilter { $Name -eq 'AppIDSvc' -and $ErrorAction -eq 'Stop' }
+        }
+
+        It 'warns about manual startup without predicting reboot behavior' {
+            Mock Get-Service { [pscustomobject]@{ Status = 'Running'; StartType = 'Manual' } }
+            Write-AppLockerServiceStatus
+            Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { $Object -like '*not configured for automatic startup*' }
+        }
+
+        It 'reports a stopped service' {
+            Mock Get-Service { [pscustomobject]@{ Status = 'Stopped'; StartType = 'Automatic' } }
+            Write-AppLockerServiceStatus
+            Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { $Object -like '*prerequisite is not running*' }
+        }
+
+        It 'reports disabled startup independently of current running state' {
+            Mock Get-Service { [pscustomobject]@{ Status = 'Running'; StartType = 'Disabled' } }
+            Write-AppLockerServiceStatus
+            Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { $Object -eq 'AppIDSvc startup is disabled.' }
+        }
+
+        It 'distinguishes a missing service from query errors' {
+            Mock Get-Service { Write-Error 'Missing service' -ErrorId NoServiceFoundForGivenName -ErrorAction Stop }
+            Write-AppLockerServiceStatus
+            Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { $Object -like '*not found; service prerequisite unavailable*' }
+        }
+
+        It 'leaves the service state unknown when the query fails' {
+            Mock Get-Service { throw 'Access denied' }
+            Write-AppLockerServiceStatus
+            Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { $Object -like '*state unknown; service query failed*' }
         }
     }
 

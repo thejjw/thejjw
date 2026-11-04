@@ -31,6 +31,7 @@ Describe 'AppLocker block helpers' {
         foreach ($functionName in @(
                 'Repair-AppLockerEnforcement',
                 'Write-AppLockerEnforcementStatus',
+                'Write-AppLockerServiceStatus',
                 'Stop-AppLockerProcesses',
                 'Read-AppLockerPolicy',
                 'Resolve-AppLockerTargetFile',
@@ -49,6 +50,7 @@ Describe 'AppLocker block helpers' {
 
         Mock Repair-AppLockerEnforcement { [pscustomobject]@{ Enforcement = 'Unverified'; Recovery = @(); NeedsReboot = $false } }
         Mock Write-AppLockerEnforcementStatus {}
+        Mock Write-AppLockerServiceStatus {}
 
         function New-TestPolicy {
             param(
@@ -93,6 +95,7 @@ $rules
             $report[0].FileName | Should -Be 'example.exe'
             $report[0].Path | Should -Be '*\example.exe'
             $report[0].Action | Should -Be 'Deny'
+            Should -Invoke Write-AppLockerServiceStatus -Times 1 -Exactly
         }
 
         It 'marks rules created by this profile as managed' {
@@ -240,6 +243,21 @@ $rules
 
             $result.Enforcement | Should -Be 'Unverified'
             Should -Invoke Repair-AppLockerEnforcement -Times 0 -Exactly
+            Should -Invoke Write-AppLockerServiceStatus -Times 1 -Exactly
+        }
+
+        It 'reports service state after recovery without replacing a failed probe verdict' {
+            $script:recoveryFinished = $false
+            Mock Repair-AppLockerEnforcement {
+                $script:recoveryFinished = $true
+                [pscustomobject]@{ Enforcement = 'NotEnforced'; Recovery = @(); NeedsReboot = $false; Probes = @() }
+            }
+            Mock Write-AppLockerServiceStatus { $script:recoveryFinished | Should -BeTrue }
+
+            $result = Add-AppLockerBlock -Name 'example.exe' -NoGroupPolicyRefresh -Confirm:$false -BackupDirectory $TestDrive
+
+            $result.Enforcement | Should -Be 'NotEnforced'
+            Should -Invoke Write-AppLockerServiceStatus -Times 1 -Exactly
         }
 
         It 'passes audit mode to recovery without changing the requested policy mode' {
@@ -267,6 +285,7 @@ $rules
 
             $result.Action | Should -Be 'AlreadyBlocked'
             $result.BlockedFiles | Should -Be 'example.exe'
+            Should -Invoke Write-AppLockerServiceStatus -Times 1 -Exactly
             Should -Invoke -CommandName Set-AppLockerPolicy -Times 0 -Exactly
         }
 
@@ -381,6 +400,7 @@ $rules
 
             $result.Action | Should -Be 'Removed'
             $result.Removed | Should -Be '*\example.exe'
+            Should -Invoke Write-AppLockerServiceStatus -Times 1 -Exactly
             Should -Invoke -CommandName Set-AppLockerPolicy -Times 1 -Exactly
         }
 
@@ -419,6 +439,7 @@ $rules
 
             $result.Action | Should -Be 'NotFound'
             $result.Kept.Count | Should -Be 1
+            Should -Invoke Write-AppLockerServiceStatus -Times 1 -Exactly
             Should -Invoke -CommandName Set-AppLockerPolicy -Times 0 -Exactly
         }
 

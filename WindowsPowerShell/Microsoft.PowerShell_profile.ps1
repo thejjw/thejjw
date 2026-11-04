@@ -16046,6 +16046,9 @@ function Test-AppLockerLiveEnforcement {
                     EndTime = $finished
                 } -ErrorAction SilentlyContinue)
                 foreach ($event in $events) {
+                    # Check the evidence itself as well as the event-log query.
+                    if ($event.Id -ne 8004 -or $null -eq $event.TimeCreated -or
+                        $event.TimeCreated -lt $started -or $event.TimeCreated -gt $finished) { continue }
                     $xml = [xml]$event.ToXml()
                     $pathNode = $xml.SelectSingleNode("//*[local-name()='FilePath'] | //*[@Name='FilePath']")
                     $userNode = $xml.SelectSingleNode("//*[local-name()='TargetUser'] | //*[@Name='TargetUser']")
@@ -16161,6 +16164,41 @@ function Write-AppLockerEnforcementStatus {
         Write-Host 'Enforcement: unverified (probe skipped or evidence unavailable)' -ForegroundColor Yellow
     }
 }
+
+function Write-AppLockerServiceStatus {
+    <#
+.SYNOPSIS
+    Reports Application Identity service readiness without claiming enforcement.
+#>
+    param()
+
+    try {
+        $service = Get-Service -Name 'AppIDSvc' -ErrorAction Stop
+    }
+    catch {
+        if ($_.FullyQualifiedErrorId -like 'NoServiceFoundForGivenName*') {
+            Write-Host 'AppIDSvc: not found; service prerequisite unavailable.' -ForegroundColor Red
+        }
+        else {
+            Write-Host ("AppIDSvc: state unknown; service query failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+        }
+        return
+    }
+    $state = '{0} (startup {1})' -f $service.Status, $service.StartType
+    if ($service.Status -ne 'Running') {
+        Write-Host ("AppIDSvc: {0}; service prerequisite is not running." -f $state) -ForegroundColor Red
+    }
+    else {
+        Write-Host ("AppIDSvc: {0}; service is running; enforcement requires live probe evidence." -f $state) -ForegroundColor DarkGray
+    }
+    if ($service.StartType -eq 'Disabled') {
+        Write-Host 'AppIDSvc startup is disabled.' -ForegroundColor Red
+    }
+    elseif ($service.StartType -ne 'Automatic') {
+        Write-Host 'AppIDSvc is not configured for automatic startup. Add-AppLockerBlock -PersistServiceStartup can configure it.' -ForegroundColor Yellow
+    }
+}
+
 function Stop-AppLockerProcesses {
     <#
 .SYNOPSIS
@@ -16422,6 +16460,7 @@ function Add-AppLockerBlock {
         Write-Host ("   EXE allow rules      : {0}" -f $allowCount) -ForegroundColor DarkGray
         Write-Host ("   Packaged app rules   : {0}" -f $appxCount) -ForegroundColor DarkGray
         Write-Host ("   Filename blocks      : {0}" -f $report.Count) -ForegroundColor DarkGray
+        Write-AppLockerServiceStatus
 
         if ($Format) {
             if ($report.Count -gt 0) {
@@ -16591,6 +16630,7 @@ function Add-AppLockerBlock {
                 Write-Host ("Stopped running processes: {0}" -f ($stopped -join ', ')) -ForegroundColor DarkGray
             }
         }
+        Write-AppLockerServiceStatus
         return [pscustomobject]@{
             Action           = 'AlreadyBlocked'
             BlockedFiles     = @($alreadyBlocked)
@@ -16825,6 +16865,7 @@ function Add-AppLockerBlock {
         Write-Host ("Verify {0}: {1}" -f $VerifyPath, $decision.PolicyDecision) -ForegroundColor DarkGray
     }
     Write-AppLockerEnforcementStatus -Enforcement $enforcementStatus -Recovery $recovery
+    Write-AppLockerServiceStatus
     if ($stopped.Count -gt 0) {
         Write-Host ("Stopped running processes: {0}" -f ($stopped -join ', ')) -ForegroundColor DarkGray
     }
@@ -16977,6 +17018,7 @@ function Remove-AppLockerBlock {
             }
         }
 
+        Write-AppLockerServiceStatus
         return [pscustomobject]@{
             Action      = 'NotFound'
             Removed     = @()
@@ -17047,6 +17089,7 @@ function Remove-AppLockerBlock {
     }
     Write-Host ("Policy backup: {0}" -f $backupPath) -ForegroundColor DarkGray
 
+    Write-AppLockerServiceStatus
     return [pscustomobject]@{
         Action         = 'Removed'
         Removed        = @($removed)
