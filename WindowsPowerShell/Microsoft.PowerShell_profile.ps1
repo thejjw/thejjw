@@ -611,50 +611,6 @@ $_AppLockerInternal = @{
     EveryoneSid   = 'S-1-1-0'
 }
 
-$profileHelperFunctions = @(
-    'GetAiApiKey',
-    'SaveProcessEnvVars',
-    'RestoreProcessEnvVars',
-    'NewSafeFileNameFromCertificateName',
-    'GetCertutilPath',
-    'GetAppLockerRuleIdList',
-    'GetAiUsageJsonProperty',
-    'GetAiUsageJwtClaims',
-    'GetAiUsageWindowLabel',
-    'NewAiUsageHttpSession',
-    'CloseAiUsageHttpSession',
-    'ConvertFromCodexUsagePayload',
-    'ConvertFromClaudeUsagePayload',
-    'ConvertFromQwenCloudUsagePayload',
-    'ResolveWUResultCode',
-    'ResolveWUHResult',
-    'FormatDuration',
-    'WriteSection',
-    'WriteUsageTimestamp',
-    'FromEpochMs',
-    'FormatTokens',
-    'FormatPrice',
-    'GetSeriesStats',
-    'GetSpikes',
-    'UnwrapZaiData',
-    'GetJsoncText',
-    'ShowFontArchive',
-    'Expand7ZipArchive',
-    'NewTemporarySshIdentity',
-    'RemoveTemporarySshIdentity',
-    'GetAppLockerRuleCollection',
-    'GetAppLockerRules',
-    'GetAppLockerRulePath',
-    'GetAppLockerDomainRules',
-    'NewAppLockerFilePathRule',
-    'NewAppLockerFilePublisherRule',
-    'NewAppLockerFileHashRule',
-    'NewAppLockerRuleCollection',
-    'GetAppLockerRuleInfo',
-    'ConvertToAppLockerHashValue',
-    'GetAppLockerBlockReport'
-)
-
 # --- $_ProfileHelpers: shared helper object for the whole profile ----------
 # General-purpose helpers exposed as methods on $_ProfileHelpers (e.g.
 # $_ProfileHelpers.WriteSection('x')). Home for ANY cross-cutting helper.
@@ -2190,7 +2146,53 @@ public class AiUsageTls {
             ForEach-Object { $_.GetAttribute('Id') })
     }
 
-    Export-ModuleMember -Function $profileHelperFunctions
+    # Export list lives inside the module so it never depends on a caller-scope
+    # variable: the module stays loadable when only this assignment is evaluated
+    # (the Pester suites do that) and nothing leaks into the global session.
+    # Unlisted functions (e.g. _U16, _ReadFontNames) stay private.
+    Export-ModuleMember -Function @(
+        'GetAiApiKey',
+        'SaveProcessEnvVars',
+        'RestoreProcessEnvVars',
+        'NewSafeFileNameFromCertificateName',
+        'GetCertutilPath',
+        'GetAppLockerRuleIdList',
+        'GetAiUsageJsonProperty',
+        'GetAiUsageJwtClaims',
+        'GetAiUsageWindowLabel',
+        'NewAiUsageHttpSession',
+        'CloseAiUsageHttpSession',
+        'ConvertFromCodexUsagePayload',
+        'ConvertFromClaudeUsagePayload',
+        'ConvertFromQwenCloudUsagePayload',
+        'ResolveWUResultCode',
+        'ResolveWUHResult',
+        'FormatDuration',
+        'WriteSection',
+        'WriteUsageTimestamp',
+        'FromEpochMs',
+        'FormatTokens',
+        'FormatPrice',
+        'GetSeriesStats',
+        'GetSpikes',
+        'UnwrapZaiData',
+        'GetJsoncText',
+        'ShowFontArchive',
+        'Expand7ZipArchive',
+        'NewTemporarySshIdentity',
+        'RemoveTemporarySshIdentity',
+        'GetAppLockerRuleCollection',
+        'GetAppLockerRules',
+        'GetAppLockerRulePath',
+        'GetAppLockerDomainRules',
+        'NewAppLockerFilePathRule',
+        'NewAppLockerFilePublisherRule',
+        'NewAppLockerFileHashRule',
+        'NewAppLockerRuleCollection',
+        'GetAppLockerRuleInfo',
+        'ConvertToAppLockerHashValue',
+        'GetAppLockerBlockReport'
+    )
 }
 
 function Invoke-WebRequest2 {

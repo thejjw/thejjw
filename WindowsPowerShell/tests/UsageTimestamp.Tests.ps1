@@ -36,19 +36,16 @@ Describe 'usage-query timestamps' {
     }
 
     It 'exports the helper through the shared profile helper object' {
-        $exportAssignment = $script:profileAst.Find({
+        # Evaluate only the $_ProfileHelpers assignment, as the other suites do;
+        # the module must export its methods without any caller-scope state.
+        $helpersAst = $script:profileAst.Find({
             param($node)
             $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
-                $node.Left.Extent.Text -eq '$profileHelperFunctions'
+                $node.Left.Extent.Text -eq '$_ProfileHelpers'
         }, $true)
-        $exportedNames = @(
-            $exportAssignment.Right.FindAll({
-                param($node)
-                $node -is [System.Management.Automation.Language.StringConstantExpressionAst]
-            }, $true).Value
-        )
+        . ([scriptblock]::Create($helpersAst.Extent.Text))
 
-        $exportedNames | Should -Contain 'WriteUsageTimestamp'
+        $_ProfileHelpers.PSObject.Methods.Name | Should -Contain 'WriteUsageTimestamp'
     }
 
     It 'is the first statement in every local Get-*Usage function' {
