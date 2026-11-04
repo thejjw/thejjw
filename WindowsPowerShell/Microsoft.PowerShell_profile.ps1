@@ -16165,6 +16165,34 @@ function Write-AppLockerEnforcementStatus {
     }
 }
 
+function Enable-AppLockerServiceStartup {
+    <#
+.SYNOPSIS
+    Configures and verifies Automatic startup and starts Application Identity.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param()
+
+    if (-not (Test-IsAdministrator)) { throw 'AppIDSvc configuration requires an elevated PowerShell session.' }
+    $service = Get-Service -Name AppIDSvc -ErrorAction Stop
+    if ($service.StartType -ne 'Automatic' -or $service.Status -ne 'Running') {
+        if (-not $PSCmdlet.ShouldProcess('AppIDSvc', 'Configure Automatic startup and start service')) { return }
+        if ($service.StartType -ne 'Automatic') {
+            # Application Identity is protected; use the documented service-control command.
+            $output = @(& sc.exe config AppIDSvc start= auto 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw "AppIDSvc startup configuration failed (exit $LASTEXITCODE): $($output -join ' ')" }
+            $service = Get-Service -Name AppIDSvc -ErrorAction Stop
+            if ($service.StartType -ne 'Automatic') { throw 'AppIDSvc startup configuration did not become Automatic.' }
+        }
+        if ($service.Status -ne 'Running') { Start-Service -Name AppIDSvc -ErrorAction Stop }
+    }
+    $service = Get-Service -Name AppIDSvc -ErrorAction Stop
+    if ($service.StartType -ne 'Automatic' -or $service.Status -ne 'Running') {
+        throw 'AppIDSvc did not reach Automatic startup and Running status.'
+    }
+    return [pscustomobject]@{ Action = 'ServiceConfigured'; StartType = $service.StartType; Status = $service.Status; Enforcement = 'Unverified' }
+}
+
 function Write-AppLockerServiceStatus {
     <#
 .SYNOPSIS
@@ -16286,7 +16314,9 @@ function Add-AppLockerBlock {
 
 .PARAMETER PersistServiceStartup
     Also set the Application Identity service to start automatically. Without
-    it the service is only started for the current session.
+    it the service is only started for the current session. May be used alone
+    without -Name to configure and start the service without changing policy.
+    Service readiness does not verify rule enforcement.
 
 .PARAMETER NoGroupPolicyRefresh
     Skip the gpupdate refresh that makes the new policy effective.
@@ -16360,7 +16390,7 @@ function Add-AppLockerBlock {
 #>
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High', DefaultParameterSetName = 'Add')]
     param(
-        [Parameter(ParameterSetName = 'Add', Mandatory = $true, Position = 0)]
+        [Parameter(ParameterSetName = 'Add', Position = 0)]
         [Parameter(ParameterSetName = 'Revert', Mandatory = $true, Position = 0)]
         [string[]]$Name,
 
@@ -16413,6 +16443,18 @@ function Add-AppLockerBlock {
     )
 
     $ErrorActionPreference = 'Stop'
+
+    if ($PSCmdlet.ParameterSetName -eq 'Add' -and $Name.Count -eq 0) {
+        if (-not $PersistServiceStartup) { throw 'Specify -Name or use -PersistServiceStartup for service-only setup.' }
+        $ruleOptions = @('Mode', 'FilePath', 'Path', 'Enforcement', 'BackupDirectory', 'NoGroupPolicyRefresh', 'VerifyPath', 'NoLiveVerify', 'StopRunning', 'Force')
+        foreach ($option in $ruleOptions) {
+            if ($PSBoundParameters.ContainsKey($option)) { throw "-$option requires -Name; service-only setup accepts -PersistServiceStartup and common parameters." }
+        }
+        $result = Enable-AppLockerServiceStartup -WhatIf:$WhatIfPreference
+        Write-AppLockerServiceStatus
+        Write-AppLockerEnforcementStatus -Enforcement Unverified
+        return $result
+    }
 
     Import-Module AppLocker -ErrorAction Stop
 
@@ -16607,6 +16649,7 @@ function Add-AppLockerBlock {
     }
 
     if ($blocked.Count -eq 0) {
+        if ($PersistServiceStartup) { $null = Enable-AppLockerServiceStartup -WhatIf:$WhatIfPreference }
         Write-Host "Already blocked: $($alreadyBlocked -join ', ')" -ForegroundColor Yellow
         $enforcementStatus = 'Unverified'
         $recovery = @()
@@ -16781,20 +16824,13 @@ function Add-AppLockerBlock {
     }
 
     # AppLocker enforcement depends on the Application Identity service.
+    if ($PersistServiceStartup) { $null = Enable-AppLockerServiceStartup -WhatIf:$WhatIfPreference }
     $service = Get-Service -Name 'AppIDSvc' -ErrorAction SilentlyContinue
     if (-not $service) {
         Write-Warning 'The Application Identity service (AppIDSvc) was not found; AppLocker rules may not be enforced.'
     }
     else {
-        if ($PersistServiceStartup -and $service.StartType -ne 'Disabled') {
-            try {
-                Set-Service -Name 'AppIDSvc' -StartupType Automatic -ErrorAction Stop
-            }
-            catch {
-                Write-Warning "Could not set the Application Identity service to start automatically: $($_.Exception.Message)"
-            }
-        }
-        elseif ($service.StartType -eq 'Disabled') {
+        if ($service.StartType -eq 'Disabled') {
             Write-Warning 'The Application Identity service is disabled; AppLocker rules will not be enforced.'
         }
         if ($service.Status -ne 'Running') {

@@ -32,6 +32,7 @@ Describe 'AppLocker block helpers' {
                 'Repair-AppLockerEnforcement',
                 'Write-AppLockerEnforcementStatus',
                 'Write-AppLockerServiceStatus',
+                'Enable-AppLockerServiceStartup',
                 'Stop-AppLockerProcesses',
                 'Read-AppLockerPolicy',
                 'Resolve-AppLockerTargetFile',
@@ -51,6 +52,7 @@ Describe 'AppLocker block helpers' {
         Mock Repair-AppLockerEnforcement { [pscustomobject]@{ Enforcement = 'Unverified'; Recovery = @(); NeedsReboot = $false } }
         Mock Write-AppLockerEnforcementStatus {}
         Mock Write-AppLockerServiceStatus {}
+        Mock Enable-AppLockerServiceStartup {}
 
         function New-TestPolicy {
             param(
@@ -229,10 +231,11 @@ $rules
         }
 
         It 'adds a deny rule and an allow-all baseline to an empty policy' {
-            $result = Add-AppLockerBlock -Name 'example.exe' -NoGroupPolicyRefresh -Confirm:$false
+            $result = Add-AppLockerBlock -Name 'example.exe' -PersistServiceStartup -NoGroupPolicyRefresh -Confirm:$false
 
             $result.Action | Should -Be 'Blocked'
             $result.BlockedFiles | Should -Be 'example.exe'
+            Should -Invoke Enable-AppLockerServiceStartup -Times 1 -Exactly
             $result.BlockedPaths | Should -Be '*\example.exe'
 
             Should -Invoke -CommandName Set-AppLockerPolicy -Times 1 -Exactly
@@ -281,10 +284,11 @@ $rules
 '@
             }
 
-            $result = Add-AppLockerBlock -Name 'example.exe' -NoGroupPolicyRefresh -Confirm:$false
+            $result = Add-AppLockerBlock -Name 'example.exe' -PersistServiceStartup -NoGroupPolicyRefresh -Confirm:$false
 
             $result.Action | Should -Be 'AlreadyBlocked'
             $result.BlockedFiles | Should -Be 'example.exe'
+            Should -Invoke Enable-AppLockerServiceStartup -Times 1 -Exactly
             Should -Invoke Write-AppLockerServiceStatus -Times 1 -Exactly
             Should -Invoke -CommandName Set-AppLockerPolicy -Times 0 -Exactly
         }
