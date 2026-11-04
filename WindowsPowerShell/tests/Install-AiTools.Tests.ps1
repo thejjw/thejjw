@@ -44,6 +44,12 @@ Describe 'Install-AiTools PowerShell modules' {
         . ([scriptblock]::Create($installerAst.Extent.Text))
         function Add-UserPathEntry { param([string]$Path) }
         function Test-IsAdministrator { return $false }
+        function Enable-LongPathSupport {
+            param([switch]$NoElevate)
+            $script:events += 'longpath'
+            $script:longPathNoElevate = [bool]$NoElevate
+            return $true
+        }
         $script:configuredModules = @($_AiToolsInternal.PowerShellModules)
         $script:configuredWingetPackages = @($_AiToolsInternal.WingetPackages)
         $script:configuredMoreAiWingetPackages = @($_AiToolsInternal.MoreAiWingetPackages)
@@ -180,7 +186,7 @@ Describe 'Install-AiTools PowerShell modules' {
     It 'installs a missing module before checking Winget' {
         Install-AiTools -Auto
 
-        ($script:events -join ',') | Should -Be 'module,winget'
+        ($script:events -join ',') | Should -Be 'longpath,module,winget'
         Should -Invoke Install-Module -Times 1 -Exactly -ParameterFilter {
             $Name -eq 'Pester' -and
             $MinimumVersion -eq '6.0' -and
@@ -224,6 +230,31 @@ Describe 'Install-AiTools PowerShell modules' {
             $Message -like '*Pester*gallery unavailable*'
         }
         $script:events | Should -Contain 'winget'
+    }
+
+    It 'only checks long paths without elevation under -UserScope' {
+        $script:longPathNoElevate = $null
+
+        Install-AiTools -Auto -UserScope
+
+        $script:events | Should -Contain 'longpath'
+        $script:longPathNoElevate | Should -BeTrue
+    }
+
+    It 'may elevate for long paths in a normal run' {
+        $script:longPathNoElevate = $null
+
+        Install-AiTools -Auto
+
+        $script:longPathNoElevate | Should -BeFalse
+    }
+
+    It 'changes nothing when the confirmation prompt is declined' {
+        Mock Read-Host { 'n' }
+
+        Install-AiTools
+
+        $script:events | Should -BeNullOrEmpty
     }
 }
 
@@ -283,6 +314,7 @@ Describe 'Install-AiTools npm packages' {
         function Install-GrokSettings {}
         function Add-UserPathEntry { param([string]$Path) }
         function Test-IsAdministrator { return $false }
+        function Enable-LongPathSupport { param([switch]$NoElevate) return $true }
         function winget {
             param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
         }
@@ -979,6 +1011,7 @@ Describe 'Install-AiTools -REA switch' {
         function Install-ReaToolchain {}
         function Add-UserPathEntry { param([string]$Path) }
         function Test-IsAdministrator { return $false }
+        function Enable-LongPathSupport { param([switch]$NoElevate) return $true }
         function winget {
             param([Parameter(ValueFromRemainingArguments = $true)][object[]]$ArgumentList)
         }

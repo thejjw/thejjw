@@ -10910,6 +10910,10 @@ function Install-AiTools {
     Pass -Customize to interactively remove specific package ids from the pending
     install lists before confirming the run.
 
+    Before installing anything it ensures Win32 long path support
+    (LongPathsEnabled) is enabled via Enable-LongPathSupport, which may show a
+    UAC prompt. A failure only warns; the installs continue.
+
     On first run this helper will ask once whether to proceed automatically with
     installations; if you decline, it will list missing items for manual review and exit.
 
@@ -10965,11 +10969,12 @@ function Install-AiTools {
 .PARAMETER UserScope
     When supplied, restricts winget installs to the current user's profile
     (--scope user), enables unattended/silent switches, suppresses UAC elevation prompts via
-    RunAsInvoker, and requires a non-elevated PowerShell session.
+    RunAsInvoker, and requires a non-elevated PowerShell session. Win32 long path
+    support is only checked and reported, never enabled (no UAC prompt).
 
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-09
+    Last Edit: 2026-11
 #>
     [CmdletBinding()]
     param(
@@ -11073,6 +11078,10 @@ function Install-AiTools {
         Write-Host " - [$npmIdx/$($npmPackages.Count)] $np"
     }
 
+    Write-Host "System settings:" -ForegroundColor Cyan
+    $longPathMode = if ($UserScope) { 'check only' } else { 'may prompt UAC' }
+    Write-Host " - Win32 long paths (HKLM LongPathsEnabled; $longPathMode)"
+
     Write-Host "Command-line tools to verify/install:" -ForegroundColor Cyan
     Write-Host " - git (installed via winget if missing)"
     if ($Dotnet) { Write-Host " - .NET SDK (via dotnet-install.ps1)" }
@@ -11136,6 +11145,10 @@ function Install-AiTools {
             return
         }
     }
+
+    # Long paths must be on before git/npm/winget unpack deep trees. -UserScope
+    # only checks (no UAC); a failure only warns and the installs continue.
+    $null = Enable-LongPathSupport -NoElevate:$UserScope
 
     # Install configured modules before Winget so PowerShell-only setup remains
     # useful on machines where App Installer is absent or unavailable.
