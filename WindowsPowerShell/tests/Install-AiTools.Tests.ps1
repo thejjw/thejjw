@@ -255,6 +255,23 @@ Describe 'Install-AiTools PowerShell modules' {
         Install-AiTools
 
         $script:events | Should -BeNullOrEmpty
+        Should -Invoke Write-Host -Times 0 -Exactly -ParameterFilter { "$Object" -like '*wall time*' }
+    }
+
+    It 'reports wall time as stopped early when winget is missing' {
+        Install-AiTools -Auto
+
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            "$Object" -match '^Install-AiTools stopped early at .+; wall time \d{2,}:\d{2}:\d{2}\.$'
+        }
+    }
+
+    It 'stamps each stage with the elapsed time since start' {
+        Install-AiTools -Auto
+
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            "$Object" -match '^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| \+\d{2,}:\d{2}:\d{2}\] PowerShell modules$'
+        }
     }
 }
 
@@ -1072,6 +1089,14 @@ Describe 'Install-AiTools -REA switch' {
         Install-AiTools -Auto -All
 
         Should -Invoke Install-ReaToolchain -Times 1 -Exactly
+    }
+
+    It 'reports wall time as completed after a full run' {
+        Install-AiTools -Auto
+
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
+            "$Object" -match '^Install-AiTools completed at .+; wall time \d{2,}:\d{2}:\d{2}\.$'
+        }
     }
 }
 

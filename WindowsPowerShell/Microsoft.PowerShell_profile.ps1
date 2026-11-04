@@ -11146,402 +11146,440 @@ function Install-AiTools {
         }
     }
 
-    # Long paths must be on before git/npm/winget unpack deep trees. -UserScope
-    # only checks (no UAC); a failure only warns and the installs continue.
-    $null = Enable-LongPathSupport -NoElevate:$UserScope
+    # Wall-clock timing starts after the confirmation prompt so the time spent
+    # answering it is excluded. Stopwatch is monotonic (immune to clock changes).
+    $runClock = [System.Diagnostics.Stopwatch]::StartNew()
+    $runCompleted = $false
 
-    # Install configured modules before Winget so PowerShell-only setup remains
-    # useful on machines where App Installer is absent or unavailable.
-    if ($powerShellModules.Count -gt 0) {
-        Write-Host 'Checking PowerShell modules...' -ForegroundColor Cyan
-        # PowerShellGet 1.0.0.1 requires NuGet provider 2.8.5.201 or newer to
-        # access NuGet-backed repositories such as PSGallery. This is a shared
-        # package-management prerequisite, not a requirement of Pester itself.
-        $minimumNuGetVersion = [version]'2.8.5.201'
-        $moduleInstallIdx = 0
+    # Formats the run's elapsed time as hh:mm:ss (hours are not capped at 24).
+    function Format-InstallElapsed {
+        $elapsed = $runClock.Elapsed
+        return ('{0:00}:{1:mm\:ss}' -f [math]::Floor($elapsed.TotalHours), $elapsed)
+    }
 
-        foreach ($module in $powerShellModules) {
-            $moduleInstallIdx++
-            $minimumVersion = [version]$module.MinimumVersion
-            $installedModule = Get-Module -ListAvailable -Name $module.Name |
-                Where-Object { $_.Version -ge $minimumVersion } |
-                Sort-Object Version -Descending |
-                Select-Object -First 1
+    # Prints a stage marker with the local time and elapsed time since the start.
+    function Write-InstallStage {
+        param([string]$Title)
+        Write-Host ('[{0} | +{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), (Format-InstallElapsed), $Title) -ForegroundColor DarkCyan
+    }
 
-            if ($installedModule) {
-                Write-Host "[$moduleInstallIdx/$($powerShellModules.Count)] installed: $($module.Name) $($installedModule.Version)" -ForegroundColor Green
-                continue
-            }
+    Write-Host "Install-AiTools started at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')." -ForegroundColor Cyan
 
-            Write-Host "[$moduleInstallIdx/$($powerShellModules.Count)] Installing $($module.Name) >= $minimumVersion..." -ForegroundColor Cyan
+    # try/finally so the wall-time report also prints on every early return,
+    # on Ctrl+C, and on a terminating error.
+    try {
+        Write-InstallStage 'Win32 long paths'
+        # Long paths must be on before git/npm/winget unpack deep trees. -UserScope
+        # only checks (no UAC); a failure only warns and the installs continue.
+        $null = Enable-LongPathSupport -NoElevate:$UserScope
 
-            try {
-                if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) {
-                    throw 'Install-Module is unavailable. Install PowerShellGet and retry.'
-                }
+        # Install configured modules before Winget so PowerShell-only setup remains
+        # useful on machines where App Installer is absent or unavailable.
+        if ($powerShellModules.Count -gt 0) {
+            Write-InstallStage 'PowerShell modules'
+            Write-Host 'Checking PowerShell modules...' -ForegroundColor Cyan
+            # PowerShellGet 1.0.0.1 requires NuGet provider 2.8.5.201 or newer to
+            # access NuGet-backed repositories such as PSGallery. This is a shared
+            # package-management prerequisite, not a requirement of Pester itself.
+            $minimumNuGetVersion = [version]'2.8.5.201'
+            $moduleInstallIdx = 0
 
-                # Older Windows PowerShell defaults may not negotiate the TLS
-                # version required by PowerShell Gallery.
-                [Net.ServicePointManager]::SecurityProtocol =
-                    [Net.ServicePointManager]::SecurityProtocol -bor
-                    [Net.SecurityProtocolType]::Tls12
-
-                $nuGetProvider = Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Version -ge $minimumNuGetVersion } |
-                    Sort-Object Version -Descending |
-                    Select-Object -First 1
-                if (-not $nuGetProvider) {
-                    Write-Host "Bootstrapping NuGet provider >= $minimumNuGetVersion..." -ForegroundColor Yellow
-                    Install-PackageProvider -Name NuGet -MinimumVersion $minimumNuGetVersion `
-                        -Scope CurrentUser -Force -Confirm:$false -ErrorAction Stop | Out-Null
-                }
-
-                $installParameters = @{
-                    Name           = $module.Name
-                    MinimumVersion = $module.MinimumVersion
-                    Repository     = $module.Repository
-                    Scope          = $module.Scope
-                    Confirm        = $false
-                    ErrorAction    = 'Stop'
-                }
-                if ($module.Force) { $installParameters.Force = $true }
-                if ($module.SkipPublisherCheck) { $installParameters.SkipPublisherCheck = $true }
-                Install-Module @installParameters
-
+            foreach ($module in $powerShellModules) {
+                $moduleInstallIdx++
+                $minimumVersion = [version]$module.MinimumVersion
                 $installedModule = Get-Module -ListAvailable -Name $module.Name |
                     Where-Object { $_.Version -ge $minimumVersion } |
                     Sort-Object Version -Descending |
                     Select-Object -First 1
-                if (-not $installedModule) {
-                    throw "$($module.Name) >= $minimumVersion was not discoverable after installation."
+
+                if ($installedModule) {
+                    Write-Host "[$moduleInstallIdx/$($powerShellModules.Count)] installed: $($module.Name) $($installedModule.Version)" -ForegroundColor Green
+                    continue
                 }
 
-                Write-Host "Installed $($module.Name) $($installedModule.Version)." -ForegroundColor Green
-            }
-            catch {
-                Write-Warning "PowerShell module setup failed for $($module.Name): $($_.Exception.Message)"
-            }
-        }
-    }
+                Write-Host "[$moduleInstallIdx/$($powerShellModules.Count)] Installing $($module.Name) >= $minimumVersion..." -ForegroundColor Cyan
 
-    # App Installer exposes winget through the per-user WindowsApps aliases.
-    $windowsAppsDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
-    $null = Add-UserPathEntry -Path $windowsAppsDir
+                try {
+                    if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) {
+                        throw 'Install-Module is unavailable. Install PowerShellGet and retry.'
+                    }
 
-    # Ensure winget exists
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Host "winget not found. Please install 'App Installer' (winget) from Microsoft Store and retry." -ForegroundColor Red
-        return
-    }
+                    # Older Windows PowerShell defaults may not negotiate the TLS
+                    # version required by PowerShell Gallery.
+                    [Net.ServicePointManager]::SecurityProtocol =
+                        [Net.ServicePointManager]::SecurityProtocol -bor
+                        [Net.SecurityProtocolType]::Tls12
 
-    # Winget installs shim executables into this Links directory, but some
-    # system images don't include it in the default User PATH.  Ensure it's
-    # present so `winget list` results translate to discoverable commands.
-    $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
-    $null = Add-UserPathEntry -Path $wingetLinksDir
+                    $nuGetProvider = Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Version -ge $minimumNuGetVersion } |
+                        Sort-Object Version -Descending |
+                        Select-Object -First 1
+                    if (-not $nuGetProvider) {
+                        Write-Host "Bootstrapping NuGet provider >= $minimumNuGetVersion..." -ForegroundColor Yellow
+                        Install-PackageProvider -Name NuGet -MinimumVersion $minimumNuGetVersion `
+                            -Scope CurrentUser -Force -Confirm:$false -ErrorAction Stop | Out-Null
+                    }
 
-    $wingetListOutput = @()
-    Write-Host 'Checking Winget package inventory...' -ForegroundColor Cyan
-    try {
-        # Captured output hides source agreement prompts, so inventory queries
-        # must be noninteractive and use only the source managed by this setup.
-        $wingetListOutput = @(& winget list --source winget --accept-source-agreements --disable-interactivity 2>&1)
-        if ($LASTEXITCODE -ne 0) {
-            throw "winget list failed (exit code $LASTEXITCODE): $($wingetListOutput -join [Environment]::NewLine)"
-        }
-    }
-    catch {
-        Write-Host "Failed to query winget package inventory: $_" -ForegroundColor Red
-        return
-    }
+                    $installParameters = @{
+                        Name           = $module.Name
+                        MinimumVersion = $module.MinimumVersion
+                        Repository     = $module.Repository
+                        Scope          = $module.Scope
+                        Confirm        = $false
+                        ErrorAction    = 'Stop'
+                    }
+                    if ($module.Force) { $installParameters.Force = $true }
+                    if ($module.SkipPublisherCheck) { $installParameters.SkipPublisherCheck = $true }
+                    Install-Module @installParameters
 
-    # Matches exact package ID bounded by whitespace. Because winget list was already
-    # restricted via --source winget, all rows originate from the winget catalog and
-    # the Source column is omitted by winget across all locales.
-    function Test-WingetInstalledPackage {
-        param(
-            [string[]]$Rows,
-            [string]$PackageId
-        )
+                    $installedModule = Get-Module -ListAvailable -Name $module.Name |
+                        Where-Object { $_.Version -ge $minimumVersion } |
+                        Sort-Object Version -Descending |
+                        Select-Object -First 1
+                    if (-not $installedModule) {
+                        throw "$($module.Name) >= $minimumVersion was not discoverable after installation."
+                    }
 
-        $escapedId = [regex]::Escape($PackageId)
-        $pattern = "(?i)(?:^|\s)$escapedId\s+"
-        foreach ($row in $Rows) {
-            if ($row -match $pattern) {
-                return $true
-            }
-        }
-
-        return $false
-    }
-
-    $missing = @()
-    $installed = @()
-    $totalWinget = $wingetPackages.Count
-    $wingetCheckIdx = 0
-    # Enumerate and check install status of each winget package, printing progress
-    foreach ($pkg in $wingetPackages) {
-        $wingetCheckIdx++
-        $isInstalled = Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $pkg
-        if ($isInstalled) {
-            Write-Host "[$wingetCheckIdx/$totalWinget] installed:   $pkg" -ForegroundColor Green
-            $installed += $pkg
-        }
-        else {
-            Write-Host "[$wingetCheckIdx/$totalWinget] not installed: $pkg" -ForegroundColor Yellow
-            $missing += $pkg
-        }
-    }
-
-    if ($missing.Count -gt 0) {
-        Write-Host "Missing winget packages:" -ForegroundColor Yellow
-        foreach ($m in $missing) { Write-Host " - $m" }
-
-        Write-Host "Installing missing packages via winget..." -ForegroundColor Cyan
-        $totalMissing = $missing.Count
-        $wingetInstallIdx = 0
-        # Install each missing winget package, printing progress
-        foreach ($m in $missing) {
-            $wingetInstallIdx++
-            $scopeTag = if ($UserScope) { ' [user scope]' } else { '' }
-            Write-Host "[$wingetInstallIdx/$totalMissing] Installing $m$scopeTag..." -ForegroundColor Cyan
-            try {
-                $exitCode = Invoke-WingetPackage -Action install -PackageId $m -UserScope:$UserScope -NoUpgrade
-                $alreadyInstalledCodes = @(-1978335135, -1978335189, -1978334963)
-                $rebootCodes = @(3010, -1978334965)
-                if ($exitCode -eq 0) {
-                    $installed += $m
+                    Write-Host "Installed $($module.Name) $($installedModule.Version)." -ForegroundColor Green
                 }
-                elseif ($exitCode -in $alreadyInstalledCodes) {
-                    Write-Host "$m is already installed." -ForegroundColor DarkGray
-                    $installed += $m
-                }
-                elseif ($exitCode -in $rebootCodes) {
-                    Write-Host "Installed $m (reboot required)." -ForegroundColor Green
-                    $installed += $m
-                }
-                else {
-                    Write-Host "Winget install failed for $m (exit code $exitCode)." -ForegroundColor Yellow
+                catch {
+                    Write-Warning "PowerShell module setup failed for $($module.Name): $($_.Exception.Message)"
                 }
             }
-            catch { Write-Host "Failed to start winget for $($m): $_" -ForegroundColor Red }
         }
 
-        Write-Host 'Rechecking Winget package inventory...' -ForegroundColor Cyan
+        Write-InstallStage 'Winget inventory and installs'
+        # App Installer exposes winget through the per-user WindowsApps aliases.
+        $windowsAppsDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
+        $null = Add-UserPathEntry -Path $windowsAppsDir
+
+        # Ensure winget exists
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Write-Host "winget not found. Please install 'App Installer' (winget) from Microsoft Store and retry." -ForegroundColor Red
+            return
+        }
+
+        # Winget installs shim executables into this Links directory, but some
+        # system images don't include it in the default User PATH.  Ensure it's
+        # present so `winget list` results translate to discoverable commands.
+        $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
+        $null = Add-UserPathEntry -Path $wingetLinksDir
+
+        $wingetListOutput = @()
+        Write-Host 'Checking Winget package inventory...' -ForegroundColor Cyan
         try {
+            # Captured output hides source agreement prompts, so inventory queries
+            # must be noninteractive and use only the source managed by this setup.
             $wingetListOutput = @(& winget list --source winget --accept-source-agreements --disable-interactivity 2>&1)
             if ($LASTEXITCODE -ne 0) {
                 throw "winget list failed (exit code $LASTEXITCODE): $($wingetListOutput -join [Environment]::NewLine)"
             }
         }
         catch {
-            Write-Host "Failed to verify winget package inventory: $_" -ForegroundColor Red
+            Write-Host "Failed to query winget package inventory: $_" -ForegroundColor Red
             return
         }
-        $stillMissing = $missing | Where-Object { $_ -notin $installed -and -not (Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $_) }
-        if ($stillMissing) {
-            Write-Host "The following packages failed to install:" -ForegroundColor Red
-            foreach ($m in $stillMissing) { Write-Host " - $m" -ForegroundColor Red }
-        }
-        else {
-            Write-Host "All packages installed successfully." -ForegroundColor Green
-        }
-    }
-    else {
-        Write-Host "All winget packages already present." -ForegroundColor Green
-    }
 
-    # Ensure Git is present; use an interactive installer unless user scope requires unattended setup.
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        $gitMsg = if ($UserScope) { "git not found. Installing Git with user scope..." } else { "git not found. Launching interactive winget installer for Git..." }
-        Write-Host $gitMsg -ForegroundColor Yellow
-        try {
-            $null = Invoke-WingetPackage -Action install -PackageId $($_AiToolsInternal.GitWingetPackage) -UserScope:$UserScope -Interactive:(-not $UserScope)
-        }
-        catch { Write-Host "Failed to start winget for Git: $_" -ForegroundColor Red }
-    }
+        # Matches exact package ID bounded by whitespace. Because winget list was already
+        # restricted via --source winget, all rows originate from the winget catalog and
+        # the Source column is omitted by winget across all locales.
+        function Test-WingetInstalledPackage {
+            param(
+                [string[]]$Rows,
+                [string]$PackageId
+            )
 
-    # Install .NET SDK via official install script (https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-install-script)
-    if ($Dotnet) {
-        Write-Host "Installing .NET SDK via dotnet-install.ps1..." -ForegroundColor Cyan
-        # dotnet-install.ps1 calls exit internally, so it must run in a child process.
-        # Forcing TLS 1.2 ensures the download succeeds on older Windows 10 builds.
-        & powershell -NoProfile -ExecutionPolicy Unrestricted -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; &([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1')))"
-        Write-Host ".NET SDK install script completed." -ForegroundColor Green
-    }
+            $escapedId = [regex]::Escape($PackageId)
+            $pattern = "(?i)(?:^|\s)$escapedId\s+"
+            foreach ($row in $Rows) {
+                if ($row -match $pattern) {
+                    return $true
+                }
+            }
 
-    # Keep npm defaults grouped here so additional setup can be added later.
-    function Set-NpmConfiguration {
-        & npm config set fund false
-    }
-
-    # Install global npm packages if npm available
-    if (Get-Command npm -ErrorAction SilentlyContinue) {
-        $npmPrefix = [string](@(& npm prefix -g 2>$null) | Select-Object -Last 1)
-        if ($npmPrefix) {
-            $null = Add-UserPathEntry -Path $npmPrefix.Trim()
+            return $false
         }
 
-        Set-NpmConfiguration
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "npm funding configuration failed with exit code $LASTEXITCODE; continuing."
-        }
-
-        $inventory = Get-GlobalNpmInventory
-        $totalNpm = $npmPackages.Count
-        $npmCheckIdx = 0
-        $missingNpmPackages = @()
-        foreach ($np in $npmPackages) {
-            $npmCheckIdx++
-            if ($inventory.Available -and $inventory.Packages.ContainsKey($np)) {
-                Write-Host "[$npmCheckIdx/$totalNpm] installed:   $np $($inventory.Packages[$np])" -ForegroundColor Green
+        $missing = @()
+        $installed = @()
+        $totalWinget = $wingetPackages.Count
+        $wingetCheckIdx = 0
+        # Enumerate and check install status of each winget package, printing progress
+        foreach ($pkg in $wingetPackages) {
+            $wingetCheckIdx++
+            $isInstalled = Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $pkg
+            if ($isInstalled) {
+                Write-Host "[$wingetCheckIdx/$totalWinget] installed:   $pkg" -ForegroundColor Green
+                $installed += $pkg
             }
             else {
-                Write-Host "[$npmCheckIdx/$totalNpm] not installed: $np" -ForegroundColor Yellow
-                $missingNpmPackages += $np
+                Write-Host "[$wingetCheckIdx/$totalWinget] not installed: $pkg" -ForegroundColor Yellow
+                $missing += $pkg
             }
         }
 
-        if ($missingNpmPackages.Count -eq 0) {
-            Write-Host "All selected global npm packages are already installed." -ForegroundColor Green
+        if ($missing.Count -gt 0) {
+            Write-Host "Missing winget packages:" -ForegroundColor Yellow
+            foreach ($m in $missing) { Write-Host " - $m" }
+
+            Write-Host "Installing missing packages via winget..." -ForegroundColor Cyan
+            $totalMissing = $missing.Count
+            $wingetInstallIdx = 0
+            # Install each missing winget package, printing progress
+            foreach ($m in $missing) {
+                $wingetInstallIdx++
+                $scopeTag = if ($UserScope) { ' [user scope]' } else { '' }
+                Write-Host "[$wingetInstallIdx/$totalMissing] Installing $m$scopeTag..." -ForegroundColor Cyan
+                try {
+                    $exitCode = Invoke-WingetPackage -Action install -PackageId $m -UserScope:$UserScope -NoUpgrade
+                    $alreadyInstalledCodes = @(-1978335135, -1978335189, -1978334963)
+                    $rebootCodes = @(3010, -1978334965)
+                    if ($exitCode -eq 0) {
+                        $installed += $m
+                    }
+                    elseif ($exitCode -in $alreadyInstalledCodes) {
+                        Write-Host "$m is already installed." -ForegroundColor DarkGray
+                        $installed += $m
+                    }
+                    elseif ($exitCode -in $rebootCodes) {
+                        Write-Host "Installed $m (reboot required)." -ForegroundColor Green
+                        $installed += $m
+                    }
+                    else {
+                        Write-Host "Winget install failed for $m (exit code $exitCode)." -ForegroundColor Yellow
+                    }
+                }
+                catch { Write-Host "Failed to start winget for $($m): $_" -ForegroundColor Red }
+            }
+
+            Write-Host 'Rechecking Winget package inventory...' -ForegroundColor Cyan
+            try {
+                $wingetListOutput = @(& winget list --source winget --accept-source-agreements --disable-interactivity 2>&1)
+                if ($LASTEXITCODE -ne 0) {
+                    throw "winget list failed (exit code $LASTEXITCODE): $($wingetListOutput -join [Environment]::NewLine)"
+                }
+            }
+            catch {
+                Write-Host "Failed to verify winget package inventory: $_" -ForegroundColor Red
+                return
+            }
+            $stillMissing = $missing | Where-Object { $_ -notin $installed -and -not (Test-WingetInstalledPackage -Rows $wingetListOutput -PackageId $_) }
+            if ($stillMissing) {
+                Write-Host "The following packages failed to install:" -ForegroundColor Red
+                foreach ($m in $stillMissing) { Write-Host " - $m" -ForegroundColor Red }
+            }
+            else {
+                Write-Host "All packages installed successfully." -ForegroundColor Green
+            }
         }
         else {
-            $npmArgs = @('install', '-g') + $missingNpmPackages
-            Write-Host "Installing missing npm packages: $($missingNpmPackages -join ', ')" -ForegroundColor Cyan
-            & npm @npmArgs
-            $npmInstallExitCode = $LASTEXITCODE
-            if ($npmInstallExitCode -ne 0) {
-                Write-Warning "npm install failed with exit code $npmInstallExitCode for: $($missingNpmPackages -join ', ')"
-            }
-
-            $refreshedInventory = Get-GlobalNpmInventory
-            if ($refreshedInventory.Available) {
-                $stillMissing = @($missingNpmPackages | Where-Object { -not $refreshedInventory.Packages.ContainsKey($_) })
-                if ($stillMissing.Count -gt 0) {
-                    Write-Warning "The following global npm packages remain missing or invalid: $($stillMissing -join ', ')"
-                }
-                elseif ($npmInstallExitCode -eq 0) {
-                    Write-Host "All missing global npm packages installed successfully." -ForegroundColor Green
-                }
-            }
+            Write-Host "All winget packages already present." -ForegroundColor Green
         }
-    }
-    else {
-        Write-Host "npm not found - aborting Install-AiTools. Please inspect your Node/npm installation and re-run." -ForegroundColor Red
-        return
-    }
 
-    Write-Host "CLIs to verify:" -ForegroundColor Cyan
-    Write-Host " - agy (Antigravity CLI)"
-    Write-Host " - claude (Claude CLI)"
-    Write-Host " - codex (Codex CLI)"
-    Write-Host " - omp (oh-my-pi CLI)"
-    Write-Host " - opencode (opencode CLI)"
-    if ($MoreAi) {
-        Write-Host " - kimi (Kimi Code CLI)"
-        Write-Host " - grok (Grok CLI)"
-        Write-Host " - cursor (Cursor CLI / agent)"
-    }
-    # Install Antigravity and Claude CLIs using their recommended installers
-    Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
-
-    if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
-        Write-Host "agy CLI not found; installing via $($_AiToolsInternal.Urls.AgyCli)..." -ForegroundColor Yellow
-        try { & powershell -NoProfile -Command "iex (irm '$($_AiToolsInternal.Urls.AgyCli)')" } catch { Write-Host "Failed to install agy: $_" -ForegroundColor Red }
-    } else {
-        # If agy is present, ensure it's configured with the default settings
-        Install-AgySettings
-    }
-
-    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-        Write-Host "claude CLI not found; installing via Install-ClaudeCode..." -ForegroundColor Yellow
-        try { Install-ClaudeCode } catch { Write-Host "Failed to install claude: $_" -ForegroundColor Red }
-        # The claude installer places the binary in ~/.local/bin; ensure it's on the user PATH.
-        $claudeBin = Join-Path $env:USERPROFILE '.local\bin'
-        $null = Add-UserPathEntry -Path $claudeBin
-    } else {
-        # If claude is present, ensure it's configured with the default settings
-        Install-ClaudeGlobalSettings
-    }
-
-    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-        Write-Host "codex CLI not found; installing via $($_AiToolsInternal.Urls.CodexCli)..." -ForegroundColor Yellow
-        try { & powershell -NoProfile -ExecutionPolicy ByPass -Command "irm '$($_AiToolsInternal.Urls.CodexCli)' | iex" } catch { Write-Host "Failed to install codex: $_" -ForegroundColor Red }
-    } else {
-        # If codex is present, ensure it's configured with the default settings
-        Install-CodexSettings
-    }
-
-    # If omp is present (installed via npm package @oh-my-pi/pi-coding-agent), ensure it's configured with the default settings
-    if (Get-Command omp -ErrorAction SilentlyContinue) {
-        $ompArgs = if ($Auto) { @{ SkipDownload = $true; NoPrompt = $true } } else { @{} }
-        Install-OmpSettings @ompArgs
-    }
-
-    # Install opencode via npm (@opencode/cli, not winget) so the package is managed by npm
-    # and the native `opencode upgrade` command works as upstream intended.
-    if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
-        Write-Host "opencode CLI not found; installing via 'npm install -g @opencode/cli'..." -ForegroundColor Yellow
-        & npm install -g '@opencode/cli'
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Failed to install @opencode/cli with npm exit code $LASTEXITCODE."
-        }
-    }
-
-    # Install/refresh the oc-advisor plugin when the opencode CLI is available.
-    # A plugin failure must not abort the rest of the setup run.
-    if (Get-Command opencode -ErrorAction SilentlyContinue) {
-        try {
-            Install-OpenCodeSettings
-        }
-        catch {
-            Write-Warning "oc-advisor plugin installation failed: $($_.Exception.Message)"
-        }
-    }
-
-    # Configure Qwen Code, Kimi Code, and Grok when MoreAi is requested. All three CLIs
-    # ship as npm packages listed in MoreAiNpmPackages and are installed by the global
-    # npm stage above; only default-settings configuration remains here.
-    if ($MoreAi) {
-        Install-QwenSettings
-        Install-KimiSettings
-        Install-GrokSettings
-    }
-
-    # Verify and install Cursor CLI (agent) if MoreAi is requested.
-    # The upstream installer places binaries in %LOCALAPPDATA%\cursor-agent.
-    if ($MoreAi) {
-        if (-not (Get-Command cursor-agent -ErrorAction SilentlyContinue) -and -not (Get-Command agent -ErrorAction SilentlyContinue)) {
-            Write-Host "Cursor CLI (agent) not found; installing via $($_AiToolsInternal.Urls.CursorCli)..." -ForegroundColor Yellow
+        # Ensure Git is present; use an interactive installer unless user scope requires unattended setup.
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-InstallStage 'Git'
+            $gitMsg = if ($UserScope) { "git not found. Installing Git with user scope..." } else { "git not found. Launching interactive winget installer for Git..." }
+            Write-Host $gitMsg -ForegroundColor Yellow
             try {
-                & powershell -NoProfile -ExecutionPolicy ByPass -Command "iex (irm '$($_AiToolsInternal.Urls.CursorCli)')"
-                $cursorAgentDir = Join-Path $env:LOCALAPPDATA 'cursor-agent'
-                $null = Add-UserPathEntry -Path $cursorAgentDir
-            } catch {
-                Write-Host "Failed to install Cursor CLI: $_" -ForegroundColor Red
+                $null = Invoke-WingetPackage -Action install -PackageId $($_AiToolsInternal.GitWingetPackage) -UserScope:$UserScope -Interactive:(-not $UserScope)
+            }
+            catch { Write-Host "Failed to start winget for Git: $_" -ForegroundColor Red }
+        }
+
+        # Install .NET SDK via official install script (https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-install-script)
+        if ($Dotnet) {
+            Write-InstallStage '.NET SDK'
+            Write-Host "Installing .NET SDK via dotnet-install.ps1..." -ForegroundColor Cyan
+            # dotnet-install.ps1 calls exit internally, so it must run in a child process.
+            # Forcing TLS 1.2 ensures the download succeeds on older Windows 10 builds.
+            & powershell -NoProfile -ExecutionPolicy Unrestricted -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; &([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1')))"
+            Write-Host ".NET SDK install script completed." -ForegroundColor Green
+        }
+
+        # Keep npm defaults grouped here so additional setup can be added later.
+        function Set-NpmConfiguration {
+            & npm config set fund false
+        }
+
+        # Install global npm packages if npm available
+        if (Get-Command npm -ErrorAction SilentlyContinue) {
+            Write-InstallStage 'npm global packages'
+            $npmPrefix = [string](@(& npm prefix -g 2>$null) | Select-Object -Last 1)
+            if ($npmPrefix) {
+                $null = Add-UserPathEntry -Path $npmPrefix.Trim()
+            }
+
+            Set-NpmConfiguration
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "npm funding configuration failed with exit code $LASTEXITCODE; continuing."
+            }
+
+            $inventory = Get-GlobalNpmInventory
+            $totalNpm = $npmPackages.Count
+            $npmCheckIdx = 0
+            $missingNpmPackages = @()
+            foreach ($np in $npmPackages) {
+                $npmCheckIdx++
+                if ($inventory.Available -and $inventory.Packages.ContainsKey($np)) {
+                    Write-Host "[$npmCheckIdx/$totalNpm] installed:   $np $($inventory.Packages[$np])" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "[$npmCheckIdx/$totalNpm] not installed: $np" -ForegroundColor Yellow
+                    $missingNpmPackages += $np
+                }
+            }
+
+            if ($missingNpmPackages.Count -eq 0) {
+                Write-Host "All selected global npm packages are already installed." -ForegroundColor Green
+            }
+            else {
+                $npmArgs = @('install', '-g') + $missingNpmPackages
+                Write-Host "Installing missing npm packages: $($missingNpmPackages -join ', ')" -ForegroundColor Cyan
+                & npm @npmArgs
+                $npmInstallExitCode = $LASTEXITCODE
+                if ($npmInstallExitCode -ne 0) {
+                    Write-Warning "npm install failed with exit code $npmInstallExitCode for: $($missingNpmPackages -join ', ')"
+                }
+
+                $refreshedInventory = Get-GlobalNpmInventory
+                if ($refreshedInventory.Available) {
+                    $stillMissing = @($missingNpmPackages | Where-Object { -not $refreshedInventory.Packages.ContainsKey($_) })
+                    if ($stillMissing.Count -gt 0) {
+                        Write-Warning "The following global npm packages remain missing or invalid: $($stillMissing -join ', ')"
+                    }
+                    elseif ($npmInstallExitCode -eq 0) {
+                        Write-Host "All missing global npm packages installed successfully." -ForegroundColor Green
+                    }
+                }
             }
         }
-    }
-
-    # Install the REA reverse-engineering toolchain (REA CLI + Ghidra) on request.
-    if ($REA) {
-        Install-ReaToolchain
-    }
-
-    # Create a docker.bat shim so tools that hardcode `docker` commands
-    # (compose files, scripts) transparently route through podman.
-    if ($Podman) {
-        Write-Host "Configuring Podman aliases..." -ForegroundColor Cyan
-        $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
-        if (-not (Test-Path -LiteralPath $wingetLinksDir)) {
-            $null = New-Item -ItemType Directory -Path $wingetLinksDir -Force -Verbose
+        else {
+            Write-Host "npm not found - aborting Install-AiTools. Please inspect your Node/npm installation and re-run." -ForegroundColor Red
+            return
         }
-        $dockerBat = Join-Path $wingetLinksDir "docker.bat"
-        "@echo off`r`npodman %*" | Out-File -FilePath $dockerBat -Encoding ascii
-        Write-Host "Created docker alias (docker.bat) for podman in Winget Links directory." -ForegroundColor Green
-    }
 
-    Write-Host "Install-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
+        Write-InstallStage 'CLIs and AI tool settings'
+        Write-Host "CLIs to verify:" -ForegroundColor Cyan
+        Write-Host " - agy (Antigravity CLI)"
+        Write-Host " - claude (Claude CLI)"
+        Write-Host " - codex (Codex CLI)"
+        Write-Host " - omp (oh-my-pi CLI)"
+        Write-Host " - opencode (opencode CLI)"
+        if ($MoreAi) {
+            Write-Host " - kimi (Kimi Code CLI)"
+            Write-Host " - grok (Grok CLI)"
+            Write-Host " - cursor (Cursor CLI / agent)"
+        }
+        # Install Antigravity and Claude CLIs using their recommended installers
+        Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
+
+        if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
+            Write-Host "agy CLI not found; installing via $($_AiToolsInternal.Urls.AgyCli)..." -ForegroundColor Yellow
+            try { & powershell -NoProfile -Command "iex (irm '$($_AiToolsInternal.Urls.AgyCli)')" } catch { Write-Host "Failed to install agy: $_" -ForegroundColor Red }
+        } else {
+            # If agy is present, ensure it's configured with the default settings
+            Install-AgySettings
+        }
+
+        if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+            Write-Host "claude CLI not found; installing via Install-ClaudeCode..." -ForegroundColor Yellow
+            try { Install-ClaudeCode } catch { Write-Host "Failed to install claude: $_" -ForegroundColor Red }
+            # The claude installer places the binary in ~/.local/bin; ensure it's on the user PATH.
+            $claudeBin = Join-Path $env:USERPROFILE '.local\bin'
+            $null = Add-UserPathEntry -Path $claudeBin
+        } else {
+            # If claude is present, ensure it's configured with the default settings
+            Install-ClaudeGlobalSettings
+        }
+
+        if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+            Write-Host "codex CLI not found; installing via $($_AiToolsInternal.Urls.CodexCli)..." -ForegroundColor Yellow
+            try { & powershell -NoProfile -ExecutionPolicy ByPass -Command "irm '$($_AiToolsInternal.Urls.CodexCli)' | iex" } catch { Write-Host "Failed to install codex: $_" -ForegroundColor Red }
+        } else {
+            # If codex is present, ensure it's configured with the default settings
+            Install-CodexSettings
+        }
+
+        # If omp is present (installed via npm package @oh-my-pi/pi-coding-agent), ensure it's configured with the default settings
+        if (Get-Command omp -ErrorAction SilentlyContinue) {
+            $ompArgs = if ($Auto) { @{ SkipDownload = $true; NoPrompt = $true } } else { @{} }
+            Install-OmpSettings @ompArgs
+        }
+
+        # Install opencode via npm (@opencode/cli, not winget) so the package is managed by npm
+        # and the native `opencode upgrade` command works as upstream intended.
+        if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
+            Write-Host "opencode CLI not found; installing via 'npm install -g @opencode/cli'..." -ForegroundColor Yellow
+            & npm install -g '@opencode/cli'
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Failed to install @opencode/cli with npm exit code $LASTEXITCODE."
+            }
+        }
+
+        # Install/refresh the oc-advisor plugin when the opencode CLI is available.
+        # A plugin failure must not abort the rest of the setup run.
+        if (Get-Command opencode -ErrorAction SilentlyContinue) {
+            try {
+                Install-OpenCodeSettings
+            }
+            catch {
+                Write-Warning "oc-advisor plugin installation failed: $($_.Exception.Message)"
+            }
+        }
+
+        # Configure Qwen Code, Kimi Code, and Grok when MoreAi is requested. All three CLIs
+        # ship as npm packages listed in MoreAiNpmPackages and are installed by the global
+        # npm stage above; only default-settings configuration remains here.
+        if ($MoreAi) {
+            Install-QwenSettings
+            Install-KimiSettings
+            Install-GrokSettings
+        }
+
+        # Verify and install Cursor CLI (agent) if MoreAi is requested.
+        # The upstream installer places binaries in %LOCALAPPDATA%\cursor-agent.
+        if ($MoreAi) {
+            if (-not (Get-Command cursor-agent -ErrorAction SilentlyContinue) -and -not (Get-Command agent -ErrorAction SilentlyContinue)) {
+                Write-Host "Cursor CLI (agent) not found; installing via $($_AiToolsInternal.Urls.CursorCli)..." -ForegroundColor Yellow
+                try {
+                    & powershell -NoProfile -ExecutionPolicy ByPass -Command "iex (irm '$($_AiToolsInternal.Urls.CursorCli)')"
+                    $cursorAgentDir = Join-Path $env:LOCALAPPDATA 'cursor-agent'
+                    $null = Add-UserPathEntry -Path $cursorAgentDir
+                } catch {
+                    Write-Host "Failed to install Cursor CLI: $_" -ForegroundColor Red
+                }
+            }
+        }
+
+        # Install the REA reverse-engineering toolchain (REA CLI + Ghidra) on request.
+        if ($REA) {
+            Write-InstallStage 'REA toolchain'
+            Install-ReaToolchain
+        }
+
+        # Create a docker.bat shim so tools that hardcode `docker` commands
+        # (compose files, scripts) transparently route through podman.
+        if ($Podman) {
+            Write-InstallStage 'Podman aliases'
+            Write-Host "Configuring Podman aliases..." -ForegroundColor Cyan
+            $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
+            if (-not (Test-Path -LiteralPath $wingetLinksDir)) {
+                $null = New-Item -ItemType Directory -Path $wingetLinksDir -Force -Verbose
+            }
+            $dockerBat = Join-Path $wingetLinksDir "docker.bat"
+            "@echo off`r`npodman %*" | Out-File -FilePath $dockerBat -Encoding ascii
+            Write-Host "Created docker alias (docker.bat) for podman in Winget Links directory." -ForegroundColor Green
+        }
+
+        Write-Host "Install-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
+        $runCompleted = $true
+    }
+    finally {
+        $runClock.Stop()
+        $outcome = if ($runCompleted) { 'completed' } else { 'stopped early' }
+        Write-Host ('Install-AiTools {0} at {1}; wall time {2}.' -f $outcome, (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), (Format-InstallElapsed)) -ForegroundColor Cyan
+    }
 }
 
 function Set-AiApiKeysCS {
