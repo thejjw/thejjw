@@ -15675,6 +15675,73 @@ function Enable-WindowsSudo {
     return $true
 }
 
+function Enable-LongPathSupport {
+    <#
+.SYNOPSIS
+    Ensures Win32 long path support (LongPathsEnabled=1) is enabled.
+.DESCRIPTION
+    Checks HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled.
+    When it is not 1, sets it directly in an elevated session or launches
+    reg.exe through a UAC prompt otherwise, then reads the value back and
+    reports the result. Only applications that declare longPathAware in their
+    manifest benefit, and processes already running keep the old value.
+.PARAMETER NoElevate
+    Report the current state only; never write or prompt for elevation.
+.EXAMPLE
+    PS C:\> Enable-LongPathSupport
+.OUTPUTS
+    System.Boolean. True when LongPathsEnabled is 1 after the call.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-11
+#>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([switch]$NoElevate)
+
+    $keyPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
+    $readValue = { (Get-ItemProperty -LiteralPath $keyPath -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled }
+
+    if ((& $readValue) -eq 1) {
+        Write-Host 'Win32 long paths: already enabled.' -ForegroundColor Green
+        return $true
+    }
+    if ($NoElevate) {
+        Write-Warning 'Win32 long paths are disabled. Run Enable-LongPathSupport from a normal (non -UserScope) session to enable them.'
+        return $false
+    }
+
+    $process = $null
+    try {
+        if (Test-IsAdministrator) {
+            New-ItemProperty -LiteralPath $keyPath -Name LongPathsEnabled -PropertyType DWord -Value 1 -Force -ErrorAction Stop | Out-Null
+        }
+        else {
+            # reg.exe avoids quoting/profile loading of an elevated PowerShell child.
+            # The window is left visible on purpose so the elevated action is not hidden.
+            $regPath = Join-Path $env:SystemRoot 'System32\reg.exe'
+            $regArgs = @('add', 'HKLM\SYSTEM\CurrentControlSet\Control\FileSystem', '/v', 'LongPathsEnabled', '/t', 'REG_DWORD', '/d', '1', '/f')
+            Write-Host 'Win32 long paths are disabled. Requesting administrator rights (UAC) to run:' -ForegroundColor Yellow
+            Write-Host "  $regPath $($regArgs -join ' ')" -ForegroundColor Yellow
+            $process = Start-Process -FilePath $regPath -ArgumentList $regArgs -Verb RunAs -Wait -PassThru -ErrorAction Stop
+        }
+    }
+    catch {
+        Write-Warning "Enabling Win32 long paths was cancelled or failed: $($_.Exception.Message)"
+        return $false
+    }
+
+    # Read back instead of trusting the exit code; HKLM is readable unelevated.
+    if ((& $readValue) -ne 1) {
+        $exitInfo = if ($process) { " (reg.exe exit code $($process.ExitCode))" } else { '' }
+        Write-Warning "LongPathsEnabled is still not 1$exitInfo."
+        return $false
+    }
+
+    Write-Host 'Win32 long paths enabled. Already-running processes keep the old value: restart terminals (a reboot may be required). Only longPathAware apps benefit.' -ForegroundColor Green
+    return $true
+}
+
 function Invoke-Elevated {
     <#
 .SYNOPSIS
