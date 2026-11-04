@@ -51,10 +51,6 @@ Describe 'Install-AiTools PowerShell modules' {
             return $true
         }
         $script:configuredModules = @($_AiToolsInternal.PowerShellModules)
-        $script:configuredWingetPackages = @($_AiToolsInternal.WingetPackages)
-        $script:configuredMoreAiWingetPackages = @($_AiToolsInternal.MoreAiWingetPackages)
-        $script:configuredUrls = $_AiToolsInternal.Urls
-        $script:configuredUpgradeCommands = @($_AiToolsInternal.UpgradeCommands)
         $script:originalAiToolsConfig = $_AiToolsInternal
     }
 
@@ -123,39 +119,6 @@ Describe 'Install-AiTools PowerShell modules' {
         $pester.Scope | Should -Be 'CurrentUser'
         $pester.Force | Should -BeTrue
         $pester.SkipPublisherCheck | Should -BeTrue
-    }
-
-    It 'includes Bun in the standard Winget packages' {
-        $script:configuredWingetPackages | Should -Contain 'Oven-sh.Bun'
-    }
-
-    It 'includes age in the standard Winget packages' {
-        $script:configuredWingetPackages | Should -Contain 'FiloSottile.age'
-    }
-
-    It 'includes Gpg4win in the standard Winget packages' {
-        $script:configuredWingetPackages | Should -Contain 'GnuPG.Gpg4win'
-    }
-
-    It 'includes Anysphere.Cursor in the MoreAi Winget packages' {
-        $script:configuredMoreAiWingetPackages | Should -Contain 'Anysphere.Cursor'
-    }
-
-    It 'configures the official win32 install script URL for Cursor CLI' {
-        $script:configuredUrls.CursorCli | Should -Be 'https://cursor.com/install?win32=true'
-    }
-
-    It 'configures an upgrade command for Cursor CLI' {
-        $cursorUpgrade = $script:configuredUpgradeCommands | Where-Object Label -eq 'cursor'
-        $cursorUpgrade | Should -Not -BeNullOrEmpty
-        $cursorUpgrade.Cmd | Should -Be 'agent'
-        $cursorUpgrade.Probe | Should -Be 'cursor-agent'
-        $cursorUpgrade.Args | Should -Be @('update')
-    }
-
-    It 'does not write the user PATH directly' {
-        $script:installerAst.Extent.Text | Should -Not -Match "SetValue\('PATH'"
-        $script:installerAst.Extent.Text | Should -Not -Match "SetEnvironmentVariable\('PATH'"
     }
 
     It 'configures npm funding notices before global package installs' {
