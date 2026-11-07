@@ -12142,7 +12142,8 @@ function Invoke-AiUpgrade {
     $_AiToolsInternal.NpmPackages and MoreAiNpmPackages -- through one global
     npm command. Winget packages are upgraded only when -Winget is supplied.
     Preserves and restores the terminal window title so npm commands cannot
-    leave the tab title stuck. Use the alias 'aiu' for convenience.
+    leave the tab title stuck. Reports stage timestamps and cumulative wall time.
+    Normal skips count as completed runs. Use the alias 'aiu' for convenience.
 .PARAMETER Winget
     Upgrade the reported managed Winget packages. Without this switch, Winget
     updates are listed only because they may be large or require elevation.
@@ -12182,7 +12183,25 @@ function Invoke-AiUpgrade {
         # Host environment may not support WindowTitle (e.g. non-interactive/headless).
     }
 
+    $runClock = [System.Diagnostics.Stopwatch]::StartNew()
+    $runCompleted = $false
+
+    # Format cumulative hours without wrapping at 24 hours.
+    function Format-UpgradeElapsed {
+        $elapsed = $runClock.Elapsed
+        return ('{0:00}:{1:mm\:ss}' -f [math]::Floor($elapsed.TotalHours), $elapsed)
+    }
+
+    # Print a local timestamp and cumulative elapsed time for each stage.
+    function Write-UpgradeStage {
+        param([string]$Title)
+        Write-Host ('[{0} | +{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), (Format-UpgradeElapsed), $Title) -ForegroundColor DarkCyan
+    }
+
+    Write-Host "Invoke-AiUpgrade started at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')." -ForegroundColor Cyan
+
     try {
+    Write-UpgradeStage 'Native CLI upgrades'
     foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
         $probe = if ($tool.Probe) { $tool.Probe } else { $tool.Cmd }
         if (-not (Get-Command $probe -ErrorAction SilentlyContinue)) {
@@ -12197,6 +12216,7 @@ function Invoke-AiUpgrade {
 
     # PowerShell modules stage: check and update configured modules (e.g. Pester)
     if ($_AiToolsInternal.PowerShellModules -and (Get-Command Find-Module -ErrorAction SilentlyContinue) -and (Get-Command Update-Module -ErrorAction SilentlyContinue)) {
+        Write-UpgradeStage 'PowerShell modules'
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         $moduleUpdates = @()
         foreach ($mod in $_AiToolsInternal.PowerShellModules) {
@@ -12288,6 +12308,7 @@ function Invoke-AiUpgrade {
         }
     }
 
+    Write-UpgradeStage 'Winget checks and upgrades'
     # Winget stage: discover updates once, restrict the results to every package
     # Install-AiTools may manage, and require an explicit switch before installing.
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
@@ -12371,18 +12392,21 @@ function Invoke-AiUpgrade {
         }
     }
 
+    Write-UpgradeStage 'npm global packages'
     # npm stage: update all npm-installed managed packages in one command.
     # Candidates come from the Install-AiTools npm lists (single source of
     # truth). @opencode/cli is deliberately excluded: the native
     # 'opencode upgrade' command above owns its updates.
     if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
         Write-Host '>>> npm: skipped (npm is not available).' -ForegroundColor Yellow
+        $runCompleted = $true
         return
     }
 
     $inventory = Get-GlobalNpmInventory
     if (-not $inventory.Available) {
         Write-Host '>>> npm: skipped (global package inventory is unavailable).' -ForegroundColor Yellow
+        $runCompleted = $true
         return
     }
 
@@ -12390,6 +12414,7 @@ function Invoke-AiUpgrade {
     $npmPackages = @($managedNpm | Where-Object { $inventory.Packages.ContainsKey($_) })
     if ($npmPackages.Count -eq 0) {
         Write-Host '>>> npm: no managed npm packages are installed.' -ForegroundColor DarkGray
+        $runCompleted = $true
         return
     }
 
@@ -12428,6 +12453,7 @@ function Invoke-AiUpgrade {
 
     if ($outdatedPackages.Count -eq 0) {
         Write-Host '>>> npm: all managed npm packages are already up to date.' -ForegroundColor Green
+        $runCompleted = $true
         return
     }
 
@@ -12456,8 +12482,10 @@ function Invoke-AiUpgrade {
     else {
         Write-Warning "npm update failed with exit code $LASTEXITCODE for: $($outdatedPackages -join ', ')"
     }
+    $runCompleted = $true
     }
     finally {
+        $runClock.Stop()
         try {
             if ($originalTitle -and $originalTitle -notmatch '^(?:npm|node)\b') {
                 $Host.UI.RawUI.WindowTitle = $originalTitle
@@ -12471,6 +12499,8 @@ function Invoke-AiUpgrade {
         catch {
             # Ignore when host does not support setting WindowTitle.
         }
+        $outcome = if ($runCompleted) { 'completed' } else { 'stopped early' }
+        Write-Host ('Invoke-AiUpgrade {0} at {1}; wall time {2}.' -f $outcome, (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), (Format-UpgradeElapsed)) -ForegroundColor Cyan
     }
 }
 function Install-ClaudeCode {

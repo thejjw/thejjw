@@ -129,6 +129,33 @@ Describe 'Invoke-AiUpgrade managed packages' {
         }
     }
 
+    It 'formats cumulative hours beyond one day' {
+        $formatter = $ast.Find({ param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Format-UpgradeElapsed'
+        }, $true)
+        . ([scriptblock]::Create($formatter.Extent.Text))
+        $runClock = [pscustomobject]@{ Elapsed = [timespan]::FromSeconds(90061) }
+        Format-UpgradeElapsed | Should -Be '25:01:01'
+    }
+
+    It 'reports start, stages and completed timing on a normal skip' {
+        Invoke-AiUpgrade
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { "$Object" -match '^Invoke-AiUpgrade started at .+\.$' }
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { "$Object" -match '^\[.+ \| \+\d{2,}:\d{2}:\d{2}\] npm global packages$' }
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { "$Object" -match '^Invoke-AiUpgrade completed at .+; wall time \d{2,}:\d{2}:\d{2}\.$' }
+    }
+
+    It 'reports stopped early and propagates terminating errors' {
+        Mock Get-GlobalNpmInventory { throw 'timing test failure' }
+        { Invoke-AiUpgrade } | Should -Throw '*timing test failure*'
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { "$Object" -match '^Invoke-AiUpgrade stopped early at .+; wall time ' }
+    }
+
+    It 'does not report timing for invalid parameters' {
+        { Invoke-AiUpgrade -UserScope } | Should -Throw
+        Should -Invoke Write-Host -Times 0 -Exactly -ParameterFilter { "$Object" -match '^Invoke-AiUpgrade ' }
+    }
+
     It 'reports when no managed npm AI tools are installed' {
         Invoke-AiUpgrade
 
