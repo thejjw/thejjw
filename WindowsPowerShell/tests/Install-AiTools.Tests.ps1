@@ -762,7 +762,7 @@ Describe 'Install-AiTools REA toolchain' {
         }
         function Invoke-WingetPackage {
             [CmdletBinding()]
-            param($Action, $PackageId, [switch]$UserScope, [switch]$Interactive, [switch]$NoUpgrade)
+            param($Action, $PackageId, [switch]$UserScope, [switch]$Interactive, [switch]$Unattended, [switch]$NoUpgrade)
         }
         function npm {
             [CmdletBinding()]

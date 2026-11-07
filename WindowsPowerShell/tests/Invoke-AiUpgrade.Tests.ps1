@@ -129,6 +129,25 @@ Describe 'Invoke-AiUpgrade managed packages' {
         }
     }
 
+    It 'wires unattended package and JDK installs while preserving interactive Git' {
+        $text = Get-Content -LiteralPath $profilePath -Raw
+        $text | Should -Match 'Invoke-WingetPackage -Action install -PackageId \$m -UserScope:\$UserScope -Unattended -NoUpgrade'
+        $text | Should -Match 'Invoke-WingetPackage -Action install -PackageId \$_AiToolsInternal.ReaGhidraJdkWingetPackage -Unattended'
+        $text | Should -Match '-Interactive:\(-not \$UserScope\)'
+    }
+
+    It 'rejects conflicting installer modes before launching Winget' {
+        { Invoke-WingetPackage -Action install -PackageId Git.Git -Interactive -Unattended } | Should -Throw '*Cannot combine*'
+        $script:startProcessCalls.Count | Should -Be 0
+    }
+
+    It 'requests unattended installs without changing scope' {
+        $before = $env:__COMPAT_LAYER
+        Invoke-WingetPackage -Action install -PackageId Test.Package -Unattended -NoUpgrade | Should -Be 0
+        ($script:startProcessCalls[0].ArgumentList -join ' ') | Should -Be 'install --source winget --exact --id Test.Package --no-upgrade --silent --disable-interactivity --accept-package-agreements --accept-source-agreements'
+        $env:__COMPAT_LAYER | Should -Be $before
+    }
+
     It 'formats cumulative hours beyond one day' {
         $formatter = $ast.Find({ param($node)
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Format-UpgradeElapsed'
@@ -235,7 +254,7 @@ Describe 'Invoke-AiUpgrade managed packages' {
 
         Invoke-AiUpgrade
 
-        ($script:wingetCalls[0].Args -join ' ') | Should -Be 'list --upgrade-available --source winget --disable-interactivity'
+        ($script:wingetCalls[0].Args -join ' ') | Should -Be 'list --upgrade-available --source winget --accept-source-agreements --disable-interactivity'
         $script:startProcessCalls.Count | Should -Be 0
         Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
             $Object -eq ">>> winget: report only; run 'aiu -Winget' to install these updates."
@@ -257,8 +276,8 @@ Describe 'Invoke-AiUpgrade managed packages' {
         Invoke-AiUpgrade -winget
 
         $script:startProcessCalls.Count | Should -Be 2
-        ($script:startProcessCalls[0].ArgumentList -join ' ') | Should -Be 'upgrade --source winget --exact --id MiniMax.MiniMaxCode'
-        ($script:startProcessCalls[1].ArgumentList -join ' ') | Should -Be 'upgrade --source winget --exact --id ZhipuAI.ZCode'
+        ($script:startProcessCalls[0].ArgumentList -join ' ') | Should -Be 'upgrade --source winget --exact --id MiniMax.MiniMaxCode --silent --disable-interactivity --accept-package-agreements --accept-source-agreements'
+        ($script:startProcessCalls[1].ArgumentList -join ' ') | Should -Be 'upgrade --source winget --exact --id ZhipuAI.ZCode --silent --disable-interactivity --accept-package-agreements --accept-source-agreements'
         Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter {
             $Object -eq '>>> winget: [1/2] upgrading MiniMax.MiniMaxCode  1.1.0 -> 1.2.0'
         }
@@ -277,7 +296,7 @@ Describe 'Invoke-AiUpgrade managed packages' {
         Invoke-AiUpgrade -Winget
 
         $script:startProcessCalls.Count | Should -Be 1
-        ($script:startProcessCalls[0].ArgumentList -join ' ') | Should -Be 'upgrade --source winget --exact --id Microsoft.VCRedist.2015+.x64'
+        ($script:startProcessCalls[0].ArgumentList -join ' ') | Should -Be 'upgrade --source winget --exact --id Microsoft.VCRedist.2015+.x64 --silent --disable-interactivity --accept-package-agreements --accept-source-agreements'
     }
 
     It 'warns on a Winget query failure and continues to npm' {

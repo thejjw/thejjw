@@ -10517,6 +10517,8 @@ function Invoke-WingetPackage {
     '--accept-package-agreements', and '--accept-source-agreements', and applies
     __COMPAT_LAYER=RunAsInvoker to suppress UAC credential elevation prompts,
     restoring any previous compatibility layer on completion.
+    Unattended adds the same silent/agreement flags without changing scope.
+    Interactive and Unattended cannot be combined.
 #>
     [CmdletBinding()]
     param(
@@ -10531,8 +10533,14 @@ function Invoke-WingetPackage {
 
         [switch]$Interactive,
 
+        [switch]$Unattended,
+
         [switch]$NoUpgrade
     )
+
+    if ($Interactive -and $Unattended) {
+        throw 'Cannot combine -Interactive and -Unattended.'
+    }
 
     $arguments = @($Action, '--source', 'winget', '--exact', '--id', $PackageId)
     if ($NoUpgrade) {
@@ -10540,14 +10548,14 @@ function Invoke-WingetPackage {
     }
     if ($UserScope) {
         $arguments += @('--scope', 'user')
-        if (-not $Interactive) {
-            $arguments += @(
-                '--silent',
-                '--disable-interactivity',
-                '--accept-package-agreements',
-                '--accept-source-agreements'
-            )
-        }
+    }
+    if (($UserScope -or $Unattended) -and -not $Interactive) {
+        $arguments += @(
+            '--silent',
+            '--disable-interactivity',
+            '--accept-package-agreements',
+            '--accept-source-agreements'
+        )
     }
     if ($Interactive) {
         $arguments += @('-i')
@@ -10681,7 +10689,7 @@ function Install-ReaToolchain {
         Write-Host "Installing JDK ($($_AiToolsInternal.ReaGhidraJdkWingetPackage)) for Ghidra..." -ForegroundColor Cyan
         try {
             # The OpenJDK MSI is a per-machine package, so no user scope here.
-            $null = Invoke-WingetPackage -Action install -PackageId $_AiToolsInternal.ReaGhidraJdkWingetPackage
+            $null = Invoke-WingetPackage -Action install -PackageId $_AiToolsInternal.ReaGhidraJdkWingetPackage -Unattended
             Update-ProcessPath
             $jdk = Get-JdkInstallation -MinimumMajor $javaMajorMin
         }
@@ -10909,6 +10917,8 @@ function Install-AiTools {
     before processing a curated list of Windows packages via `winget`. Also ensures
     `git` is present, installs global `npm` packages, and bootstraps AI CLIs using
     their supported installers.
+    Winget installs accept agreements and request silent operation, except the
+    default-scope Git setup wizard. User-scope Git installs remain silent.
     Pass -Customize to interactively remove specific package ids from the pending
     install lists before confirming the run.
 
@@ -11333,7 +11343,7 @@ function Install-AiTools {
                 $scopeTag = if ($UserScope) { ' [user scope]' } else { '' }
                 Write-Host "[$wingetInstallIdx/$totalMissing] Installing $m$scopeTag..." -ForegroundColor Cyan
                 try {
-                    $exitCode = Invoke-WingetPackage -Action install -PackageId $m -UserScope:$UserScope -NoUpgrade
+                    $exitCode = Invoke-WingetPackage -Action install -PackageId $m -UserScope:$UserScope -Unattended -NoUpgrade
                     $alreadyInstalledCodes = @(-1978335135, -1978335189, -1978334963)
                     $rebootCodes = @(3010, -1978334965)
                     if ($exitCode -eq 0) {
@@ -12147,6 +12157,7 @@ function Invoke-AiUpgrade {
 .PARAMETER Winget
     Upgrade the reported managed Winget packages. Without this switch, Winget
     updates are listed only because they may be large or require elevation.
+    Upgrades accept agreements and request silent operation; UAC may still appear.
 .PARAMETER UserScope
     When supplied with -Winget, restricts winget upgrades to the current user's profile
     (--scope user), enables unattended/silent switches, suppresses UAC elevation prompts via
@@ -12329,7 +12340,7 @@ function Invoke-AiUpgrade {
         )
 
         Write-Host ">>> winget: checking $($managedWinget.Count) managed package(s) for updates..." -ForegroundColor Cyan
-        $wingetOutput = @(& winget list --upgrade-available --source winget --disable-interactivity 2>$null)
+        $wingetOutput = @(& winget list --upgrade-available --source winget --accept-source-agreements --disable-interactivity 2>$null)
         $wingetExitCode = $LASTEXITCODE
         if ($wingetExitCode -ne 0) {
             Write-Warning "Could not query managed Winget updates (exit code $wingetExitCode)."
@@ -12372,7 +12383,7 @@ function Invoke-AiUpgrade {
                         $scopeTag = if ($UserScope) { ' [user scope]' } else { '' }
                         Write-Host (">>> winget: [{0}/{1}] upgrading {2}  {3} -> {4}{5}" -f $wingetUpgradeIndex, $wingetUpdates.Count, $update.Id, $update.Current, $update.Available, $scopeTag) -ForegroundColor Cyan
                         try {
-                            $exitCode = Invoke-WingetPackage -Action upgrade -PackageId $update.Id -UserScope:$UserScope
+                            $exitCode = Invoke-WingetPackage -Action upgrade -PackageId $update.Id -UserScope:$UserScope -Unattended
                             if ($exitCode -ne 0) {
                                 $wingetFailures += "$($update.Id) (exit code $exitCode)"
                             }
