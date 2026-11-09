@@ -335,7 +335,8 @@ $_AiToolsInternal = @{
         CursorCli     = 'https://cursor.com/install?win32=true'
         CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
-        OmpTps        = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
+        OmpTps            = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
+        OmpLemonadeJudge  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpLemonadeJudge.ps1'
     }
 
     # REA reverse-engineering toolchain used by the -REA stage of Install-AiTools.
@@ -7614,6 +7615,148 @@ OUTPUT FORMAT: a single JSON array of strings with ONLY the IDs that are NOT tex
     [IO.File]::WriteAllText($stampFile, $hash, [Text.UTF8Encoding]::new($false))
     Write-Host "omp: qwencloud-payg roster written ($($kept.Count) models, backup: $modelsFile.$stamp.bak)" -ForegroundColor Green
     return $true
+}
+
+function Set-OmpLemonadeJudge {
+    <#
+.SYNOPSIS
+    Configures oh-my-pi (omp) to use LiquidAI LFM3-1.7B via Lemonade as judge model.
+.DESCRIPTION
+    Probes for the local util\Set-OmpLemonadeJudge.ps1 script under the profile directory
+    or downloads it from the repository if missing (or when -UpdateScript is supplied).
+    Executes the script in an isolated PowerShell process.
+.PARAMETER Checkpoint
+    Hugging Face checkpoint (repo:variant) registered when no LFM3 model exists yet.
+.PARAMETER ModelName
+    Lemonade model name for a new registration.
+.PARAMETER ProviderId
+    omp provider id for the Lemonade endpoint.
+.PARAMETER ContextWindow
+    Context size Lemonade loads the model with, and the window omp budgets for it.
+.PARAMETER MinLlamaCppBuild
+    Oldest llama.cpp build that supports LFM3.
+.PARAMETER UpdateScript
+    Forces downloading the latest script from the remote repository before running.
+.EXAMPLE
+    Set-OmpLemonadeJudge
+.EXAMPLE
+    Set-OmpLemonadeJudge -ContextWindow 65536
+.EXAMPLE
+    Set-OmpLemonadeJudge -UpdateScript
+#>
+    [CmdletBinding()]
+    param(
+        [ValidatePattern('^[^/:\s]+/[^/:\s]+:[^/:\s]+$')]
+        [string]$Checkpoint,
+        [ValidatePattern('^[A-Za-z0-9._-]+$')]
+        [string]$ModelName,
+        [ValidatePattern('^[a-z0-9][a-z0-9._-]*$')]
+        [string]$ProviderId,
+        [ValidateRange(2048, 262144)]
+        [int]$ContextWindow,
+        [int]$MinLlamaCppBuild,
+        [switch]$UpdateScript
+    )
+
+    # Resolve profile directory and local util script target
+    $profileDir = if ($PROFILE -and "$PROFILE" -ne '') {
+        $targetProfile = if ($PROFILE -is [System.Management.Automation.PSObject] -and $PROFILE.CurrentUserCurrentHost) {
+            $PROFILE.CurrentUserCurrentHost
+        } else {
+            "$PROFILE"
+        }
+        Split-Path -Parent $targetProfile
+    } else {
+        Join-Path $env:USERPROFILE 'Documents\WindowsPowerShell'
+    }
+    $utilDir = Join-Path $profileDir 'util'
+    $scriptPath = Join-Path $utilDir 'Set-OmpLemonadeJudge.ps1'
+
+    if ($UpdateScript -or -not (Test-Path -LiteralPath $scriptPath)) {
+        $remoteUrl = $_AiToolsInternal.Urls.OmpLemonadeJudge
+        if (-not $remoteUrl) {
+            $remoteUrl = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpLemonadeJudge.ps1'
+        }
+
+        Write-Host "Fetching Set-OmpLemonadeJudge.ps1 from $remoteUrl..." -ForegroundColor Cyan
+        $tempFile = [System.IO.Path]::GetTempFileName()
+        try {
+            $cacheBuster = '?cb={0}' -f [guid]::NewGuid().ToString('N')
+            if (Get-Command 'Invoke-WebRequest2' -ErrorAction SilentlyContinue) {
+                Invoke-WebRequest2 -Uri ($remoteUrl + $cacheBuster) -OutFile $tempFile -UseBasicParsing | Out-Null
+            } else {
+                Invoke-RestMethod -Uri ($remoteUrl + $cacheBuster) -OutFile $tempFile
+            }
+
+            # Validate downloaded script before installing
+            $fileItem = Get-Item -LiteralPath $tempFile -ErrorAction Stop
+            if ($fileItem.Length -le 0) {
+                throw 'Downloaded script is empty.'
+            }
+
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($tempFile, [ref]$null, [ref]$errors)
+            if ($errors -and $errors.Count -gt 0) {
+                throw "Downloaded script contains syntax errors: $($errors[0].Message)"
+            }
+
+            if (-not (Test-Path -LiteralPath $utilDir)) {
+                New-Item -ItemType Directory -Path $utilDir -Force | Out-Null
+            }
+            [System.IO.File]::Copy($tempFile, $scriptPath, $true)
+            Write-Host "Saved Set-OmpLemonadeJudge.ps1 to $scriptPath." -ForegroundColor Green
+        } catch {
+            Write-Error "Failed to download Set-OmpLemonadeJudge.ps1: $_"
+            if (-not (Test-Path -LiteralPath $scriptPath)) {
+                return
+            }
+            Write-Warning "Falling back to existing local script at $scriptPath."
+        } finally {
+            if ($tempFile -and (Test-Path -LiteralPath $tempFile)) {
+                Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        Write-Error "Set-OmpLemonadeJudge.ps1 not found at $scriptPath."
+        return
+    }
+
+    # Forward parameters explicitly passed by caller
+    $cliArgs = [System.Collections.Generic.List[string]]::new()
+    $cliArgs.Add('-NoProfile')
+    $cliArgs.Add('-ExecutionPolicy')
+    $cliArgs.Add('Bypass')
+    $cliArgs.Add('-File')
+    $cliArgs.Add($scriptPath)
+
+    if ($PSBoundParameters.ContainsKey('Checkpoint')) {
+        $cliArgs.Add('-Checkpoint')
+        $cliArgs.Add($Checkpoint)
+    }
+    if ($PSBoundParameters.ContainsKey('ModelName')) {
+        $cliArgs.Add('-ModelName')
+        $cliArgs.Add($ModelName)
+    }
+    if ($PSBoundParameters.ContainsKey('ProviderId')) {
+        $cliArgs.Add('-ProviderId')
+        $cliArgs.Add($ProviderId)
+    }
+    if ($PSBoundParameters.ContainsKey('ContextWindow')) {
+        $cliArgs.Add('-ContextWindow')
+        $cliArgs.Add($ContextWindow.ToString())
+    }
+    if ($PSBoundParameters.ContainsKey('MinLlamaCppBuild')) {
+        $cliArgs.Add('-MinLlamaCppBuild')
+        $cliArgs.Add($MinLlamaCppBuild.ToString())
+    }
+
+    $psExe = if ($PSVersionTable.PSVersion.Major -ge 6) { 'pwsh.exe' } else { 'powershell.exe' }
+    & $psExe @cliArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Set-OmpLemonadeJudge script exited with code $LASTEXITCODE."
+    }
 }
 
 function Install-ClaudezSetup {
