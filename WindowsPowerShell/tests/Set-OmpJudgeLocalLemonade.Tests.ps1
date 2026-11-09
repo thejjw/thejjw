@@ -1,4 +1,4 @@
-Describe 'Set-OmpLemonadeJudge' {
+Describe 'Set-OmpJudgeLocalLemonade' {
     BeforeAll {
         function Invoke-WebRequest2 {
             [CmdletBinding()]
@@ -22,9 +22,9 @@ Describe 'Set-OmpLemonadeJudge' {
         $functionAst = $ast.Find({
             param($node)
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-                $node.Name -eq 'Set-OmpLemonadeJudge'
+                $node.Name -eq 'Set-OmpJudgeLocalLemonade'
         }, $true)
-        if (-not $functionAst) { throw 'Could not load Set-OmpLemonadeJudge from the profile.' }
+        if (-not $functionAst) { throw 'Could not load Set-OmpJudgeLocalLemonade from the profile.' }
         . ([scriptblock]::Create($functionAst.Extent.Text))
     }
 
@@ -32,7 +32,7 @@ Describe 'Set-OmpLemonadeJudge' {
         $script:mockHome = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         $script:mockProfileDir = Join-Path $script:mockHome 'Documents\WindowsPowerShell'
         $script:mockUtilDir = Join-Path $script:mockProfileDir 'util'
-        $script:mockScriptPath = Join-Path $script:mockUtilDir 'Set-OmpLemonadeJudge.ps1'
+        $script:mockScriptPath = Join-Path $script:mockUtilDir 'Set-OmpJudgeLocalLemonade.ps1'
 
         $null = New-Item -ItemType Directory -Path $script:mockUtilDir -Force
         $script:dummyScriptContent = "param(`$Checkpoint, `$ModelName, `$ProviderId, [int]`$ContextWindow, [int]`$MinLlamaCppBuild)`n`"RAN: Checkpoint=`$Checkpoint ModelName=`$ModelName ProviderId=`$ProviderId ContextWindow=`$ContextWindow MinLlamaCppBuild=`$MinLlamaCppBuild`""
@@ -44,13 +44,13 @@ Describe 'Set-OmpLemonadeJudge' {
 
         $_AiToolsInternal = @{
             Urls = @{
-                OmpLemonadeJudge = 'https://example.invalid/util/Set-OmpLemonadeJudge.ps1'
+                OmpJudgeLocalLemonade = 'https://example.invalid/util/Set-OmpJudgeLocalLemonade.ps1'
             }
         }
     }
 
     It 'executes the existing local script with forwarded parameters' {
-        $out = Set-OmpLemonadeJudge -Checkpoint 'LiquidAI/LFM3-1.7B-GGUF:Q4_K_M' -ContextWindow 32768
+        $out = Set-OmpJudgeLocalLemonade -Checkpoint 'LiquidAI/LFM3-1.7B-GGUF:Q4_K_M' -ContextWindow 32768
         $out | Should -Match 'RAN: Checkpoint=LiquidAI/LFM3-1.7B-GGUF:Q4_K_M.*ContextWindow=32768'
     }
 
@@ -61,7 +61,7 @@ Describe 'Set-OmpLemonadeJudge' {
             [IO.File]::WriteAllText($OutFile, "param(`$Checkpoint)`n`"DOWNLOADED: Checkpoint=`$Checkpoint`"", [Text.Encoding]::UTF8)
         }
 
-        $out = Set-OmpLemonadeJudge -Checkpoint 'LiquidAI/LFM3-1.7B-GGUF:Q4_K_M'
+        $out = Set-OmpJudgeLocalLemonade -Checkpoint 'LiquidAI/LFM3-1.7B-GGUF:Q4_K_M'
         Test-Path -LiteralPath $script:mockScriptPath | Should -Be $true
         $out | Should -Match 'DOWNLOADED: Checkpoint=LiquidAI/LFM3-1.7B-GGUF:Q4_K_M'
     }
@@ -73,7 +73,7 @@ Describe 'Set-OmpLemonadeJudge' {
             [IO.File]::WriteAllText($OutFile, "function (broken syntax", [Text.Encoding]::UTF8)
         }
 
-        $out = Set-OmpLemonadeJudge -UpdateScript
+        $out = Set-OmpJudgeLocalLemonade -UpdateScript
         (Get-Content -LiteralPath $script:mockScriptPath -Raw) | Should -Match 'ORIGINAL'
         $out | Should -Match 'ORIGINAL'
     }

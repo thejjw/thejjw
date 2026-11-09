@@ -335,8 +335,8 @@ $_AiToolsInternal = @{
         CursorCli     = 'https://cursor.com/install?win32=true'
         CcStatusline  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/bin/cc_statusline.sh'
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
-        OmpTps            = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
-        OmpLemonadeJudge  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpLemonadeJudge.ps1'
+        OmpTps                 = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
+        OmpJudgeLocalLemonade  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpJudgeLocalLemonade.ps1'
     }
 
     # REA reverse-engineering toolchain used by the -REA stage of Install-AiTools.
@@ -7617,12 +7617,12 @@ OUTPUT FORMAT: a single JSON array of strings with ONLY the IDs that are NOT tex
     return $true
 }
 
-function Set-OmpLemonadeJudge {
+function Set-OmpJudgeLocalLemonade {
     <#
 .SYNOPSIS
     Configures oh-my-pi (omp) to use LiquidAI LFM3-1.7B via Lemonade as judge model.
 .DESCRIPTION
-    Probes for the local util\Set-OmpLemonadeJudge.ps1 script under the profile directory
+    Probes for the local util\Set-OmpJudgeLocalLemonade.ps1 script under the profile directory
     or downloads it from the repository if missing (or when -UpdateScript is supplied).
     Executes the script in an isolated PowerShell process.
 .PARAMETER Checkpoint
@@ -7638,11 +7638,11 @@ function Set-OmpLemonadeJudge {
 .PARAMETER UpdateScript
     Forces downloading the latest script from the remote repository before running.
 .EXAMPLE
-    Set-OmpLemonadeJudge
+    Set-OmpJudgeLocalLemonade
 .EXAMPLE
-    Set-OmpLemonadeJudge -ContextWindow 65536
+    Set-OmpJudgeLocalLemonade -ContextWindow 65536
 .EXAMPLE
-    Set-OmpLemonadeJudge -UpdateScript
+    Set-OmpJudgeLocalLemonade -UpdateScript
 #>
     [CmdletBinding()]
     param(
@@ -7670,15 +7670,15 @@ function Set-OmpLemonadeJudge {
         Join-Path $env:USERPROFILE 'Documents\WindowsPowerShell'
     }
     $utilDir = Join-Path $profileDir 'util'
-    $scriptPath = Join-Path $utilDir 'Set-OmpLemonadeJudge.ps1'
+    $scriptPath = Join-Path $utilDir 'Set-OmpJudgeLocalLemonade.ps1'
 
     if ($UpdateScript -or -not (Test-Path -LiteralPath $scriptPath)) {
-        $remoteUrl = $_AiToolsInternal.Urls.OmpLemonadeJudge
+        $remoteUrl = $_AiToolsInternal.Urls.OmpJudgeLocalLemonade
         if (-not $remoteUrl) {
-            $remoteUrl = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpLemonadeJudge.ps1'
+            $remoteUrl = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpJudgeLocalLemonade.ps1'
         }
 
-        Write-Host "Fetching Set-OmpLemonadeJudge.ps1 from $remoteUrl..." -ForegroundColor Cyan
+        Write-Host "Fetching Set-OmpJudgeLocalLemonade.ps1 from $remoteUrl..." -ForegroundColor Cyan
         $tempFile = [System.IO.Path]::GetTempFileName()
         try {
             $cacheBuster = '?cb={0}' -f [guid]::NewGuid().ToString('N')
@@ -7704,9 +7704,9 @@ function Set-OmpLemonadeJudge {
                 New-Item -ItemType Directory -Path $utilDir -Force | Out-Null
             }
             [System.IO.File]::Copy($tempFile, $scriptPath, $true)
-            Write-Host "Saved Set-OmpLemonadeJudge.ps1 to $scriptPath." -ForegroundColor Green
+            Write-Host "Saved Set-OmpJudgeLocalLemonade.ps1 to $scriptPath." -ForegroundColor Green
         } catch {
-            Write-Error "Failed to download Set-OmpLemonadeJudge.ps1: $_"
+            Write-Error "Failed to download Set-OmpJudgeLocalLemonade.ps1: $_"
             if (-not (Test-Path -LiteralPath $scriptPath)) {
                 return
             }
@@ -7719,7 +7719,7 @@ function Set-OmpLemonadeJudge {
     }
 
     if (-not (Test-Path -LiteralPath $scriptPath)) {
-        Write-Error "Set-OmpLemonadeJudge.ps1 not found at $scriptPath."
+        Write-Error "Set-OmpJudgeLocalLemonade.ps1 not found at $scriptPath."
         return
     }
 
@@ -7755,7 +7755,7 @@ function Set-OmpLemonadeJudge {
     $psExe = if ($PSVersionTable.PSVersion.Major -ge 6) { 'pwsh.exe' } else { 'powershell.exe' }
     & $psExe @cliArgs
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Set-OmpLemonadeJudge script exited with code $LASTEXITCODE."
+        Write-Error "Set-OmpJudgeLocalLemonade script exited with code $LASTEXITCODE."
     }
 }
 

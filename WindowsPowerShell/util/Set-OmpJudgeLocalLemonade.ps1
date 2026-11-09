@@ -35,7 +35,7 @@
     Oldest llama.cpp build that supports LFM3 (b11960 per the LFM3-1.7B-GGUF model card).
 
 .EXAMPLE
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\Set-OmpLemonadeJudge.ps1
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\Set-OmpJudgeLocalLemonade.ps1
 #>
 [CmdletBinding()]
 param(
@@ -332,7 +332,7 @@ function Read-ModelsYaml([string]$Path) {
 function Format-ProviderBlock([string]$Indent, [string]$ModelId) {
     $auth = if ($env:LEMONADE_API_KEY) { 'apiKey: LEMONADE_API_KEY # env var name; omp reads the key from it' } else { 'auth: none' }
     $block = @(
-        "$MarkerStart (managed by Set-OmpLemonadeJudge.ps1; re-run to update, delete through the end marker to remove)",
+        "$MarkerStart (managed by Set-OmpJudgeLocalLemonade.ps1; re-run to update, delete through the end marker to remove)",
         "${ProviderId}:",
         "  baseUrl: '$script:LemonadeUrl/v1'",
         '  api: openai-completions',
