@@ -248,6 +248,7 @@ $_AiToolsInternal = @{
         'cURL.cURL',
         'aria2.aria2',
         'jqlang.jq',
+        'mtkennerly.shawl',
         'BurntSushi.ripgrep.MSVC',
         'junegunn.fzf',
         'sharkdp.fd',
@@ -7798,6 +7799,12 @@ function Set-OmpJudgeLocalLlamaCpp {
     Show the server status.
 .PARAMETER RemoveAutoStart
     Remove the logon task.
+.PARAMETER InstallService
+    (Elevated) Run the server as the Windows service 'llama-cpp-tiny' through shawl.
+.PARAMETER ShawlPath
+    Path to shawl.exe for -InstallService (default: shawl.exe on PATH).
+.PARAMETER RemoveService
+    (Elevated) Remove the Windows service.
 .PARAMETER UpdateScript
     Forces downloading the latest script from the remote repository before running.
 .EXAMPLE
@@ -7831,6 +7838,9 @@ function Set-OmpJudgeLocalLlamaCpp {
         [switch]$Stop,
         [switch]$Status,
         [switch]$RemoveAutoStart,
+        [switch]$InstallService,
+        [string]$ShawlPath,
+        [switch]$RemoveService,
         [switch]$UpdateScript
     )
 
@@ -7902,13 +7912,13 @@ function Set-OmpJudgeLocalLlamaCpp {
     # Forward parameters explicitly passed by caller (values as name/value pairs, switches by name)
     $cliArgs = [System.Collections.Generic.List[string]]::new()
     $cliArgs.AddRange([string[]]@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath))
-    foreach ($name in 'Checkpoint', 'ModelId', 'ProviderId', 'Backend', 'ContextWindow', 'Port', 'Build', 'IdleSleepSeconds') {
+    foreach ($name in 'Checkpoint', 'ModelId', 'ProviderId', 'Backend', 'ContextWindow', 'Port', 'Build', 'IdleSleepSeconds', 'ShawlPath') {
         if ($PSBoundParameters.ContainsKey($name)) {
             $cliArgs.Add("-$name")
             $cliArgs.Add([string]$PSBoundParameters[$name])
         }
     }
-    foreach ($name in 'AutoStart', 'Yes', 'Start', 'Stop', 'Status', 'RemoveAutoStart') {
+    foreach ($name in 'AutoStart', 'Yes', 'Start', 'Stop', 'Status', 'RemoveAutoStart', 'InstallService', 'RemoveService') {
         if ($PSBoundParameters.ContainsKey($name) -and $PSBoundParameters[$name].IsPresent) {
             $cliArgs.Add("-$name")
         }
