@@ -38,7 +38,8 @@ Describe 'Set-OmpJudgeLocalLlamaCpp' {
         # Echoes every bound parameter so forwarding can be asserted.
         $script:dummyScriptContent = @'
 param($Checkpoint, $ModelId, $ProviderId, $Backend, $ContextWindow, [int]$Port, $Build, [int]$IdleSleepSeconds,
-    [switch]$AutoStart, [switch]$Yes, [switch]$Start, [switch]$Stop, [switch]$Status, [switch]$RemoveAutoStart)
+    [switch]$AutoStart, [switch]$Yes, [switch]$Start, [switch]$Stop, [switch]$Status, [switch]$RemoveAutoStart,
+    [switch]$InstallService, $ShawlPath, [switch]$RemoveService)
 "RAN: " + (($PSBoundParameters.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' ')
 '@
         [IO.File]::WriteAllText($script:mockScriptPath, $script:dummyScriptContent, [Text.Encoding]::UTF8)
@@ -78,6 +79,8 @@ param($Checkpoint, $ModelId, $ProviderId, $Backend, $ContextWindow, [int]$Port, 
         (Set-OmpJudgeLocalLlamaCpp -Start) | Should -Match 'RAN: Start=True$'
         (Set-OmpJudgeLocalLlamaCpp -Stop) | Should -Match 'RAN: Stop=True$'
         (Set-OmpJudgeLocalLlamaCpp -RemoveAutoStart) | Should -Match 'RAN: RemoveAutoStart=True$'
+        (Set-OmpJudgeLocalLlamaCpp -RemoveService) | Should -Match 'RAN: RemoveService=True$'
+        (Set-OmpJudgeLocalLlamaCpp -InstallService -ShawlPath 'C:\Program Files\shawl\shawl.exe') | Should -Match 'RAN: InstallService=True ShawlPath=C:\\Program Files\\shawl\\shawl.exe$'
     }
 
     It 'downloads the script when missing' {

@@ -430,6 +430,40 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
         }
     }
 
+    Context 'service helpers' {
+        BeforeAll { $ServiceName = 'llama-cpp-tiny' }
+
+        It 'adds the start/stop ACE before the SACL, once' {
+            $sddl = 'D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRC;;;IU)S:(AU;FA;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;WD)'
+            $result = Add-ServiceAce $sddl 'S-1-5-21-1-2-3-1001'
+            $result | Should -Be 'D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRC;;;IU)(A;;RPWPLCLOCRRC;;;S-1-5-21-1-2-3-1001)S:(AU;FA;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;WD)'
+            Add-ServiceAce $result 'S-1-5-21-1-2-3-1001' | Should -Be $result
+        }
+
+        It 'appends the ACE when there is no SACL' {
+            Add-ServiceAce 'D:(A;;LC;;;IU)' 'S-1-5-21-9' | Should -Be 'D:(A;;LC;;;IU)(A;;RPWPLCLOCRRC;;;S-1-5-21-9)'
+        }
+
+        It 'lists only model files outside the root' {
+            Get-ExternalServiceFiles ([pscustomobject]@{ model = (Join-Path $Root 'models\m.gguf') }) | Should -BeNullOrEmpty
+            Get-ExternalServiceFiles ([pscustomobject]@{ model = 'C:\cache\m.gguf' }) | Should -Be 'C:\cache\m.gguf'
+        }
+
+        It 'recognizes a listener under the running service process tree' {
+            Mock Get-JudgeService { [pscustomobject]@{ ProcessId = 100; State = 'Running' } }
+            Mock Get-CimInstance {
+                $id = [int]($Filter -replace '\D', '')
+                switch ($id) { 300 { [pscustomobject]@{ ParentProcessId = 200 } } 200 { [pscustomobject]@{ ParentProcessId = 100 } } 400 { [pscustomobject]@{ ParentProcessId = 1 } } default { $null } }
+            } -ParameterFilter { $ClassName -eq 'Win32_Process' }
+            Test-ServiceChild 300 | Should -BeTrue
+            Test-ServiceChild 400 | Should -BeFalse
+        }
+
+        It 'is false without a service' {
+            Mock Get-JudgeService { $null }
+            Test-ServiceChild 300 | Should -BeFalse
+        }
+    }
     Context 'server command line' {
         It 'builds the llama-server arguments' {
             $config = [pscustomobject]@{ port = 9941; model = 'C:\Users\A B\m.gguf'; ctx = 8192; ngl = 'all'; alias = 'LFM3-1.7B'; idleSleepSeconds = 900; log = 'C:\r\server.log' }
