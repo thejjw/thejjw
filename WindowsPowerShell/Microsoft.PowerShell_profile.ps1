@@ -337,6 +337,7 @@ $_AiToolsInternal = @{
         AgyStatusline = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/agy_statusline.ps1'
         OmpTps                 = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
         OmpJudgeLocalLemonade  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpJudgeLocalLemonade.ps1'
+        OmpJudgeLocalLlamaCpp  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpJudgeLocalLlamaCpp.ps1'
     }
 
     # REA reverse-engineering toolchain used by the -REA stage of Install-AiTools.
@@ -7756,6 +7757,168 @@ function Set-OmpJudgeLocalLemonade {
     & $psExe @cliArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Set-OmpJudgeLocalLemonade script exited with code $LASTEXITCODE."
+    }
+}
+
+function Set-OmpJudgeLocalLlamaCpp {
+    <#
+.SYNOPSIS
+    Configures oh-my-pi (omp) to use LiquidAI LFM3-1.7B via a self-managed llama.cpp server as judge model.
+.DESCRIPTION
+    Probes for the local util\Set-OmpJudgeLocalLlamaCpp.ps1 script under the profile directory
+    or downloads it from the repository if missing (or when -UpdateScript is supplied).
+    Executes the script in an isolated PowerShell process. Setup downloads llama.cpp and the
+    model into ~\llama-cpp-tiny after printing the machine's resources and asking for
+    confirmation; -Start, -Stop and -Status manage the server afterwards.
+.PARAMETER Checkpoint
+    Hugging Face checkpoint (owner/repo:variant) of the GGUF model.
+.PARAMETER ModelId
+    Model id served by llama-server and used in omp.
+.PARAMETER ProviderId
+    omp provider id for the llama-server endpoint.
+.PARAMETER Backend
+    auto, vulkan or cpu.
+.PARAMETER ContextWindow
+    'auto' (by total RAM) or a context size.
+.PARAMETER Port
+    Preferred loopback port; when omitted and busy, the next free port is used.
+.PARAMETER Build
+    latest (stable release's build), nightly, or a b#### tag.
+.PARAMETER IdleSleepSeconds
+    Seconds of idle time before the model is unloaded; -1 disables.
+.PARAMETER AutoStart
+    Also register the per-user logon task that starts the server.
+.PARAMETER Yes
+    Skip the confirmation prompt.
+.PARAMETER Start
+    Start the configured server.
+.PARAMETER Stop
+    Stop the configured server.
+.PARAMETER Status
+    Show the server status.
+.PARAMETER RemoveAutoStart
+    Remove the logon task.
+.PARAMETER UpdateScript
+    Forces downloading the latest script from the remote repository before running.
+.EXAMPLE
+    Set-OmpJudgeLocalLlamaCpp
+.EXAMPLE
+    Set-OmpJudgeLocalLlamaCpp -Backend cpu -AutoStart
+.EXAMPLE
+    Set-OmpJudgeLocalLlamaCpp -Status
+#>
+    [CmdletBinding()]
+    param(
+        [ValidatePattern('^[^/:\s]+/[^/:\s]+:[^/:\s]+$')]
+        [string]$Checkpoint,
+        [ValidatePattern('^[A-Za-z0-9._-]+$')]
+        [string]$ModelId,
+        [ValidatePattern('^[a-z0-9][a-z0-9._-]*$')]
+        [string]$ProviderId,
+        [ValidateSet('auto', 'vulkan', 'cpu')]
+        [string]$Backend,
+        [ValidatePattern('^(auto|\d+)$')]
+        [string]$ContextWindow,
+        [ValidateRange(1024, 65535)]
+        [int]$Port,
+        [ValidatePattern('^(latest|nightly|b\d+)$')]
+        [string]$Build,
+        [ValidateRange(-1, 604800)]
+        [int]$IdleSleepSeconds,
+        [switch]$AutoStart,
+        [switch]$Yes,
+        [switch]$Start,
+        [switch]$Stop,
+        [switch]$Status,
+        [switch]$RemoveAutoStart,
+        [switch]$UpdateScript
+    )
+
+    # Resolve profile directory and local util script target
+    $profileDir = if ($PROFILE -and "$PROFILE" -ne '') {
+        $targetProfile = if ($PROFILE -is [System.Management.Automation.PSObject] -and $PROFILE.CurrentUserCurrentHost) {
+            $PROFILE.CurrentUserCurrentHost
+        } else {
+            "$PROFILE"
+        }
+        Split-Path -Parent $targetProfile
+    } else {
+        Join-Path $env:USERPROFILE 'Documents\WindowsPowerShell'
+    }
+    $utilDir = Join-Path $profileDir 'util'
+    $scriptPath = Join-Path $utilDir 'Set-OmpJudgeLocalLlamaCpp.ps1'
+
+    if ($UpdateScript -or -not (Test-Path -LiteralPath $scriptPath)) {
+        $remoteUrl = $_AiToolsInternal.Urls.OmpJudgeLocalLlamaCpp
+        if (-not $remoteUrl) {
+            $remoteUrl = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpJudgeLocalLlamaCpp.ps1'
+        }
+
+        Write-Host "Fetching Set-OmpJudgeLocalLlamaCpp.ps1 from $remoteUrl..." -ForegroundColor Cyan
+        $tempFile = [System.IO.Path]::GetTempFileName()
+        try {
+            $cacheBuster = '?cb={0}' -f [guid]::NewGuid().ToString('N')
+            if (Get-Command 'Invoke-WebRequest2' -ErrorAction SilentlyContinue) {
+                Invoke-WebRequest2 -Uri ($remoteUrl + $cacheBuster) -OutFile $tempFile -UseBasicParsing | Out-Null
+            } else {
+                Invoke-RestMethod -Uri ($remoteUrl + $cacheBuster) -OutFile $tempFile
+            }
+
+            # Validate downloaded script before installing
+            $fileItem = Get-Item -LiteralPath $tempFile -ErrorAction Stop
+            if ($fileItem.Length -le 0) {
+                throw 'Downloaded script is empty.'
+            }
+
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($tempFile, [ref]$null, [ref]$errors)
+            if ($errors -and $errors.Count -gt 0) {
+                throw "Downloaded script contains syntax errors: $($errors[0].Message)"
+            }
+
+            if (-not (Test-Path -LiteralPath $utilDir)) {
+                New-Item -ItemType Directory -Path $utilDir -Force | Out-Null
+            }
+            [System.IO.File]::Copy($tempFile, $scriptPath, $true)
+            Write-Host "Saved Set-OmpJudgeLocalLlamaCpp.ps1 to $scriptPath." -ForegroundColor Green
+        } catch {
+            Write-Error "Failed to download Set-OmpJudgeLocalLlamaCpp.ps1: $_"
+            if (-not (Test-Path -LiteralPath $scriptPath)) {
+                return
+            }
+            Write-Warning "Falling back to existing local script at $scriptPath."
+        } finally {
+            if ($tempFile -and (Test-Path -LiteralPath $tempFile)) {
+                Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        Write-Error "Set-OmpJudgeLocalLlamaCpp.ps1 not found at $scriptPath."
+        return
+    }
+
+    # Forward parameters explicitly passed by caller (values as name/value pairs, switches by name)
+    $cliArgs = [System.Collections.Generic.List[string]]::new()
+    $cliArgs.AddRange([string[]]@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath))
+    foreach ($name in 'Checkpoint', 'ModelId', 'ProviderId', 'Backend', 'ContextWindow', 'Port', 'Build', 'IdleSleepSeconds') {
+        if ($PSBoundParameters.ContainsKey($name)) {
+            $cliArgs.Add("-$name")
+            $cliArgs.Add([string]$PSBoundParameters[$name])
+        }
+    }
+    foreach ($name in 'AutoStart', 'Yes', 'Start', 'Stop', 'Status', 'RemoveAutoStart') {
+        if ($PSBoundParameters.ContainsKey($name) -and $PSBoundParameters[$name].IsPresent) {
+            $cliArgs.Add("-$name")
+        }
+    }
+
+    # The child inherits this console, so the script's confirmation prompt works here.
+    $psExe = if ($PSVersionTable.PSVersion.Major -ge 6) { 'pwsh.exe' } else { 'powershell.exe' }
+    & $psExe @cliArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Set-OmpJudgeLocalLlamaCpp script exited with code $LASTEXITCODE."
     }
 }
 
