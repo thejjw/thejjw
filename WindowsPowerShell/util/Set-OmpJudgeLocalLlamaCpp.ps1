@@ -31,7 +31,9 @@
     Model id served by llama-server (--alias) and used in omp (selector <ProviderId>/<ModelId>).
 
 .PARAMETER ProviderId
-    omp provider id for the llama-server endpoint.
+    omp provider id for the llama-server endpoint (default llama-cpp-tiny, distinct from omp's
+    built-in auto-discovered 'llama.cpp' provider). Changing it replaces the managed block and drops
+    the old id from the judge fallback chain.
 
 .PARAMETER Backend
     auto (Vulkan build; GPU when a real Vulkan device exists, else CPU), vulkan (require a GPU) or
@@ -102,7 +104,7 @@ param(
     [string]$ModelId = 'LFM3-1.7B',
     [Parameter(ParameterSetName = 'Setup')]
     [ValidatePattern('^[a-z0-9][a-z0-9._-]*$')]
-    [string]$ProviderId = 'llamacpp',
+    [string]$ProviderId = 'llama-cpp-tiny',
     [Parameter(ParameterSetName = 'Setup')]
     [ValidateSet('auto', 'vulkan', 'cpu')]
     [string]$Backend = 'auto',
@@ -1045,7 +1047,7 @@ function Read-ModelsYaml([string]$Path) {
     if ($text.Length -gt 0) { $lines.AddRange([string[]]($text -split "`r?`n")) }
     if ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq '') { $lines.RemoveAt($lines.Count - 1) }
 
-    $plan = [pscustomobject]@{ Path = $Path; Lines = $lines; NewLine = $newline; Mode = 'append'; Start = -1; End = -1; Indent = '  ' }
+    $plan = [pscustomobject]@{ Path = $Path; Lines = $lines; NewLine = $newline; Mode = 'append'; Start = -1; End = -1; Indent = '  '; OldProviderId = $null }
     $startPattern = '^\s*' + [regex]::Escape($MarkerStart)
     $endPattern = '^\s*' + [regex]::Escape($MarkerEnd)
     for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -1056,6 +1058,10 @@ function Read-ModelsYaml([string]$Path) {
         if ($plan.End -lt 0) { Stop-Setup "$Path has a '$MarkerStart' line without '$MarkerEnd'. Fix or remove that block, then re-run." }
         $plan.Mode = 'replace'
         $plan.Indent = ([regex]::Match($lines[$plan.Start], '^\s*')).Value
+        # The first mapping key inside the block is the provider id it declares.
+        for ($i = $plan.Start + 1; $i -lt $plan.End; $i++) {
+            if ($lines[$i] -match '^\s*["'']?([^"''\s:#]+)["'']?\s*:') { $plan.OldProviderId = $Matches[1]; break }
+        }
         return $plan
     }
 
@@ -1163,21 +1169,25 @@ function Get-OmpState {
 }
 
 # Points modelRoles.judge at $Selector and keeps the previous judge as the first fallback.
+# Selectors of $DropProvider (a provider id this run renamed away) are removed, not kept as
+# fallbacks, because that provider no longer exists.
 # Only the global config layer is read and written so project/env values are not copied into it.
-function Set-OmpJudge([string]$Selector) {
+function Set-OmpJudge([string]$Selector, [string]$DropProvider) {
     $global = (Invoke-Omp @('config', 'list', '--scope', 'global', '--json')).StdOut | ConvertFrom-Json
     $roles = ConvertTo-OrderedMap $(if ($global.modelRoles) { $global.modelRoles.value })
     $chains = ConvertTo-OrderedMap $(if ($global.'retry.fallbackChains') { $global.'retry.fallbackChains'.value })
 
     $previous = [string]$roles['judge']
-    if ($previous -ne $Selector) {
+    $dropped = if ($DropProvider) { "$DropProvider/*" } else { $null }
+    if ($dropped -and $previous -like $dropped) { $previous = '' }
+    if ([string]$roles['judge'] -ne $Selector) {
         $roles['judge'] = $Selector
         Set-OmpRecordSetting 'modelRoles' $roles
     }
 
     $hadChain = $chains.Contains('judge')
     $oldChain = if ($hadChain) { @($chains['judge']) } else { @() }
-    $newChain = @(@($previous) + $oldChain | Where-Object { $_ -and $_ -ne $Selector } | Select-Object -Unique)
+    $newChain = @(@($previous) + $oldChain | Where-Object { $_ -and $_ -ne $Selector -and -not ($dropped -and $_ -like $dropped) } | Select-Object -Unique)
     # Leave an unset chain alone when there is no previous judge to preserve.
     if (($previous -or $hadChain) -and (($newChain -join "`n") -ne ($oldChain -join "`n") -or -not $hadChain)) {
         $chains['judge'] = $newChain
@@ -1444,7 +1454,10 @@ function Invoke-Setup {
     Write-Step "Configuring omp: provider '$ProviderId' in models.yml ($baseUrl), modelRoles.judge = $selector"
     $script:Backups = @(@(Backup-File $script:ModelsPath; Backup-File $script:ConfigPath) | Where-Object { $_ })
     $modelsBackup = $script:Backups | Where-Object { $_ -like "$script:ModelsPath.*" } | Select-Object -First 1
-    Write-ModelsYaml (Read-ModelsYaml $script:ModelsPath) $baseUrl $ModelId $context
+    $modelsPlan = Read-ModelsYaml $script:ModelsPath
+    $renamedFrom = if ($modelsPlan.OldProviderId -and $modelsPlan.OldProviderId -ne $ProviderId) { $modelsPlan.OldProviderId } else { $null }
+    if ($renamedFrom) { Write-Host "  Renaming provider '$renamedFrom' to '$ProviderId'; '$renamedFrom/*' is dropped from the judge fallback chain." }
+    Write-ModelsYaml $modelsPlan $baseUrl $ModelId $context
     $check = Invoke-Omp @('models', $ProviderId, '--kind', 'all', '--json') -AllowFailure
     $listed = $check.ExitCode -eq 0 -and @(($check.StdOut | ConvertFrom-Json).models | Where-Object { $_.selector -eq $selector }).Count -gt 0
     if (-not $listed) {
@@ -1452,7 +1465,7 @@ function Invoke-Setup {
         Stop-Setup "omp does not list $selector after editing models.yml; the file was restored." @($check.StdErr)
     }
     if ($check.StdErr) { Write-Warning "omp reported while loading models.yml: $($check.StdErr)" }
-    Set-OmpJudge $selector
+    Set-OmpJudge $selector $renamedFrom
 
     # The service runs a copy of this script inside the root (readable by the service account).
     if ((Get-JudgeService) -and $PSCommandPath -and $PSCommandPath -ne $ServiceScriptPath) {
