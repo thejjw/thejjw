@@ -17,7 +17,7 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
         $PortRangeSize = 49
         $KvBytesPerToken = 30KB
         $DiskMarginBytes = 512MB
-        $ProviderId = 'llamacpp'
+        $ProviderId = 'llama-cpp-tiny'
         $Root = Join-Path $TestDrive 'llama-cpp-tiny'
         $BinRoot = Join-Path $Root 'bin'
         $ModelsDir = Join-Path $Root 'models'
@@ -279,7 +279,7 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
         It 'formats the provider block' {
             $block = Format-ProviderBlock '  ' 'http://127.0.0.1:9941/v1' 'LFM3-1.7B' 32768
             $block[0] | Should -Match '^  # >>> omp-llamacpp-judge'
-            $block | Should -Contain '  llamacpp:'
+            $block | Should -Contain '  llama-cpp-tiny:'
             $block | Should -Contain "    baseUrl: 'http://127.0.0.1:9941/v1'"
             $block | Should -Contain '        contextWindow: 32768'
             $block[-1] | Should -Be '  # <<< omp-llamacpp-judge'
@@ -315,6 +315,45 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
         }
     }
 
+    Context 'provider rename' {
+        It 'reports the provider id declared by an existing managed block' {
+            $path = Join-Path $TestDrive 'models-rename.yml'
+            $old = @('providers:', '  # >>> omp-llamacpp-judge (managed)', '  llamacpp:', "    baseUrl: 'x'", '  # <<< omp-llamacpp-judge')
+            [IO.File]::WriteAllText($path, ($old -join "`n") + "`n")
+            $plan = Read-ModelsYaml $path
+            $plan.Mode | Should -Be 'replace'
+            $plan.OldProviderId | Should -Be 'llamacpp'
+            Write-ModelsYaml $plan 'http://127.0.0.1:9941/v1' 'LFM3-1.7B' 8192
+            $text = [IO.File]::ReadAllText($path)
+            $text | Should -Match '(?m)^  llama-cpp-tiny:'
+            $text | Should -Not -Match '(?m)^\s*llamacpp:'
+        }
+
+        It 'drops the renamed provider from the judge and fallback chain' {
+            $script:saved = @{}
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
+                            modelRoles             = @{ value = @{ judge = 'llamacpp/LFM3-1.7B'; tiny = 'x/y' } }
+                            'retry.fallbackChains' = @{ value = @{ judge = @('local/lfm2-1.2b', 'llamacpp/LFM3-1.7B') } }
+                        } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
+            Set-OmpJudge 'llama-cpp-tiny/LFM3-1.7B' 'llamacpp'
+            $script:saved['modelRoles']['judge'] | Should -Be 'llama-cpp-tiny/LFM3-1.7B'
+            $script:saved['modelRoles']['tiny'] | Should -Be 'x/y'
+            @($script:saved['retry.fallbackChains']['judge']) | Should -Be @('local/lfm2-1.2b')
+        }
+
+        It 'keeps the previous judge as the first fallback without a rename' {
+            $script:saved = @{}
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{ modelRoles = @{ value = @{ judge = 'local/lfm2-1.2b' } } } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
+            Set-OmpJudge 'llama-cpp-tiny/LFM3-1.7B' $null
+            @($script:saved['retry.fallbackChains']['judge']) | Should -Be @('local/lfm2-1.2b')
+        }
+    }
     Context 'requirements and warnings' {
         It 'counts zip, extracted size, model and margin' {
             $req = Get-InstallRequirement 100MB 1GB 1GB 32768
