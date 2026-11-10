@@ -73,6 +73,7 @@
     account NT SERVICE\llama-cpp-tiny, starting at boot (delayed). Grants that account Modify on
     ~\llama-cpp-tiny and the installing user start/stop rights on the service, so setup, -Start
     and -Stop keep working unelevated. Replaces the logon task. Run setup first.
+    Prerequisite: shawl (winget install --id mtkennerly.shawl --exact --scope machine).
 
 .PARAMETER ShawlPath
     Path to shawl.exe for -InstallService (default: shawl.exe on PATH, e.g. from
@@ -1602,13 +1603,18 @@ function Get-ExternalServiceFiles($Config) {
 
 # -InstallService (elevated): creates the shawl-wrapped service and its permissions, then starts it.
 function Invoke-InstallServiceMode {
-    if (-not (Test-Elevated)) { Stop-Setup '-InstallService needs an elevated PowerShell (Run as administrator).' }
+    # Prerequisites first (none of these checks needs elevation), so one run reports them all.
     $config = Read-ServerConfig
     if (-not $config) { Stop-Setup "No $ServerConfigPath. Run Set-OmpJudgeLocalLlamaCpp (setup, unelevated) first." }
     $shawl = if ($ShawlPath) { $ShawlPath } else { (Get-Command 'shawl.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
+    $elevated = Test-Elevated
     if (-not $shawl -or -not (Test-Path -LiteralPath $shawl)) {
-        Stop-Setup 'shawl.exe not found.' @('Install it machine-wide: winget install --id mtkennerly.shawl --exact --scope machine', 'then open a new elevated PowerShell, or pass -ShawlPath <path to shawl.exe>.')
+        $directions = @('Prerequisite: shawl. Install it machine-wide from an elevated PowerShell:',
+            '  winget install --id mtkennerly.shawl --exact --scope machine',
+            'then re-run -InstallService elevated (new window, or pass -ShawlPath <path to shawl.exe>).')
+        Stop-Setup 'shawl.exe not found.' $directions
     }
+    if (-not $elevated) { Stop-Setup '-InstallService needs an elevated PowerShell (Run as administrator).' }
     $item = Get-Item -LiteralPath $shawl
     if ($item.LinkType -and $item.Target) { $shawl = [string](@($item.Target)[0]) }  # winget Links are symlinks
     if (-not $shawl.StartsWith($env:ProgramFiles + '\', [StringComparison]::OrdinalIgnoreCase)) {
