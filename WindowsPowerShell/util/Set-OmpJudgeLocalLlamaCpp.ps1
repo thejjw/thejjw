@@ -68,6 +68,22 @@
 .PARAMETER RemoveAutoStart
     Remove the logon task.
 
+.PARAMETER InstallService
+    (Elevated) Run llama-server as the Windows service 'llama-cpp-tiny' through shawl, as the virtual
+    account NT SERVICE\llama-cpp-tiny, starting at boot (delayed). Grants that account Modify on
+    ~\llama-cpp-tiny and the installing user start/stop rights on the service, so setup, -Start
+    and -Stop keep working unelevated. Replaces the logon task. Run setup first.
+
+.PARAMETER ShawlPath
+    Path to shawl.exe for -InstallService (default: shawl.exe on PATH, e.g. from
+    winget install --id mtkennerly.shawl --scope machine).
+
+.PARAMETER RemoveService
+    (Elevated) Stop and delete the service and remove its folder permission.
+
+.PARAMETER Run
+    Internal: run llama-server in the foreground from server.json (the service command).
+
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Set-OmpJudgeLocalLlamaCpp.ps1
 .EXAMPLE
@@ -112,7 +128,15 @@ param(
     [Parameter(ParameterSetName = 'Status', Mandatory = $true)]
     [switch]$Status,
     [Parameter(ParameterSetName = 'RemoveAutoStart', Mandatory = $true)]
-    [switch]$RemoveAutoStart
+    [switch]$RemoveAutoStart,
+    [Parameter(ParameterSetName = 'InstallService', Mandatory = $true)]
+    [switch]$InstallService,
+    [Parameter(ParameterSetName = 'InstallService')]
+    [string]$ShawlPath,
+    [Parameter(ParameterSetName = 'RemoveService', Mandatory = $true)]
+    [switch]$RemoveService,
+    [Parameter(ParameterSetName = 'Run', Mandatory = $true)]
+    [switch]$Run
 )
 
 $ErrorActionPreference = 'Stop'
@@ -125,7 +149,11 @@ $MarkerEnd = '# <<< omp-llamacpp-judge'
 $AbortToken = 'OMP_LLAMACPP_SETUP_ABORTED'
 $MinLlamaCppBuild = 11960
 $TaskName = 'llama-cpp-tiny'
-$Root = Join-Path $HOME 'llama-cpp-tiny'
+$ServiceName = 'llama-cpp-tiny'
+$ServiceAccount = "NT SERVICE\$ServiceName"
+# The service runs under another account, so it passes the root explicitly.
+$Root = if ($env:LLAMA_CPP_TINY_HOME) { $env:LLAMA_CPP_TINY_HOME } else { Join-Path $HOME 'llama-cpp-tiny' }
+$ServiceScriptPath = Join-Path $Root 'service\Set-OmpJudgeLocalLlamaCpp.ps1'
 $BinRoot = Join-Path $Root 'bin'
 $ModelsDir = Join-Path $Root 'models'
 $ServerConfigPath = Join-Path $Root 'server.json'
@@ -667,7 +695,35 @@ function Test-OurProcess($Process) {
 # Returns $true when the listener on $Port is our llama-server (an executable under bin\, any
 # build or alias; such a server is restarted rather than avoided).
 function Test-OurServer([int]$Port) {
-    Test-OurProcess (Get-PortOwner $Port)
+    $owner = Get-PortOwner $Port
+    (Test-OurProcess $owner) -or ($owner -and (Test-ServiceChild $owner.Id))
+}
+
+# Returns the llama-cpp-tiny service (Win32_Service: State, ProcessId, StartName), or $null.
+function Get-JudgeService {
+    Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
+}
+
+# Returns $true when $ProcessId runs under the running service (shawl -> powershell -> llama-server).
+function Test-ServiceChild([int]$ProcessId) {
+    $service = Get-JudgeService
+    if (-not $service -or -not $service.ProcessId) { return $false }
+    $current = $ProcessId
+    for ($depth = 0; $depth -lt 4 -and $current; $depth++) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$current" -ErrorAction SilentlyContinue
+        if (-not $process) { return $false }
+        if ([int]$process.ParentProcessId -eq [int]$service.ProcessId) { return $true }
+        $current = [int]$process.ParentProcessId
+    }
+    $false
+}
+
+# Waits until the service reaches $Status (Running/Stopped); returns $true on success.
+function Wait-ServiceStatus([string]$Status, [int]$TimeoutSec = 30) {
+    try {
+        (Get-Service -Name $ServiceName).WaitForStatus($Status, [TimeSpan]::FromSeconds($TimeoutSec))
+        $true
+    } catch { $false }
 }
 
 # Picks the port: saved, then preferred, then preferred+1..+49; the first that is ours or free wins.
@@ -804,6 +860,21 @@ function Start-JudgeServer($Config, [switch]$InSetup) {
             $port = [int]$Config.port
         }
 
+        if (Get-JudgeService) {
+            # Service mode: the service command (-Run) reads server.json, so just (re)start it.
+            try { Start-Service -Name $ServiceName } catch { throw "Cannot start service '$ServiceName': $($_.Exception.Message) Re-run -InstallService elevated to grant start/stop rights." }
+            $deadline = (Get-Date).AddSeconds(120)
+            while ((Get-Date) -lt $deadline) {
+                if ((Get-HealthStatus $port) -eq 200) {
+                    Write-Host "  llama-server ready on 127.0.0.1:$port (service '$ServiceName')." -ForegroundColor Green
+                    return
+                }
+                if ((Get-Service -Name $ServiceName).Status -eq 'Stopped') { break }
+                Start-Sleep -Milliseconds 500
+            }
+            throw "Service '$ServiceName' did not serve /health on port $port within 120 s. Log tail:`n$((Get-LogTail $Config) -join "`n")"
+        }
+
         $commandLine = (Get-ServerArguments $Config | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' '
         # No stream redirection: that would make the server inherit the caller's stdout/stderr handles
         # and keep a capturing caller waiting until the server exits. Logs go to --log-file instead.
@@ -837,6 +908,13 @@ function Start-JudgeServer($Config, [switch]$InSetup) {
 
 # Stops our llama-server (pid file, else the listener on the configured port). Returns $true if one stopped.
 function Stop-JudgeServer($Config) {
+    $service = Get-JudgeService
+    if ($service) {
+        if ($service.State -eq 'Stopped') { return $false }
+        try { Stop-Service -Name $ServiceName -Force } catch { throw "Cannot stop service '$ServiceName': $($_.Exception.Message) Re-run -InstallService elevated to grant start/stop rights." }
+        Wait-ServiceStatus 'Stopped' | Out-Null
+        return $true
+    }
     $process = $null
     if ($Config.pidFile -and (Test-Path -LiteralPath $Config.pidFile)) {
         $process = Get-Process -Id ([int][IO.File]::ReadAllText($Config.pidFile).Trim()) -ErrorAction SilentlyContinue
@@ -1204,7 +1282,11 @@ function Show-Plan($Resources, $Plan) {
     $idle = if ($IdleSleepSeconds -gt 0) { "idle-unload after $IdleSleepSeconds s" } else { 'no idle unload' }
     Write-Row 'Server' "127.0.0.1:$(Format-PortChoice $Plan.PortChoice), started now, $idle"
     Write-Row 'omp' "models.yml block '$ProviderId', judge -> $ProviderId/$ModelId"
-    Write-Row 'Logon task' $(if ($AutoStart) { "register '$TaskName'" } else { 'not registered (use -AutoStart)' })
+    if (Get-JudgeService) {
+        Write-Row 'Service' "'$ServiceName' restarted with these settings"
+    } else {
+        Write-Row 'Logon task' $(if ($AutoStart) { "register '$TaskName'" } else { 'not registered (use -AutoStart)' })
+    }
     foreach ($dir in $Plan.Prune) { Write-Row 'Remove after success' "$(Format-HomePath $dir) (old build)" }
 }
 
@@ -1371,8 +1453,15 @@ function Invoke-Setup {
     if ($check.StdErr) { Write-Warning "omp reported while loading models.yml: $($check.StdErr)" }
     Set-OmpJudge $selector
 
-    # Step 13: optional logon task.
-    if ($AutoStart) {
+    # The service runs a copy of this script inside the root (readable by the service account).
+    if ((Get-JudgeService) -and $PSCommandPath -and $PSCommandPath -ne $ServiceScriptPath) {
+        Copy-Item -LiteralPath $PSCommandPath -Destination $ServiceScriptPath -Force
+    }
+
+    # Step 13: optional logon task (not needed when the service is installed).
+    if ($AutoStart -and (Get-JudgeService)) {
+        Write-Warning "Service '$ServiceName' is installed and starts at boot; the logon task was not registered."
+    } elseif ($AutoStart) {
         Write-Step "Registering logon task '$TaskName'"
         Register-AutoStartTask $PSCommandPath
         Write-Host '  Registered.' -ForegroundColor Green
@@ -1398,7 +1487,9 @@ function Invoke-Setup {
     }
     $portNote = if ($config.port -ne $Port) { " (moved from ${Port}: $(Format-PortChoice $portChoice))" } else { '' }
     Write-Host "  - llama-server listens on 127.0.0.1:$($config.port)$portNote and is running now."
-    if ($AutoStart) {
+    if (Get-JudgeService) {
+        Write-Host "  - The Windows service '$ServiceName' runs it from boot; -Start and -Stop control the service."
+    } elseif ($AutoStart) {
         Write-Host "  - The logon task '$TaskName' starts it at each sign-in."
     } else {
         Write-Host '  - It is not started at sign-in. Start it when needed (or re-run setup with -AutoStart):'
@@ -1443,7 +1534,12 @@ function Invoke-StatusMode {
     $health = switch ($llama.Health) { 200 { 'running' } 503 { 'loading' } default { 'not running' } }
     Write-Row 'Server' "127.0.0.1:$($config.port) $health" ($llama.Health -eq 200)
     $owner = Get-PortOwner ([int]$config.port)
-    if ($owner) { Write-Row 'Listener' "$($owner.Name) pid $($owner.Id)" (Test-OurProcess $owner) }
+    if ($owner) { Write-Row 'Listener' "$($owner.Name) pid $($owner.Id)" (Test-OurServer ([int]$config.port)) }
+    $service = Get-JudgeService
+    if ($service) {
+        Write-Row "Service '$ServiceName'" "$($service.State), start $($service.StartMode), as $($service.StartName)" ($service.State -eq 'Running')
+        Write-Row 'Service logs' (Format-HomePath (Join-Path $Root 'service-logs'))
+    }
     if ($llama.Health -eq 200) {
         try {
             $props = Invoke-Json "http://127.0.0.1:$($config.port)/props" -TimeoutSec 5
@@ -1452,6 +1548,134 @@ function Invoke-StatusMode {
     }
     Write-Row "Logon task '$TaskName'" $(if ($llama.Task) { 'registered' } else { 'not registered' })
     Write-Row 'Logs' (Format-HomePath $config.log)
+}
+
+# -Run (service command): runs llama-server in the foreground from server.json; returns its exit code.
+# Output goes to shawl's log; a non-zero exit makes shawl restart it after a delay.
+function Invoke-RunMode {
+    $config = Read-ServerConfig
+    if (-not $config) { Write-Host "No $ServerConfigPath; run setup first."; return 1 }
+    $exe = Get-ServerExe $config.current
+    if (-not (Test-Path -LiteralPath $exe)) { Write-Host "llama-server not found at $exe; re-run setup."; return 1 }
+    $commandLine = (Get-ServerArguments $config | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' '
+    Write-Host "$(Get-Date -Format s) starting $exe $commandLine"
+    $info = New-Object Diagnostics.ProcessStartInfo $exe, $commandLine
+    $info.UseShellExecute = $false
+    $info.WorkingDirectory = Split-Path $exe
+    $process = [Diagnostics.Process]::Start($info)
+    $process.WaitForExit()
+    Write-Host "$(Get-Date -Format s) llama-server exited with code $($process.ExitCode)"
+    $process.ExitCode
+}
+
+# Returns $true when this session runs elevated (Administrators token).
+function Test-Elevated {
+    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Adds an allow ACE for $Sid (start, stop, query status/config, interrogate, user control, read) to a
+# service security descriptor's DACL, before the SACL when there is one. Idempotent.
+function Add-ServiceAce([string]$Sddl, [string]$Sid) {
+    $ace = "(A;;RPWPLCLOCRRC;;;$Sid)"
+    if ($Sddl.Contains($ace)) { return $Sddl }
+    $sacl = $Sddl.IndexOf('S:')
+    if ($sacl -ge 0) { $Sddl.Insert($sacl, $ace) } else { $Sddl + $ace }
+}
+
+# Runs sc.exe and aborts on failure.
+function Invoke-Sc([string[]]$Arguments) {
+    $result = Invoke-Cli "$env:SystemRoot\System32\sc.exe" $Arguments
+    if ($result.ExitCode -ne 0) { Stop-Setup "sc.exe $($Arguments[0]) $ServiceName failed (exit $($result.ExitCode))." @($result.StdOut, $result.StdErr) }
+    $result.StdOut
+}
+
+# Runs icacls.exe and aborts on failure.
+function Invoke-Icacls([string[]]$Arguments) {
+    $result = Invoke-Cli "$env:SystemRoot\System32\icacls.exe" $Arguments
+    if ($result.ExitCode -ne 0) { Stop-Setup "icacls $($Arguments -join ' ') failed (exit $($result.ExitCode))." @($result.StdOut, $result.StdErr) }
+}
+
+# Returns the files outside the root that the service account must read (a model in an HF cache).
+function Get-ExternalServiceFiles($Config) {
+    @(@($Config.model) | Where-Object { $_ -and -not ([string]$_).StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase) })
+}
+
+# -InstallService (elevated): creates the shawl-wrapped service and its permissions, then starts it.
+function Invoke-InstallServiceMode {
+    if (-not (Test-Elevated)) { Stop-Setup '-InstallService needs an elevated PowerShell (Run as administrator).' }
+    $config = Read-ServerConfig
+    if (-not $config) { Stop-Setup "No $ServerConfigPath. Run Set-OmpJudgeLocalLlamaCpp (setup, unelevated) first." }
+    $shawl = if ($ShawlPath) { $ShawlPath } else { (Get-Command 'shawl.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
+    if (-not $shawl -or -not (Test-Path -LiteralPath $shawl)) {
+        Stop-Setup 'shawl.exe not found.' @('Install it machine-wide: winget install --id mtkennerly.shawl --exact --scope machine', 'then open a new elevated PowerShell, or pass -ShawlPath <path to shawl.exe>.')
+    }
+    $item = Get-Item -LiteralPath $shawl
+    if ($item.LinkType -and $item.Target) { $shawl = [string](@($item.Target)[0]) }  # winget Links are symlinks
+    if (-not $shawl.StartsWith($env:ProgramFiles + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Warning "shawl.exe is outside Program Files ($shawl); anything running as you could replace the service binary."
+    }
+    Write-Host "  shawl: $shawl ($((Invoke-Cli $shawl @('--version')).StdOut.Trim()))"
+
+    Write-Step 'Stopping the current server'
+    Stop-JudgeServer $config | Out-Null
+    if (Get-AutoStartTask) {
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+        Write-Host "  Removed logon task '$TaskName' (the service replaces it)."
+    }
+    if (Get-JudgeService) {
+        Write-Host "  Replacing the existing service '$ServiceName'."
+        Invoke-Sc @('delete', $ServiceName) | Out-Null
+        Start-Sleep -Seconds 2
+    }
+
+    Write-Step "Creating service '$ServiceName' (account $ServiceAccount)"
+    New-Item -ItemType Directory -Path (Split-Path $ServiceScriptPath) -Force | Out-Null
+    Copy-Item -LiteralPath $PSCommandPath -Destination $ServiceScriptPath -Force
+    $add = @(
+        'add', '--name', $ServiceName, '--cwd', $Root, '--log-dir', (Join-Path $Root 'service-logs'),
+        '--restart-delay', '10000', '--stop-timeout', '10000', '--kill-process-tree',
+        '--env', "LLAMA_CPP_TINY_HOME=$Root",
+        '--', 'powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $ServiceScriptPath, '-Run'
+    )
+    $result = Invoke-Cli $shawl $add
+    if ($result.ExitCode -ne 0) { Stop-Setup "shawl add failed (exit $($result.ExitCode))." @($result.StdOut, $result.StdErr) }
+    Invoke-Sc @('config', $ServiceName, 'start=', 'delayed-auto', 'obj=', $ServiceAccount) | Out-Null
+    Invoke-Sc @('description', $ServiceName, 'llama.cpp server (~\llama-cpp-tiny) serving the omp judge model on loopback.') | Out-Null
+    # If shawl itself dies, let the service manager restart it.
+    Invoke-Sc @('failure', $ServiceName, 'reset=', '86400', 'actions=', 'restart/10000/restart/10000/restart/60000') | Out-Null
+
+    # The virtual account exists once the service does: grant it the root, and any external model file.
+    Invoke-Icacls @($Root, '/grant', "${ServiceAccount}:(OI)(CI)M", '/Q')
+    foreach ($file in Get-ExternalServiceFiles $config) { Invoke-Icacls @($file, '/grant', "${ServiceAccount}:R", '/Q') }
+    # Let the installing user start and stop the service without elevation.
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $sddl = ((Invoke-Sc @('sdshow', $ServiceName)) -split "`n" | Where-Object { $_.Trim() }) -join ''
+    Invoke-Sc @('sdset', $ServiceName, (Add-ServiceAce $sddl.Trim() $sid)) | Out-Null
+    Write-Host "  Created; start type delayed-auto; $ServiceAccount has Modify on $Root; $env:USERNAME may start/stop it." -ForegroundColor Green
+
+    Write-Step "Starting service '$ServiceName'"
+    try { Start-JudgeServer $config } catch { if ("$_" -eq $AbortToken) { throw }; Stop-Setup "$_" @("Service logs: $(Join-Path $Root 'service-logs')") }
+    $log = (Get-LogTail $config 400) -join "`n"
+    $devices = @([regex]::Matches($log, '(?m)(using device|Vulkan\d+ \(|ggml_vulkan: \d+ =)[^\r\n]*') | ForEach-Object { $_.Value } | Select-Object -Unique -First 3)
+    if ($devices) { $devices | ForEach-Object { Write-Host "  log: $_" -ForegroundColor DarkGray } }
+    Write-Host ''
+    Write-Host "Service '$ServiceName' is running. Manage it unelevated with Set-OmpJudgeLocalLlamaCpp -Start | -Stop | -Status;" -ForegroundColor Green
+    Write-Host 'remove it (elevated) with -RemoveService.' -ForegroundColor Green
+}
+
+# -RemoveService (elevated): stops and deletes the service and removes its permissions.
+function Invoke-RemoveServiceMode {
+    if (-not (Test-Elevated)) { Stop-Setup '-RemoveService needs an elevated PowerShell (Run as administrator).' }
+    if (-not (Get-JudgeService)) { Write-Host "Service '$ServiceName' is not installed."; return }
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    Wait-ServiceStatus 'Stopped' | Out-Null
+    # Remove the ACEs while the virtual account name still resolves.
+    if (Test-Path -LiteralPath $Root) { Invoke-Icacls @($Root, '/remove:g', $ServiceAccount, '/T', '/Q') }
+    $config = Read-ServerConfig
+    if ($config) { foreach ($file in Get-ExternalServiceFiles $config) { Invoke-Icacls @($file, '/remove:g', $ServiceAccount, '/Q') } }
+    Invoke-Sc @('delete', $ServiceName) | Out-Null
+    Remove-Item -LiteralPath (Split-Path $ServiceScriptPath) -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "Removed service '$ServiceName'. Start the server on demand with -Start, or re-run setup with -AutoStart." -ForegroundColor Green
 }
 
 # -RemoveAutoStart: removes the logon task.
@@ -1466,6 +1690,7 @@ function Invoke-RemoveAutoStartMode {
 
 $previousEncoding = $null
 $transcript = $false
+$runExitCode = $null
 try {
     # Decode omp/llama.cpp output as UTF-8 regardless of the console code page.
     try { $previousEncoding = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { $previousEncoding = $null }
@@ -1482,9 +1707,13 @@ try {
         'Stop' { Invoke-StopMode }
         'Status' { Invoke-StatusMode }
         'RemoveAutoStart' { Invoke-RemoveAutoStartMode }
+        'InstallService' { Invoke-InstallServiceMode }
+        'RemoveService' { Invoke-RemoveServiceMode }
+        'Run' { $runExitCode = Invoke-RunMode }
         default { Invoke-Setup; Write-Host ''; Write-Host 'Done.' -ForegroundColor Green }
     }
-    $exitCode = 0
+    # -Run passes llama-server's exit code through so shawl can restart it on failure.
+    $exitCode = if ($null -ne $runExitCode) { [int]$runExitCode } else { 0 }
 } catch {
     if ("$_" -ne $AbortToken) {
         Write-Host ''
