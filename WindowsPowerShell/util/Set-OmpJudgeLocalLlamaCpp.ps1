@@ -181,7 +181,7 @@ function Write-Section([string]$Title) {
 # Prints one aligned report row; $Ok colors the value (green = good, yellow = needs attention).
 function Write-Row([string]$Label, $Value, $Ok = $null) {
     $color = if ($null -eq $Ok) { 'Gray' } elseif ($Ok) { 'Green' } else { 'Yellow' }
-    Write-Host ('  {0,-34}' -f $Label) -NoNewline
+    Write-Host ('  {0,-38}' -f $Label) -NoNewline
     Write-Host ([string]$Value) -ForegroundColor $color
 }
 
@@ -1296,7 +1296,8 @@ function Show-Plan($Resources, $Plan) {
     if (Get-JudgeService) {
         Write-Row 'Service' "'$ServiceName' restarted with these settings"
     } else {
-        Write-Row 'Logon task' $(if ($AutoStart) { "register '$TaskName'" } else { 'not registered (use -AutoStart)' })
+        $task = if ($AutoStart) { "register '$TaskName'" } elseif (Get-AutoStartTask) { "'$TaskName' already registered (kept)" } else { 'not registered (use -AutoStart)' }
+        Write-Row 'Logon task' $task
     }
     foreach ($dir in $Plan.Prune) { Write-Row 'Remove after success' "$(Format-HomePath $dir) (old build)" }
 }
