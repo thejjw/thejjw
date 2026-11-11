@@ -287,7 +287,8 @@ $_AiToolsInternal = @{
         'Google.AntigravityIDE',
         'ZhipuAI.ZCode',
         'MiniMax.MiniMaxCode',
-        'Anysphere.Cursor'
+        'Anysphere.Cursor',
+        'Finesssee.Win-CodexBar'
     )
     ExtendedWingetPackages = @(
         'JRSoftware.InnoSetup',
