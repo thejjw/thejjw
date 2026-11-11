@@ -1133,10 +1133,9 @@ nrd() {
 * Never append Co-Authored-By trailers to commit messages.
 * Use purpose-based branch names (e.g. `feat/<description>`,
   `fix/<description>`, `docs/<description>`); never use `agent/`, `ai/`, or
-  `codex/` prefixes unless explicitly directed. Exception: fixes that directly
-  answer an advisor review note present in this session (an `[oc-advisor-note]`
-  message or an `oc-advisor` tool result) stay on the current branch - commit
-  them where the reviewed work lives rather than opening a branch.
+  `codex/` prefixes unless explicitly directed.
+  * `opencode` exception: commit fixes for `[oc-advisor-note]` or `oc-advisor`
+    review notes on the current branch rather than opening a new one.
 * Never run `git push` unless explicitly directed; keep all commits local.
 
 ## Dependencies
