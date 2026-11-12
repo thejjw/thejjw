@@ -5,6 +5,7 @@ Run from the ``py`` directory: ``python3 -m unittest discover -s aiusage/tests -
 
 from __future__ import annotations
 
+import copy
 import json
 import unittest
 from datetime import datetime, timezone
@@ -64,6 +65,108 @@ class KimiTests(unittest.TestCase):
         for window in self.report.windows:
             self.assertIsNotNone(window.resets_at)
             self.assertEqual(window.resets_source, "api")
+
+    def test_modern_five_hour_keeps_legacy_weekly(self):
+        # Dropping only usages.limit_7d must not lose the weekly quota: the
+        # legacy top-level usage fills the gap, and the 300-minute legacy
+        # limits entry must not duplicate the modern 5h row.
+        doc = copy.deepcopy(fixture("kimi_usages.json"))
+        del doc["usages"]["limit_7d"]
+        doc["usage"]["remaining"] = "50"  # distinct value proving the legacy source filled the gap
+
+        report = kimi.parse(doc, fetched_at=NOW)
+
+        self.assertEqual([w.label for w in report.windows], ["5h", "weekly"])
+        self.assertEqual(report.windows[1].used_percent, 50.0)
+        self.assertEqual(report.windows[1].resets_source, "api")
+        self.assertEqual(
+            report.windows[1].resets_at,
+            datetime(2026, 11, 13, 0, 32, 9, 619778, tzinfo=timezone.utc),
+        )
+
+    def test_modern_weekly_keeps_legacy_five_hour(self):
+        # The reverse mixed response: legacy 5h survives next to modern weekly.
+        doc = copy.deepcopy(fixture("kimi_usages.json"))
+        del doc["usages"]["limit_5h"]
+        doc["limits"][0]["detail"]["remaining"] = "40"
+
+        report = kimi.parse(doc, fetched_at=NOW)
+
+        self.assertEqual([w.label for w in report.windows], ["weekly", "5h"])
+        self.assertAlmostEqual(report.windows[0].used_percent or 0, 0.06, places=6)
+        self.assertEqual(report.windows[1].used_percent, 60.0)
+        self.assertEqual(
+            report.windows[1].resets_at,
+            datetime(2026, 11, 11, 12, 32, 9, 619778, tzinfo=timezone.utc),
+        )
+
+    def test_legacy_only_payload_keeps_windows_and_reset_data(self):
+        doc = copy.deepcopy(fixture("kimi_usages.json"))
+        del doc["usages"]
+
+        report = kimi.parse(doc, fetched_at=NOW)
+
+        self.assertEqual([w.label for w in report.windows], ["weekly", "5h"])
+        self.assertEqual(report.windows[0].used_percent, 0.0)
+        for window in report.windows:
+            self.assertIsNotNone(window.resets_at)
+            self.assertEqual(window.resets_source, "api")
+
+    def test_empty_modern_block_zero_usage_and_extra_durations_fill_in(self):
+        # An empty modern block must not suppress legacy fallback; numeric zero
+        # is valid usage; a duplicate legacy identity is dropped once; entries
+        # without window metadata are always kept (no safe identity to match).
+        doc = {
+            "usage": {"limit": "100", "remaining": "100", "resetTime": "2026-11-13T00:00:00Z"},
+            "limits": [
+                {
+                    "window": {"duration": 30, "timeUnit": "TIME_UNIT_MINUTE"},
+                    "detail": {"limit": "10", "remaining": "0"},
+                },
+                {
+                    "window": {"duration": 30, "timeUnit": "TIME_UNIT_MINUTE"},
+                    "detail": {"limit": "10", "remaining": "0"},
+                },
+                {"detail": {"limit": "5", "remaining": "1"}},
+            ],
+            "usages": {},
+        }
+
+        report = kimi.parse(doc, fetched_at=NOW)
+
+        self.assertEqual([w.label for w in report.windows], ["weekly", "30m", "quota"])
+        self.assertEqual(report.windows[0].used_percent, 0.0)
+        self.assertEqual(report.windows[1].used_percent, 100.0)
+        self.assertIsNone(report.windows[1].resets_at)
+        self.assertIsNone(report.windows[1].resets_source)
+
+    def test_relative_reset_is_computed_from_the_pinned_fetch_time(self):
+        doc = copy.deepcopy(fixture("kimi_usages.json"))
+        del doc["usages"]["limit_7d"]
+        doc["limits"] = [
+            {
+                "window": {"duration": 30, "timeUnit": "TIME_UNIT_MINUTE"},
+                "detail": {"limit": "10", "remaining": "9", "ttl": 600},
+            }
+        ]
+
+        report = kimi.parse(doc, fetched_at=NOW)
+
+        self.assertEqual([w.label for w in report.windows], ["5h", "weekly", "30m"])
+        self.assertEqual(report.windows[2].resets_at, datetime(2026, 11, 11, 23, 10, tzinfo=timezone.utc))
+        self.assertEqual(report.windows[2].resets_source, "relative")
+
+    def test_malformed_legacy_numbers_keep_the_window_without_a_percent(self):
+        # Junk numerics are not silently converted to zero: the window is
+        # reported, the percentage stays unknown.
+        doc = copy.deepcopy(fixture("kimi_usages.json"))
+        del doc["usages"]
+        doc["usage"]["limit"] = "abc"
+
+        report = kimi.parse(doc, fetched_at=NOW)
+
+        self.assertEqual(len(report.windows), 2)
+        self.assertIsNone(report.windows[0].used_percent)
 
 
 class MinimaxTests(unittest.TestCase):

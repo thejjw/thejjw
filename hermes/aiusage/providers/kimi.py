@@ -3,7 +3,8 @@
 The endpoint returns three overlapping views of the same quotas: a top-level
 ``usage`` (weekly), a ``limits`` array (window + detail), and a newer ``usages``
 object keyed by window (``limit_5h``, ``limit_7d``). ``usages`` carries the
-ratio directly, so it wins when present; the others keep older responses working.
+ratio directly, so it wins per window; the legacy views fill only the windows
+the modern view does not cover, so mixed responses keep every available window.
 """
 
 from __future__ import annotations
@@ -32,6 +33,19 @@ def _window_label(duration: int | None, unit: str | None) -> str:
     return f"{duration} {unit.lower() or 'units'}"
 
 
+def _window_identity(duration: int | None, unit: str | None) -> str:
+    """Canonical identity that merges the overlapping legacy views: 300
+    minutes and 5 hours are the same window, as are 7 days and 168 hours.
+    Durations without a modern equivalent keep their label as identity
+    instead of collapsing into one shared bucket."""
+    label = _window_label(duration, unit)
+    if label in ("7d", "168h") or (
+        (unit or "").upper().startswith("TIME_UNIT_WEEK") and duration == 1
+    ):
+        return "weekly"
+    return label
+
+
 def _used_percent(limit: float | None, remaining: float | None) -> float | None:
     """Derive a used percentage from a limit and its remainder."""
     if not limit or remaining is None:
@@ -45,9 +59,12 @@ def parse(doc: dict, *, fetched_at: datetime | None = None) -> UsageReport:
     windows: list[Window] = []
     details: list[str] = []
 
+    # The modern ``usages`` view wins for the windows it covers; the identities
+    # recorded here keep the legacy views from duplicating them.
+    seen: set[str] = set()
     usages = doc.get("usages") or {}
     if isinstance(usages, dict) and usages:
-        for key, label in (("limit_5h", "5h"), ("limit_7d", "weekly")):
+        for key, label, identity in (("limit_5h", "5h", "5h"), ("limit_7d", "weekly", "weekly")):
             block = usages.get(key) or {}
             if not block:
                 continue
@@ -60,45 +77,58 @@ def parse(doc: dict, *, fetched_at: datetime | None = None) -> UsageReport:
                     resets_source=RESET_API,
                 )
             )
+            seen.add(identity)
 
-    if not windows:
-        usage = doc.get("usage") or {}
-        if usage:
-            windows.append(
-                Window(
-                    label=str(usage.get("name") or usage.get("title") or "weekly"),
-                    used_percent=_used_percent(
-                        _as_float(usage.get("limit")), _as_float(usage.get("remaining"))
-                    ),
-                    resets_at=parse_timestamp(usage.get("resetTime") or usage.get("reset_at")),
-                    resets_source=RESET_API,
-                )
+    # Legacy views now fill only the gaps, one identity at a time: a response
+    # carrying a single modern window keeps its legacy counterpart instead of
+    # losing it, while an identity the modern view already covered is skipped.
+    usage = doc.get("usage") or {}
+    if usage and "weekly" not in seen:
+        windows.append(
+            Window(
+                label=str(usage.get("name") or usage.get("title") or "weekly"),
+                used_percent=_used_percent(
+                    _as_float(usage.get("limit")), _as_float(usage.get("remaining"))
+                ),
+                resets_at=parse_timestamp(usage.get("resetTime") or usage.get("reset_at")),
+                resets_source=RESET_API,
             )
-        for limit in doc.get("limits") or []:
-            detail = limit.get("detail") if isinstance(limit.get("detail"), dict) else limit
-            window_meta = detail.get("window") or limit.get("window") or {}
-            reset_at = parse_timestamp(
-                detail.get("resetTime")
-                or detail.get("reset_at")
-                or detail.get("resetAt")
-                or detail.get("reset_time")
+        )
+        seen.add("weekly")
+    for limit in doc.get("limits") or []:
+        detail = limit.get("detail") if isinstance(limit.get("detail"), dict) else limit
+        window_meta = detail.get("window") or limit.get("window") or {}
+        # Entries without window metadata carry no identity, so they can never
+        # be deduplicated safely and are always kept (previous behavior).
+        identity = None
+        if window_meta.get("duration"):
+            identity = _window_identity(window_meta.get("duration"), window_meta.get("timeUnit"))
+            if identity in seen:
+                continue
+        reset_at = parse_timestamp(
+            detail.get("resetTime")
+            or detail.get("reset_at")
+            or detail.get("resetAt")
+            or detail.get("reset_time")
+        )
+        source = RESET_API
+        if reset_at is None:
+            seconds = _as_float(detail.get("reset_in") or detail.get("ttl"))
+            if seconds:
+                reset_at = fetched + timedelta(seconds=seconds)
+                source = RESET_RELATIVE
+        windows.append(
+            Window(
+                label=_window_label(window_meta.get("duration"), window_meta.get("timeUnit")),
+                used_percent=_used_percent(
+                    _as_float(detail.get("limit")), _as_float(detail.get("remaining"))
+                ),
+                resets_at=reset_at,
+                resets_source=source if reset_at else None,
             )
-            source = RESET_API
-            if reset_at is None:
-                seconds = _as_float(detail.get("reset_in") or detail.get("ttl"))
-                if seconds:
-                    reset_at = fetched + timedelta(seconds=seconds)
-                    source = RESET_RELATIVE
-            windows.append(
-                Window(
-                    label=_window_label(window_meta.get("duration"), window_meta.get("timeUnit")),
-                    used_percent=_used_percent(
-                        _as_float(detail.get("limit")), _as_float(detail.get("remaining"))
-                    ),
-                    resets_at=reset_at,
-                    resets_source=source if reset_at else None,
-                )
-            )
+        )
+        if identity is not None:
+            seen.add(identity)
 
     wallet = doc.get("boosterWallet")
     if isinstance(wallet, dict):
