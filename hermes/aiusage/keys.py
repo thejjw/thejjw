@@ -10,7 +10,11 @@ import json
 import os
 from pathlib import Path
 
-HERMES_HOME = Path(os.environ.get("HERMES_HOME", "/root/.hermes"))
+# Credential home, resolved once at import so callers can keep importing the
+# constant. An unset or empty HERMES_HOME falls back to the invoking user's
+# home instead of a hardcoded /root, matching the documented lookup; an
+# explicitly configured path still wins.
+HERMES_HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
 
 # Environment variable names each provider's key may arrive under, most specific first.
 KEY_ENV_NAMES = {

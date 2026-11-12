@@ -38,6 +38,8 @@ PYTHONPATH=hermes python3 -m aiusage render /tmp/usage
 
 Resolution order per provider: explicit value, process environment,
 `~/.hermes/.env`, then the Hermes credential pool in `~/.hermes/auth.json`.
+Set `HERMES_HOME` to relocate that directory; unset or empty means the
+current user's home (`~/.hermes`).
 Variable names: `ZAI_API_KEY`/`GLM_API_KEY`, `KIMI_CODE_PLAN_API_KEY`/
 `KIMI_API_KEY`, `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`.
 
