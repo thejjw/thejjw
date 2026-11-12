@@ -911,12 +911,12 @@ fi
 # nrd - embed into shell profile if not already present
 # ---------------------------------------------------------------------------
 MARKER="# >>> nrd >>>"
-NRD_VERSION_MARKER="# nrd version 2"
+NRD_VERSION_MARKER="# nrd version 3"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> nrd >>>" "# <<< nrd <<<"
 elif grep -qF "$MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$NRD_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
-  echo "nrd: upgrading embedded function to version 2"
+  echo "nrd: upgrading embedded function to version 3"
   remove_profile_section "$PROFILE" "# >>> nrd >>>" "# <<< nrd <<<"
 fi
 
@@ -926,7 +926,7 @@ else
   cat >> "$PROFILE" << 'NRD_EOF'
 
 # >>> nrd >>>
-# nrd version 2
+# nrd version 3
 # Palette mirrored from WindowsPowerShell/Microsoft.PowerShell_profile.ps1
 # ($_NrdInternal.Colors); keep both lists in sync when either changes.
 # nrd - New Random Dir
@@ -994,6 +994,14 @@ nrd() {
     planet pond rabbit river shadow sky star stone sun thicket trail tree
     valley wave wind wolf wood workshop
   )
+
+  # zsh aborts the "$base_path"/*/ scan below with an unmatched-glob (NOMATCH)
+  # error when the base path has no visible child directories; bash expands it
+  # to nothing instead. Under zsh, scope null_glob to this function:
+  # LOCAL_OPTIONS restores the caller's options on return.
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    setopt local_options null_glob
+  fi
 
   if [[ -z "$name" ]]; then
     # Leading colors already used by direct child directories, so a fresh
