@@ -1017,11 +1017,16 @@ nrd() {
 
     # Up to three draws for an unused color; accept a duplicate afterwards
     # so creation still succeeds when the color pool is exhausted.
-    local color_attempts=3 c color
+    local color_attempts=3 c ci color
     for ((c = 1; c <= color_attempts; c++)); do
-      # zsh subscripts are 1-based, so ${colors[0]} would be empty there;
-      # the 0-based :offset: slice form indexes identically in bash and zsh.
-      color="$(printf '%s' "${colors[@]:$((RANDOM % ${#colors[@]})):1}")"
+      # Draw in the function's own scope: zsh never advances the parent's
+      # random state for draws made inside a command substitution, so every
+      # fresh subshell replays the same draw (reproduced with zsh 5.9; bash
+      # 5.x draws differ regardless, but in-scope draws are harmless there).
+      # The 0-based :offset: slice keeps the lookup portable (plain
+      # subscripts are 0-based in bash, 1-based in zsh).
+      ci=$((RANDOM % ${#colors[@]}))
+      color="$(printf '%s' "${colors[@]:$ci:1}")"
       if [[ "$used_colors" != *" $color "* ]]; then
         break
       fi
@@ -1031,13 +1036,15 @@ nrd() {
       echo "nrd: all $color_attempts color draws are in use; using '$color' anyway." >&2
     fi
 
-    local i
+    local i ai ni
     for ((i = 1; i <= max_attempts; i++)); do
-      # Only the adjective/noun subscripts needed porting: the name must lead
-      # with the retry loop's chosen $color so its used-color avoidance and
-      # the exhaustion warning actually describe the created directory.
-      name="$color-$(printf '%s' "${adjectives[@]:$((RANDOM % ${#adjectives[@]})):1}")"
-      name="$name-$(printf '%s' "${nouns[@]:$((RANDOM % ${#nouns[@]})):1}")"
+      # Same in-function draws as the color loop; the name must lead with the
+      # retried $color so used-color avoidance and the exhaustion warning
+      # describe the created directory.
+      ai=$((RANDOM % ${#adjectives[@]}))
+      ni=$((RANDOM % ${#nouns[@]}))
+      name="$color-$(printf '%s' "${adjectives[@]:$ai:1}")"
+      name="$name-$(printf '%s' "${nouns[@]:$ni:1}")"
       $verbose && echo "attempt $i: $name"
       [[ ! -e "$base_path/$name" ]] && break
       name=""

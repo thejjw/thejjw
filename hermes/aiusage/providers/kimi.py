@@ -34,16 +34,32 @@ def _window_label(duration: int | None, unit: str | None) -> str:
 
 
 def _window_identity(duration: int | None, unit: str | None) -> str:
-    """Canonical identity that merges the overlapping legacy views: 300
-    minutes and 5 hours are the same window, as are 7 days and 168 hours.
-    Durations without a modern equivalent keep their label as identity
-    instead of collapsing into one shared bucket."""
+    """Canonical identity that merges the overlapping legacy views: windows
+    equal in duration share one identity regardless of unit spelling (300
+    minutes and 5 hours, 7 days and 168 hours, 1 day and 24 hours).
+    Recognized units normalize to hours; unrecognized spellings keep their
+    display label as identity so distinct unknown windows never collapse."""
     label = _window_label(duration, unit)
-    if label in ("7d", "168h") or (
-        (unit or "").upper().startswith("TIME_UNIT_WEEK") and duration == 1
-    ):
+    unit_name = (unit or "").upper()
+    hours = None
+    if duration:
+        if "MINUTE" in unit_name:
+            hours = duration // 60 if duration % 60 == 0 else None
+        elif "HOUR" in unit_name:
+            hours = duration
+        elif "DAY" in unit_name:
+            hours = duration * 24
+        elif "WEEK" in unit_name:
+            hours = duration * 168
+    if hours is None:
+        return label
+    if hours == 5:
+        return "5h"
+    if hours == 168:
+        # Exactly one week shares the modern limit_7d identity; longer spans
+        # keep their own duration so they are never collapsed into it.
         return "weekly"
-    return label
+    return f"{hours}h"
 
 
 def _used_percent(limit: float | None, remaining: float | None) -> float | None:

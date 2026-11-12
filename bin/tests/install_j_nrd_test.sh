@@ -224,6 +224,25 @@ test_exhausted_palette_warns_and_uses_that_color() {
   [[ "$new" == "$warned-"* ]] || fail "created '$new' does not lead with the warned color '$warned'"
 }
 
+test_two_sequential_calls_pick_different_names() {
+  # Both calls must run in ONE shell: a draw made inside a command
+  # substitution replays the inherited frozen seed across calls (probe:
+  # three substitutions yield one value), which is what an interactive
+  # session sees. The indices are therefore computed in the function's own
+  # scope, and this test fails if any draw migrates back into a substitution.
+  local base="$TEST_ROOT/sequential" results first second
+  mkdir -p "$base"
+  load_embedded_nrd
+  results="$(cd "$base" && { nrd && nrd; })" || fail 'sequential nrd failed'
+  first="$(printf '%s\n' "$results" | sed -n '1s|.*/||p')"
+  second="$(printf '%s\n' "$results" | sed -n '2s|.*/||p')"
+  assert_dir "$base/$first" 'first directory'
+  # nrd cd's into the new directory, so the second call nests inside the first.
+  assert_dir "$base/$first/$second" 'second directory'
+  [[ -n "$second" ]] || fail 'second nrd produced no directory'
+  [[ "$first" != "$second" ]] || fail "sequential calls replayed the draw '$first'"
+}
+
 run_test 'bash: empty directory scan succeeds' test_empty_directory_scan_succeeds
 run_test 'bash: directory with only files succeeds' test_directory_with_only_files_succeeds
 run_test 'bash: existing color-prefixed children scanned' test_existing_color_children_still_scanned
@@ -232,6 +251,7 @@ run_test 'bash: parent path with spaces succeeds' test_parent_path_with_spaces_s
 run_test 'bash: caller options unchanged' test_caller_options_unchanged_after_run
 run_test 'bash: generated name has nonempty components' test_generated_name_has_nonempty_components
 run_test 'bash: exhausted palette warns and uses that color' test_exhausted_palette_warns_and_uses_that_color
+run_test 'bash: two sequential calls pick different names' test_two_sequential_calls_pick_different_names
 run_test 'installer: version 2 block upgrades once, rerun idempotent' test_old_version_marker_upgrades_once_and_idempotent
 
 if command -v zsh >/dev/null 2>&1; then

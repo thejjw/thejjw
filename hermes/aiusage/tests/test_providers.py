@@ -223,6 +223,33 @@ class KimiTests(unittest.TestCase):
         self.assertEqual(report.windows[2].resets_at, datetime(2026, 11, 11, 23, 10, tzinfo=timezone.utc))
         self.assertEqual(report.windows[2].resets_source, "relative")
 
+    def test_equivalent_durations_in_different_units_dedupe(self):
+        # 1 day and 24 hours are the same window: one row survives (first
+        # entry wins), while a genuinely different 14-day window stays.
+        doc = {
+            "usage": {"limit": "100", "remaining": "100", "resetTime": "2026-11-13T00:00:00Z"},
+            "limits": [
+                {
+                    "window": {"duration": 1, "timeUnit": "TIME_UNIT_DAY"},
+                    "detail": {"limit": "10", "remaining": "0", "resetTime": "2026-11-12T00:00:00Z"},
+                },
+                {
+                    "window": {"duration": 24, "timeUnit": "TIME_UNIT_HOUR"},
+                    "detail": {"limit": "10", "remaining": "1"},
+                },
+                {
+                    "window": {"duration": 14, "timeUnit": "TIME_UNIT_DAY"},
+                    "detail": {"limit": "20", "remaining": "2"},
+                },
+            ],
+        }
+
+        report = kimi.parse(doc, fetched_at=NOW)
+
+        self.assertEqual([w.label for w in report.windows], ["weekly", "1d", "14d"])
+        self.assertEqual(report.windows[1].used_percent, 100.0)
+        self.assertEqual(report.windows[2].used_percent, 90.0)
+
     def test_malformed_legacy_numbers_keep_the_window_without_a_percent(self):
         # Junk numerics are not silently converted to zero: the window is
         # reported, the percentage stays unknown.
