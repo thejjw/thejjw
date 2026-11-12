@@ -1019,7 +1019,9 @@ nrd() {
     # so creation still succeeds when the color pool is exhausted.
     local color_attempts=3 c color
     for ((c = 1; c <= color_attempts; c++)); do
-      color="${colors[RANDOM % ${#colors[@]}]}"
+      # zsh subscripts are 1-based, so ${colors[0]} would be empty there;
+      # the 0-based :offset: slice form indexes identically in bash and zsh.
+      color="$(printf '%s' "${colors[@]:$((RANDOM % ${#colors[@]})):1}")"
       if [[ "$used_colors" != *" $color "* ]]; then
         break
       fi
@@ -1031,7 +1033,11 @@ nrd() {
 
     local i
     for ((i = 1; i <= max_attempts; i++)); do
-      name="$color-${adjectives[RANDOM % ${#adjectives[@]}]}-${nouns[RANDOM % ${#nouns[@]}]}"
+      # Same portable slice form as the color draw: plain 0-based subscripts
+      # select empty strings under zsh's 1-based indexing.
+      name="$(printf '%s' "${colors[@]:$((RANDOM % ${#colors[@]})):1}")"
+      name="$name-$(printf '%s' "${adjectives[@]:$((RANDOM % ${#adjectives[@]})):1}")"
+      name="$name-$(printf '%s' "${nouns[@]:$((RANDOM % ${#nouns[@]})):1}")"
       $verbose && echo "attempt $i: $name"
       [[ ! -e "$base_path/$name" ]] && break
       name=""

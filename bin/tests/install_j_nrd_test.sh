@@ -185,12 +185,24 @@ test_old_version_marker_upgrades_once_and_idempotent() {
   bash -n "$profile" || fail 'generated profile has bash syntax errors'
 }
 
+test_generated_name_has_nonempty_components() {
+  local base="$TEST_ROOT/components" child name
+  mkdir -p "$base"
+  load_embedded_nrd
+  (cd "$base" && nrd >/dev/null) || fail 'nrd failed'
+  child="$(sole_child_dir "$base")"
+  name="$(basename "$child")"
+  # color-adjective-noun: every component nonempty in both target shells.
+  [[ "$name" =~ ^[a-z]+-[a-z]+-[a-z]+$ ]] || fail "generated name '$name' has an empty component"
+}
+
 run_test 'bash: empty directory scan succeeds' test_empty_directory_scan_succeeds
 run_test 'bash: directory with only files succeeds' test_directory_with_only_files_succeeds
 run_test 'bash: existing color-prefixed children scanned' test_existing_color_children_still_scanned
 run_test 'bash: explicit name unchanged' test_explicit_name_is_unchanged
 run_test 'bash: parent path with spaces succeeds' test_parent_path_with_spaces_succeeds
 run_test 'bash: caller options unchanged' test_caller_options_unchanged_after_run
+run_test 'bash: generated name has nonempty components' test_generated_name_has_nonempty_components
 run_test 'installer: version 2 block upgrades once, rerun idempotent' test_old_version_marker_upgrades_once_and_idempotent
 
 if command -v zsh >/dev/null 2>&1; then
@@ -224,9 +236,21 @@ if command -v zsh >/dev/null 2>&1; then
     assert_dir "$base/zsh-given" 'zsh explicit name'
   }
 
+  test_zsh_generated_name_has_nonempty_components() {
+    local base="$TEST_ROOT/zsh-components" child name
+    mkdir -p "$base"
+    write_embedded_nrd
+    # 1-based zsh subscripts must not empty the random name components.
+    zsh -f -e -c "source '$TEST_ROOT/nrd_block.sh'; cd '$base'; nrd >/dev/null" || fail 'zsh nrd failed'
+    child="$(sole_child_dir "$base")"
+    name="$(basename "$child")"
+    [[ "$name" =~ ^[a-z]+-[a-z]+-[a-z]+$ ]] || fail "generated name '$name' has an empty component"
+  }
+
   run_test 'zsh: empty directory scan succeeds' test_zsh_empty_directory_scan_succeeds
   run_test 'zsh: caller option state restored' test_zsh_caller_options_restored
   run_test 'zsh: explicit name unchanged' test_zsh_explicit_name_is_unchanged
+  run_test 'zsh: generated name has nonempty components' test_zsh_generated_name_has_nonempty_components
 else
   echo 'skip: zsh is unavailable; nrd zsh cases were not run' >&2
 fi
