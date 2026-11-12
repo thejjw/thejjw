@@ -296,10 +296,38 @@ if command -v zsh >/dev/null 2>&1; then
     [[ "$name" =~ ^[a-z]+-[a-z]+-[a-z]+$ ]] || fail "generated name '$name' has an empty component"
   }
 
+  test_zsh_sequential_calls_pick_different_names() {
+    # The actual defect shape: draws inside command substitutions advance
+    # only a copy of zsh's random state, so the parent replays the seeded
+    # sequence on the next call and the same name collides until retries
+    # exhaust. A fixed RANDOM seed makes that replay deterministic: pre-fix
+    # both calls produce one identical name; post-fix the in-function draws
+    # advance the state and the names differ. Both calls run in one zsh and
+    # nrd's cd nests the second directory under the first.
+    local base="$TEST_ROOT/zsh-sequential" results first second
+    mkdir -p "$base"
+    write_embedded_nrd
+    results="$(
+      zsh -f -e -c "
+        cd '$base' || exit 70
+        RANDOM=42
+        source '$TEST_ROOT/nrd_block.sh'
+        nrd && nrd
+      "
+    )" || fail 'zsh sequential nrd failed'
+    first="$(printf '%s\n' "$results" | sed -n '1s|.*/||p')"
+    second="$(printf '%s\n' "$results" | sed -n '2s|.*/||p')"
+    assert_dir "$base/$first" 'zsh first directory'
+    assert_dir "$base/$first/$second" 'zsh second directory'
+    [[ -n "$second" ]] || fail 'second zsh nrd produced no directory'
+    [[ "$first" != "$second" ]] || fail "zsh sequential calls replayed the draw '$first'"
+  }
+
   run_test 'zsh: empty directory scan succeeds' test_zsh_empty_directory_scan_succeeds
   run_test 'zsh: caller option state restored' test_zsh_caller_options_restored
   run_test 'zsh: explicit name unchanged' test_zsh_explicit_name_is_unchanged
   run_test 'zsh: generated name has nonempty components' test_zsh_generated_name_has_nonempty_components
+  run_test 'zsh: sequential calls pick different names' test_zsh_sequential_calls_pick_different_names
 else
   echo 'skip: zsh is unavailable; nrd zsh cases were not run' >&2
 fi
