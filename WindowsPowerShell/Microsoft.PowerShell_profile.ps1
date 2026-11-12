@@ -763,8 +763,58 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
     function UnwrapZaiData {
         param([object]$Response)
         if ($null -eq $Response) { return $null }
-        if ($Response.PSObject.Properties['data'] -and $null -ne $Response.data) { return $Response.data }
+
+        # HTTP 200 + success:false is the documented failure mode for auth and
+        # rate limits. Surface it; rendering it as zero usage is misleading.
+        $hasCode = $null -ne $Response.PSObject.Properties['code']
+        $code    = if ($hasCode) { [string]$Response.code } else { $null }
+        $ok      = if ($null -ne $Response.PSObject.Properties['success']) { $Response.success } else { $true }
+        if ($ok -eq $false -or ($hasCode -and $code -notin @('200', '0'))) {
+            $msg = if ($null -ne $Response.PSObject.Properties['msg']) { [string]$Response.msg } else { 'request rejected' }
+            throw "Z.AI API error (code $code): $msg"
+        }
+
+        if ($null -ne $Response.PSObject.Properties['data'] -and $null -ne $Response.data) { return $Response.data }
         return $Response
+    }
+
+    # Invariant-culture number formatting so tables never render comma decimals
+    # on hosts with a localized default culture.
+    function FormatInvariant([double]$Value, [string]$Format) {
+        return $Value.ToString($Format, [Globalization.CultureInfo]::InvariantCulture)
+    }
+
+    # Normalize a reset timestamp from any usage provider: DateTimeOffset /
+    # DateTime objects, epoch seconds or milliseconds, or ISO-8601 strings.
+    # Parsing is invariant-culture so an offset is never silently dropped.
+    function ConvertToResetTime([object]$Value) {
+        if ($null -eq $Value) { return $null }
+        if ($Value -is [DateTimeOffset]) { return $Value.ToLocalTime() }
+        if ($Value -is [DateTime]) { return ([DateTimeOffset]$Value).ToLocalTime() }
+        if ($Value -is [long] -or $Value -is [int]) {
+            $n = [long]$Value
+            # Values above 1e11 are epoch milliseconds; smaller ones are seconds.
+            $ms = if ($n -gt 100000000000) { $n } else { $n * 1000 }
+            return [DateTimeOffset]::FromUnixTimeMilliseconds($ms).ToLocalTime()
+        }
+        $parsed = [DateTimeOffset]::MinValue
+        $styles = [Globalization.DateTimeStyles]::AssumeUniversal
+        if ([DateTimeOffset]::TryParse([string]$Value, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$parsed)) {
+            return $parsed.ToLocalTime()
+        }
+        return $null
+    }
+
+    # Human label for a Z.AI quota window from its (unit, number) pair.
+    # unit codes observed: 3=hours, 5=months, 6=weeks.
+    function GetZaiWindowLabel {
+        param([int]$Unit, [int]$Number)
+        switch ($Unit) {
+            3 { return ('{0}h' -f $Number) }
+            5 { return ('{0}mo' -f $Number) }
+            6 { return ('{0}w' -f $Number) }
+            default { return ('unit{0}' -f $Unit) }
+        }
     }
 
     # Big-endian readers for OpenType tables (all multi-byte fields are BE).
@@ -2210,6 +2260,9 @@ public class AiUsageTls {
         'GetSeriesStats',
         'GetSpikes',
         'UnwrapZaiData',
+        'ConvertToResetTime',
+        'GetZaiWindowLabel',
+        'FormatInvariant',
         'GetJsoncText',
         'ShowFontArchive',
         'Expand7ZipArchive',
@@ -13000,6 +13053,7 @@ function Get-MinimaxUsage {
 
     $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
+    if (-not $ApiKey) { $ApiKey = $_ProfileHelpers.GetAiApiKey('MINIMAX_API_KEY') }
     if (-not $ApiKey) { Write-Error 'MINIMAX_API_KEY not set (env var or -ApiKey).'; return }
 
     $headers = @{
@@ -13007,7 +13061,7 @@ function Get-MinimaxUsage {
         'Authorization' = "Bearer $ApiKey"
     }
     try {
-        $resp = Invoke-RestMethod -Uri 'https://www.minimax.io/v1/token_plan/remains' -Headers $headers -Method GET
+        $resp = Invoke-RestMethod -Uri 'https://www.minimax.io/v1/token_plan/remains' -Headers $headers -Method GET -TimeoutSec 20
     } catch {
         Write-Error "API call failed: $($_.Exception.Message)"
         return
@@ -13064,14 +13118,16 @@ function Get-MinimaxUsage {
         if ($null -ne $wRatio -and $wRatio -gt $BurnWarnRatio) { $flags.Add('WEEKLY BURN > LINEAR') }
 
         if ($m.current_interval_total_count -gt 0) {
-            $iUsedStr = '{0}/{1} (burn {2:N2}x)' -f $m.current_interval_usage_count, $m.current_interval_total_count, $iRatio
+            $iUsedStr = '{0}/{1} (burn {2}x)' -f $m.current_interval_usage_count, $m.current_interval_total_count, ($_ProfileHelpers.FormatInvariant([double]$iRatio, 'N2'))
         } else {
-            $iUsedStr = '-'
+            # No countable total means burn math cannot run: say so instead of
+            # leaving a blank cell that reads as a healthy zero.
+            $iUsedStr = 'no countable quota (total=0)'
         }
         if ($m.current_weekly_total_count -gt 0) {
-            $wUsedStr = '{0}/{1} (burn {2:N2}x)' -f $m.current_weekly_usage_count, $m.current_weekly_total_count, $wRatio
+            $wUsedStr = '{0}/{1} (burn {2}x)' -f $m.current_weekly_usage_count, $m.current_weekly_total_count, ($_ProfileHelpers.FormatInvariant([double]$wRatio, 'N2'))
         } else {
-            $wUsedStr = '-'
+            $wUsedStr = 'no countable quota (total=0)'
         }
 
         $rows.Add([pscustomobject]@{
@@ -13166,6 +13222,7 @@ function Get-ZaiUsage {
 
     $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
+    if (-not $Token) { $Token = $_ProfileHelpers.GetAiApiKey('ZAI_API_KEY') }
     if (-not $Token) { Write-Error 'ZAI_API_KEY not set (env var or -Token).'; return }
 
     $base = 'https://api.z.ai'
@@ -13212,9 +13269,16 @@ function Get-ZaiUsage {
         Write-Host '   Use -All to display inline.)' -ForegroundColor DarkGray
     }
 
-    $modelData = $_ProfileHelpers.UnwrapZaiData($modelResp)
-    $toolData  = $_ProfileHelpers.UnwrapZaiData($toolResp)
-    $quotaData = $_ProfileHelpers.UnwrapZaiData($quotaResp)
+    try {
+        $modelData = $_ProfileHelpers.UnwrapZaiData($modelResp)
+        $toolData  = $_ProfileHelpers.UnwrapZaiData($toolResp)
+        $quotaData = $_ProfileHelpers.UnwrapZaiData($quotaResp)
+    } catch {
+        # A rejected key or rate limit arrives as HTTP 200 + success:false.
+        Write-Error $_.Exception.Message
+        Write-Host '  Quota and usage tables suppressed: the API rejected the request.' -ForegroundColor DarkGray
+        return $Global:zaiLastQuery
+    }
 
     $_ProfileHelpers.WriteSection('Model usage summary (Z.AI, last 24h)')
     if ($modelData) {
@@ -13291,12 +13355,9 @@ function Get-ZaiUsage {
                 $delta   = $resetDt - (Get-Date)
                 $reset   = ('{0} ({1} from now)' -f $resetDt.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($delta)))
             } elseif ($lim.PSObject.Properties['unit'] -and $lim.PSObject.Properties['number']) {
-                $unitName = switch ([int]$lim.unit) {
-                    3 { 'h' }
-                    5 { 'mo' }
-                    default { "unit$($lim.unit)" }
-                }
-                $reset = ('{0} {1} (window)' -f $lim.number, $unitName)
+                # No absolute reset time reported: say so instead of a bare
+                # "(window)" that reads like a reset date.
+                $reset = ('reset not reported ({0} rolling)' -f ($_ProfileHelpers.GetZaiWindowLabel([int]$lim.unit, [int]$lim.number)))
             }
             $rows.Add([pscustomobject]@{
                 Type    = $type
@@ -13307,6 +13368,17 @@ function Get-ZaiUsage {
             })
         }
         $rows | Format-Table -AutoSize -Wrap | Out-Host
+
+        # Per-tool counters attached to a window (usageDetails) render as
+        # indented lines under the table; zero counters are skipped.
+        foreach ($lim in $quotaData.limits) {
+            if (-not ($lim.PSObject.Properties['usageDetails'] -and $lim.usageDetails)) { continue }
+            $label = $_ProfileHelpers.GetZaiWindowLabel([int]$lim.unit, [int]$lim.number)
+            foreach ($d in $lim.usageDetails) {
+                if ([int]$d.usage -le 0) { continue }
+                Write-Host ('    [{0}] {1}: {2}' -f $label, $d.modelCode, $d.usage)
+            }
+        }
     } else {
         Write-Host '  (no data)' -ForegroundColor DarkGray
     }
@@ -13412,6 +13484,10 @@ function Get-DeepseekUsage {
         [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Peak';     Scenario = 'Output';              CostUsd = 3.96;  CostCny = 27.00 }
     )
 
+    # Staleness marker: pricing tables go stale quietly, so warn when the
+    # verification date ages past six months.
+    $pricingAsOf = [datetime]'2026-11-01'
+
     # Web Search & Fetch pricing per 1,000 requests (introduced Nov 2026).
     # Source: api-docs.deepseek.com
     $requestPricing = @(
@@ -13419,6 +13495,7 @@ function Get-DeepseekUsage {
         [pscustomobject]@{ Action = 'Web Fetch (API)';  Unit = '1K req'; CostUsd = 0.75; CostCny = 5.00 }
     )
 
+    if (-not $ApiKey) { $ApiKey = $_ProfileHelpers.GetAiApiKey('DEEPSEEK_API_KEY') }
     if (-not $ApiKey) { Write-Error 'DEEPSEEK_API_KEY not set (env var or -ApiKey).'; return }
 
     $headers = @{
@@ -13426,7 +13503,7 @@ function Get-DeepseekUsage {
         'Authorization' = "Bearer $ApiKey"
     }
     try {
-        $resp = Invoke-RestMethod -Uri 'https://api.deepseek.com/user/balance' -Headers $headers -Method GET
+        $resp = Invoke-RestMethod -Uri 'https://api.deepseek.com/user/balance' -Headers $headers -Method GET -TimeoutSec 20
     } catch {
         Write-Error "API call failed: $($_.Exception.Message)"
         return
@@ -13513,11 +13590,13 @@ function Get-DeepseekUsage {
     if ($balances.ContainsKey('CNY') -and $balances['CNY'] -le $LowBalanceCny) {
         $concerns.Add(('[LOW] CNY balance {0:N2} at or below threshold {1:N2}' -f $balances['CNY'], $LowBalanceCny))
     }
-    if ($balances.Count -gt 0) {
-        $total = ($balances.Values | Measure-Object -Sum).Sum
-        if ($total -le 0) {
-            $concerns.Add('[CRITICAL] All reported balances are zero')
-        }
+    # Compare per currency: adding CNY to USD is not a meaningful quantity.
+    $positive = @($balances.GetEnumerator() | Where-Object { $_.Value -gt 0 })
+    if ($balances.Count -gt 0 -and $positive.Count -eq 0) {
+        $concerns.Add('[CRITICAL] All reported balances are zero')
+    }
+    if ((Get-Date) -gt $pricingAsOf.AddMonths(6)) {
+        $concerns.Add(('Pricing table last verified {0:yyyy-MM}; token estimates may be stale.' -f $pricingAsOf))
     }
     if ($concerns.Count -eq 0) {
         Write-Host '  No concerns flagged.' -ForegroundColor Green
@@ -13584,6 +13663,7 @@ function Get-KimiUsage {
 
     $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
 
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) { $ApiKey = $_ProfileHelpers.GetAiApiKey('KIMI_CODE_PLAN_API_KEY') }
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
         Write-Error 'KIMI_CODE_PLAN_API_KEY not set (env var or -ApiKey).'
         return
@@ -13622,7 +13702,25 @@ function Get-KimiUsage {
     } | Format-Table -AutoSize | Out-Host
 
     # Normalize weekly and rolling quota objects before formatting them together.
+    # The `usages` block is the authoritative precomputed-ratio view; prefer it
+    # and keep `usage`/`limits` as fallbacks for older response shapes.
     $quotaItems = New-Object System.Collections.Generic.List[object]
+    $usages = if ($null -ne $resp.PSObject.Properties['usages']) { $resp.usages } else { $null }
+    if ($usages -and ($usages.limit_5h -or $usages.limit_7d)) {
+        foreach ($pair in @(
+            @{ Key = 'limit_5h'; Label = '5h' },
+            @{ Key = 'limit_7d'; Label = 'Weekly' }
+        )) {
+            $block = $usages.($pair.Key)
+            if (-not $block) { continue }
+            $quotaItems.Add([pscustomobject]@{
+                Label        = $pair.Label
+                UsedRatio    = if ($null -ne $block.used_ratio) { [double]$block.used_ratio } else { $null }
+                ResetInstant = ($_ProfileHelpers.ConvertToResetTime($block.reset_time))
+                Detail       = $null
+            })
+        }
+    } else {
     if ($resp.usage) {
         $weeklyLabel = if ($resp.usage.name) { $resp.usage.name } elseif ($resp.usage.title) { $resp.usage.title } else { 'Weekly limit' }
         $quotaItems.Add([pscustomobject]@{ Label = $weeklyLabel; Detail = $resp.usage })
@@ -13675,12 +13773,36 @@ function Get-KimiUsage {
         }
         $quotaItems.Add([pscustomobject]@{ Label = $label; Detail = $detail })
     }
+    } # fallback usage/limits path
 
     $_ProfileHelpers.WriteSection('Quota summary (Kimi Code)')
     $rows = New-Object System.Collections.Generic.List[object]
     $concerns = New-Object System.Collections.Generic.List[string]
     foreach ($item in $quotaItems) {
         $detail = $item.Detail
+        if (-not $detail) {
+            # Precomputed-ratio row from the `usages` block: no counts exposed.
+            $remainingPercent = if ($null -ne $item.UsedRatio) { 100 * (1 - $item.UsedRatio) } else { $null }
+            $resetText = 'n/a'
+            if ($item.ResetInstant) {
+                $resetLocal = $item.ResetInstant.LocalDateTime
+                $resetDelta = $resetLocal - (Get-Date)
+                if ($resetDelta.TotalSeconds -gt 0) {
+                    $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
+                } else {
+                    $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+                }
+            }
+            $rows.Add([pscustomobject]@{
+                Window            = $item.Label
+                Used              = if ($null -ne $item.UsedRatio) { ('{0}% used' -f ($_ProfileHelpers.FormatInvariant(100 * $item.UsedRatio, 'N2'))) } else { 'n/a' }
+                Limit             = 'n/a'
+                Remaining         = 'n/a'
+                Remaining_Percent = if ($null -ne $remainingPercent) { ('{0}%' -f ($_ProfileHelpers.FormatInvariant($remainingPercent, 'N1'))) } else { 'n/a' }
+                Reset             = $resetText
+            })
+            continue
+        }
         $limit = if ($detail -and $null -ne $detail.limit) { [double]$detail.limit } else { $null }
         $used = if ($detail -and $null -ne $detail.used) { [double]$detail.used } else { $null }
         $remaining = if ($detail -and $null -ne $detail.remaining) { [double]$detail.remaining } else { $null }
@@ -13693,20 +13815,19 @@ function Get-KimiUsage {
         $resetValue = $null
         foreach ($resetKey in @('reset_at', 'resetAt', 'reset_time', 'resetTime')) {
             if ($detail -and $detail.PSObject.Properties[$resetKey] -and $detail.$resetKey) {
-                $resetValue = [string]$detail.$resetKey
+                # Invariant-culture conversion: a [string] cast is culture
+                # sensitive and can drop the UTC offset from ISO timestamps.
+                $resetValue = $_ProfileHelpers.ConvertToResetTime($detail.$resetKey)
                 break
             }
         }
         if ($resetValue) {
-            $resetDto = [DateTimeOffset]::MinValue
-            if ([DateTimeOffset]::TryParse($resetValue, [ref]$resetDto)) {
-                $resetLocal = $resetDto.ToLocalTime().LocalDateTime
-                $resetDelta = $resetLocal - (Get-Date)
-                if ($resetDelta.TotalSeconds -gt 0) {
-                    $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
-                } else {
-                    $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
-                }
+            $resetLocal = $resetValue.LocalDateTime
+            $resetDelta = $resetLocal - (Get-Date)
+            if ($resetDelta.TotalSeconds -gt 0) {
+                $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
+            } else {
+                $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
             }
         } else {
             foreach ($relativeKey in @('reset_in', 'resetIn', 'ttl', 'window')) {
