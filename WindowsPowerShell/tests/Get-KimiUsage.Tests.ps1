@@ -123,6 +123,41 @@ Describe 'Get-KimiUsage' {
         $rows[1].Remaining_Percent | Should -Be '100.0%'
     }
 
+    It 'preserves both windows when <MissingKey> is absent' -TestCases @(
+        @{ MissingKey = 'limit_7d'; Labels = @('5h', 'Weekly limit') },
+        @{ MissingKey = 'limit_5h'; Labels = @('Weekly', '5h limit') }
+    ) {
+        param($MissingKey, $Labels)
+        $resp = $script:kimiJson | ConvertFrom-Json
+        $resp.usages.PSObject.Properties.Remove($MissingKey)
+        Mock Invoke-RestMethod { $resp }
+
+        Get-KimiUsage -ApiKey 'test-key'
+
+        $rows = @($script:outHostObjects | Where-Object { $_.PSObject.Properties['Window'] })
+        $rows.Count | Should -Be 2
+        $rows[0].Window | Should -Be $Labels[0]
+        $rows[1].Window | Should -Be $Labels[1]
+    }
+
+    It 'retains additional legacy windows without duplicating the preferred 5h window' {
+        $resp = $script:kimiJson | ConvertFrom-Json
+        $resp.limits += [pscustomobject]@{
+            window = [pscustomobject]@{ duration = 1; timeUnit = 'TIME_UNIT_DAY' }
+            detail = [pscustomobject]@{ limit = 100; remaining = 75 }
+        }
+        Mock Invoke-RestMethod { $resp }
+
+        Get-KimiUsage -ApiKey 'test-key'
+
+        $rows = @($script:outHostObjects | Where-Object { $_.PSObject.Properties['Window'] })
+        $rows.Count | Should -Be 3
+        $rows[0].Window | Should -Be '5h'
+        $rows[1].Window | Should -Be 'Weekly'
+        $rows[2].Window | Should -Be '1d limit'
+        $rows[2].Remaining_Percent | Should -Be '75.0%'
+    }
+
     It 'normalizes string, epoch-seconds and epoch-milliseconds resets to the same instant' {
         $fromIso   = $_ProfileHelpers.ConvertToResetTime('2026-11-11T12:32:09Z')
         $fromSecs  = $_ProfileHelpers.ConvertToResetTime(1794400329)

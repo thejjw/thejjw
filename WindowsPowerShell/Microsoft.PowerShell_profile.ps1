@@ -13702,8 +13702,8 @@ function Get-KimiUsage {
     } | Format-Table -AutoSize | Out-Host
 
     # Normalize weekly and rolling quota objects before formatting them together.
-    # The `usages` block is the authoritative precomputed-ratio view; prefer it
-    # and keep `usage`/`limits` as fallbacks for older response shapes.
+    # Prefer each available `usages` window independently, then retain legacy
+    # windows that have no equivalent in the newer response.
     $quotaItems = New-Object System.Collections.Generic.List[object]
     $usages = if ($null -ne $resp.PSObject.Properties['usages']) { $resp.usages } else { $null }
     if ($usages -and ($usages.limit_5h -or $usages.limit_7d)) {
@@ -13720,8 +13720,8 @@ function Get-KimiUsage {
                 Detail       = $null
             })
         }
-    } else {
-    if ($resp.usage) {
+    }
+    if ($resp.usage -and -not ($usages -and $usages.limit_7d)) {
         $weeklyLabel = if ($resp.usage.name) { $resp.usage.name } elseif ($resp.usage.title) { $resp.usage.title } else { 'Weekly limit' }
         $quotaItems.Add([pscustomobject]@{ Label = $weeklyLabel; Detail = $resp.usage })
     }
@@ -13744,6 +13744,20 @@ function Get-KimiUsage {
         } else {
             [string]$detail.timeUnit
         }
+        # Match by duration rather than display name so named legacy windows
+        # are not duplicated when the API supplies both response formats.
+        $windowHours = if ($null -ne $duration) {
+            switch ($unit) {
+                'TIME_UNIT_SECOND' { [double]$duration / 3600 }
+                'TIME_UNIT_MINUTE' { [double]$duration / 60 }
+                'TIME_UNIT_HOUR'   { [double]$duration }
+                'TIME_UNIT_DAY'    { [double]$duration * 24 }
+            }
+        } else { $null }
+        if ($usages -and (
+            ($usages.limit_5h -and $windowHours -eq 5) -or
+            ($usages.limit_7d -and $windowHours -eq 168)
+        )) { continue }
         $unitLabel = switch ($unit) {
             'TIME_UNIT_MINUTE' { 'min' }
             'TIME_UNIT_HOUR'   { 'h' }
@@ -13773,7 +13787,6 @@ function Get-KimiUsage {
         }
         $quotaItems.Add([pscustomobject]@{ Label = $label; Detail = $detail })
     }
-    } # fallback usage/limits path
 
     $_ProfileHelpers.WriteSection('Quota summary (Kimi Code)')
     $rows = New-Object System.Collections.Generic.List[object]
