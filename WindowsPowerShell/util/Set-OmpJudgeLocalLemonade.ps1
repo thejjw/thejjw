@@ -322,10 +322,14 @@ function Read-ModelsYaml([string]$Path) {
         # requested id would be duplicated by the replacement, so return the
         # same conflict plan the unmanaged path uses; setup stops on it before
         # installing or writing anything. The managed block itself is exempt.
-        $keyPattern = '^' + [regex]::Escape($sectionIndent) + '["'']?' + [regex]::Escape($ProviderId) + '["'']?\s*:'
-        for ($i = $providers + 1; $i -lt $sectionEnd; $i++) {
-            if ($i -ge $plan.Start -and $i -le $plan.End) { continue }
-            if ($lines[$i] -match $keyPattern) { $plan.Mode = 'conflict'; return $plan }
+        # Without a providers mapping there are no sibling keys; scanning the
+        # whole file would flag matching ids under unrelated top-level maps.
+        if ($providers -ge 0) {
+            $keyPattern = '^' + [regex]::Escape($sectionIndent) + '["'']?' + [regex]::Escape($ProviderId) + '["'']?\s*:'
+            for ($i = $providers + 1; $i -lt $sectionEnd; $i++) {
+                if ($i -ge $plan.Start -and $i -le $plan.End) { continue }
+                if ($lines[$i] -match $keyPattern) { $plan.Mode = 'conflict'; return $plan }
+            }
         }
         return $plan
     }

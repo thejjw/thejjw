@@ -81,6 +81,20 @@ Describe 'Set-OmpJudgeLocalLemonade.ps1 helpers' {
             $plan.Mode | Should -Be 'replace'
         }
 
+        It 'ignores matching ids under other top-level mappings when providers is absent' {
+            $plan = New-Models @(
+                'modelRoles:'
+                '  judge: lemonade/LFM3-1.7B'
+                '  # >>> omp-lemonade-judge (managed by Set-OmpJudgeLocalLemonade.ps1; re-run to update, delete through the end marker to remove)'
+                '  lemonade-old:'
+                "    baseUrl: 'http://127.0.0.1:8000/v1'"
+                '  # <<< omp-lemonade-judge'
+                '  lemonade:'
+                "    baseUrl: 'http://127.0.0.1:8000/v1'"
+            )
+            $plan.Mode | Should -Be 'replace'
+        }
+
         It 'rejects an unmanaged collision without a managed block (existing behavior)' {
             $plan = New-Models @(
                 'providers:'

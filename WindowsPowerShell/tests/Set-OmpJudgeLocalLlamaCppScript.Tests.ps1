@@ -604,6 +604,25 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
             $plan.Mode | Should -Be 'replace'
         }
 
+        It 'ignores matching ids under other top-level mappings when providers is absent' {
+            # A managed block can survive under a different top-level mapping
+            # (hand-edited file). With no providers mapping there are no
+            # sibling provider keys, so a matching id elsewhere is not a
+            # collision and replacement stays allowed.
+            $plan = New-Models @(
+                'modelRoles:'
+                '  judge: llama-cpp-tiny/LFM3-1.7B'
+                '  # >>> omp-llamacpp-judge (managed by Set-OmpJudgeLocalLlamaCpp.ps1; re-run to update, delete through the end marker to remove)'
+                '  llamacpp:'
+                "    baseUrl: 'http://127.0.0.1:9941/v1'"
+                '  # <<< omp-llamacpp-judge'
+                '  llama-cpp-tiny:'
+                "    baseUrl: 'http://127.0.0.1:1/v1'"
+            )
+            $plan.Mode | Should -Be 'replace'
+            $plan.OldProviderId | Should -Be 'llamacpp'
+        }
+
         It 'rejects an unmanaged collision without a managed block (existing behavior)' {
             $plan = New-Models @(
                 'providers:'
