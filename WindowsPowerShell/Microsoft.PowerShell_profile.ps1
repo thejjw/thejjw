@@ -13780,39 +13780,20 @@ function Get-KimiUsage {
     $concerns = New-Object System.Collections.Generic.List[string]
     foreach ($item in $quotaItems) {
         $detail = $item.Detail
-        if (-not $detail) {
-            # Precomputed-ratio row from the `usages` block: no counts exposed.
-            $remainingPercent = if ($null -ne $item.UsedRatio) { 100 * (1 - $item.UsedRatio) } else { $null }
-            $resetText = 'n/a'
-            if ($item.ResetInstant) {
-                $resetLocal = $item.ResetInstant.LocalDateTime
-                $resetDelta = $resetLocal - (Get-Date)
-                if ($resetDelta.TotalSeconds -gt 0) {
-                    $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
-                } else {
-                    $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
-                }
-            }
-            $rows.Add([pscustomobject]@{
-                Window            = $item.Label
-                Used              = if ($null -ne $item.UsedRatio) { ('{0}% used' -f ($_ProfileHelpers.FormatInvariant(100 * $item.UsedRatio, 'N2'))) } else { 'n/a' }
-                Limit             = 'n/a'
-                Remaining         = 'n/a'
-                Remaining_Percent = if ($null -ne $remainingPercent) { ('{0}%' -f ($_ProfileHelpers.FormatInvariant($remainingPercent, 'N1'))) } else { 'n/a' }
-                Reset             = $resetText
-            })
-            continue
-        }
         $limit = if ($detail -and $null -ne $detail.limit) { [double]$detail.limit } else { $null }
         $used = if ($detail -and $null -ne $detail.used) { [double]$detail.used } else { $null }
         $remaining = if ($detail -and $null -ne $detail.remaining) { [double]$detail.remaining } else { $null }
         if ($null -eq $used -and $null -ne $limit -and $null -ne $remaining) { $used = $limit - $remaining }
         if ($null -eq $remaining -and $null -ne $limit -and $null -ne $used) { $remaining = $limit - $used }
         $remainingPercent = if ($null -ne $limit -and $limit -gt 0 -and $null -ne $remaining) { 100 * $remaining / $limit } else { $null }
+        # Normalize both response shapes before the shared rendering and warnings.
+        if (-not $detail -and $null -ne $item.UsedRatio) {
+            $remainingPercent = 100 * (1 - $item.UsedRatio)
+        }
 
         $resetText = 'n/a'
         $resetDelta = $null
-        $resetValue = $null
+        $resetValue = if (-not $detail) { $item.ResetInstant } else { $null }
         foreach ($resetKey in @('reset_at', 'resetAt', 'reset_time', 'resetTime')) {
             if ($detail -and $detail.PSObject.Properties[$resetKey] -and $detail.$resetKey) {
                 # Invariant-culture conversion: a [string] cast is culture
@@ -13844,10 +13825,10 @@ function Get-KimiUsage {
 
         $rows.Add([pscustomobject]@{
             Window            = $item.Label
-            Used              = if ($null -ne $used) { $used } else { 'n/a' }
+            Used              = if (-not $detail -and $null -ne $item.UsedRatio) { '{0}% used' -f ($_ProfileHelpers.FormatInvariant(100 * $item.UsedRatio, 'N2')) } elseif ($null -ne $used) { $used } else { 'n/a' }
             Limit             = if ($null -ne $limit) { $limit } else { 'n/a' }
             Remaining         = if ($null -ne $remaining) { $remaining } else { 'n/a' }
-            Remaining_Percent = if ($null -ne $remainingPercent) { '{0:N1}%' -f $remainingPercent } else { 'n/a' }
+            Remaining_Percent = if ($null -ne $remainingPercent) { '{0}%' -f ($_ProfileHelpers.FormatInvariant($remainingPercent, 'N1')) } else { 'n/a' }
             Reset             = $resetText
         })
 

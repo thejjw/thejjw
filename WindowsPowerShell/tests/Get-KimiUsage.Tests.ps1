@@ -80,6 +80,34 @@ Describe 'Get-KimiUsage' {
         $rows[1].Reset | Should -Match 'from now'
     }
 
+    It 'flags exhausted quota and an imminent reset from usages' {
+        $now = [datetime]'2026-11-12T00:00:00'
+        Mock Get-Date { $now }
+        $resp = $script:kimiJson | ConvertFrom-Json
+        $resp.usages.limit_5h.used_ratio = 1
+        $resp.usages.limit_5h.reset_time = ([DateTimeOffset]$now.AddMinutes(30)).ToString('o')
+        # A later row without a reset must not inherit the first row's warning.
+        $resp.usages.limit_7d.reset_time = $null
+        Mock Invoke-RestMethod { $resp }
+
+        Get-KimiUsage -ApiKey 'test-key'
+
+        $script:hostMessages -join "`n" | Should -Match '\[CRITICAL\] 5h: only 0.0% remaining'
+        $script:hostMessages -join "`n" | Should -Match '\[INFO\]\s+5h: resets in'
+        $script:hostMessages -join "`n" | Should -Not -Match '\[INFO\]\s+Weekly:'
+        $script:hostMessages | Should -Not -Contain '  No concerns flagged.'
+    }
+
+    It 'honors custom low quota thresholds for usages' {
+        $resp = $script:kimiJson | ConvertFrom-Json
+        $resp.usages.limit_5h.used_ratio = 0.6
+        Mock Invoke-RestMethod { $resp }
+
+        Get-KimiUsage -ApiKey 'test-key' -LowPercent 50 -CriticalPercent 20
+
+        $script:hostMessages -join "`n" | Should -Match '\[LOW\]\s+5h: 40.0% remaining'
+    }
+
     It 'falls back to usage + limits when usages is absent' {
         $resp = $script:kimiJson | ConvertFrom-Json
         $resp.PSObject.Properties.Remove('usages')
