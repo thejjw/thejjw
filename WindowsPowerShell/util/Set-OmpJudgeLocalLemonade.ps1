@@ -294,25 +294,43 @@ function Read-ModelsYaml([string]$Path) {
         if ($plan.Start -lt 0 -and $lines[$i] -match $startPattern) { $plan.Start = $i }
         elseif ($plan.Start -ge 0 -and $lines[$i] -match $endPattern) { $plan.End = $i; break }
     }
-    if ($plan.Start -ge 0) {
-        if ($plan.End -lt 0) { Stop-Setup "$Path has a '$MarkerStart' line without '$MarkerEnd'. Fix or remove that block, then re-run." }
-        $plan.Mode = 'replace'
-        $plan.Indent = ([regex]::Match($lines[$plan.Start], '^\s*')).Value
-        return $plan
-    }
-
+    # Locate the providers mapping before either branch: the managed-block path
+    # needs its bounds for the collision preflight below, the unmanaged path
+    # needs them for the same scan, and a flow-style providers line can never
+    # be edited line-wise so it is rejected regardless of the block.
     $providers = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i] -match '^providers\s*:\s*(#.*)?$') { $providers = $i; break }
         if ($lines[$i] -match '^providers\s*:') { $plan.Mode = 'flow'; return $plan }
     }
+    $sectionEnd = $lines.Count
+    $sectionIndent = $plan.Indent
+    if ($providers -ge 0) {
+        # The providers mapping ends at the next top-level key (or end of file).
+        for ($i = $providers + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^[^\s#]') { $sectionEnd = $i; break }
+        }
+        for ($i = $providers + 1; $i -lt $sectionEnd; $i++) {
+            if ($lines[$i] -match '^(\s+)[^\s#]') { $sectionIndent = $Matches[1]; break }
+        }
+    }
+    if ($plan.Start -ge 0) {
+        if ($plan.End -lt 0) { Stop-Setup "$Path has a '$MarkerStart' line without '$MarkerEnd'. Fix or remove that block, then re-run." }
+        $plan.Mode = 'replace'
+        $plan.Indent = ([regex]::Match($lines[$plan.Start], '^\s*')).Value
+        # Collision preflight: an unmanaged sibling provider already using the
+        # requested id would be duplicated by the replacement, so return the
+        # same conflict plan the unmanaged path uses; setup stops on it before
+        # installing or writing anything. The managed block itself is exempt.
+        $keyPattern = '^' + [regex]::Escape($sectionIndent) + '["'']?' + [regex]::Escape($ProviderId) + '["'']?\s*:'
+        for ($i = $providers + 1; $i -lt $sectionEnd; $i++) {
+            if ($i -ge $plan.Start -and $i -le $plan.End) { continue }
+            if ($lines[$i] -match $keyPattern) { $plan.Mode = 'conflict'; return $plan }
+        }
+        return $plan
+    }
     if ($providers -lt 0) { return $plan }
 
-    # The providers mapping ends at the next top-level key (or end of file).
-    $sectionEnd = $lines.Count
-    for ($i = $providers + 1; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match '^[^\s#]') { $sectionEnd = $i; break }
-    }
     for ($i = $providers + 1; $i -lt $sectionEnd; $i++) {
         if ($lines[$i] -match '^(\s+)[^\s#]') { $plan.Indent = $Matches[1]; break }
     }

@@ -523,4 +523,179 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
             ConvertTo-CommandLineArgument '' | Should -Be '""'
         }
     }
+    Context 'collision preflight' {
+        BeforeAll {
+            # Builds a models.yml from raw lines and returns the parsed plan.
+            function New-Models([string[]]$Content) {
+                $path = Join-Path $TestDrive ("models-{0}.yml" -f [Guid]::NewGuid().ToString('N'))
+                [IO.File]::WriteAllText($path, ($Content -join "`n") + "`n")
+                Read-ModelsYaml $path
+            }
+        }
+
+        It 'rejects a rename onto an unmanaged sibling provider id' {
+            $plan = New-Models @(
+                'providers:'
+                '  # >>> omp-llamacpp-judge (managed by Set-OmpJudgeLocalLlamaCpp.ps1; re-run to update, delete through the end marker to remove)'
+                '  llamacpp:'
+                "    baseUrl: 'http://127.0.0.1:9941/v1'"
+                '  # <<< omp-llamacpp-judge'
+                '  llama-cpp-tiny:'
+                "    baseUrl: 'http://127.0.0.1:1/v1'"
+            )
+            $plan.Mode | Should -Be 'conflict'
+        }
+
+        It 'rejects a collision hidden behind supported quoting' {
+            $plan = New-Models @(
+                'providers:'
+                '  # >>> omp-llamacpp-judge (managed by Set-OmpJudgeLocalLlamaCpp.ps1; re-run to update, delete through the end marker to remove)'
+                '  llamacpp:'
+                "    baseUrl: 'http://127.0.0.1:9941/v1'"
+                '  # <<< omp-llamacpp-judge'
+                "  'llama-cpp-tiny':"
+                "    baseUrl: 'http://127.0.0.1:1/v1'"
+            )
+            $plan.Mode | Should -Be 'conflict'
+        }
+
+        It 'allows replacing when the managed block itself declares the requested id' {
+            $plan = New-Models @(
+                'providers:'
+                '  # >>> omp-llamacpp-judge (managed by Set-OmpJudgeLocalLlamaCpp.ps1; re-run to update, delete through the end marker to remove)'
+                '  llama-cpp-tiny:'
+                "    baseUrl: 'http://127.0.0.1:9941/v1'"
+                '  # <<< omp-llamacpp-judge'
+                '  other:'
+                "    baseUrl: 'http://127.0.0.1:2/v1'"
+            )
+            $plan.Mode | Should -Be 'replace'
+            $plan.OldProviderId | Should -Be 'llama-cpp-tiny'
+        }
+
+        It 'allows a rename to an unused id and keeps the old id for chain cleanup' {
+            $plan = New-Models @(
+                'providers:'
+                '  # >>> omp-llamacpp-judge (managed by Set-OmpJudgeLocalLlamaCpp.ps1; re-run to update, delete through the end marker to remove)'
+                '  llamacpp-old:'
+                "    baseUrl: 'http://127.0.0.1:9941/v1'"
+                '  # <<< omp-llamacpp-judge'
+                '  other:'
+                "    baseUrl: 'http://127.0.0.1:2/v1'"
+            )
+            $plan.Mode | Should -Be 'replace'
+            $plan.OldProviderId | Should -Be 'llamacpp-old'
+        }
+
+        It 'does not treat nested model keys or comments as a provider collision' {
+            $plan = New-Models @(
+                'providers:'
+                '  # >>> omp-llamacpp-judge (managed by Set-OmpJudgeLocalLlamaCpp.ps1; re-run to update, delete through the end marker to remove)'
+                '  llamacpp:'
+                "    baseUrl: 'http://127.0.0.1:9941/v1'"
+                '    models:'
+                '      llama-cpp-tiny/LFM3-1.7B:'
+                '        contextWindow: 32768'
+                '  # <<< omp-llamacpp-judge'
+                '  # llama-cpp-tiny: mentioned in a comment'
+                '  other:'
+                "    baseUrl: 'http://127.0.0.1:2/v1'"
+            )
+            $plan.Mode | Should -Be 'replace'
+        }
+
+        It 'rejects an unmanaged collision without a managed block (existing behavior)' {
+            $plan = New-Models @(
+                'providers:'
+                '  other:'
+                "    baseUrl: 'http://127.0.0.1:2/v1'"
+                '  llama-cpp-tiny:'
+                "    baseUrl: 'http://127.0.0.1:1/v1'"
+            )
+            $plan.Mode | Should -Be 'conflict'
+        }
+
+        It 'still rejects a missing end marker and flow-style providers' {
+            $missing = Join-Path $TestDrive 'models-missing-end.yml'
+            [IO.File]::WriteAllText($missing, "providers:`n  # >>> omp-llamacpp-judge (managed)`n  llamacpp:`n")
+            { Read-ModelsYaml $missing } | Should -Throw $AbortToken
+
+            $flow = Join-Path $TestDrive 'models-flow.yml'
+            [IO.File]::WriteAllText($flow, "providers: {other: {}}`n")
+            (Read-ModelsYaml $flow).Mode | Should -Be 'flow'
+
+            # A flow-style providers line rejects even when a managed block exists.
+            $flowManaged = Join-Path $TestDrive 'models-flow-managed.yml'
+            [IO.File]::WriteAllText($flowManaged, "providers: {other: {}}`n  # >>> omp-llamacpp-judge (managed)`n  llamacpp:`n  # <<< omp-llamacpp-judge`n")
+            (Read-ModelsYaml $flowManaged).Mode | Should -Be 'flow'
+        }
+
+        It 'matches collisions across CRLF and nonstandard section indentation' {
+            $crlf = Join-Path $TestDrive 'models-crlf.yml'
+            $lines = @(
+                'providers:'
+                '    # >>> omp-llamacpp-judge (managed by Set-OmpJudgeLocalLlamaCpp.ps1; re-run to update, delete through the end marker to remove)'
+                '    llamacpp:'
+                "        baseUrl: 'http://127.0.0.1:9941/v1'"
+                '    # <<< omp-llamacpp-judge'
+                '    llama-cpp-tiny:'
+                "        baseUrl: 'http://127.0.0.1:1/v1'"
+            )
+            [IO.File]::WriteAllText($crlf, ($lines -join "`r`n") + "`r`n")
+            (Read-ModelsYaml $crlf).Mode | Should -Be 'conflict'
+        }
+    }
+    Context 'setup stops before mutations on a rename collision' {
+        It 'reports conflict, runs no mutating helper, and leaves models.yml untouched' {
+            $script:agentDir = Join-Path $TestDrive 'agent'
+            New-Item -ItemType Directory -Path $script:agentDir -Force | Out-Null
+            $modelsPath = Join-Path $script:agentDir 'models.yml'
+            $lines = @(
+                'providers:'
+                '  # >>> omp-llamacpp-judge (managed by Set-OmpJudgeLocalLlamaCpp.ps1; re-run to update, delete through the end marker to remove)'
+                '  llamacpp-old:'
+                "    baseUrl: 'http://127.0.0.1:9941/v1'"
+                '  # <<< omp-llamacpp-judge'
+                '  llama-cpp-tiny:'
+                "    baseUrl: 'http://127.0.0.1:1/v1'"
+                '    api: openai-completions'
+            )
+            [IO.File]::WriteAllText($modelsPath, ($lines -join "`n") + "`n")
+            $before = [IO.File]::ReadAllBytes($modelsPath)
+
+            # Read-only preflight stubs: omp exists, curl exists, omp answers.
+            $CurlExe = Join-Path $TestDrive 'curl.exe'
+            Set-Content -LiteralPath $CurlExe -Value 'stub'
+            $ServerConfigPath = Join-Path $TestDrive 'server.json'
+            # The initial report probes the logon task; keep it out of the real scheduler.
+            $TaskName = 'llama-cpp-tiny'
+            Mock Get-AutoStartTask { $null }
+            Mock Get-Command { [pscustomobject]@{ Source = 'omp' } } -ParameterFilter { $Name -eq 'omp' }
+            Mock Invoke-Omp {
+                if ($Arguments.Count -ge 2 -and $Arguments[0] -eq 'config' -and $Arguments[1] -eq 'path') {
+                    [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = $script:agentDir }
+                } else {
+                    [pscustomobject]@{ ExitCode = 1; StdErr = ''; StdOut = '' }
+                }
+            }
+            Mock Get-OmpSetting { $null }
+            # Every helper past the preflight must stay unused: zero calls is the assertion.
+            Mock Get-EnvironmentResources { throw 'MUTATION: resource probe' }
+            Mock Resolve-LlamaRelease { throw 'MUTATION: release resolve' }
+            Mock Install-LlamaRelease { throw 'MUTATION: llama.cpp install' }
+            Mock Write-ModelsYaml { throw 'MUTATION: models.yml write' }
+            Mock Set-OmpJudge { throw 'MUTATION: omp settings write' }
+            Mock Backup-File { throw 'MUTATION: backup' }
+
+            { Invoke-Setup } | Should -Throw $AbortToken
+
+            Should -Invoke Get-EnvironmentResources -Times 0
+            Should -Invoke Resolve-LlamaRelease -Times 0
+            Should -Invoke Install-LlamaRelease -Times 0
+            Should -Invoke Write-ModelsYaml -Times 0
+            Should -Invoke Set-OmpJudge -Times 0
+            Should -Invoke Backup-File -Times 0
+            [IO.File]::ReadAllBytes($modelsPath) | Should -Be $before
+        }
+    }
 }
