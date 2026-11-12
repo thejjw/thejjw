@@ -11790,5 +11790,5981 @@ function Install-AiTools {
             }
 
             if ($missingNpmPackages.Count -eq 0) {
-                Write-Host "All selected global n
-... [truncated for diff preview]
+                Write-Host "All selected global npm packages are already installed." -ForegroundColor Green
+            }
+            else {
+                $npmArgs = @('install', '-g') + $missingNpmPackages
+                Write-Host "Installing missing npm packages: $($missingNpmPackages -join ', ')" -ForegroundColor Cyan
+                & npm @npmArgs
+                $npmInstallExitCode = $LASTEXITCODE
+                if ($npmInstallExitCode -ne 0) {
+                    Write-Warning "npm install failed with exit code $npmInstallExitCode for: $($missingNpmPackages -join ', ')"
+                }
+
+                $refreshedInventory = Get-GlobalNpmInventory
+                if ($refreshedInventory.Available) {
+                    $stillMissing = @($missingNpmPackages | Where-Object { -not $refreshedInventory.Packages.ContainsKey($_) })
+                    if ($stillMissing.Count -gt 0) {
+                        Write-Warning "The following global npm packages remain missing or invalid: $($stillMissing -join ', ')"
+                    }
+                    elseif ($npmInstallExitCode -eq 0) {
+                        Write-Host "All missing global npm packages installed successfully." -ForegroundColor Green
+                    }
+                }
+            }
+        }
+        else {
+            Write-Host "npm not found - aborting Install-AiTools. Please inspect your Node/npm installation and re-run." -ForegroundColor Red
+            return
+        }
+
+        Write-InstallStage 'CLIs and AI tool settings'
+        Write-Host "CLIs to verify:" -ForegroundColor Cyan
+        Write-Host " - agy (Antigravity CLI)"
+        Write-Host " - claude (Claude CLI)"
+        Write-Host " - codex (Codex CLI)"
+        Write-Host " - omp (oh-my-pi CLI)"
+        Write-Host " - opencode (opencode CLI)"
+        if ($MoreAi) {
+            Write-Host " - kimi (Kimi Code CLI)"
+            Write-Host " - grok (Grok CLI)"
+            Write-Host " - cursor (Cursor CLI / agent)"
+        }
+        # Install Antigravity and Claude CLIs using their recommended installers
+        Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
+
+        if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
+            Write-Host "agy CLI not found; installing via $($_AiToolsInternal.Urls.AgyCli)..." -ForegroundColor Yellow
+            try { & powershell -NoProfile -Command "iex (irm '$($_AiToolsInternal.Urls.AgyCli)')" } catch { Write-Host "Failed to install agy: $_" -ForegroundColor Red }
+        } else {
+            # If agy is present, ensure it's configured with the default settings
+            Install-AgySettings
+        }
+
+        if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+            Write-Host "claude CLI not found; installing via Install-ClaudeCode..." -ForegroundColor Yellow
+            try { Install-ClaudeCode } catch { Write-Host "Failed to install claude: $_" -ForegroundColor Red }
+            # The claude installer places the binary in ~/.local/bin; ensure it's on the user PATH.
+            $claudeBin = Join-Path $env:USERPROFILE '.local\bin'
+            $null = Add-UserPathEntry -Path $claudeBin
+        } else {
+            # If claude is present, ensure it's configured with the default settings
+            Install-ClaudeGlobalSettings
+        }
+
+        if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
+            Write-Host "codex CLI not found; installing via $($_AiToolsInternal.Urls.CodexCli)..." -ForegroundColor Yellow
+            try { & powershell -NoProfile -ExecutionPolicy ByPass -Command "irm '$($_AiToolsInternal.Urls.CodexCli)' | iex" } catch { Write-Host "Failed to install codex: $_" -ForegroundColor Red }
+        } else {
+            # If codex is present, ensure it's configured with the default settings
+            Install-CodexSettings
+        }
+
+        # If omp is present (installed via npm package @oh-my-pi/pi-coding-agent), ensure it's configured with the default settings
+        if (Get-Command omp -ErrorAction SilentlyContinue) {
+            $ompArgs = if ($Auto) { @{ SkipDownload = $true; NoPrompt = $true } } else { @{} }
+            Install-OmpSettings @ompArgs
+        }
+
+        # Install opencode via npm (@opencode/cli, not winget) so the package is managed by npm
+        # and the native `opencode upgrade` command works as upstream intended.
+        if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
+            Write-Host "opencode CLI not found; installing via 'npm install -g @opencode/cli'..." -ForegroundColor Yellow
+            & npm install -g '@opencode/cli'
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Failed to install @opencode/cli with npm exit code $LASTEXITCODE."
+            }
+        }
+
+        # Install/refresh the oc-advisor plugin when the opencode CLI is available.
+        # A plugin failure must not abort the rest of the setup run.
+        if (Get-Command opencode -ErrorAction SilentlyContinue) {
+            try {
+                Install-OpenCodeSettings
+            }
+            catch {
+                Write-Warning "oc-advisor plugin installation failed: $($_.Exception.Message)"
+            }
+        }
+
+        # Configure Qwen Code, Kimi Code, and Grok when MoreAi is requested. All three CLIs
+        # ship as npm packages listed in MoreAiNpmPackages and are installed by the global
+        # npm stage above; only default-settings configuration remains here.
+        if ($MoreAi) {
+            Install-QwenSettings
+            Install-KimiSettings
+            Install-GrokSettings
+        }
+
+        # Verify and install Cursor CLI (agent) if MoreAi is requested.
+        # The upstream installer places binaries in %LOCALAPPDATA%\cursor-agent.
+        if ($MoreAi) {
+            if (-not (Get-Command cursor-agent -ErrorAction SilentlyContinue) -and -not (Get-Command agent -ErrorAction SilentlyContinue)) {
+                Write-Host "Cursor CLI (agent) not found; installing via $($_AiToolsInternal.Urls.CursorCli)..." -ForegroundColor Yellow
+                try {
+                    & powershell -NoProfile -ExecutionPolicy ByPass -Command "iex (irm '$($_AiToolsInternal.Urls.CursorCli)')"
+                    $cursorAgentDir = Join-Path $env:LOCALAPPDATA 'cursor-agent'
+                    $null = Add-UserPathEntry -Path $cursorAgentDir
+                } catch {
+                    Write-Host "Failed to install Cursor CLI: $_" -ForegroundColor Red
+                }
+            }
+        }
+
+        # Install the REA reverse-engineering toolchain (REA CLI + Ghidra) on request.
+        if ($REA) {
+            Write-InstallStage 'REA toolchain'
+            Install-ReaToolchain
+        }
+
+        # Create a docker.bat shim so tools that hardcode `docker` commands
+        # (compose files, scripts) transparently route through podman.
+        if ($Podman) {
+            Write-InstallStage 'Podman aliases'
+            Write-Host "Configuring Podman aliases..." -ForegroundColor Cyan
+            $wingetLinksDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
+            if (-not (Test-Path -LiteralPath $wingetLinksDir)) {
+                $null = New-Item -ItemType Directory -Path $wingetLinksDir -Force -Verbose
+            }
+            $dockerBat = Join-Path $wingetLinksDir "docker.bat"
+            "@echo off`r`npodman %*" | Out-File -FilePath $dockerBat -Encoding ascii
+            Write-Host "Created docker alias (docker.bat) for podman in Winget Links directory." -ForegroundColor Green
+        }
+
+        Write-Host "Install-AiTools finished. You may need to restart PowerShell to pick up new PATH or env changes." -ForegroundColor Green
+        $runCompleted = $true
+    }
+    finally {
+        $runClock.Stop()
+        $outcome = if ($runCompleted) { 'completed' } else { 'stopped early' }
+        Write-Host ('Install-AiTools {0} at {1}; wall time {2}.' -f $outcome, (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), (Format-InstallElapsed)) -ForegroundColor Cyan
+    }
+}
+
+function Set-AiApiKeysCS {
+    <#
+    .SYNOPSIS
+        Interactive helper to view and set AI provider API keys in Windows Credential Manager.
+
+    .DESCRIPTION
+        Checks for existing values of AI API keys in the Windows Credential Manager (PasswordVault).
+        Presents a summary and prompts the user to enter missing keys (or optionally overwrite existing ones).
+        Values are securely saved using Windows Credential Manager (DPAPI-encrypted), keeping plaintext
+        credentials out of your registry. Saving QWEN_TOKEN_PLAN_API_KEY also saves the same value as
+        BAILIAN_TOKEN_PLAN_API_KEY without an additional prompt. OpenCode Go uses its own
+        OPENCODE_GO_API_KEY credential; the shared OPENCODE_API_KEY is not changed.
+
+    .PARAMETER Force
+        When supplied, prompt to overwrite existing keys instead of skipping them.
+
+    .NOTES
+        Author: jjw(@thejjw)
+        Last Edit: 2026-08
+    #>
+    [CmdletBinding()]
+    param(
+        [switch]$Force
+    )
+
+    # WinRT PasswordVault is per-user and DPAPI-encrypted at rest -- no plaintext
+    # credentials in the registry. The explicit type load is required for both
+    # Windows PowerShell 5.1 and PowerShell 7+ on Windows.
+    [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+    $vault = New-Object Windows.Security.Credentials.PasswordVault
+    $names = $_AiKeysInternal.Names
+    $userName = $_AiKeysInternal.UserName
+
+    # Retrieve a stored key's plaintext value from vault
+    function Get-StoredKey($n) {
+        try {
+            $cred = $vault.Retrieve($n, $userName)
+            $cred.RetrievePassword()
+            return $cred.Password
+        }
+        catch {
+            return $null
+        }
+    }
+
+    # Format the masked key display status
+    function MaskValue($v) {
+        if (-not $v) { return '<missing>' }
+        return "<secured in Credential Manager, length=$($v.Length)>"
+    }
+
+    Write-Host "Checking existing keys in Windows Credential Manager:" -ForegroundColor Cyan
+    $found = @{}
+    foreach ($n in $names) {
+        $v = Get-StoredKey $n
+        $found[$n] = $v
+        Write-Host " - $($n) : $(MaskValue $v)"
+    }
+
+    # Show aliases too, so a missing alias is visible instead of silently desynced.
+    foreach ($alias in @($_AiKeysInternal.Aliases)) {
+        $found[$alias.Alias] = Get-StoredKey $alias.Alias
+        Write-Host " - $($alias.Alias) : $(MaskValue $found[$alias.Alias]) (alias of $($alias.Source))"
+    }
+
+    Write-Host ""
+    Write-Host "You can press Enter to skip setting a key. To keep an existing value, leave it blank when prompted." -ForegroundColor Yellow
+
+    foreach ($n in $names) {
+        $current = $found[$n]
+        if ($current -and -not $Force) {
+            # Backfill a missing alias from the stored source value so a key set
+            # before the alias existed gets repaired without prompting (aliases
+            # are otherwise only written as a side effect of saving the source).
+            foreach ($alias in @($_AiKeysInternal.Aliases | Where-Object { $_.Source -eq $n })) {
+                if (-not $found[$alias.Alias]) {
+                    try {
+                        $aliasCred = New-Object Windows.Security.Credentials.PasswordCredential($alias.Alias, $userName, $current)
+                        $vault.Add($aliasCred)
+                        Write-Host "Backfilled $($alias.Alias) from existing $n." -ForegroundColor Cyan
+                    }
+                    catch {
+                        Write-Host "Failed to backfill $($alias.Alias): $_" -ForegroundColor Red
+                    }
+                }
+            }
+            Write-Host "Skipping $n (already set in vault). Use -Force to overwrite." -ForegroundColor DarkGray
+            continue
+        }
+
+        if ($current -and $Force) {
+            $resp = Read-Host -Prompt "$n already set in vault. Overwrite? (y/N)"
+            if ($resp -notin @('y', 'Y')) { Write-Host "Keeping existing $n." -ForegroundColor DarkGray; continue }
+        }
+
+        # Read hidden input as SecureString. Skip if empty.
+        $secure = Read-Host -AsSecureString -Prompt "Enter value for $n (input hidden, blank to skip)"
+        if ($null -eq $secure -or -not ($secure -is [System.Security.SecureString]) -or $secure.Length -eq 0) {
+            Write-Host "Skipped $n." -ForegroundColor DarkGray
+            continue
+        }
+
+        $ptr = [IntPtr]::Zero
+        try {
+            $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+            $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto($ptr)
+
+            # Store inside the vault
+            $newCred = New-Object Windows.Security.Credentials.PasswordCredential($n, $userName, $plain)
+            $vault.Add($newCred)
+            Write-Host "Successfully saved $n to Windows Credential Manager." -ForegroundColor Green
+
+            # Aliases ride along with their source key instead of being prompted for.
+            foreach ($alias in @($_AiKeysInternal.Aliases | Where-Object { $_.Source -eq $n })) {
+                try {
+                    $aliasCred = New-Object Windows.Security.Credentials.PasswordCredential($alias.Alias, $userName, $plain)
+                    $vault.Add($aliasCred)
+                    Write-Host "Duplicated $n to $($alias.Alias) in Windows Credential Manager." -ForegroundColor Cyan
+                }
+                catch {
+                    Write-Host "Failed to duplicate $n to $($alias.Alias): $_" -ForegroundColor Red
+                }
+            }
+        }
+        catch {
+            Write-Host "Failed to save secure input for $($n): $_" -ForegroundColor Red
+            continue
+        }
+        finally {
+            if ($ptr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+        }
+    }
+
+    Write-Host ""
+    Write-Host "Done! Run 'Load-AiApiKeysFromCS' to load these into your current terminal process." -ForegroundColor Cyan
+}
+
+function Load-AiApiKeysFromCS {
+    <#
+    .SYNOPSIS
+        Loads secure API keys from Windows Credential Manager into the current process environment.
+
+    .DESCRIPTION
+        Retrieves saved credentials from the Windows PasswordVault and registers them as
+        session-level (Process) environment variables. This makes them immediately available
+        to all CLI tools, scripts, and processes run from this PowerShell terminal (e.g. claude, python, etc.),
+        without saving them as plaintext in registry variables.
+
+    .PARAMETER Quiet
+        When supplied, skips detailed output and only prints a short status message.
+
+    .NOTES
+        Author: jjw(@thejjw)
+        Last Edit: 2026-08
+    #>
+    [CmdletBinding()]
+    param(
+        [switch]$Quiet
+    )
+    [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+    $vault = New-Object Windows.Security.Credentials.PasswordVault
+    $names = @($_AiKeysInternal.Names) + @($_AiKeysInternal.Aliases | ForEach-Object { $_.Alias })
+    $userName = $_AiKeysInternal.UserName
+
+    $loadedCount = 0
+    foreach ($n in $names) {
+        try {
+            $cred = $vault.Retrieve($n, $userName)
+            $cred.RetrievePassword()
+            $envKey = $cred.Password
+            if ($envKey) {
+                [Environment]::SetEnvironmentVariable($n, $envKey, 'Process')
+                $loadedCount++
+            }
+        }
+        catch {
+            # Silent skip if credential is not in vault
+        }
+    }
+    if ($loadedCount -gt 0) {
+        if ($Quiet) {
+            Write-Host "Credential storage load completed." -ForegroundColor Green
+        } else {
+            Write-Host "Loaded $loadedCount API key(s) from Windows Credential Manager into session environment." -ForegroundColor Green
+        }
+    } else {
+        Write-Host "No saved API keys found in Windows Credential Manager." -ForegroundColor DarkGray
+    }
+}
+
+function Remove-AiApiKeysFromCS {
+    <#
+    .SYNOPSIS
+        Removes the profile's API keys from Windows Credential Manager and the current process.
+
+    .DESCRIPTION
+        Removes every credential grouped under the api-key username in Windows PasswordVault.
+        Also clears the corresponding current-process environment variable for each grouped
+        credential resource. User- and Machine-scope variables are not changed.
+
+    .EXAMPLE
+        Remove-AiApiKeysFromCS -WhatIf
+
+    .EXAMPLE
+        Remove-AiApiKeysFromCS -Confirm:$false
+
+    .EXAMPLE
+        Remove-AiApiKeysFromCS -Verbose
+
+    .NOTES
+        Author: jjw(@thejjw)
+        Last Edit: 2026-08
+    #>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param()
+
+    $target = "Windows Credential Manager entries grouped as '$($_AiKeysInternal.UserName)' and matching process variables"
+    if (-not $PSCmdlet.ShouldProcess($target, 'Remove AI API keys')) {
+        return
+    }
+
+    [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+    $vault = New-Object Windows.Security.Credentials.PasswordVault
+    try {
+        # RetrieveAll returns a stable snapshot, so removing entries while iterating is safe.
+        $credentials = @($vault.RetrieveAll() | Where-Object { $_.UserName -eq $_AiKeysInternal.UserName })
+    }
+    catch {
+        Write-Error "Failed to enumerate Windows Credential Manager: $_"
+        return
+    }
+
+    $names = @($credentials.Resource | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+
+    $removedCount = 0
+    $failureCount = 0
+    foreach ($credential in $credentials) {
+        try {
+            $vault.Remove($credential)
+            $removedCount++
+            Write-Verbose "Scrubbed credential: $($credential.Resource)"
+        }
+        catch {
+            $failureCount++
+            Write-Error "Failed to remove credential '$($credential.Resource)': $_" -ErrorAction Continue
+        }
+    }
+
+    $clearedCount = 0
+    foreach ($name in $names) {
+        try {
+            if ($null -ne [Environment]::GetEnvironmentVariable($name, 'Process')) {
+                [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+                $clearedCount++
+            }
+        }
+        catch {
+            $failureCount++
+            Write-Error "Failed to clear process variable '$name': $_" -ErrorAction Continue
+        }
+    }
+
+    $message = "Scrubbed $removedCount credential(s) from the $($_AiKeysInternal.UserName) group and cleared $clearedCount process variable(s)."
+    Write-Host $message -ForegroundColor Green
+    if ($failureCount -gt 0) {
+        Write-Warning "$failureCount operation(s) failed."
+    }
+}
+
+# https://code.claude.com/docs/en/model-config#special-model-behavior
+# default model setting
+# The behavior of default depends on your account type:
+# Pro, Max, Team, Enterprise, and Anthropic API: defaults to Opus 5.5
+# Claude Platform on AWS, Amazon Bedrock, and Google Cloud's Agent Platform: defaults to Opus 5.5
+# Microsoft Foundry: defaults to Sonnet 4.5
+# (Before v2.1.280: Sonnet 5 on Pro/Team Standard, Opus 5 on Max/Team Premium/Enterprise/API.)
+# opusplan model setting
+# The opusplan model alias provides an automated hybrid approach:
+# In plan mode - Uses opus for complex reasoning and architecture decisions
+# In execution mode - Automatically switches to sonnet for code generation and implementation
+# This gives you the best of both worlds: Opusâ€™s superior reasoning for planning, and Sonnetâ€™s efficiency for execution.
+# The plan-mode Opus phase uses the same context window as the opus model setting.
+# When opus and sonnet resolve to models that run with the 1M context window by default (as the
+# current models do on the Anthropic API), both phases run with it.
+# To force 1M context for both phases where they don't, set the model to opusplan[1m] (via /model requires v2.1.265 or later).
+# For a hybrid approach where Claude decides mid-task when to consult a second model rather than switching at the plan boundary, see the advisor tool.
+# https://code.claude.com/docs/en/advisor
+# The advisor tool lets Claude consult a second, typically stronger model at key moments during a task, such as before committing to an approach, when stuck on a recurring error, 
+# or before declaring a task complete. The advisor receives the full conversation, including every tool call and result, and returns guidance that Claude applies before continuing.
+# Pairing	When to use
+# Sonnet main + Opus advisor	Sonnet handles routine work and escalates planning, ambiguous failures, and completion checks to Opus
+# Sonnet main + Fable advisor	Fable 5.1 guidance at decision points without running Fable 5.1 throughout. Requires v2.1.257 or later and Fable access
+# Haiku main + Opus advisor	Lowest-cost main model with strong planning. Expect higher cost than Haiku alone but lower than switching the main model to Sonnet or Opus
+# Opus main + Opus advisor	A second Opus reviews the first. Useful for high-stakes tasks where an independent check matters more than cost
+# Fable main + Fable advisor	Highest-capability pairing when Fable is available. Fable is a higher tier than Opus and Sonnet, so it is the only accepted advisor for a Fable main model (a Fable 5.1 main accepts only a Fable 5.1 advisor)
+# Sonnet main + Sonnet advisor	A lower-cost second opinion for catching routine oversights
+# Claude decides when to call the advisor. It tends to consult before committing to an approach, when an error keeps recurring, and before declaring a task done, but the timing is model-driven rather than rule-based.
+# Claude calls the advisor at decision points rather than on every turn, so pairing a faster main model with a stronger advisor typically costs less than running the stronger model throughout. Advisor usage counts toward the session totals shown by /usage.
+
+function ccd {
+    <#
+.SYNOPSIS
+Shorthand for running claude with the --dangerously-skip-permissions flag.
+
+.DESCRIPTION
+Equivalent of the bash alias: alias ccd='claude --dangerously-skip-permissions'
+Checks whether the claude CLI is installed before invoking it.
+
+.EXAMPLE
+ccd
+
+Runs Claude Code with permissions skipped.
+
+.EXAMPLE
+ccd --model claude-opus
+
+Runs Claude Code with a specific model and permissions skipped.
+
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-09
+#>
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+        Write-Host 'claude CLI not found.' -ForegroundColor Red
+        Write-Host 'Install via: irm https://claude.ai/install.ps1 | iex' -ForegroundColor Yellow
+        Write-Host 'Or visit:    https://claude.com/product/claude-code' -ForegroundColor Yellow
+        return
+    }
+    claude --dangerously-skip-permissions @args
+}
+
+function agyd {
+    <#
+.SYNOPSIS
+    Launches agy with permissions skipped.
+
+.DESCRIPTION
+    Forwards all arguments to agy and appends --dangerously-skip-permissions.
+    Checks whether the agy CLI is installed before invoking it.
+
+.EXAMPLE
+    agyd
+
+.EXAMPLE
+    agyd "Summarize the changed files"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-05
+#>
+    if (-not (Get-Command agy -ErrorAction SilentlyContinue)) {
+        Write-Host 'agy CLI not found.' -ForegroundColor Red
+        Write-Host 'Install via: irm https://antigravity.google/cli/install.ps1 | iex' -ForegroundColor Yellow
+        Write-Host 'Or visit:    https://antigravity.google' -ForegroundColor Yellow
+        return
+    }
+    agy --dangerously-skip-permissions @args
+}
+
+function Test-AnthropicApi {
+    <#
+.SYNOPSIS
+    Tests connectivity to an Anthropic-compatible API endpoint.
+
+.DESCRIPTION
+    Sends a minimal chat-completion request to the specified Anthropic Messages API
+    endpoint and reports whether the API key, URL, and model combination is working.
+    Useful for verifying credentials and endpoint reachability before integrating
+    with tools or scripts.
+
+.PARAMETER ApiKey
+    The API key used for authentication (sent as x-api-key header).
+
+.PARAMETER ApiUrl
+    The base URL of the Anthropic-compatible API (e.g. "https://api.anthropic.com"
+    or "https://api.z.ai/api/anthropic").
+
+.PARAMETER Model
+    The model identifier to use for the test request (e.g. "claude-sonnet-5").
+
+.EXAMPLE
+    Test-AnthropicApi -ApiKey $env:ANTHROPIC_API_KEY -ApiUrl "https://api.anthropic.com" -Model "claude-sonnet-5"
+
+.EXAMPLE
+    Test-AnthropicApi $env:SOME_AUTH_TOKEN "https://api.z.ai/api/anthropic" "glm-5.1"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-09
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string]$ApiKey,
+
+        [Parameter(Mandatory, Position = 1)]
+        [string]$ApiUrl,
+
+        [Parameter(Mandatory, Position = 2)]
+        [string]$Model
+    )
+
+    Write-Host "Testing API connectivity..."
+    Write-Host "URL: $ApiUrl"
+    Write-Host "Model: $Model"
+    Write-Host ("-" * 40)
+
+    $headers = @{
+        "x-api-key"         = $ApiKey
+        "Content-Type"      = "application/json"
+        "anthropic-version" = "2023-06-01"
+    }
+
+    $body = @{
+        model      = $Model
+        max_tokens = 100
+        messages   = @(
+            @{
+                role    = "user"
+                content = "Say 'API is working'"
+            }
+        )
+    } | ConvertTo-Json -Depth 10
+
+    try {
+        $response = Invoke-WebRequest2 -Uri "$ApiUrl/v1/messages" `
+            -Method POST `
+            -Headers $headers `
+            -Body $body `
+            -TimeoutSec 30 `
+            -UseBasicParsing
+
+        Write-Host "Status Code: $($response.StatusCode)"
+
+        if ($response.StatusCode -eq 200) {
+            $data = $response.Content | ConvertFrom-Json
+            Write-Host "[OK] API is responding!"
+            if ($data.content -and $data.content.Count -gt 0) {
+                Write-Host "Response: $($data.content[0].text)"
+            }
+        }
+    }
+    catch {
+        Write-Host "[ERROR] $($_.Exception.Message)"
+        if ($_.Exception.Response) {
+            $errorBody = $_.Exception.Response.GetResponseStream()
+            $reader = New-Object System.IO.StreamReader($errorBody)
+            $errorText = $reader.ReadToEnd()
+            Write-Host $errorText
+        }
+    }
+}
+
+function Test-OpenAiApi {
+    <#
+.SYNOPSIS
+    Tests connectivity to an OpenAI-compatible API endpoint.
+
+.DESCRIPTION
+    Sends a minimal chat-completion request to the specified OpenAI Chat Completions
+    API endpoint and reports whether the API key, URL, and model combination is working.
+    Useful for verifying credentials and endpoint reachability before integrating
+    with tools or scripts.
+
+.PARAMETER ApiKey
+    The API key used for authentication (sent as Bearer token in Authorization header).
+
+.PARAMETER ApiUrl
+    The base URL of the OpenAI-compatible API (e.g. "https://api.openai.com/v1"
+    or "https://api.deepseek.com/v1").
+
+.PARAMETER Model
+    The model identifier to use for the test request (e.g. "gpt-6-luna", "deepseek-chat").
+
+.EXAMPLE
+    Test-OpenAiApi -ApiKey $env:OPENAI_API_KEY -ApiUrl "https://api.openai.com/v1" -Model "gpt-6-luna"
+
+.EXAMPLE
+    Test-OpenAiApi $env:DEEPSEEK_API_KEY "https://api.deepseek.com/v1" "deepseek-chat"
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-09
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [string]$ApiKey,
+
+        [Parameter(Mandatory, Position = 1)]
+        [string]$ApiUrl,
+
+        [Parameter(Mandatory, Position = 2)]
+        [string]$Model
+    )
+
+    Write-Host "Testing API connectivity..."
+    Write-Host "URL: $ApiUrl"
+    Write-Host "Model: $Model"
+    Write-Host ("-" * 40)
+
+    $headers = @{
+        "Authorization" = "Bearer $ApiKey"
+        "Content-Type"  = "application/json"
+    }
+
+    $body = @{
+        model      = $Model
+        max_tokens = 100
+        messages   = @(
+            @{
+                role    = "user"
+                content = "Say 'API is working'"
+            }
+        )
+    } | ConvertTo-Json -Depth 10
+
+    try {
+        $response = Invoke-WebRequest2 -Uri "$ApiUrl/chat/completions" `
+            -Method POST `
+            -Headers $headers `
+            -Body $body `
+            -TimeoutSec 30 `
+            -UseBasicParsing
+
+        Write-Host "Status Code: $($response.StatusCode)"
+
+        if ($response.StatusCode -eq 200) {
+            $data = $response.Content | ConvertFrom-Json
+            Write-Host "[OK] API is responding!"
+            if ($data.choices -and $data.choices.Count -gt 0) {
+                Write-Host "Response: $($data.choices[0].message.content)"
+            }
+        }
+    }
+    catch {
+        Write-Host "[ERROR] $($_.Exception.Message)"
+        if ($_.Exception.Response) {
+            $errorBody = $_.Exception.Response.GetResponseStream()
+            $reader = New-Object System.IO.StreamReader($errorBody)
+            $errorText = $reader.ReadToEnd()
+            Write-Host $errorText
+        }
+    }
+}
+
+function Invoke-AiUpgrade {
+    <#
+.SYNOPSIS
+    Updates all AI CLI tools in one shot.
+.DESCRIPTION
+    Runs the native update/upgrade command for each available CLI registered in
+    $_AiToolsInternal.UpgradeCommands (agy, Claude, Codex, OpenCode, and Cursor),
+    checks and updates configured PowerShell modules (e.g. Pester) from PSGallery,
+    and updates every npm-installed managed package -- from
+    $_AiToolsInternal.NpmPackages and MoreAiNpmPackages -- through one global
+    npm command. Winget packages are upgraded only when -Winget is supplied.
+    Preserves and restores the terminal window title so npm commands cannot
+    leave the tab title stuck. Reports stage timestamps and cumulative wall time.
+    Normal skips count as completed runs. Use the alias 'aiu' for convenience.
+.PARAMETER Winget
+    Upgrade the reported managed Winget packages. Without this switch, Winget
+    updates are listed only because they may be large or require elevation.
+    Upgrades accept agreements and request silent operation; UAC may still appear.
+.PARAMETER UserScope
+    When supplied with -Winget, restricts winget upgrades to the current user's profile
+    (--scope user), enables unattended/silent switches, suppresses UAC elevation prompts via
+    RunAsInvoker, and requires a non-elevated PowerShell session. Cannot be specified without -Winget.
+.EXAMPLE
+    Invoke-AiUpgrade
+.EXAMPLE
+    aiu -winget
+.EXAMPLE
+    aiu -Winget -UserScope
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-09
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Winget,
+        [switch]$UserScope
+    )
+
+    if ($UserScope -and -not $Winget) {
+        throw "Cannot specify -UserScope without -Winget. In Invoke-AiUpgrade (aiu), Winget upgrades only execute when -Winget is specified."
+    }
+
+    if ($UserScope -and (Test-IsAdministrator)) {
+        throw "Cannot use -UserScope in an elevated PowerShell session. Run from a standard, non-elevated session."
+    }
+
+    $originalTitle = $null
+    try {
+        $originalTitle = $Host.UI.RawUI.WindowTitle
+    }
+    catch {
+        # Host environment may not support WindowTitle (e.g. non-interactive/headless).
+    }
+
+    $runClock = [System.Diagnostics.Stopwatch]::StartNew()
+    $runCompleted = $false
+
+    # Format cumulative hours without wrapping at 24 hours.
+    function Format-UpgradeElapsed {
+        $elapsed = $runClock.Elapsed
+        return ('{0:00}:{1:mm\:ss}' -f [math]::Floor($elapsed.TotalHours), $elapsed)
+    }
+
+    # Print a local timestamp and cumulative elapsed time for each stage.
+    function Write-UpgradeStage {
+        param([string]$Title)
+        Write-Host ('[{0} | +{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), (Format-UpgradeElapsed), $Title) -ForegroundColor DarkCyan
+    }
+
+    Write-Host "Invoke-AiUpgrade started at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')." -ForegroundColor Cyan
+
+    try {
+    Write-UpgradeStage 'Native CLI upgrades'
+    foreach ($tool in $_AiToolsInternal.UpgradeCommands) {
+        $probe = if ($tool.Probe) { $tool.Probe } else { $tool.Cmd }
+        if (-not (Get-Command $probe -ErrorAction SilentlyContinue)) {
+            continue
+        }
+        if ($probe -ne $tool.Cmd -and -not (Get-Command $tool.Cmd -ErrorAction SilentlyContinue)) {
+            continue
+        }
+        Write-Host ">>> $($tool.Label): $($tool.Cmd) $($tool.Args -join ' ')" -ForegroundColor Cyan
+        & $tool.Cmd @($tool.Args)
+    }
+
+    # PowerShell modules stage: check and update configured modules (e.g. Pester)
+    if ($_AiToolsInternal.PowerShellModules -and (Get-Command Find-Module -ErrorAction SilentlyContinue) -and (Get-Command Update-Module -ErrorAction SilentlyContinue)) {
+        Write-UpgradeStage 'PowerShell modules'
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $moduleUpdates = @()
+        foreach ($mod in $_AiToolsInternal.PowerShellModules) {
+            $installedMod = Get-Module -ListAvailable -Name $mod.Name |
+                Where-Object { $_.Version -ge [version]$mod.MinimumVersion } |
+                Sort-Object Version -Descending | Select-Object -First 1
+            if ($installedMod) {
+                try {
+                    $onlineMod = Find-Module -Name $mod.Name -Repository $mod.Repository -ErrorAction Stop | Select-Object -First 1
+                    if ($onlineMod -and [version]$onlineMod.Version -gt [version]$installedMod.Version) {
+                        $moduleUpdates += [pscustomobject]@{
+                            Config    = $mod
+                            Current   = $installedMod.Version
+                            Available = $onlineMod.Version
+                        }
+                    }
+                }
+                catch {
+                    Write-Warning "Could not check updates for PowerShell module $($mod.Name): $($_.Exception.Message)"
+                }
+            }
+        }
+
+        if ($moduleUpdates.Count -eq 0) {
+            Write-Host '>>> powershell modules: all managed modules are already up to date.' -ForegroundColor Green
+        }
+        else {
+            Write-Host ">>> powershell modules: $($moduleUpdates.Count) update(s) available:" -ForegroundColor Cyan
+            $modNameWidth = ($moduleUpdates.Config.Name | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+            foreach ($up in $moduleUpdates) {
+                Write-Host ("      {0}  {1} -> {2}" -f $up.Config.Name.PadRight($modNameWidth), $up.Current, $up.Available) -ForegroundColor Cyan
+            }
+            $moduleFailures = @()
+            $modulePruneWarnings = @()
+            $modUpIndex = 0
+            foreach ($up in $moduleUpdates) {
+                $modUpIndex++
+                Write-Host (">>> powershell modules: [{0}/{1}] updating {2}  {3} -> {4}" -f $modUpIndex, $moduleUpdates.Count, $up.Config.Name, $up.Current, $up.Available) -ForegroundColor Cyan
+                try {
+                    # Update-Module only gained -Scope in PowerShellGet 2.x; the inbox
+                    # 1.x build on Windows PowerShell 5.1 has no -Scope, so install the
+                    # newer version with Install-Module (which does support -Scope) --
+                    # the same cmdlet the Install-AiTools stage already uses.
+                    Install-Module -Name $up.Config.Name -MinimumVersion $up.Available -Repository $up.Config.Repository -Scope $up.Config.Scope -Force -SkipPublisherCheck -Confirm:$false -ErrorAction Stop
+
+                    # Install-Module places the new version beside the old one. Once the
+                    # new version is discoverable, delete older version folders under the
+                    # SAME module folder so stale copies do not linger. The parent-name
+                    # and version-leaf checks restrict deletion to this module in this
+                    # scope -- e.g. the inbox Pester under Program Files is never touched.
+                    $newModule = Get-Module -ListAvailable -Name $up.Config.Name |
+                        Where-Object { $_.Version -ge [version]$up.Available } |
+                        Sort-Object Version -Descending |
+                        Select-Object -First 1
+                    if (-not $newModule) {
+                        throw "$($up.Config.Name) >= $($up.Available) was not discoverable after installation."
+                    }
+                    $moduleRoot = Split-Path -Parent $newModule.ModuleBase
+                    $parsedInstalledVersion = $null
+                    if ([version]::TryParse((Split-Path -Leaf $newModule.ModuleBase), [ref]$parsedInstalledVersion) -and
+                        (Split-Path -Leaf $moduleRoot) -ieq $up.Config.Name) {
+                        foreach ($oldDir in @(Get-ChildItem -LiteralPath $moduleRoot -Directory -ErrorAction SilentlyContinue)) {
+                            $oldVersion = $null
+                            if ([version]::TryParse($oldDir.Name, [ref]$oldVersion) -and $oldVersion -lt $newModule.Version) {
+                                try {
+                                    Remove-Item -LiteralPath $oldDir.FullName -Recurse -Force -ErrorAction Stop
+                                    Write-Host ("      removed old version {0}" -f $oldVersion) -ForegroundColor DarkGray
+                                }
+                                catch {
+                                    $modulePruneWarnings += ("{0} {1} ({2})" -f $up.Config.Name, $oldVersion, $_.Exception.Message)
+                                }
+                            }
+                        }
+                    }
+                }
+                catch {
+                    $moduleFailures += "$($up.Config.Name) ($($_.Exception.Message))"
+                }
+            }
+            if ($moduleFailures.Count -eq 0) {
+                Write-Host 'PowerShell-managed modules updated successfully.' -ForegroundColor Green
+            }
+            else {
+                Write-Warning "PowerShell module update failed for: $($moduleFailures -join ', ')"
+            }
+            if ($modulePruneWarnings.Count -gt 0) {
+                Write-Warning "Some old module versions could not be removed: $($modulePruneWarnings -join ', ')"
+            }
+        }
+    }
+
+    Write-UpgradeStage 'Winget checks and upgrades'
+    # Winget stage: discover updates once, restrict the results to every package
+    # Install-AiTools may manage, and require an explicit switch before installing.
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host '>>> winget: skipped (winget is not available).' -ForegroundColor Yellow
+    }
+    else {
+        $managedWinget = @(
+            @($_AiToolsInternal.WingetPackages) +
+            @($_AiToolsInternal.ExtendedWingetPackages) +
+            @($_AiToolsInternal.SdkWingetPackages) +
+            @($_AiToolsInternal.DbWingetPackages) +
+            @($_AiToolsInternal.MoreAiWingetPackages) +
+            @(
+                $_AiToolsInternal.DockerWingetPackage,
+                $_AiToolsInternal.PodmanWingetPackage,
+                $_AiToolsInternal.GitWingetPackage
+            ) | Where-Object { $_ } | Sort-Object -Unique
+        )
+
+        Write-Host ">>> winget: checking $($managedWinget.Count) managed package(s) for updates..." -ForegroundColor Cyan
+        $wingetOutput = @(& winget list --upgrade-available --source winget --accept-source-agreements --disable-interactivity 2>$null)
+        $wingetExitCode = $LASTEXITCODE
+        if ($wingetExitCode -ne 0) {
+            Write-Warning "Could not query managed Winget updates (exit code $wingetExitCode)."
+        }
+        else {
+            $wingetUpdates = @()
+            foreach ($packageId in $managedWinget) {
+                $escapedId = [regex]::Escape($packageId)
+                # A source-restricted query may omit the Source column; older
+                # Winget versions can still include it in redirected output.
+                $pattern = "(?i)(?:^|\s)$escapedId\s+(?<Current>\S+)\s+(?<Available>\S+)(?:\s+winget)?\s*$"
+                $matchingRow = $wingetOutput | Where-Object { $_ -match $pattern } | Select-Object -First 1
+                if ($matchingRow -and $matchingRow -match $pattern) {
+                    $wingetUpdates += [pscustomobject]@{
+                        Id        = $packageId
+                        Current   = $Matches.Current
+                        Available = $Matches.Available
+                    }
+                }
+            }
+
+            if ($wingetUpdates.Count -eq 0) {
+                Write-Host '>>> winget: all managed packages are already up to date.' -ForegroundColor Green
+            }
+            else {
+                Write-Host ">>> winget: $($wingetUpdates.Count) managed update(s) available:" -ForegroundColor Cyan
+                $nameWidth = ($wingetUpdates.Id | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+                foreach ($update in $wingetUpdates) {
+                    Write-Host ("      {0}  {1} -> {2}" -f $update.Id.PadRight($nameWidth), $update.Current, $update.Available) -ForegroundColor Cyan
+                }
+
+                if (-not $Winget) {
+                    Write-Host ">>> winget: report only; run 'aiu -Winget' to install these updates." -ForegroundColor Yellow
+                }
+                else {
+                    $wingetFailures = @()
+                    $wingetUpgradeIndex = 0
+                    foreach ($update in $wingetUpdates) {
+                        $wingetUpgradeIndex++
+                        $scopeTag = if ($UserScope) { ' [user scope]' } else { '' }
+                        Write-Host (">>> winget: [{0}/{1}] upgrading {2}  {3} -> {4}{5}" -f $wingetUpgradeIndex, $wingetUpdates.Count, $update.Id, $update.Current, $update.Available, $scopeTag) -ForegroundColor Cyan
+                        try {
+                            $exitCode = Invoke-WingetPackage -Action upgrade -PackageId $update.Id -UserScope:$UserScope -Unattended
+                            if ($exitCode -ne 0) {
+                                $wingetFailures += "$($update.Id) (exit code $exitCode)"
+                            }
+                        }
+                        catch {
+                            $wingetFailures += "$($update.Id) ($($_.Exception.Message))"
+                        }
+                    }
+                    if ($wingetFailures.Count -eq 0) {
+                        Write-Host 'Winget-managed packages updated successfully.' -ForegroundColor Green
+                    }
+                    else {
+                        Write-Warning "Winget update failed for: $($wingetFailures -join ', ')"
+                    }
+                }
+            }
+        }
+    }
+
+    Write-UpgradeStage 'npm global packages'
+    # npm stage: update all npm-installed managed packages in one command.
+    # Candidates come from the Install-AiTools npm lists (single source of
+    # truth). @opencode/cli is deliberately excluded: the native
+    # 'opencode upgrade' command above owns its updates.
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Write-Host '>>> npm: skipped (npm is not available).' -ForegroundColor Yellow
+        $runCompleted = $true
+        return
+    }
+
+    $inventory = Get-GlobalNpmInventory
+    if (-not $inventory.Available) {
+        Write-Host '>>> npm: skipped (global package inventory is unavailable).' -ForegroundColor Yellow
+        $runCompleted = $true
+        return
+    }
+
+    $managedNpm = @(@($_AiToolsInternal.NpmPackages) + @($_AiToolsInternal.MoreAiNpmPackages) | Sort-Object -Unique)
+    $npmPackages = @($managedNpm | Where-Object { $inventory.Packages.ContainsKey($_) })
+    if ($npmPackages.Count -eq 0) {
+        Write-Host '>>> npm: no managed npm packages are installed.' -ForegroundColor DarkGray
+        $runCompleted = $true
+        return
+    }
+
+    # Phase 1: show the checked set (managed packages that are actually
+    # installed) with installed versions, plus managed packages skipped
+    # because they are not installed.
+    $candidateList = ($npmPackages | ForEach-Object { "$_ ($($inventory.Packages[$_]))" }) -join ', '
+    Write-Host ">>> npm: checking $($npmPackages.Count) managed package(s): $candidateList" -ForegroundColor Cyan
+    $skippedNpm = @($managedNpm | Where-Object { -not $inventory.Packages.ContainsKey($_) })
+    if ($skippedNpm.Count -gt 0) {
+        Write-Host ">>> npm: not installed, skipped: $($skippedNpm -join ', ')" -ForegroundColor DarkGray
+    }
+
+    # npm outdated exits 1 when updates exist; that is not an error, so
+    # its exit code is deliberately ignored here.
+    $outdatedJson = @(& npm outdated -g --json @npmPackages 2>$null)
+    $outdatedText = ($outdatedJson -join [Environment]::NewLine).Trim()
+    $outdatedData = $null
+    if ($outdatedText) {
+        try {
+            $outdatedData = $outdatedText | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            Write-Warning "Could not determine which managed npm packages are outdated; updating all installed candidates. $($_.Exception.Message)"
+        }
+    }
+    # Empty stdout means nothing is outdated. Non-empty stdout that
+    # failed to parse falls back to updating every candidate.
+    $outdatedPackages = @()
+    if ($outdatedData) {
+        $outdatedPackages = @($npmPackages | Where-Object { $_ -in @($outdatedData.PSObject.Properties.Name) })
+    }
+    elseif ($outdatedText) {
+        $outdatedPackages = $npmPackages
+    }
+
+    if ($outdatedPackages.Count -eq 0) {
+        Write-Host '>>> npm: all managed npm packages are already up to date.' -ForegroundColor Green
+        $runCompleted = $true
+        return
+    }
+
+    # Phase 2: show current -> latest per package before touching
+    # anything. For -g, wanted == latest in practice; fall back to
+    # wanted (then the inventory version) when a field is absent.
+    Write-Host ">>> npm: $($outdatedPackages.Count) update(s) available:" -ForegroundColor Cyan
+    $nameWidth = ($outdatedPackages | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+    foreach ($name in $outdatedPackages) {
+        $info = if ($outdatedData) { $outdatedData.$name } else { $null }
+        # npm emits an array of identical entries when a package has multiple
+        # outdated edges (e.g. eslint's circular peer dep via eslint-utils);
+        # keep one so the version fields below stay scalar strings.
+        if ($info -is [array]) { $info = $info[0] }
+        $latest = if ($info -and $info.latest) { $info.latest } elseif ($info -and $info.wanted) { $info.wanted } else { '?' }
+        $current = if ($info -and $info.current) { $info.current } else { $inventory.Packages[$name] }
+        Write-Host ("      {0}  {1} -> {2}" -f $name.PadRight($nameWidth), $current, $latest) -ForegroundColor Cyan
+    }
+
+    $npmArgs = @('up', '-g') + $outdatedPackages
+    Write-Host ">>> npm: npm $($npmArgs -join ' ')" -ForegroundColor Cyan
+    & npm @npmArgs
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host 'npm-managed packages updated successfully.' -ForegroundColor Green
+    }
+    else {
+        Write-Warning "npm update failed with exit code $LASTEXITCODE for: $($outdatedPackages -join ', ')"
+    }
+    $runCompleted = $true
+    }
+    finally {
+        $runClock.Stop()
+        try {
+            if ($originalTitle -and $originalTitle -notmatch '^(?:npm|node)\b') {
+                $Host.UI.RawUI.WindowTitle = $originalTitle
+            }
+            else {
+                $defaultTitle = if ($PSEdition -eq 'Core') { 'PowerShell' } else { 'Windows PowerShell' }
+                $isAdmin = if (Get-Command Test-IsAdministrator -ErrorAction SilentlyContinue) { Test-IsAdministrator } else { $false }
+                $Host.UI.RawUI.WindowTitle = if ($isAdmin) { "Administrator: $defaultTitle" } else { $defaultTitle }
+            }
+        }
+        catch {
+            # Ignore when host does not support setting WindowTitle.
+        }
+        $outcome = if ($runCompleted) { 'completed' } else { 'stopped early' }
+        Write-Host ('Invoke-AiUpgrade {0} at {1}; wall time {2}.' -f $outcome, (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), (Format-UpgradeElapsed)) -ForegroundColor Cyan
+    }
+}
+function Install-ClaudeCode {
+    <#
+.SYNOPSIS
+    Downloads and installs Claude Code (native binary launcher).
+.DESCRIPTION
+    Fetches the latest release from downloads.claude.ai, verifies its SHA-256
+    against the manifest, then runs `claude install <Target>`. Complements
+    Invoke-AiUpgrade (aiu), which only self-updates an already-installed
+    Claude Code via `claude update`.
+.PARAMETER Target
+    stable | latest | x.y.z[-suffix]. Default latest.
+.EXAMPLE
+    Install-ClaudeCode
+.EXAMPLE
+    Install-ClaudeCode -Target stable
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+    Source reference (upstream installer this mirrors): https://claude.ai/install.ps1
+#>
+    [CmdletBinding()]
+    param(
+        [ValidatePattern('^(stable|latest|\d+\.\d+\.\d+(-[^\s]+)?)$')]
+        [string]$Target = 'latest'
+    )
+
+    if (-not [Environment]::Is64BitProcess) { throw 'Claude Code requires 64-bit Windows.' }
+
+    $base = $_ClaudeInternal.DownloadBaseUrl
+    $platform = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'win32-arm64' } else { 'win32-x64' }
+    $downloadDir = Join-Path $env:USERPROFILE '.claude\downloads'
+    New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+    $version = Invoke-RestMethod -Uri "$base/latest" -ErrorAction Stop
+    if ($version -notmatch '^\d+\.\d+\.\d+') { throw "Invalid version from $base (got '$version')." }
+
+    $manifest = Invoke-RestMethod -Uri "$base/$version/manifest.json" -ErrorAction Stop
+    $checksum = $manifest.platforms.$platform.checksum
+    if (-not $checksum) { throw "Platform $platform not present in manifest for $version." }
+
+    $binaryPath = Join-Path $downloadDir "claude-$version-$platform.exe"
+
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri "$base/$version/$platform/claude.exe" -OutFile $binaryPath -UseBasicParsing -ErrorAction Stop
+    } finally {
+        $ProgressPreference = $prevProgress
+    }
+
+    $actual = (Get-FileHash -Path $binaryPath -Algorithm SHA256).Hash.ToLower()
+    if ($actual -ne $checksum.ToLower()) {
+        Remove-Item -Force $binaryPath -ErrorAction SilentlyContinue
+        throw 'Checksum verification failed; downloaded file removed.'
+    }
+
+    Write-Host "Setting up Claude Code $version ($platform)..." -ForegroundColor Cyan
+    $installExit = 0
+    try {
+        & $binaryPath install $Target
+        $installExit = $LASTEXITCODE
+    } finally {
+        Start-Sleep -Seconds 1
+        Remove-Item -Force $binaryPath -ErrorAction SilentlyContinue
+    }
+
+    if ($installExit -ne 0) { throw "Installation failed (exit code $installExit)." }
+    # The claude installer places the binary in ~/.local/bin; ensure it's on the
+    # user PATH (and in this session) so `claude` is usable immediately -- but
+    # only when `claude` does not already resolve, to avoid duplicate entries.
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+        $claudeBin = Join-Path $env:USERPROFILE '.local\bin'
+        $null = Add-UserPathEntry -Path $claudeBin
+    }
+    Write-Host "Installation complete." -ForegroundColor Green
+    [pscustomobject]@{ Version = $version; Platform = $platform }
+}
+
+Set-Alias -Name aiu -Value Invoke-AiUpgrade
+
+# === AI provider usage-query functions ===
+# Provides provider-specific Get-*Usage functions and Get-AllAiUsage to discover
+# and run the currently loaded usage functions. Call the provider functions after
+# the vault credentials load further down (Load-AiApiKeysFromCS) so
+# $env:MINIMAX_API_KEY, $env:ZAI_API_KEY, $env:DEEPSEEK_API_KEY, and
+# $env:KIMI_CODE_PLAN_API_KEY and $env:OPENCODE_GO_API_KEY are populated.
+
+# --- Get-MinimaxUsage ------------------------------------------------------
+# Queries MiniMax's token-plan endpoint for remaining quotas and burn rates
+# over the current interval and the current week. Stashes the parsed
+# response in $Global:minimaxLastQuery and returns it.
+
+function Get-MinimaxUsage {
+<#
+.SYNOPSIS
+    Queries MiniMax's token-plan endpoint and reports per-model remaining quotas and burn rate.
+.DESCRIPTION
+    Calls https://www.minimax.io/v1/token_plan/remains with the API key in
+    $env:MINIMAX_API_KEY, computes time-until-reset and burn rate
+    (used / elapsed) for both the current interval and the current week per
+    model, and flags concerns when remaining percent drops below threshold
+    or burn outpaces linear consumption. Stores the parsed response in
+    $Global:minimaxLastQuery and returns it.
+.PARAMETER ApiKey
+    MiniMax API key. Defaults to $env:MINIMAX_API_KEY.
+.PARAMETER LowPercent
+    Remaining-percent threshold below which a model is reported as LOW.
+.PARAMETER CriticalPercent
+    Remaining-percent threshold below which a model is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Flag an interval that resets within this many hours.
+.PARAMETER BurnWarnRatio
+    Flag a model whose burn rate exceeds this multiple of linear consumption.
+.PARAMETER All
+    When supplied, prints the raw API response inline. Otherwise the raw
+    response stays in $Global:minimaxLastQuery.
+.EXAMPLE
+    Get-MinimaxUsage
+.EXAMPLE
+    $r = Get-MinimaxUsage
+    $r.model_remains | Where-Object { $_.current_interval_remaining_percent -lt 10 }
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-06
+#>
+    [CmdletBinding()]
+    param(
+        [string]$ApiKey = $env:MINIMAX_API_KEY,
+        [int]$LowPercent = 30,
+        [int]$CriticalPercent = 10,
+        [int]$ResetWarnHours = 1,
+        [double]$BurnWarnRatio = 1.0,
+        [switch]$All
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    if (-not $ApiKey) { Write-Error 'MINIMAX_API_KEY not set (env var or -ApiKey).'; return }
+
+    $headers = @{
+        'Content-Type'  = 'application/json'
+        'Authorization' = "Bearer $ApiKey"
+    }
+    try {
+        $resp = Invoke-RestMethod -Uri 'https://www.minimax.io/v1/token_plan/remains' -Headers $headers -Method GET
+    } catch {
+        Write-Error "API call failed: $($_.Exception.Message)"
+        return
+    }
+
+    $Global:minimaxLastQuery = $resp
+
+    $_ProfileHelpers.WriteSection('Raw API response (MiniMax)')
+    if ($All) { $resp | ConvertTo-Json -Depth 8 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:minimaxLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $now = Get-Date
+    $_ProfileHelpers.WriteSection('Per-model insights (MiniMax)')
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($m in $resp.model_remains) {
+        $intervalStart   = $_ProfileHelpers.FromEpochMs([long]$m.start_time)
+        $intervalEnd     = $_ProfileHelpers.FromEpochMs([long]$m.end_time)
+        $intervalTotal   = $intervalEnd - $intervalStart
+        $intervalElapsed = $now - $intervalStart
+        if ($intervalElapsed.TotalSeconds -lt 0) { $intervalElapsed = [TimeSpan]::Zero }
+        if ($intervalElapsed -gt $intervalTotal)  { $intervalElapsed = $intervalTotal }
+
+        $weeklyStart   = $_ProfileHelpers.FromEpochMs([long]$m.weekly_start_time)
+        $weeklyEnd     = $_ProfileHelpers.FromEpochMs([long]$m.weekly_end_time)
+        $weeklyTotal   = $weeklyEnd - $weeklyStart
+        $weeklyElapsed = $now - $weeklyStart
+        if ($weeklyElapsed.TotalSeconds -lt 0) { $weeklyElapsed = [TimeSpan]::Zero }
+        if ($weeklyElapsed -gt $weeklyTotal)   { $weeklyElapsed = $weeklyTotal }
+
+        $iRemain = [int]$m.current_interval_remaining_percent
+        $wRemain = [int]$m.current_weekly_remaining_percent
+        # remains_time / weekly_remains_time come back in ms, not s.
+        $iReset  = [TimeSpan]::FromMilliseconds([double]$m.remains_time)
+        $wReset  = [TimeSpan]::FromMilliseconds([double]$m.weekly_remains_time)
+
+        $flags = New-Object System.Collections.Generic.List[string]
+        $iRatio = $null
+        if ($m.current_interval_total_count -gt 0 -and $intervalTotal.TotalSeconds -gt 0) {
+            $fracElapsed = $intervalElapsed.TotalSeconds / $intervalTotal.TotalSeconds
+            if ($fracElapsed -gt 0) {
+                $fracUsed = [double]$m.current_interval_usage_count / [double]$m.current_interval_total_count
+                $iRatio = $fracUsed / $fracElapsed
+            }
+        }
+        $wRatio = $null
+        if ($m.current_weekly_total_count -gt 0 -and $weeklyTotal.TotalSeconds -gt 0) {
+            $fracElapsed = $weeklyElapsed.TotalSeconds / $weeklyTotal.TotalSeconds
+            if ($fracElapsed -gt 0) {
+                $fracUsed = [double]$m.current_weekly_usage_count / [double]$m.current_weekly_total_count
+                $wRatio = $fracUsed / $fracElapsed
+            }
+        }
+        if ($null -ne $iRatio -and $iRatio -gt $BurnWarnRatio) { $flags.Add('INTERVAL BURN > LINEAR') }
+        if ($null -ne $wRatio -and $wRatio -gt $BurnWarnRatio) { $flags.Add('WEEKLY BURN > LINEAR') }
+
+        if ($m.current_interval_total_count -gt 0) {
+            $iUsedStr = '{0}/{1} (burn {2:N2}x)' -f $m.current_interval_usage_count, $m.current_interval_total_count, $iRatio
+        } else {
+            $iUsedStr = '-'
+        }
+        if ($m.current_weekly_total_count -gt 0) {
+            $wUsedStr = '{0}/{1} (burn {2:N2}x)' -f $m.current_weekly_usage_count, $m.current_weekly_total_count, $wRatio
+        } else {
+            $wUsedStr = '-'
+        }
+
+        $rows.Add([pscustomobject]@{
+            Model              = $m.model_name
+            Interval_Remaining = ('{0}%' -f $iRemain)
+            Interval_Reset     = ($_ProfileHelpers.FormatDuration($iReset))
+            Interval_Used      = $iUsedStr
+            Weekly_Remaining   = ('{0}%' -f $wRemain)
+            Weekly_Reset       = ($_ProfileHelpers.FormatDuration($wReset))
+            Weekly_Used        = $wUsedStr
+            Alerts             = ($flags -join ', ')
+        })
+    }
+    $rows | Format-Table -AutoSize -Wrap | Out-Host
+
+    $_ProfileHelpers.WriteSection('Concerns (MiniMax)')
+    $concerns = New-Object System.Collections.Generic.List[string]
+    foreach ($m in $resp.model_remains) {
+        $name    = [string]$m.model_name
+        $iRemain = [int]$m.current_interval_remaining_percent
+        $wRemain = [int]$m.current_weekly_remaining_percent
+        $iReset  = [TimeSpan]::FromMilliseconds([double]$m.remains_time)
+        if ($iRemain -le $CriticalPercent) {
+            $concerns.Add(('[CRITICAL] {0}: only {1}% left in current interval' -f $name, $iRemain))
+        } elseif ($iRemain -le $LowPercent) {
+            $concerns.Add(('[LOW]      {0}: {1}% left in current interval' -f $name, $iRemain))
+        }
+        if ($wRemain -le $CriticalPercent) {
+            $concerns.Add(('[CRITICAL] {0}: only {1}% left this week' -f $name, $wRemain))
+        } elseif ($wRemain -le $LowPercent) {
+            $concerns.Add(('[LOW]      {0}: {1}% left this week' -f $name, $wRemain))
+        }
+        if ($iReset.TotalSeconds -gt 0 -and $iReset.TotalHours -le $ResetWarnHours) {
+            $concerns.Add(('[INFO]     {0}: interval resets in {1}' -f $name, ($_ProfileHelpers.FormatDuration($iReset))))
+        }
+    }
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($c in $concerns) { Write-Host ('  - ' + $c) -ForegroundColor Yellow }
+    }
+
+    return $resp
+}
+
+# --- Get-ZaiUsage ----------------------------------------------------------
+# Hits Z.AI's three monitoring endpoints (model-usage, tool-usage,
+# quota/limit) over the last 24h, prints summaries, flags spikes and
+# threshold breaches. Stashes the three responses in
+# $Global:zaiLastQuery as @{ Model; Tool; Quota } and returns the
+# hashtable.
+
+function Get-ZaiUsage {
+<#
+.SYNOPSIS
+    Queries Z.AI's model-usage, tool-usage, and quota-limit endpoints over
+    the trailing 24 hours.
+.DESCRIPTION
+    Calls api.z.ai with the bearer token in $env:ZAI_API_KEY over a
+    yesterday-at-current-hour to end-of-current-hour window. Prints model
+    and tool usage totals, hourly averages, peak hours, hourly spikes
+    (configurable multiplier), and quota usage with reset times. Stores
+    the three responses in $Global:zaiLastQuery as @{ Model; Tool; Quota }
+    and returns the same.
+.PARAMETER Token
+    Z.AI auth token. Defaults to $env:ZAI_API_KEY.
+.PARAMETER McpWarnPercent
+    Quota-percent threshold for the MCP/month window.
+.PARAMETER TokenWarnPercent
+    Quota-percent threshold for the 5-hour token window.
+.PARAMETER SpikeRatio
+    Multiplier used to flag hourly tool-usage spikes.
+.PARAMETER All
+    When supplied, prints the raw API responses inline. Otherwise the
+    raw responses stay in $Global:zaiLastQuery.
+.EXAMPLE
+    Get-ZaiUsage
+.EXAMPLE
+    Get-ZaiUsage -McpWarnPercent 50 -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-08
+#>
+    [CmdletBinding()]
+    param(
+        [string]$Token = $env:ZAI_API_KEY,
+        [int]$McpWarnPercent = 80,
+        [int]$TokenWarnPercent = 80,
+        [double]$SpikeRatio = 3.0,
+        [switch]$All
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    if (-not $Token) { Write-Error 'ZAI_API_KEY not set (env var or -Token).'; return }
+
+    $base = 'https://api.z.ai'
+    $now  = Get-Date
+    # Time window matches the upstream skill: yesterday at the current
+    # hour through end of the current hour.
+    $start = Get-Date $now.AddDays(-1).Date.AddHours($now.Hour) -Format 'yyyy-MM-dd HH:mm:ss'
+    $end   = Get-Date $now.Date.AddHours($now.Hour).AddMinutes(59).AddSeconds(59) -Format 'yyyy-MM-dd HH:mm:ss'
+    $q = "?startTime=$([uri]::EscapeDataString($start))&endTime=$([uri]::EscapeDataString($end))"
+    $headers = @{ Authorization = $Token; Accept = 'application/json' }
+
+    function Invoke-Zai-Internal {
+        param([string]$Path)
+        try {
+            return Invoke-RestMethod -Uri ($base + $Path) -Headers $headers -Method GET
+        } catch {
+            Write-Error "API call failed for $Path`: $($_.Exception.Message)"
+            return $null
+        }
+    }
+
+    $modelResp = Invoke-Zai-Internal "/api/monitor/usage/model-usage$q"
+    $toolResp  = Invoke-Zai-Internal "/api/monitor/usage/tool-usage$q"
+    $quotaResp = Invoke-Zai-Internal '/api/monitor/usage/quota/limit'
+
+    $Global:zaiLastQuery = @{
+        Model = $modelResp
+        Tool  = $toolResp
+        Quota = $quotaResp
+    }
+
+    $_ProfileHelpers.WriteSection('Raw API responses (Z.AI)')
+    if ($All) {
+        Write-Host '--- model-usage ---'
+        if ($modelResp) { $modelResp | ConvertTo-Json -Depth 8 | Out-Host } else { Write-Host '(no response)' }
+        Write-Host ''
+        Write-Host '--- tool-usage ---'
+        if ($toolResp) { $toolResp | ConvertTo-Json -Depth 8 | Out-Host } else { Write-Host '(no response)' }
+        Write-Host ''
+        Write-Host '--- quota/limit ---'
+        if ($quotaResp) { $quotaResp | ConvertTo-Json -Depth 8 | Out-Host } else { Write-Host '(no response)' }
+    } else {
+        Write-Host '  (suppressed; stored in $Global:zaiLastQuery as @{ Model; Tool; Quota }.' -ForegroundColor DarkGray
+        Write-Host '   Use -All to display inline.)' -ForegroundColor DarkGray
+    }
+
+    $modelData = $_ProfileHelpers.UnwrapZaiData($modelResp)
+    $toolData  = $_ProfileHelpers.UnwrapZaiData($toolResp)
+    $quotaData = $_ProfileHelpers.UnwrapZaiData($quotaResp)
+
+    $_ProfileHelpers.WriteSection('Model usage summary (Z.AI, last 24h)')
+    if ($modelData) {
+        $callStats = $_ProfileHelpers.GetSeriesStats($modelData.x_time, $modelData.modelCallCount)
+        $tokStats  = $_ProfileHelpers.GetSeriesStats($modelData.x_time, $modelData.tokensUsage)
+        [pscustomobject]@{
+            Total_Calls    = $callStats.Total
+            Hourly_Avg     = ('{0:N2}' -f $callStats.Avg)
+            Peak_Calls     = ('{0} at {1}' -f $callStats.Peak, $callStats.PeakHour)
+            Total_Tokens   = $tokStats.Total
+            Hourly_Tok_Avg = ('{0:N0}' -f $tokStats.Avg)
+            Peak_Tokens    = ('{0} at {1}' -f $tokStats.Peak, $tokStats.PeakHour)
+        } | Format-Table -AutoSize | Out-Host
+    } else {
+        Write-Host '  (no data)' -ForegroundColor DarkGray
+    }
+
+    $_ProfileHelpers.WriteSection('Tool usage summary (Z.AI, last 24h)')
+    if ($toolData) {
+        $netStats = $_ProfileHelpers.GetSeriesStats($toolData.x_time, $toolData.networkSearchCount)
+        $webStats = $_ProfileHelpers.GetSeriesStats($toolData.x_time, $toolData.webReadMcpCount)
+        $zreStats = $_ProfileHelpers.GetSeriesStats($toolData.x_time, $toolData.zreadMcpCount)
+        [pscustomobject]@{
+            Tool       = 'network-search (search-prime)'
+            Total      = $netStats.Total
+            Hourly_Avg = ('{0:N2}' -f $netStats.Avg)
+            Peak       = ('{0} at {1}' -f $netStats.Peak, $netStats.PeakHour)
+        },
+        [pscustomobject]@{
+            Tool       = 'web-reader'
+            Total      = $webStats.Total
+            Hourly_Avg = ('{0:N2}' -f $webStats.Avg)
+            Peak       = ('{0} at {1}' -f $webStats.Peak, $webStats.PeakHour)
+        },
+        [pscustomobject]@{
+            Tool       = 'zread'
+            Total      = $zreStats.Total
+            Hourly_Avg = ('{0:N2}' -f $zreStats.Avg)
+            Peak       = ('{0} at {1}' -f $zreStats.Peak, $zreStats.PeakHour)
+        } | Format-Table -AutoSize | Out-Host
+
+        $spikes = @()
+        $spikes += $_ProfileHelpers.GetSpikes($toolData.x_time, $toolData.networkSearchCount, $netStats.Avg, $SpikeRatio)
+        $spikes += $_ProfileHelpers.GetSpikes($toolData.x_time, $toolData.webReadMcpCount, $webStats.Avg, $SpikeRatio)
+        $spikes += $_ProfileHelpers.GetSpikes($toolData.x_time, $toolData.zreadMcpCount, $zreStats.Avg, $SpikeRatio)
+        if ($spikes.Count -gt 0) {
+            Write-Host ''
+            Write-Host ('  Spikes (> {0:N1}x hourly avg):' -f $SpikeRatio)
+            $spikes | ForEach-Object { Write-Host ('    {0}  ->  {1}' -f $_.Hour, $_.Value) }
+        } else {
+            Write-Host ''
+            Write-Host ('  No hourly spikes above {0:N1}x average.' -f $SpikeRatio) -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host '  (no data)' -ForegroundColor DarkGray
+    }
+
+    $_ProfileHelpers.WriteSection('Quota summary (Z.AI)')
+    if ($quotaData -and $quotaData.limits) {
+        # Use the API's nextResetTime when present, else fall back to a
+        # label derived from the (unit, number) pair. unit codes
+        # observed: 3=hours, 5=months.
+        $rows = New-Object System.Collections.Generic.List[object]
+        foreach ($lim in $quotaData.limits) {
+            $type  = [string]$lim.type
+            $pct   = if ($null -ne $lim.percentage) { [int]$lim.percentage } else { 0 }
+            $cur   = $lim.currentValue
+            $tot   = $lim.usage
+            $used  = if ($null -eq $cur) { 'n/a' } else { [string]$cur }
+            $limit = if ($null -eq $tot) { 'n/a' } else { [string]$tot }
+            $reset = 'n/a'
+            if ($lim.PSObject.Properties['nextResetTime'] -and $null -ne $lim.nextResetTime) {
+                $resetDt = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$lim.nextResetTime).LocalDateTime
+                $delta   = $resetDt - (Get-Date)
+                $reset   = ('{0} ({1} from now)' -f $resetDt.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($delta)))
+            } elseif ($lim.PSObject.Properties['unit'] -and $lim.PSObject.Properties['number']) {
+                $unitName = switch ([int]$lim.unit) {
+                    3 { 'h' }
+                    5 { 'mo' }
+                    default { "unit$($lim.unit)" }
+                }
+                $reset = ('{0} {1} (window)' -f $lim.number, $unitName)
+            }
+            $rows.Add([pscustomobject]@{
+                Type    = $type
+                Used    = $used
+                Limit   = $limit
+                Percent = ('{0}%' -f $pct)
+                Reset   = $reset
+            })
+        }
+        $rows | Format-Table -AutoSize -Wrap | Out-Host
+    } else {
+        Write-Host '  (no data)' -ForegroundColor DarkGray
+    }
+
+    $_ProfileHelpers.WriteSection('Concerns (Z.AI)')
+    $concerns = New-Object System.Collections.Generic.List[string]
+    if ($quotaData -and $quotaData.limits) {
+        foreach ($lim in $quotaData.limits) {
+            $pct  = if ($null -ne $lim.percentage) { [int]$lim.percentage } else { 0 }
+            $type = [string]$lim.type
+            if ($type -match 'TOKEN' -and $pct -ge $TokenWarnPercent) {
+                $concerns.Add(('[HIGH] Token window: {0}% used (>= {1}%)' -f $pct, $TokenWarnPercent))
+            }
+            if (($type -match 'TIME_LIMIT' -or $type -match 'MCP') -and $pct -ge $McpWarnPercent) {
+                $concerns.Add(('[HIGH] MCP/month window: {0}% used (>= {1}%)' -f $pct, $McpWarnPercent))
+            }
+        }
+    }
+    if ($toolData) {
+        foreach ($seriesName in @('networkSearchCount', 'webReadMcpCount', 'zreadMcpCount')) {
+            $stats = $_ProfileHelpers.GetSeriesStats($toolData.x_time, $toolData.$seriesName)
+            $spikes = $_ProfileHelpers.GetSpikes($toolData.x_time, $toolData.$seriesName, $stats.Avg, $SpikeRatio)
+            if ($spikes.Count -gt 0) {
+                $concerns.Add(('[SPIKE] {0}: {1} hour(s) above {2:N1}x hourly avg' -f $seriesName, $spikes.Count, $SpikeRatio))
+            }
+        }
+    }
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($c in $concerns) { Write-Host ('  - ' + $c) -ForegroundColor Yellow }
+    }
+
+    return $Global:zaiLastQuery
+}
+
+# --- Get-DeepseekUsage -----------------------------------------------------
+# Queries DeepSeek's user-balance endpoint and estimates the token budget
+# remaining under V4.1 Flash / V4 Pro pricing for each currency with a
+# non-zero balance. Stashes the parsed response in
+# $Global:deepseekLastQuery and returns it.
+
+function Get-DeepseekUsage {
+<#
+.SYNOPSIS
+    Queries DeepSeek's user-balance endpoint and estimates remaining token
+    and tool-request budgets under current pricing.
+.DESCRIPTION
+    Calls https://api.deepseek.com/user/balance with the API key in
+    $env:DEEPSEEK_API_KEY, prints the per-currency balances, and for each
+    currency with a non-zero balance projects the token count available
+    under every (model, scenario) pricing row in the embedded $pricing
+    table and request capacity for Search/Fetch tools. Flags concerns when the account
+    is unavailable or balances are at or below threshold. Stores the parsed response in
+    $Global:deepseekLastQuery and returns it.
+.PARAMETER ApiKey
+    DeepSeek API key. Defaults to $env:DEEPSEEK_API_KEY.
+.PARAMETER LowBalanceUsd
+    USD-balance threshold below which a LOW concern is raised.
+.PARAMETER LowBalanceCny
+    CNY-balance threshold below which a LOW concern is raised.
+.PARAMETER All
+    When supplied, prints the raw API response inline. Otherwise the raw
+    response stays in $Global:deepseekLastQuery.
+.EXAMPLE
+    Get-DeepseekUsage
+.EXAMPLE
+    $d = Get-DeepseekUsage
+    $d.balance_infos | Where-Object { $_.currency -eq 'CNY' }
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+    Note: Per DeepSeek's Sept 2026 announcement, V4 Pro API service continues
+    after Sept 14, 2026 with billing unchanged (own rates, no Flash routing).
+    Web Search & Fetch APIs are billed at $0.75 (5 CNY) per 1,000 successful requests.
+#>
+    [CmdletBinding()]
+    param(
+        [string]$ApiKey = $env:DEEPSEEK_API_KEY,
+        [double]$LowBalanceUsd = 5.0,
+        [double]$LowBalanceCny = 35.0,
+        [switch]$All
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    # Pricing per 1M tokens (cache_hit, cache_miss, output).
+    # deepseek-v4-pro bills at its own rates; per DeepSeek's announcement, V4 Pro API
+    # service continues after Sept 14, 2026 with billing unchanged (no Flash routing).
+    # Source: api-docs.deepseek.com/quick_start/pricing
+    $pricing = @(
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.003; CostCny = 0.02 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.15;  CostCny = 1.00 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 0.60;  CostCny = 4.00 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.006; CostCny = 0.04 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 0.30;  CostCny = 2.00 }
+        [pscustomobject]@{ Model = 'deepseek-flash';                   Tier = 'Peak';     Scenario = 'Output';              CostUsd = 1.20;  CostCny = 8.00 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Off-Peak'; Scenario = 'Input  (cache hit)';  CostUsd = 0.022; CostCny = 0.15 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Off-Peak'; Scenario = 'Input  (cache miss)'; CostUsd = 0.66;  CostCny = 4.50 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Off-Peak'; Scenario = 'Output';              CostUsd = 1.98;  CostCny = 13.50 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Peak';     Scenario = 'Input  (cache hit)';  CostUsd = 0.044; CostCny = 0.30 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Peak';     Scenario = 'Input  (cache miss)'; CostUsd = 1.32;  CostCny = 9.00 }
+        [pscustomobject]@{ Model = 'deepseek-v4-pro';                  Tier = 'Peak';     Scenario = 'Output';              CostUsd = 3.96;  CostCny = 27.00 }
+    )
+
+    # Web Search & Fetch pricing per 1,000 requests (introduced Nov 2026).
+    # Source: api-docs.deepseek.com
+    $requestPricing = @(
+        [pscustomobject]@{ Action = 'Web Search (API)'; Unit = '1K req'; CostUsd = 0.75; CostCny = 5.00 }
+        [pscustomobject]@{ Action = 'Web Fetch (API)';  Unit = '1K req'; CostUsd = 0.75; CostCny = 5.00 }
+    )
+
+    if (-not $ApiKey) { Write-Error 'DEEPSEEK_API_KEY not set (env var or -ApiKey).'; return }
+
+    $headers = @{
+        'Content-Type'  = 'application/json'
+        'Authorization' = "Bearer $ApiKey"
+    }
+    try {
+        $resp = Invoke-RestMethod -Uri 'https://api.deepseek.com/user/balance' -Headers $headers -Method GET
+    } catch {
+        Write-Error "API call failed: $($_.Exception.Message)"
+        return
+    }
+
+    $Global:deepseekLastQuery = $resp
+
+    $_ProfileHelpers.WriteSection('Raw API response (DeepSeek)')
+    if ($All) { $resp | ConvertTo-Json -Depth 8 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:deepseekLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $balances = @{}
+    foreach ($b in $resp.balance_infos) {
+        $balances[[string]$b.currency] = [double]$b.total_balance
+    }
+
+    $_ProfileHelpers.WriteSection('Balance summary (DeepSeek)')
+    $balanceRows = foreach ($b in $resp.balance_infos) {
+        [pscustomobject]@{
+            Currency     = [string]$b.currency
+            Total        = [double]$b.total_balance
+            Granted      = [double]$b.granted_balance
+            Topped_Up    = [double]$b.topped_up_balance
+            Is_Available = [bool]$resp.is_available
+        }
+    }
+    $balanceRows | Format-Table -AutoSize | Out-Host
+
+    $hasAny = $false
+    foreach ($cur in @('USD', 'CNY')) {
+        if (-not $balances.ContainsKey($cur)) { continue }
+        $bal = $balances[$cur]
+        if ($bal -le 0) { continue }
+        $hasAny = $true
+        $rows = New-Object System.Collections.Generic.List[object]
+        $costKey = 'Cost' + $cur
+        foreach ($p in $pricing) {
+            $cost   = [double]$p.$costKey
+            $tokens = if ($cost -gt 0) { $bal / $cost * 1e6 } else { 0 }
+            $rows.Add([pscustomobject]@{
+                Model            = $p.Model
+                Tier             = $p.Tier
+                Scenario         = $p.Scenario
+                Cost_per_1M      = ('{0} {1}' -f $cur, ($_ProfileHelpers.FormatPrice($cost)))
+                Available_Tokens = ($_ProfileHelpers.FormatTokens($tokens))
+            })
+        }
+        $title = if ($cur -eq 'USD') { 'Estimated USD token budget (DeepSeek)' } else { 'Estimated CNY token budget (DeepSeek)' }
+        $_ProfileHelpers.WriteSection($title)
+        $rows | Format-Table -AutoSize -Wrap | Out-Host
+
+        $reqRows = New-Object System.Collections.Generic.List[object]
+        $reqCostKey = 'Cost' + $cur
+        foreach ($r in $requestPricing) {
+            $cost = [double]$r.$reqCostKey
+            $reqs = if ($cost -gt 0) { [math]::Floor($bal / $cost * 1000) } else { 0 }
+            $reqRows.Add([pscustomobject]@{
+                Action             = $r.Action
+                Unit               = $r.Unit
+                Cost               = ('{0} {1}' -f $cur, ($_ProfileHelpers.FormatPrice($cost)))
+                Available_Requests = ('{0:N0}' -f $reqs)
+            })
+        }
+        $reqTitle = if ($cur -eq 'USD') { 'Estimated USD tool request budget (DeepSeek)' } else { 'Estimated CNY tool request budget (DeepSeek)' }
+        $_ProfileHelpers.WriteSection($reqTitle)
+        $reqRows | Format-Table -AutoSize -Wrap | Out-Host
+    }
+    if (-not $hasAny) {
+        $_ProfileHelpers.WriteSection('Estimated usage budget (DeepSeek)')
+        Write-Host '  (no USD or CNY balance > 0 reported)' -ForegroundColor DarkGray
+    }
+    Write-Host ('  Estimate formula: tokens = balance / cost_per_1M * 1,000,000; requests = balance / cost_per_1K * 1,000.') -ForegroundColor DarkGray
+    Write-Host ('  Actual spend depends on cache-hit ratio, prompt size, output length, tool requests, and model mix.') -ForegroundColor DarkGray
+    Write-Host ('  Note: deepseek-v4-pro continues after Sept 14, 2026 with billing unchanged (per DeepSeek announcement).') -ForegroundColor DarkGray
+
+    $_ProfileHelpers.WriteSection('Concerns (DeepSeek)')
+    $concerns = New-Object System.Collections.Generic.List[string]
+    if (-not [bool]$resp.is_available) {
+        $concerns.Add('[CRITICAL] is_available=false: account cannot make API calls')
+    }
+    if ($balances.ContainsKey('USD') -and $balances['USD'] -le $LowBalanceUsd) {
+        $concerns.Add(('[LOW] USD balance ${0:N2} at or below threshold ${1:N2}' -f $balances['USD'], $LowBalanceUsd))
+    }
+    if ($balances.ContainsKey('CNY') -and $balances['CNY'] -le $LowBalanceCny) {
+        $concerns.Add(('[LOW] CNY balance {0:N2} at or below threshold {1:N2}' -f $balances['CNY'], $LowBalanceCny))
+    }
+    if ($balances.Count -gt 0) {
+        $total = ($balances.Values | Measure-Object -Sum).Sum
+        if ($total -le 0) {
+            $concerns.Add('[CRITICAL] All reported balances are zero')
+        }
+    }
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($c in $concerns) { Write-Host ('  - ' + $c) -ForegroundColor Yellow }
+    }
+
+    return $resp
+}
+
+# --- Get-KimiUsage ---------------------------------------------------------
+# Queries Kimi Code's private membership-usage endpoint. The schema is
+# observed rather than a documented public contract, so all fields are handled
+# defensively. Stashes the parsed response in $Global:kimiLastQuery and returns it.
+
+function Get-KimiUsage {
+<#
+.SYNOPSIS
+    Queries Kimi Code membership quota, rolling limits, and Extra Usage status.
+.DESCRIPTION
+    Calls the private https://api.kimi.com/coding/v1/usages endpoint with the
+    Kimi Code API key in $env:KIMI_CODE_PLAN_API_KEY. Reports membership details, weekly
+    quota, rolling rate windows, local reset times, concurrent-session limit,
+    aggregate quota, and optional Extra Usage wallet fields. Stores the parsed
+    response in $Global:kimiLastQuery and returns it.
+.PARAMETER ApiKey
+    Kimi Code API key. Defaults to $env:KIMI_CODE_PLAN_API_KEY.
+.PARAMETER BaseUrl
+    Kimi Code OpenAI-compatible base URL. Defaults to KIMI_CODE_BASE_URL, then
+    https://api.kimi.com/coding/v1. The function appends /usages.
+.PARAMETER TimeoutSec
+    HTTP request timeout in seconds. Defaults to the upstream client's 8 seconds.
+.PARAMETER LowPercent
+    Remaining-percent threshold at or below which a quota is reported as LOW.
+.PARAMETER CriticalPercent
+    Remaining-percent threshold at or below which a quota is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Report an informational concern when a quota resets within this many hours.
+.PARAMETER All
+    When supplied, prints the raw API response inline. Otherwise the raw
+    response stays in $Global:kimiLastQuery.
+.EXAMPLE
+    Get-KimiUsage
+.EXAMPLE
+    Get-KimiUsage -LowPercent 25 -CriticalPercent 10 -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param(
+        [string]$ApiKey = $env:KIMI_CODE_PLAN_API_KEY,
+        [string]$BaseUrl = $env:KIMI_CODE_BASE_URL,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 8,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 30,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 10,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$All
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        Write-Error 'KIMI_CODE_PLAN_API_KEY not set (env var or -ApiKey).'
+        return
+    }
+    if ($CriticalPercent -gt $LowPercent) {
+        Write-Error 'CriticalPercent must be less than or equal to LowPercent.'
+        return
+    }
+
+    $headers = @{
+        Accept        = 'application/json'
+        Authorization = "Bearer $ApiKey"
+    }
+    if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $BaseUrl = 'https://api.kimi.com/coding/v1' }
+    $usageUrl = $BaseUrl.TrimEnd('/') + '/usages'
+    try {
+        $resp = Invoke-RestMethod -Uri $usageUrl -Headers $headers -Method GET -TimeoutSec $TimeoutSec -ErrorAction Stop
+    } catch {
+        Write-Error "Kimi API call failed: $($_.Exception.Message)"
+        Write-Host "  Fallback: run '/usage' in Kimi Code CLI or check the Kimi Code Console." -ForegroundColor DarkGray
+        return
+    }
+
+    $Global:kimiLastQuery = $resp
+
+    $_ProfileHelpers.WriteSection('Raw API response (Kimi Code)')
+    if ($All) { $resp | ConvertTo-Json -Depth 8 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:kimiLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $_ProfileHelpers.WriteSection('Membership summary (Kimi Code)')
+    [pscustomobject]@{
+        Membership       = if ($resp.user -and $resp.user.membership) { $resp.user.membership.level } else { 'n/a' }
+        Subscription     = if ($resp.PSObject.Properties['subType']) { $resp.subType } else { 'n/a' }
+        Authentication   = if ($resp.authentication) { $resp.authentication.method } else { 'n/a' }
+        Parallel_Limit   = if ($resp.parallel) { $resp.parallel.limit } else { 'n/a' }
+    } | Format-Table -AutoSize | Out-Host
+
+    # Normalize weekly and rolling quota objects before formatting them together.
+    $quotaItems = New-Object System.Collections.Generic.List[object]
+    if ($resp.usage) {
+        $weeklyLabel = if ($resp.usage.name) { $resp.usage.name } elseif ($resp.usage.title) { $resp.usage.title } else { 'Weekly limit' }
+        $quotaItems.Add([pscustomobject]@{ Label = $weeklyLabel; Detail = $resp.usage })
+    }
+    $limitIndex = 0
+    foreach ($limitItem in @($resp.limits)) {
+        if (-not $limitItem) { continue }
+        $limitIndex++
+        $detail = if ($limitItem.detail) { $limitItem.detail } else { $limitItem }
+        $duration = if ($limitItem.window -and $null -ne $limitItem.window.duration) {
+            $limitItem.window.duration
+        } elseif ($null -ne $limitItem.duration) {
+            $limitItem.duration
+        } else {
+            $detail.duration
+        }
+        $unit = if ($limitItem.window -and $limitItem.window.timeUnit) {
+            [string]$limitItem.window.timeUnit
+        } elseif ($limitItem.timeUnit) {
+            [string]$limitItem.timeUnit
+        } else {
+            [string]$detail.timeUnit
+        }
+        $unitLabel = switch ($unit) {
+            'TIME_UNIT_MINUTE' { 'min' }
+            'TIME_UNIT_HOUR'   { 'h' }
+            'TIME_UNIT_DAY'    { 'd' }
+            default            { if ($unit) { $unit } else { 'window' } }
+        }
+        $label = if ($limitItem.name) {
+            [string]$limitItem.name
+        } elseif ($limitItem.title) {
+            [string]$limitItem.title
+        } elseif ($limitItem.scope) {
+            [string]$limitItem.scope
+        } elseif ($detail.name) {
+            [string]$detail.name
+        } elseif ($detail.title) {
+            [string]$detail.title
+        } elseif ($detail.scope) {
+            [string]$detail.scope
+        } elseif ($null -ne $duration) {
+            if ($unit -like '*MINUTE*' -and [double]$duration -ge 60 -and ([double]$duration % 60) -eq 0) {
+                '{0:N0}h limit' -f ([double]$duration / 60)
+            } else {
+                "$duration$unitLabel limit"
+            }
+        } else {
+            "Limit #$limitIndex"
+        }
+        $quotaItems.Add([pscustomobject]@{ Label = $label; Detail = $detail })
+    }
+
+    $_ProfileHelpers.WriteSection('Quota summary (Kimi Code)')
+    $rows = New-Object System.Collections.Generic.List[object]
+    $concerns = New-Object System.Collections.Generic.List[string]
+    foreach ($item in $quotaItems) {
+        $detail = $item.Detail
+        $limit = if ($detail -and $null -ne $detail.limit) { [double]$detail.limit } else { $null }
+        $used = if ($detail -and $null -ne $detail.used) { [double]$detail.used } else { $null }
+        $remaining = if ($detail -and $null -ne $detail.remaining) { [double]$detail.remaining } else { $null }
+        if ($null -eq $used -and $null -ne $limit -and $null -ne $remaining) { $used = $limit - $remaining }
+        if ($null -eq $remaining -and $null -ne $limit -and $null -ne $used) { $remaining = $limit - $used }
+        $remainingPercent = if ($null -ne $limit -and $limit -gt 0 -and $null -ne $remaining) { 100 * $remaining / $limit } else { $null }
+
+        $resetText = 'n/a'
+        $resetDelta = $null
+        $resetValue = $null
+        foreach ($resetKey in @('reset_at', 'resetAt', 'reset_time', 'resetTime')) {
+            if ($detail -and $detail.PSObject.Properties[$resetKey] -and $detail.$resetKey) {
+                $resetValue = [string]$detail.$resetKey
+                break
+            }
+        }
+        if ($resetValue) {
+            $resetDto = [DateTimeOffset]::MinValue
+            if ([DateTimeOffset]::TryParse($resetValue, [ref]$resetDto)) {
+                $resetLocal = $resetDto.ToLocalTime().LocalDateTime
+                $resetDelta = $resetLocal - (Get-Date)
+                if ($resetDelta.TotalSeconds -gt 0) {
+                    $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
+                } else {
+                    $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+                }
+            }
+        } else {
+            foreach ($relativeKey in @('reset_in', 'resetIn', 'ttl', 'window')) {
+                if ($detail -and $detail.PSObject.Properties[$relativeKey] -and $null -ne $detail.$relativeKey) {
+                    $relativeSeconds = 0L
+                    if ([long]::TryParse([string]$detail.$relativeKey, [ref]$relativeSeconds) -and $relativeSeconds -gt 0) {
+                        $resetDelta = [TimeSpan]::FromSeconds($relativeSeconds)
+                        $resetText = 'in {0}' -f ($_ProfileHelpers.FormatDuration($resetDelta))
+                        break
+                    }
+                }
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Window            = $item.Label
+            Used              = if ($null -ne $used) { $used } else { 'n/a' }
+            Limit             = if ($null -ne $limit) { $limit } else { 'n/a' }
+            Remaining         = if ($null -ne $remaining) { $remaining } else { 'n/a' }
+            Remaining_Percent = if ($null -ne $remainingPercent) { '{0:N1}%' -f $remainingPercent } else { 'n/a' }
+            Reset             = $resetText
+        })
+
+        if ($null -ne $remainingPercent) {
+            if ($remainingPercent -le $CriticalPercent) {
+                $concerns.Add(('[CRITICAL] {0}: only {1:N1}% remaining' -f $item.Label, $remainingPercent))
+            } elseif ($remainingPercent -le $LowPercent) {
+                $concerns.Add(('[LOW]      {0}: {1:N1}% remaining' -f $item.Label, $remainingPercent))
+            }
+        }
+        if ($null -ne $resetDelta -and $resetDelta.TotalSeconds -gt 0 -and $resetDelta.TotalHours -le $ResetWarnHours) {
+            $concerns.Add(('[INFO]     {0}: resets in {1}' -f $item.Label, ($_ProfileHelpers.FormatDuration($resetDelta))))
+        }
+    }
+    if ($rows.Count -gt 0) { $rows | Format-Table -AutoSize -Wrap | Out-Host }
+    else { Write-Host '  (no weekly or rolling quota data returned)' -ForegroundColor DarkGray }
+
+    if ($resp.totalQuota) {
+        $_ProfileHelpers.WriteSection('Aggregate quota (Kimi Code)')
+        [pscustomobject]@{
+            Limit     = if ($null -ne $resp.totalQuota.limit) { $resp.totalQuota.limit } else { 'n/a' }
+            Remaining = if ($null -ne $resp.totalQuota.remaining) { $resp.totalQuota.remaining } else { 'n/a' }
+        } | Format-Table -AutoSize | Out-Host
+    }
+
+    $_ProfileHelpers.WriteSection('Extra Usage (Kimi Code)')
+    $wallet = $resp.boosterWallet
+    if ($wallet -and $wallet.balance -and $wallet.balance.type -eq 'BOOSTER' -and [double]$wallet.balance.amount -gt 0) {
+        # Upstream stores balance amounts as fixed-point cents (1,000,000 units per cent).
+        $totalCentsRaw = [double]$wallet.balance.amount / 1000000
+        $leftCentsRaw = if ($null -ne $wallet.balance.amountLeft) { [double]$wallet.balance.amountLeft / 1000000 } else { 0 }
+        $totalCents = if ($totalCentsRaw -gt 0 -and $totalCentsRaw -lt 1) { 1 } else { [Math]::Round($totalCentsRaw) }
+        $leftCents = if ($leftCentsRaw -gt 0 -and $leftCentsRaw -lt 1) { 1 } else { [Math]::Round($leftCentsRaw) }
+        $monthlyLimitCents = if ($wallet.monthlyChargeLimit -and $null -ne $wallet.monthlyChargeLimit.priceInCents) { [double]$wallet.monthlyChargeLimit.priceInCents } else { 0 }
+        $monthlyUsedCents = if ($wallet.monthlyUsed -and $null -ne $wallet.monthlyUsed.priceInCents) { [double]$wallet.monthlyUsed.priceInCents } else { 0 }
+        $currency = if ($wallet.monthlyChargeLimit -and $wallet.monthlyChargeLimit.currency) {
+            [string]$wallet.monthlyChargeLimit.currency
+        } elseif ($wallet.monthlyUsed -and $wallet.monthlyUsed.currency) {
+            [string]$wallet.monthlyUsed.currency
+        } else {
+            'USD'
+        }
+        [pscustomobject]@{
+            Currency              = $currency
+            Balance               = '{0:N2}' -f ($leftCents / 100)
+            Total                 = '{0:N2}' -f ($totalCents / 100)
+            Monthly_Limit_Enabled = [bool]$wallet.monthlyChargeLimitEnabled
+            Monthly_Limit         = if ($monthlyLimitCents -gt 0) { '{0:N2}' -f ($monthlyLimitCents / 100) } else { 'unlimited' }
+            Monthly_Used          = '{0:N2}' -f ($monthlyUsedCents / 100)
+        } | Format-Table -AutoSize | Out-Host
+    } else {
+        Write-Host '  No Extra Usage wallet reported.' -ForegroundColor DarkGray
+    }
+
+    $_ProfileHelpers.WriteSection('Concerns (Kimi Code)')
+    if (-not $resp.usage) {
+        $concerns.Add('[WARN] No weekly quota data returned')
+    }
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) { Write-Host ('  - ' + $concern) -ForegroundColor Yellow }
+    }
+
+    return $resp
+}
+
+# --- QwenCloud Token Plan payload mapping -----------------------------------
+# Maps the private console gateway payload onto the quota windows the Token
+# Plan console reports. Split out of Get-QwenUsage so the mapping can be
+# exercised without the network, and so a change in the console's response
+# shape has a single place to be fixed. The JSON property helper it shares
+# with the other usage functions lives with them.
+
+# --- Get-QwenUsage ----------------------------------------------------------
+# Queries QwenCloud Token Plan's private console quota endpoint. The browser
+# session cookie is stored separately in Windows Credential Manager and is
+# never copied into an environment variable or returned with query results.
+
+function Get-QwenUsage {
+<#
+.SYNOPSIS
+    Queries QwenCloud Token Plan five-hour, seven-day, and monthly Credit usage.
+.DESCRIPTION
+    Retrieves a QwenCloud console Cookie header from Windows Credential Manager,
+    obtains a temporary console security token, and calls the Token Plan Personal
+    quota endpoint. On first use, displays browser DevTools capture instructions
+    and prompts for the Cookie using hidden input. A newly entered Cookie is saved
+    only after a successful quota query.
+.PARAMETER Setup
+    Forces the Cookie capture and validation flow, replacing the stored value only
+    when the new Cookie successfully queries quota.
+.PARAMETER TimeoutSec
+    HTTP timeout for each QwenCloud request.
+.PARAMETER LowPercent
+    Remaining-percent threshold at or below which a quota is reported as LOW.
+.PARAMETER CriticalPercent
+    Remaining-percent threshold at or below which a quota is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Reports an informational concern when a quota resets within this many hours.
+.PARAMETER All
+    Prints the raw quota response. Otherwise it remains in $Global:qwenLastQuery.
+.EXAMPLE
+    Get-QwenUsage
+.EXAMPLE
+    Get-QwenUsage -Setup
+.EXAMPLE
+    Get-QwenUsage -LowPercent 25 -CriticalPercent 10 -All
+.NOTES
+    The Cookie is sensitive and session-lived. If QwenCloud rejects a stored
+    session, rerun Get-QwenUsage -Setup to capture and validate a replacement.
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Setup,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 15,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 30,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 10,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$All,
+        [Parameter(DontShow = $true)]
+        [scriptblock]$QueryInvoker
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    $credentialResource = 'QWEN_TOKEN_PLAN_COOKIE'
+    $credentialUserName = 'qwencloud-cookie'
+    $consoleOrigin = 'https://home.qwencloud.com'
+    $dashboardUrl = "$consoleOrigin/billing/subscription/token-plan-individual"
+    $userInfoUrl = "$consoleOrigin/tool/user/info.json"
+    $gatewayAction = 'IntlBroadScopeAspnGateway'
+    $usageApi = 'zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage'
+    $usageUrl = "https://cs-data.qwencloud.com/data/api.json?product=sfm_bailian&action=$gatewayAction&api=$([Uri]::EscapeDataString($usageApi))"
+    $browserUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
+
+    # Read the Cookie directly from the per-user Credential Locker. It is
+    # deliberately not routed through GetAiApiKey or an environment variable.
+    function Get-StoredCookie {
+        [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+        $vault = New-Object Windows.Security.Credentials.PasswordVault
+        try {
+            $credential = $vault.Retrieve($credentialResource, $credentialUserName)
+            $credential.RetrievePassword()
+            return $credential.Password
+        } catch {
+            return $null
+        }
+    }
+
+    # Persist an already validated Cookie in the same Credential Locker used by
+    # the profile's API keys, but under a distinct resource and user name.
+    function Save-StoredCookie([string]$Cookie) {
+        [void][Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime]
+        $vault = New-Object Windows.Security.Credentials.PasswordVault
+        $credential = New-Object Windows.Security.Credentials.PasswordCredential(
+            $credentialResource,
+            $credentialUserName,
+            $Cookie
+        )
+        $vault.Add($credential)
+    }
+
+    # Prompt without echoing the Cookie, then normalize and reject malformed or
+    # multiline input before it can reach an HTTP header.
+    function Read-NewCookie {
+        Write-Host ''
+        Write-Host 'QwenCloud Token Plan Cookie setup' -ForegroundColor Cyan
+        Write-Host "  1. Sign in and open: $dashboardUrl"
+        Write-Host '  2. Open browser DevTools > Network and reload the page.'
+        Write-Host '  3. Filter for api.json, then inspect the api query parameter.'
+        Write-Host "  4. Select exactly: $usageApi" -ForegroundColor Yellow
+        Write-Host '     Do not select: zeldaEasy.bailian-telemetry.platform-model.getModelMonitorDataWithOss' -ForegroundColor DarkGray
+        Write-Host '  5. Copy the complete Request Headers > Cookie value.'
+        Write-Host ''
+
+        $secure = Read-Host -AsSecureString -Prompt 'Paste the complete Cookie header (input hidden; blank to cancel)'
+        if ($null -eq $secure -or $secure.Length -eq 0) { return $null }
+
+        $pointer = [IntPtr]::Zero
+        try {
+            $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+            $cookie = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+        } finally {
+            if ($pointer -ne [IntPtr]::Zero) {
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+            }
+        }
+
+        $cookie = ($cookie.Trim() -replace '^Cookie:\s*', '').Trim()
+        if (-not $cookie) { return $null }
+        if ($cookie -match '[\r\n]') {
+            throw 'The Cookie must be a single-line request-header value.'
+        }
+        $validPairs = @(
+            $cookie.Split(';') |
+                Where-Object { $_ -match '^\s*[^=;]+\s*=\s*.+$' }
+        )
+        if ($validPairs.Count -eq 0) {
+            throw 'The Cookie does not contain a complete name=value pair.'
+        }
+        return $cookie
+    }
+
+    # Execute both private console requests and return only the raw quota payload
+    # plus normalized limits. Cookie and secToken never leave this helper.
+    function Invoke-QwenCloudUsageQuery([string]$Cookie) {
+        function Send-JsonRequest(
+            [System.Net.Http.HttpClient]$Client,
+            [System.Net.Http.HttpRequestMessage]$Request,
+            [string]$Stage
+        ) {
+            $response = $null
+            try {
+                $response = $Client.SendAsync($Request).GetAwaiter().GetResult()
+                $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                $status = [int]$response.StatusCode
+                if ($status -in @(301, 302, 303, 307, 308, 401, 403)) {
+                    throw "[QwenAuth] $Stage rejected the console session (HTTP $status)."
+                }
+                if (-not $response.IsSuccessStatusCode) {
+                    throw "[QwenTransient] $Stage failed with HTTP $status $($response.ReasonPhrase)."
+                }
+                try {
+                    return $body | ConvertFrom-Json
+                } catch {
+                    throw "[QwenResponse] $Stage returned invalid JSON."
+                }
+            } finally {
+                if ($null -ne $response) { $response.Dispose() }
+                $Request.Dispose()
+            }
+        }
+
+        function Get-CookieValue([string]$Name) {
+            foreach ($segment in $Cookie.Split(';')) {
+                $separator = $segment.IndexOf('=')
+                if ($separator -lt 0 -or $segment.Substring(0, $separator).Trim() -cne $Name) { continue }
+                $value = $segment.Substring($separator + 1).Trim()
+                if ($value) { return $value }
+            }
+            return $null
+        }
+
+        Add-Type -AssemblyName System.Net.Http
+        $handler = New-Object System.Net.Http.HttpClientHandler
+        $handler.AllowAutoRedirect = $false
+        # Automatic cookie management replaces a manually supplied Cookie header
+        # with the handler's empty CookieContainer, producing ConsoleNeedLogin.
+        $handler.UseCookies = $false
+        $client = New-Object System.Net.Http.HttpClient($handler)
+        $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
+
+        try {
+            $userRequest = New-Object System.Net.Http.HttpRequestMessage(
+                [System.Net.Http.HttpMethod]::Get,
+                $userInfoUrl
+            )
+            [void]$userRequest.Headers.TryAddWithoutValidation('Accept', 'application/json, text/plain, */*')
+            [void]$userRequest.Headers.TryAddWithoutValidation('Cookie', $Cookie)
+            [void]$userRequest.Headers.TryAddWithoutValidation('Referer', "$consoleOrigin/")
+            [void]$userRequest.Headers.TryAddWithoutValidation('User-Agent', $browserUserAgent)
+            $userPayload = Send-JsonRequest $client $userRequest 'QwenCloud session lookup'
+            $userData = $_ProfileHelpers.GetAiUsageJsonProperty($userPayload, 'data')
+            $secToken = $_ProfileHelpers.GetAiUsageJsonProperty($userData, 'secToken')
+            $errorCode = [string]($_ProfileHelpers.GetAiUsageJsonProperty($userPayload, 'code'))
+            if ($errorCode -eq 'ConsoleNeedLogin' -or $secToken -isnot [string] -or -not $secToken) {
+                throw '[QwenAuth] QwenCloud requires a fresh console login.'
+            }
+
+            $cornerstoneParam = [ordered]@{
+                domain      = 'home.qwencloud.com'
+                consoleSite = 'QWENCLOUD'
+                console     = 'ONE_CONSOLE'
+                xsp_lang    = 'en-US'
+                protocol    = 'V2'
+                productCode = 'p_efm'
+            }
+            $requestParams = [ordered]@{
+                Api  = $usageApi
+                Data = @{ cornerstoneParam = $cornerstoneParam }
+                V    = '1.0'
+            } | ConvertTo-Json -Depth 6 -Compress
+            $form = New-Object 'System.Collections.Generic.Dictionary[string,string]'
+            $form.Add('product', 'sfm_bailian')
+            $form.Add('action', $gatewayAction)
+            $form.Add('region', 'ap-southeast-1')
+            $form.Add('sec_token', $secToken)
+            $form.Add('params', $requestParams)
+
+            $usageRequest = New-Object System.Net.Http.HttpRequestMessage(
+                [System.Net.Http.HttpMethod]::Post,
+                $usageUrl
+            )
+            $usageRequest.Content = New-Object System.Net.Http.FormUrlEncodedContent($form)
+            [void]$usageRequest.Headers.TryAddWithoutValidation('Accept', 'application/json, text/plain, */*')
+            [void]$usageRequest.Headers.TryAddWithoutValidation('Cookie', $Cookie)
+            [void]$usageRequest.Headers.TryAddWithoutValidation('Origin', $consoleOrigin)
+            [void]$usageRequest.Headers.TryAddWithoutValidation('Referer', $dashboardUrl)
+            [void]$usageRequest.Headers.TryAddWithoutValidation('User-Agent', $browserUserAgent)
+            [void]$usageRequest.Headers.TryAddWithoutValidation('X-Requested-With', 'XMLHttpRequest')
+            $csrf = Get-CookieValue 'login_aliyunid_csrf'
+            if (-not $csrf) { $csrf = Get-CookieValue 'csrf' }
+            if ($csrf) {
+                [void]$usageRequest.Headers.TryAddWithoutValidation('x-xsrf-token', $csrf)
+                [void]$usageRequest.Headers.TryAddWithoutValidation('x-csrf-token', $csrf)
+            }
+
+            $payload = Send-JsonRequest $client $usageRequest 'QwenCloud usage lookup'
+            return $_ProfileHelpers.ConvertFromQwenCloudUsagePayload($payload)
+        } catch [System.Threading.Tasks.TaskCanceledException] {
+            throw '[QwenTransient] QwenCloud usage query timed out.'
+        } catch [System.Net.Http.HttpRequestException] {
+            throw "[QwenTransient] QwenCloud usage query failed: $($_.Exception.Message)"
+        } finally {
+            $client.Dispose()
+            $handler.Dispose()
+            $secToken = $null
+        }
+    }
+
+    if ($CriticalPercent -gt $LowPercent) {
+        Write-Error 'CriticalPercent must be less than or equal to LowPercent.'
+        return
+    }
+
+    $newCookie = $false
+    $cookie = if ($Setup) { $null } else { Get-StoredCookie }
+    if (-not $cookie) {
+        if (-not $Setup) {
+            Write-Host 'No stored QwenCloud Cookie was found; starting setup.' -ForegroundColor Yellow
+        }
+        try {
+            $cookie = Read-NewCookie
+        } catch {
+            Write-Error $_.Exception.Message
+            return
+        }
+        if (-not $cookie) {
+            Write-Host 'QwenCloud Cookie setup cancelled; no credential was changed.' -ForegroundColor Yellow
+            return
+        }
+        $newCookie = $true
+    }
+
+    try {
+        $query = if ($QueryInvoker) {
+            & $QueryInvoker $cookie
+        } else {
+            Invoke-QwenCloudUsageQuery $cookie
+        }
+    } catch {
+        $message = $_.Exception.Message
+        if ($message.StartsWith('[QwenAuth]', [StringComparison]::Ordinal)) {
+            $prefix = if ($newCookie) { 'The entered QwenCloud Cookie was rejected and was not saved.' } else { 'The stored QwenCloud Cookie is invalid or expired.' }
+            Write-Error "$prefix Run: Get-QwenUsage -Setup"
+        } elseif ($message.StartsWith('[QwenTransient]', [StringComparison]::Ordinal)) {
+            Write-Error "$($message.Substring('[QwenTransient]'.Length).Trim()) The stored Cookie was retained."
+        } else {
+            Write-Error $message
+        }
+        $cookie = $null
+        return
+    }
+
+    if ($newCookie) {
+        try {
+            Save-StoredCookie $cookie
+            Write-Host 'Validated and saved the QwenCloud Cookie in Windows Credential Manager.' -ForegroundColor Green
+        } catch {
+            Write-Error "Quota query succeeded, but the Cookie could not be saved: $($_.Exception.Message)"
+            $cookie = $null
+            return
+        }
+    }
+    $cookie = $null
+
+    $Global:qwenLastQuery = $query.Raw
+    $_ProfileHelpers.WriteSection('Raw API response (QwenCloud Token Plan)')
+    if ($All) { $query.Raw | ConvertTo-Json -Depth 10 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:qwenLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $_ProfileHelpers.WriteSection('Quota summary (QwenCloud Token Plan)')
+    $rows = New-Object System.Collections.Generic.List[object]
+    $concerns = New-Object System.Collections.Generic.List[string]
+    $now = [DateTimeOffset]::Now
+    foreach ($limit in @($query.Limits)) {
+        $usedPercent = [Math]::Max(0.0, [Math]::Min(100.0, [double]$limit.UsedPercent))
+        $remainingPercent = 100 - $usedPercent
+        $status = if ($usedPercent -ge 100) {
+            'EXHAUSTED'
+        } elseif ($remainingPercent -le $CriticalPercent) {
+            'CRITICAL'
+        } elseif ($remainingPercent -le $LowPercent) {
+            'LOW'
+        } else {
+            'OK'
+        }
+
+        $resetText = 'n/a'
+        if ($limit.ResetAt -is [DateTimeOffset]) {
+            $resetLocal = $limit.ResetAt.ToLocalTime()
+            $delta = $resetLocal - $now
+            if ($delta.TotalSeconds -gt 0) {
+                $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($delta))
+                if ($delta.TotalHours -le $ResetWarnHours) {
+                    $concerns.Add(('[INFO] {0}: resets in {1}' -f $limit.Window, ($_ProfileHelpers.FormatDuration($delta))))
+                }
+            } else {
+                $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Window    = $limit.Window
+            Used      = '{0:N1}%' -f $usedPercent
+            Remaining = '{0:N1}%' -f $remainingPercent
+            Status    = $status
+            Reset     = $resetText
+        })
+        if ($status -ne 'OK') {
+            $concerns.Add(('[{0}] {1}: {2:N1}% remaining' -f $status, $limit.Window, $remainingPercent))
+        }
+    }
+    $rows | Format-Table -AutoSize -Wrap | Out-Host
+
+    $_ProfileHelpers.WriteSection('Concerns (QwenCloud Token Plan)')
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) { Write-Host ('  - ' + $concern) -ForegroundColor Yellow }
+    }
+
+    return $query.Raw
+}
+
+# --- Get-AgyUsage ----------------------------------------------------------
+# Queries Antigravity's private cloudcode-pa retrieveUserQuotaSummary API endpoint.
+# Extracts generic credentials from Windows Credential Manager under 'gemini:antigravity'.
+# Stashes the parsed response in $Global:agyLastQuery and returns it.
+
+function Get-AgyUsage {
+<#
+.SYNOPSIS
+    Queries Google Antigravity CLI model quotas and remaining requests.
+.DESCRIPTION
+    Retrieves the active Google OAuth token for "gemini:antigravity" from the Windows
+    Credential Manager using Win32 CredRead, reads the active project from the Antigravity cache,
+    and calls the private cloudcode-pa retrieveUserQuotaSummary API endpoint. Reports remaining fraction,
+    limit status, and reset times for each Gemini model.
+.PARAMETER Project
+    Google Cloud Project ID. Defaults to the value cached in ~/.gemini/antigravity-cli/cache/default_project_id.txt.
+.PARAMETER TimeoutSec
+    HTTP request timeout in seconds. Defaults to 8.
+.PARAMETER All
+    When supplied, prints the raw API response inline. Otherwise, the raw response is stored in $Global:agyLastQuery.
+.EXAMPLE
+    Get-AgyUsage
+.EXAMPLE
+    Get-AgyUsage -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param(
+        [string]$Project,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 8,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 30,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 10,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$All
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    if ($CriticalPercent -gt $LowPercent) {
+        Write-Error 'CriticalPercent must be less than or equal to LowPercent.'
+        return
+    }
+
+    # 1. Define C# type for CredRead if not already loaded in the session
+    if (-not ([System.Management.Automation.PSTypeName]'AgyCredentialHelper').Type) {
+        $code = @"
+        using System;
+        using System.Runtime.InteropServices;
+        using System.Text;
+
+        public class AgyCredentialHelper {
+            [DllImport("advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
+            public static extern bool CredRead(string target, uint type, int reserved, out IntPtr credentialPtr);
+            
+            [DllImport("advapi32.dll", EntryPoint = "CredFree", SetLastError = true)]
+            public static extern void CredFree(IntPtr credentialPtr);
+            
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+            public struct CREDENTIAL {
+                public uint Flags;
+                public uint Type;
+                public string TargetName;
+                public string Comment;
+                public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+                public uint CredentialBlobSize;
+                public IntPtr CredentialBlob;
+                public uint Persist;
+                public uint AttributeCount;
+                public IntPtr Attributes;
+                public string TargetAlias;
+                public string UserName;
+            }
+            
+            public static string GetSecret(string target) {
+                IntPtr credPtr;
+                if (CredRead(target, 1, 0, out credPtr)) {
+                    try {
+                        CREDENTIAL cred = (CREDENTIAL)Marshal.PtrToStructure(credPtr, typeof(CREDENTIAL));
+                        if (cred.CredentialBlobSize > 0) {
+                            byte[] blob = new byte[cred.CredentialBlobSize];
+                            Marshal.Copy(cred.CredentialBlob, blob, 0, (int)cred.CredentialBlobSize);
+                            return Encoding.UTF8.GetString(blob);
+                        }
+                    } finally {
+                        CredFree(credPtr);
+                    }
+                }
+                return null;
+            }
+        }
+"@
+        Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
+    }
+
+    # 2. Extract token from the Windows Credential Manager keyring
+    $secretRaw = [AgyCredentialHelper]::GetSecret("gemini:antigravity")
+    if (-not $secretRaw) {
+        Write-Error "Failed to retrieve Antigravity credentials from Windows Credential Manager."
+        Write-Host "Ensure that agy is logged in and active." -ForegroundColor Yellow
+        return
+    }
+
+    $secretJson = $null
+    try {
+        $secretJson = ConvertFrom-Json $secretRaw
+    } catch {
+        Write-Error "Failed to parse keyring secret JSON."
+        return
+    }
+
+    $accessToken = $secretJson.token.access_token
+    if (-not $accessToken) {
+        Write-Error "No access_token found in Antigravity credentials."
+        return
+    }
+
+    # 3. Resolve Project ID
+    if ([string]::IsNullOrWhiteSpace($Project)) {
+        $projectFile = "$env:USERPROFILE\.gemini\antigravity-cli\cache\default_project_id.txt"
+        if (Test-Path $projectFile) {
+            $Project = (Get-Content $projectFile).Trim()
+        } else {
+            $Project = "default-cli-project"
+        }
+    }
+
+    # 4. Invoke Quota Summary endpoints with fallback
+    $headers = @{
+        "Authorization" = "Bearer $accessToken"
+        "Content-Type"  = "application/json"
+        "User-Agent"    = "vscode/1.X.X (Antigravity/4.3.0)"
+    }
+    $body = @{ "project" = $Project } | ConvertTo-Json
+
+    $endpoints = @(
+        "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+        "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
+    )
+
+    $resp = $null
+    $success = $false
+    foreach ($url in $endpoints) {
+        try {
+            $resp = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -TimeoutSec $TimeoutSec -ErrorAction Stop
+            $success = $true
+            break
+        } catch {
+            # Fallback to the next endpoint
+        }
+    }
+
+    if (-not $success) {
+        Write-Error "Antigravity retrieveUserQuotaSummary API call failed on all endpoints."
+        return
+    }
+
+    $Global:agyLastQuery = $resp
+
+    $_ProfileHelpers.WriteSection('Raw API response (Antigravity)')
+    if ($All) { 
+        $resp | ConvertTo-Json -Depth 8 | Out-Host 
+    } else { 
+        Write-Host '  (suppressed; stored in $Global:agyLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray 
+    }
+
+    $_ProfileHelpers.WriteSection('Antigravity Grouped Quota Status')
+
+    $concerns = New-Object System.Collections.Generic.List[string]
+
+    foreach ($group in $resp.groups) {
+        $groupDesc = if ($group.description) { " ($($group.description))" } else { "" }
+        Write-Host "  * Group: $($group.displayName)$groupDesc" -ForegroundColor Cyan
+        
+        $rows = New-Object System.Collections.Generic.List[object]
+        foreach ($bucket in $group.buckets) {
+            $percentVal = [double]($bucket.remainingFraction * 100)
+            
+            $statusText = 'Quota available'
+            if ($percentVal -lt 100.0) {
+                if ($bucket.resetTime) {
+                    $resetDto = [DateTimeOffset]::MinValue
+                    if ([DateTimeOffset]::TryParse($bucket.resetTime, [ref]$resetDto)) {
+                        $resetLocal = $resetDto.ToLocalTime().LocalDateTime
+                        $resetDelta = $resetLocal - (Get-Date)
+                        if ($resetDelta.TotalSeconds -gt 0) {
+                            $h = [math]::Floor($resetDelta.TotalHours)
+                            $m = $resetDelta.Minutes
+                            $statusText = 'Refreshes in {0}h {1}m' -f $h, $m
+                        } else {
+                            $statusText = 'Reset due'
+                        }
+                    }
+                }
+            }
+
+            $resetLocalStr = 'n/a'
+            if ($bucket.resetTime) {
+                $resetDto = [DateTimeOffset]::MinValue
+                if ([DateTimeOffset]::TryParse($bucket.resetTime, [ref]$resetDto)) {
+                    $resetLocalStr = $resetDto.ToLocalTime().LocalDateTime.ToString('yyyy-MM-dd HH:mm')
+                }
+            }
+
+            $rows.Add([pscustomobject]@{
+                Window      = $bucket.window
+                Limit_Name  = $bucket.displayName
+                Remaining   = '{0:N2}%' -f $percentVal
+                Status      = $statusText
+                Reset_Local = $resetLocalStr
+            })
+
+            # Check concerns thresholds
+            if ($percentVal -le $CriticalPercent) {
+                $concerns.Add(("[CRITICAL] {0} ({1}): only {2:N2}% remaining" -f $group.displayName, $bucket.displayName, $percentVal))
+            } elseif ($percentVal -le $LowPercent) {
+                $concerns.Add(("[LOW]      {0} ({1}): {2:N2}% remaining" -f $group.displayName, $bucket.displayName, $percentVal))
+            }
+
+            # Check reset time proximity warnings
+            if ($bucket.resetTime) {
+                $resetDto = [DateTimeOffset]::MinValue
+                if ([DateTimeOffset]::TryParse($bucket.resetTime, [ref]$resetDto)) {
+                    $resetLocal = $resetDto.ToLocalTime().LocalDateTime
+                    $resetDelta = $resetLocal - (Get-Date)
+                    if ($resetDelta.TotalSeconds -gt 0 -and $resetDelta.TotalHours -le $ResetWarnHours) {
+                        $concerns.Add(("[INFO]     {0} ({1}): resets in {2}" -f $group.displayName, $bucket.displayName, ($_ProfileHelpers.FormatDuration($resetDelta))))
+                    }
+                }
+            }
+        }
+        $rows | Format-Table -AutoSize | Out-Host
+    }
+
+    $_ProfileHelpers.WriteSection('Concerns (Antigravity)')
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) {
+            if ($concern -like '*CRITICAL*') {
+                Write-Host ('  - ' + $concern) -ForegroundColor Red
+            } elseif ($concern -like '*LOW*') {
+                Write-Host ('  - ' + $concern) -ForegroundColor Yellow
+            } else {
+                Write-Host ('  - ' + $concern) -ForegroundColor Gray
+            }
+        }
+    }
+
+    return $resp
+}
+
+# --- Get-OpencodeGoUsage ---------------------------------------------------
+# Queries OpenCode Go's usage-window API with the workspace API key issued by
+# the OpenCode Console. Percentages are USED percent, so higher is worse.
+# Stashes the parsed response in $Global:opencodeGoLastQuery and returns it.
+
+function Get-OpencodeGoUsage {
+    <#
+.SYNOPSIS
+    Queries OpenCode Go subscription usage windows (rolling, weekly, monthly).
+.DESCRIPTION
+    Calls https://opencode.ai/zen/go/v1/usage with a workspace API key.
+    An explicit -ApiKey takes precedence. Otherwise GetAiApiKey resolves
+    OPENCODE_GO_API_KEY from the process environment, Windows Credential Manager,
+    then legacy User environment variables. If unavailable, falls back to
+    $env:OPENCODE_API_KEY, then the "opencode-go" entry in the OpenCode CLI
+    auth store (auth.json).
+    Save the Go key with Set-AiApiKeysCS. Load-AiApiKeysFromCS loads it into
+    the current process and runs automatically when the profile starts.
+    Reports the upstream status, used percent, and local reset time for each
+    window.
+
+    Percentages are USED percent, so higher is worse. OpenCode documents the
+    allowances as a 5-hour window worth 20% of the monthly limit, a weekly
+    window worth 50%, and the monthly window itself at 100%. The upstream
+    'rate-limited' status is reported as CRITICAL regardless of percent.
+
+    Stores the parsed response in $Global:opencodeGoLastQuery and returns it.
+.PARAMETER ApiKey
+    OpenCode Go workspace API key. When omitted, uses GetAiApiKey for
+    OPENCODE_GO_API_KEY, then $env:OPENCODE_API_KEY (shared with the Zen
+    provider), then the OpenCode CLI auth store. Save the Go key with Set-AiApiKeysCS.
+.PARAMETER TimeoutSec
+    HTTP request timeout in seconds. Defaults to 15.
+.PARAMETER LowPercent
+    Used-percent threshold at or above which a window is reported as LOW.
+.PARAMETER CriticalPercent
+    Used-percent threshold at or above which a window is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Report an informational concern when a window resets within this many hours.
+.PARAMETER All
+    When supplied, prints the raw API response inline. Otherwise the raw
+    response stays in $Global:opencodeGoLastQuery.
+.EXAMPLE
+    Get-OpencodeGoUsage
+.EXAMPLE
+    Get-OpencodeGoUsage -LowPercent 60 -CriticalPercent 85 -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+    Requires an active Go or Go Plus subscription; the API returns HTTP 403
+    otherwise. Upstream does not expose the credit balance on this endpoint
+    (anomalyco/opencode#44189), so only the three usage windows are reported.
+#>
+    [CmdletBinding()]
+    param(
+        [string]$ApiKey,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 15,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 80,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 95,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$All,
+        [Parameter(DontShow = $true)]
+        [scriptblock]$QueryInvoker
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    # These are used-percent thresholds, so the critical level sits above the low
+    # level (the opposite ordering from the remaining-percent providers).
+    if ($CriticalPercent -lt $LowPercent) {
+        Write-Error 'CriticalPercent must be greater than or equal to LowPercent.'
+        return
+    }
+
+    # Reuse the profile's credential lookup so a newly saved Go key works even
+    # before Load-AiApiKeysFromCS runs. Keep the shared Zen key as a fallback.
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) { $ApiKey = $_ProfileHelpers.GetAiApiKey('OPENCODE_GO_API_KEY') }
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) { $ApiKey = $env:OPENCODE_API_KEY }
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        $authFile = if ($env:XDG_DATA_HOME) {
+            Join-Path $env:XDG_DATA_HOME 'opencode\auth.json'
+        } else {
+            Join-Path $HOME '.local\share\opencode\auth.json'
+        }
+        if (Test-Path -LiteralPath $authFile) {
+            try {
+                $entry = (Get-Content -LiteralPath $authFile -Raw | ConvertFrom-Json).'opencode-go'
+                if ($entry -and $entry.type -eq 'api' -and $entry.key) { $ApiKey = [string]$entry.key }
+            } catch {
+                Write-Host ("  Could not read the OpenCode auth store: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        Write-Error 'No OpenCode Go API key found. Save OPENCODE_GO_API_KEY with Set-AiApiKeysCS, run /connect in OpenCode, or set OPENCODE_GO_API_KEY / OPENCODE_API_KEY; keys are issued at https://opencode.ai/auth.'
+        return
+    }
+
+    # Translate the documented HTTP failures into tagged messages so the caller
+    # can tell a bad key from a missing subscription from a transient fault.
+    function Invoke-OpencodeGoUsageQuery([string]$Key) {
+        try {
+            return Invoke-RestMethod -Uri 'https://opencode.ai/zen/go/v1/usage' -Headers @{ Authorization = "Bearer $Key"; Accept = 'application/json' } -Method GET -TimeoutSec $TimeoutSec -ErrorAction Stop
+        } catch [System.Threading.Tasks.TaskCanceledException] {
+            throw '[GoTransient] The OpenCode Go usage query timed out.'
+        } catch {
+            $status = $null
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                $status = [int]$_.Exception.Response.StatusCode
+            }
+            if ($status -eq 401) {
+                throw '[GoAuth] OpenCode Go rejected the API key. Get a fresh key from https://opencode.ai/auth. To replace a saved Go key, run Set-AiApiKeysCS -Force, then Load-AiApiKeysFromCS. If using -ApiKey, OPENCODE_API_KEY, or /connect credentials, update that source instead.'
+            }
+            if ($status -eq 403) {
+                throw '[GoSubscription] An OpenCode Go subscription is required for this key.'
+            }
+            if ($null -ne $status) {
+                throw ("[GoTransient] The OpenCode Go usage query failed with HTTP {0}." -f $status)
+            }
+            throw ("[GoTransient] The OpenCode Go usage query failed: {0}" -f $_.Exception.Message)
+        }
+    }
+
+    try {
+        $resp = if ($QueryInvoker) { & $QueryInvoker $ApiKey } else { Invoke-OpencodeGoUsageQuery $ApiKey }
+    } catch {
+        Write-Error $_.Exception.Message
+        return
+    }
+
+    # Defensive: an intermediary can return HTTP 200 with an error envelope.
+    if ($null -eq $resp -or ($resp.PSObject.Properties['type'] -and $resp.type -eq 'error')) {
+        Write-Error 'OpenCode Go returned no usage payload.'
+        return
+    }
+
+    $Global:opencodeGoLastQuery = $resp
+
+    $_ProfileHelpers.WriteSection('Raw API response (OpenCode Go)')
+    if ($All) { $resp | ConvertTo-Json -Depth 8 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:opencodeGoLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $usage = if ($resp.PSObject.Properties['usage'] -and $resp.usage) { $resp.usage } else { $resp }
+
+    $_ProfileHelpers.WriteSection('Usage summary (OpenCode Go)')
+    $windowNames = [ordered]@{ Rolling = 'Rolling'; Weekly = 'Weekly'; Monthly = 'Monthly' }
+    $rows = New-Object System.Collections.Generic.List[object]
+    $concerns = New-Object System.Collections.Generic.List[string]
+    $now = Get-Date
+    foreach ($key in $windowNames.Keys) {
+        $window = $usage.$key
+        if ($null -eq $window) { continue }
+        $label = $windowNames[$key]
+
+        # percent arrives as a JSON number; parse tolerantly in case it is a string.
+        $percent = $null
+        if ($null -ne $window.percent) {
+            $parsed = 0.0
+            if ([double]::TryParse([string]$window.percent, [ref]$parsed)) { $percent = $parsed }
+        }
+        $status = if ($window.status) { [string]$window.status } else { 'unknown' }
+
+        $resetText = 'n/a'
+        $resetDelta = $null
+        if ($window.resetsAt) {
+            $resetDto = [DateTimeOffset]::MinValue
+            if ([DateTimeOffset]::TryParse([string]$window.resetsAt, [ref]$resetDto)) {
+                $resetLocal = $resetDto.ToLocalTime().LocalDateTime
+                $resetDelta = $resetLocal - $now
+                if ($resetDelta.TotalSeconds -gt 0) {
+                    $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($resetDelta))
+                } else {
+                    $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+                }
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Window = $label
+            Status = $status
+            Used   = if ($null -ne $percent) { '{0:N1}%' -f $percent } else { 'n/a' }
+            Resets = $resetText
+        })
+
+        if ($status -eq 'rate-limited') {
+            $concerns.Add(('[CRITICAL] {0}: upstream reports rate-limited' -f $label))
+        } elseif ($null -ne $percent) {
+            if ($percent -ge $CriticalPercent) {
+                $concerns.Add(('[CRITICAL] {0}: {1:N1}% used (>= {2}%)' -f $label, $percent, $CriticalPercent))
+            } elseif ($percent -ge $LowPercent) {
+                $concerns.Add(('[LOW]      {0}: {1:N1}% used (>= {2}%)' -f $label, $percent, $LowPercent))
+            }
+        }
+        if ($null -ne $resetDelta -and $resetDelta.TotalSeconds -gt 0 -and $resetDelta.TotalHours -le $ResetWarnHours) {
+            $concerns.Add(('[INFO]     {0}: resets in {1}' -f $label, ($_ProfileHelpers.FormatDuration($resetDelta))))
+        }
+    }
+    if ($rows.Count -gt 0) { $rows | Format-Table -AutoSize -Wrap | Out-Host }
+    else { Write-Host '  (no usage windows returned)' -ForegroundColor DarkGray }
+
+    $_ProfileHelpers.WriteSection('Concerns (OpenCode Go)')
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) { Write-Host ('  - ' + $concern) -ForegroundColor Yellow }
+    }
+
+    return $resp
+}
+
+# --- Shared helpers for the Claude and Codex usage queries ------------------
+# Both providers expose subscription quota only through private endpoints that
+# their own CLIs call, and both CLIs keep an OAuth token on disk. These helpers
+# read those tokens, speak to the endpoints, and map the responses onto the
+# same window rows the other Get-*Usage functions report.
+
+function Get-CodexUsage {
+    <#
+.SYNOPSIS
+    Queries the Codex (ChatGPT plan) rate-limit windows and credit balance.
+.DESCRIPTION
+    Reads the ChatGPT OAuth token that the Codex CLI stores in
+    %USERPROFILE%\.codex\auth.json (or $CODEX_HOME\auth.json) and calls
+    https://chatgpt.com/backend-api/wham/usage, the endpoint the Codex CLI
+    itself uses. Reports the used percent and reset time of every rate-limit
+    window the account has, plus the credit balance and the workspace spend
+    limit when the backend returns them.
+
+    The window a response slot belongs to is decided by its
+    limit_window_seconds, never by its position: a Team plan reports the
+    weekly window in primary_window and leaves secondary_window null, and
+    OpenAI has both added and removed the short window without notice.
+
+    The percentages are used percent, so higher is worse.
+
+    A Codex access token lasts about an hour. When the stored token has
+    expired the refresh token is used to obtain a new one; the rotated pair is
+    written back to auth.json so the Codex CLI keeps working, but only when
+    the stored refresh token still matches the one that was used.
+.PARAMETER AccessToken
+    ChatGPT OAuth access token. When omitted, the token is read from the
+    Codex CLI auth store, then from $env:CODEX_ACCESS_TOKEN.
+.PARAMETER AccountId
+    ChatGPT account id sent in the ChatGPT-Account-Id header. When omitted,
+    it is read from the auth store, then from the account id claim of the
+    stored id token.
+.PARAMETER TimeoutSec
+    HTTP request timeout in seconds. Defaults to 15.
+.PARAMETER LowPercent
+    Used-percent threshold at or above which a window is reported as LOW.
+.PARAMETER CriticalPercent
+    Used-percent threshold at or above which a window is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Reports an informational concern when a window resets within this many hours.
+.PARAMETER Strict
+    Requires a trusted server certificate. Without it the query accepts the
+    certificate an inspection proxy presents, which a corporate network may
+    re-sign.
+.PARAMETER All
+    Prints the raw API response inline. Otherwise the raw response stays in
+    $Global:codexLastQuery.
+.EXAMPLE
+    Get-CodexUsage
+.EXAMPLE
+    Get-CodexUsage -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+    The endpoint is private and undocumented; its shape is pinned by the Codex
+    CLI's own test suite, not by a published contract.
+#>
+    [CmdletBinding()]
+    param(
+        [string]$AccessToken,
+        [string]$AccountId,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 15,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 80,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 95,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$Strict,
+        [switch]$All,
+        [Parameter(DontShow = $true)]
+        [scriptblock]$QueryInvoker
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    # These are used-percent thresholds, so the critical level sits above the
+    # low level (the opposite ordering from the remaining-percent providers).
+    if ($CriticalPercent -lt $LowPercent) {
+        Write-Error 'CriticalPercent must be greater than or equal to LowPercent.'
+        return
+    }
+
+    $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+    $authPath = Join-Path $codexHome 'auth.json'
+    $auth = $null
+    if (Test-Path -LiteralPath $authPath) {
+        try {
+            $auth = Get-Content -LiteralPath $authPath -Raw | ConvertFrom-Json
+        } catch {
+            Write-Host ("  Could not read the Codex auth store: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray
+        }
+    }
+
+    $refreshToken = $null
+    if ($auth -and $auth.tokens) {
+        if ([string]::IsNullOrWhiteSpace($AccessToken) -and $auth.tokens.access_token) {
+            $AccessToken = [string]$auth.tokens.access_token
+        }
+        if ([string]::IsNullOrWhiteSpace($AccountId) -and $auth.tokens.account_id) {
+            $AccountId = [string]$auth.tokens.account_id
+        }
+        if ($auth.tokens.refresh_token) { $refreshToken = [string]$auth.tokens.refresh_token }
+    }
+    if ([string]::IsNullOrWhiteSpace($AccessToken) -and $env:CODEX_ACCESS_TOKEN) {
+        $AccessToken = [string]$env:CODEX_ACCESS_TOKEN
+    }
+    if ([string]::IsNullOrWhiteSpace($AccountId) -and $auth -and $auth.tokens -and $auth.tokens.id_token) {
+        $claims = $_ProfileHelpers.GetAiUsageJwtClaims(([string]$auth.tokens.id_token))
+        $namespace = $_ProfileHelpers.GetAiUsageJsonProperty($claims, 'https://api.openai.com/auth')
+        if ($namespace -and $namespace.chatgpt_account_id) {
+            $AccountId = [string]$namespace.chatgpt_account_id
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($AccessToken)) {
+        Write-Error ("No Codex access token found in {0} or `$env:CODEX_ACCESS_TOKEN. Run ""codex login"" to sign in to ChatGPT, then retry; or pass -AccessToken." -f $authPath)
+        return
+    }
+
+    function Invoke-CodexUsageQuery([string]$Token, [string]$Account) {
+        $session = $_ProfileHelpers.NewAiUsageHttpSession($TimeoutSec, $false)
+        try {
+            $request = New-Object System.Net.Http.HttpRequestMessage(
+                [System.Net.Http.HttpMethod]::Get,
+                'https://chatgpt.com/backend-api/wham/usage'
+            )
+            [void]$request.Headers.TryAddWithoutValidation('Authorization', "Bearer $Token")
+            [void]$request.Headers.TryAddWithoutValidation('Accept', 'application/json')
+            [void]$request.Headers.TryAddWithoutValidation('User-Agent', 'codex_cli_rs/0.164.0 (windows; x86_64)')
+            if ($Account) { [void]$request.Headers.TryAddWithoutValidation('ChatGPT-Account-Id', $Account) }
+            $response = $session.Client.SendAsync($request).GetAwaiter().GetResult()
+            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $status = [int]$response.StatusCode
+            if ($status -ne 200) {
+                $detail = ''
+                try {
+                    $parsed = $body | ConvertFrom-Json
+                    $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'detail'))
+                    if (-not $detail) {
+                        $error = $_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'error')
+                        $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($error, 'message'))
+                    }
+                } catch {
+                    $detail = $body
+                }
+                if ($status -eq 401) {
+                    throw "[CodexAuth] ChatGPT rejected the Codex session token ($detail). Run ""codex login"" to sign in again."
+                }
+                if ($status -eq 403) {
+                    throw "[CodexAuth] ChatGPT refused the usage request for this account ($detail). A Business workspace needs its own account id."
+                }
+                if ($status -eq 404) {
+                    throw "[CodexResponse] The Codex usage endpoint was not found ($detail). The ChatGPT base URL may have changed, or chatgpt_base_url in config.toml points elsewhere."
+                }
+                if ($status -eq 429) {
+                    throw "[CodexTransient] The Codex usage endpoint is rate limiting this session ($detail)."
+                }
+                throw "[CodexTransient] The Codex usage query failed with HTTP $status ($detail)."
+            }
+            return $body | ConvertFrom-Json
+        } catch [System.Threading.Tasks.TaskCanceledException] {
+            throw '[CodexTransient] The Codex usage query timed out.'
+        } finally {
+            $_ProfileHelpers.CloseAiUsageHttpSession($session)
+        }
+    }
+
+    # The Codex access token lives about an hour. The refresh token is
+    # single-use, so the rotated pair is written back to the auth store: the
+    # CLI holds the same refresh token and would be signed out otherwise.
+    function Invoke-CodexTokenRefresh([string]$Token) {
+        $clientId = 'app_EMoamEEZ73f0CkXaXp7hrann'
+        $session = $_ProfileHelpers.NewAiUsageHttpSession($TimeoutSec, $false)
+        try {
+            foreach ($url in @(
+                'https://auth.openai.com/api/accounts/oauth/token',
+                'https://auth.openai.com/oauth/token'
+            )) {
+                $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Post, $url)
+                $body = "grant_type=refresh_token&refresh_token=$([Uri]::EscapeDataString($Token))&client_id=$clientId"
+                $request.Content = New-Object System.Net.Http.StringContent($body, [Text.Encoding]::UTF8, 'application/x-www-form-urlencoded')
+                [void]$request.Headers.TryAddWithoutValidation('Accept', 'application/json')
+                [void]$request.Headers.TryAddWithoutValidation('User-Agent', 'codex_cli_rs/0.164.0 (windows; x86_64)')
+                $response = $session.Client.SendAsync($request).GetAwaiter().GetResult()
+                $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                if ([int]$response.StatusCode -eq 200) {
+                    return $text | ConvertFrom-Json
+                }
+            }
+            return $null
+        } catch {
+            return $null
+        } finally {
+            $_ProfileHelpers.CloseAiUsageHttpSession($session)
+        }
+    }
+
+    try {
+        $payload = if ($QueryInvoker) { & $QueryInvoker $AccessToken $AccountId } else { Invoke-CodexUsageQuery $AccessToken $AccountId }
+    } catch {
+        $message = $_.Exception.Message
+        # An expired access token is recoverable while the refresh token is
+        # still alive; try once before giving up.
+        if ($message.StartsWith('[CodexAuth]', [StringComparison]::Ordinal) -and $refreshToken) {
+            $refreshed = Invoke-CodexTokenRefresh $refreshToken
+            if ($refreshed -and $refreshed.access_token) {
+                Write-Host 'Refreshed the expired Codex access token.' -ForegroundColor DarkGray
+                if ($auth -and $refreshed.refresh_token) {
+                    $current = $null
+                    try { $current = Get-Content -LiteralPath $authPath -Raw | ConvertFrom-Json } catch { }
+                    if ($current -and [string]$current.tokens.refresh_token -eq $refreshToken) {
+                        $current.tokens.access_token = [string]$refreshed.access_token
+                        $current.tokens.refresh_token = [string]$refreshed.refresh_token
+                        if ($refreshed.id_token) { $current.tokens.id_token = [string]$refreshed.id_token }
+                        $current.last_refresh = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                        try {
+                            Set-Content -LiteralPath $authPath -Value ($current | ConvertTo-Json -Depth 20) -Encoding UTF8
+                            Write-Host 'Wrote the rotated token back to the Codex auth store so the CLI keeps working.' -ForegroundColor DarkGray
+                        } catch {
+                            Write-Host ("  Could not update the Codex auth store: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray
+                        }
+                    } else {
+                        Write-Host 'The Codex auth store changed while refreshing; the rotated token was not written back.' -ForegroundColor DarkGray
+                    }
+                }
+                try {
+                    $payload = if ($QueryInvoker) { & $QueryInvoker ([string]$refreshed.access_token) $AccountId } else { Invoke-CodexUsageQuery ([string]$refreshed.access_token) $AccountId }
+                } catch {
+                    Write-Error $_.Exception.Message
+                    return
+                }
+            } else {
+                Write-Error $message
+                Write-Host 'The stored refresh token is no longer accepted; run "codex login" to sign in again.' -ForegroundColor Yellow
+                return
+            }
+        } else {
+            Write-Error $message
+            return
+        }
+    }
+
+    $query = $_ProfileHelpers.ConvertFromCodexUsagePayload($payload)
+    if (-not $query.Windows -or $query.Windows.Count -eq 0) {
+        Write-Error 'Codex returned no rate-limit windows.'
+        return
+    }
+
+    $Global:codexLastQuery = $query.Raw
+
+    $_ProfileHelpers.WriteSection('Raw API response (Codex)')
+    if ($All) { $query.Raw | ConvertTo-Json -Depth 10 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:codexLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $_ProfileHelpers.WriteSection('Quota summary (Codex)')
+    if ($query.Plan) {
+        Write-Host ("  Plan: {0}" -f $query.Plan) -ForegroundColor DarkGray
+    }
+    $rows = New-Object System.Collections.Generic.List[object]
+    $concerns = New-Object System.Collections.Generic.List[string]
+    $now = [DateTimeOffset]::Now
+    foreach ($limit in @($query.Windows)) {
+        $usedPercent = [Math]::Max(0.0, [Math]::Min(100.0, [double]$limit.UsedPercent))
+        $remainingPercent = 100 - $usedPercent
+        $status = if ($usedPercent -ge 100) {
+            'EXHAUSTED'
+        } elseif ($usedPercent -ge $CriticalPercent) {
+            'CRITICAL'
+        } elseif ($usedPercent -ge $LowPercent) {
+            'LOW'
+        } else {
+            'OK'
+        }
+
+        $resetText = 'n/a'
+        if ($limit.ResetAt -is [DateTimeOffset]) {
+            $resetLocal = $limit.ResetAt.ToLocalTime()
+            $delta = $resetLocal - $now
+            if ($delta.TotalSeconds -gt 0) {
+                $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($delta))
+                if ($delta.TotalHours -le $ResetWarnHours) {
+                    $concerns.Add(('[INFO] {0}: resets in {1}' -f $limit.Window, ($_ProfileHelpers.FormatDuration($delta))))
+                }
+            } else {
+                $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Window    = $limit.Window
+            Used      = '{0:N1}%' -f $usedPercent
+            Remaining = '{0:N1}%' -f $remainingPercent
+            Status    = $status
+            Reset     = $resetText
+        })
+        if ($status -ne 'OK') {
+            $concerns.Add(('[{0}] {1}: {2:N1}% remaining' -f $status, $limit.Window, $remainingPercent))
+        }
+    }
+    $rows | Format-Table -AutoSize -Wrap | Out-Host
+
+    if ($query.Balance) {
+        Write-Host ("  Credit balance: {0}" -f $query.Balance) -ForegroundColor DarkGray
+    }
+    if ($query.SpendLimit) {
+        Write-Host ("  Workspace spend limit: {0} used of {1}{2}" -f $query.SpendLimit.Used, $query.SpendLimit.Limit, $(if ($query.SpendLimit.ResetAt) { ', resets ' + $query.SpendLimit.ResetAt.ToLocalTime().ToString('yyyy-MM-dd HH:mm') } else { '' })) -ForegroundColor DarkGray
+    }
+
+    $_ProfileHelpers.WriteSection('Concerns (Codex)')
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) { Write-Host ('  - ' + $concern) -ForegroundColor Yellow }
+    }
+
+    return $query.Raw
+}
+
+function Get-ClaudeUsage {
+    <#
+.SYNOPSIS
+    Queries the Claude Code (Pro and Max plan) credit windows.
+.DESCRIPTION
+    Reads the Claude OAuth token that Claude Code stores in
+    %USERPROFILE%\.claude\.credentials.json and calls
+    https://api.anthropic.com/api/oauth/usage, the endpoint Claude Code itself
+    uses for its own usage bars. Reports the used percent and reset time of
+    every credit window the account has, including the model-scoped weekly
+    windows, plus the extra-usage block when the plan has one.
+
+    The percentages are used percent, so higher is worse.
+
+    The endpoint is rate limited per access token, so a query that is refused
+    is retried only after a fresh token is obtained.
+.PARAMETER AccessToken
+    Claude OAuth access token. When omitted, the token is read from the
+    Claude Code credential store, then from $env:CLAUDE_CODE_OAUTH_TOKEN.
+.PARAMETER TimeoutSec
+    HTTP request timeout in seconds. Defaults to 15.
+.PARAMETER LowPercent
+    Used-percent threshold at or above which a window is reported as LOW.
+.PARAMETER CriticalPercent
+    Used-percent threshold at or above which a window is reported as CRITICAL.
+.PARAMETER ResetWarnHours
+    Reports an informational concern when a window resets within this many hours.
+.PARAMETER Strict
+    Requires a trusted server certificate. Without it the query accepts the
+    certificate an inspection proxy presents, which a corporate network may
+    re-sign.
+.PARAMETER All
+    Prints the raw API response inline. Otherwise the raw response stays in
+    $Global:claudeLastQuery.
+.EXAMPLE
+    Get-ClaudeUsage
+.EXAMPLE
+    Get-ClaudeUsage -All
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+    The endpoint is private and undocumented, and Anthropic gates it on the
+    Claude Code user agent.
+#>
+    [CmdletBinding()]
+    param(
+        [string]$AccessToken,
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSec = 15,
+        [ValidateRange(0, 100)]
+        [int]$LowPercent = 80,
+        [ValidateRange(0, 100)]
+        [int]$CriticalPercent = 95,
+        [ValidateRange(0, 8760)]
+        [int]$ResetWarnHours = 1,
+        [switch]$Strict,
+        [switch]$All,
+        [Parameter(DontShow = $true)]
+        [scriptblock]$QueryInvoker
+    )
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    if ($CriticalPercent -lt $LowPercent) {
+        Write-Error 'CriticalPercent must be greater than or equal to LowPercent.'
+        return
+    }
+
+    # Claude Code relocates its whole configuration with CLAUDE_CONFIG_DIR.
+    $claudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
+    $credPath = Join-Path $claudeDir '.credentials.json'
+    $credential = $null
+    if (Test-Path -LiteralPath $credPath) {
+        try {
+            $credential = Get-Content -LiteralPath $credPath -Raw | ConvertFrom-Json
+        } catch {
+            Write-Host ("  Could not read the Claude credential store: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray
+        }
+    }
+
+    $oauth = $null
+    $plan = $null
+    $refreshToken = $null
+    if ($credential -and $credential.claudeAiOauth) {
+        $oauth = $credential.claudeAiOauth
+        if ($oauth.subscriptionType) { $plan = [string]$oauth.subscriptionType }
+        elseif ($oauth.rateLimitTier) { $plan = [string]$oauth.rateLimitTier }
+        if ($oauth.refreshToken) { $refreshToken = [string]$oauth.refreshToken }
+    }
+    if ([string]::IsNullOrWhiteSpace($AccessToken) -and $oauth -and $oauth.accessToken) {
+        $AccessToken = [string]$oauth.accessToken
+    }
+    if ([string]::IsNullOrWhiteSpace($AccessToken) -and $env:CLAUDE_CODE_OAUTH_TOKEN) {
+        $AccessToken = [string]$env:CLAUDE_CODE_OAUTH_TOKEN
+    }
+
+    if ([string]::IsNullOrWhiteSpace($AccessToken)) {
+        Write-Error ("No Claude access token found in {0} or `$env:CLAUDE_CODE_OAUTH_TOKEN. Run ""claude login"" to sign in, then retry; or pass -AccessToken." -f $credPath)
+        return
+    }
+
+    function Invoke-ClaudeUsageQuery([string]$Token) {
+        $session = $_ProfileHelpers.NewAiUsageHttpSession($TimeoutSec, $false)
+        try {
+            $request = New-Object System.Net.Http.HttpRequestMessage(
+                [System.Net.Http.HttpMethod]::Get,
+                'https://api.anthropic.com/api/oauth/usage'
+            )
+            [void]$request.Headers.TryAddWithoutValidation('Authorization', "Bearer $Token")
+            [void]$request.Headers.TryAddWithoutValidation('Accept', 'application/json')
+            [void]$request.Headers.TryAddWithoutValidation('Content-Type', 'application/json')
+            [void]$request.Headers.TryAddWithoutValidation('anthropic-beta', 'oauth-2025-04-20')
+            # The endpoint is gated on the Claude Code user agent; other agents
+            # are refused or put into a heavily rate-limited bucket.
+            [void]$request.Headers.TryAddWithoutValidation('User-Agent', 'claude-cli/2.1.309 (external, cli)')
+            $response = $session.Client.SendAsync($request).GetAwaiter().GetResult()
+            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $status = [int]$response.StatusCode
+            if ($status -ne 200) {
+                $detail = ''
+                try {
+                    $parsed = $body | ConvertFrom-Json
+                    $error = $_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'error')
+                    $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($error, 'message'))
+                    if (-not $detail) { $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'message')) }
+                } catch {
+                    $detail = $body
+                }
+                if ($status -eq 401) {
+                    throw "[ClaudeAuth] Anthropic rejected the Claude access token ($detail). Run ""claude login"" to sign in again."
+                }
+                if ($status -eq 403) {
+                    throw "[ClaudeSubscription] Anthropic refused the usage request ($detail). The account has no Claude Pro or Max subscription, or the organization disabled OAuth."
+                }
+                if ($status -eq 429) {
+                    throw "[ClaudeTransient] Anthropic is rate limiting this Claude access token ($detail). The bucket holds about five requests; try again in a few minutes."
+                }
+                throw "[ClaudeTransient] The Claude usage query failed with HTTP $status ($detail)."
+            }
+            return $body | ConvertFrom-Json
+        } catch [System.Threading.Tasks.TaskCanceledException] {
+            throw '[ClaudeTransient] The Claude usage query timed out.'
+        } finally {
+            $_ProfileHelpers.CloseAiUsageHttpSession($session)
+        }
+    }
+
+    # Claude OAuth refresh tokens rotate, so the rotated pair is written back
+    # to the credential store: Claude Code holds the same token and would be
+    # signed out otherwise. The write is skipped when the store changed while
+    # the refresh was in flight.
+    function Invoke-ClaudeTokenRefresh([string]$Token) {
+        $clientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+        $session = $_ProfileHelpers.NewAiUsageHttpSession($TimeoutSec, $false)
+        try {
+            $body = "grant_type=refresh_token&refresh_token=$([Uri]::EscapeDataString($Token))&client_id=$clientId"
+            $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Post, 'https://platform.claude.com/v1/oauth/token')
+            $request.Content = New-Object System.Net.Http.StringContent($body, [Text.Encoding]::UTF8, 'application/x-www-form-urlencoded')
+            [void]$request.Headers.TryAddWithoutValidation('Accept', 'application/json')
+            [void]$request.Headers.TryAddWithoutValidation('User-Agent', 'claude-cli/2.1.309 (external, cli)')
+            $response = $session.Client.SendAsync($request).GetAwaiter().GetResult()
+            $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            if ([int]$response.StatusCode -ne 200) { return $null }
+            return $text | ConvertFrom-Json
+        } catch {
+            return $null
+        } finally {
+            $_ProfileHelpers.CloseAiUsageHttpSession($session)
+        }
+    }
+
+    try {
+        $payload = if ($QueryInvoker) { & $QueryInvoker $AccessToken } else { Invoke-ClaudeUsageQuery $AccessToken }
+    } catch {
+        $message = $_.Exception.Message
+        if ($message.StartsWith('[ClaudeAuth]', [StringComparison]::Ordinal) -and $refreshToken) {
+            $refreshed = Invoke-ClaudeTokenRefresh $refreshToken
+            if ($refreshed -and $refreshed.access_token) {
+                Write-Host 'Refreshed the expired Claude access token.' -ForegroundColor DarkGray
+                $current = $null
+                try { $current = Get-Content -LiteralPath $credPath -Raw | ConvertFrom-Json } catch { }
+                if ($current -and $current.claudeAiOauth -and [string]$current.claudeAiOauth.refreshToken -eq $refreshToken) {
+                    $current.claudeAiOauth.accessToken = [string]$refreshed.access_token
+                    if ($refreshed.refresh_token) { $current.claudeAiOauth.refreshToken = [string]$refreshed.refresh_token }
+                    if ($refreshed.expires_in) {
+                        $current.claudeAiOauth.expiresAt = [DateTimeOffset]::UtcNow.AddSeconds([double]$refreshed.expires_in).ToUnixTimeMilliseconds()
+                    }
+                    try {
+                        Set-Content -LiteralPath $credPath -Value ($current | ConvertTo-Json -Depth 20) -Encoding UTF8
+                        Write-Host 'Wrote the rotated token back to the Claude credential store so Claude Code keeps working.' -ForegroundColor DarkGray
+                    } catch {
+                        Write-Host ("  Could not update the Claude credential store: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray
+                    }
+                } else {
+                    Write-Host 'The Claude credential store changed while refreshing; the rotated token was not written back.' -ForegroundColor DarkGray
+                }
+                try {
+                    $payload = if ($QueryInvoker) { & $QueryInvoker ([string]$refreshed.access_token) } else { Invoke-ClaudeUsageQuery ([string]$refreshed.access_token) }
+                } catch {
+                    Write-Error $_.Exception.Message
+                    return
+                }
+            } else {
+                Write-Error $message
+                Write-Host 'The stored refresh token is no longer accepted; run "claude login" to sign in again.' -ForegroundColor Yellow
+                return
+            }
+        } else {
+            Write-Error $message
+            return
+        }
+    }
+
+    $query = $_ProfileHelpers.ConvertFromClaudeUsagePayload($payload)
+    if (-not $query.Windows -or $query.Windows.Count -eq 0) {
+        Write-Error 'Claude returned no credit windows.'
+        return
+    }
+
+    $Global:claudeLastQuery = $query.Raw
+
+    $_ProfileHelpers.WriteSection('Raw API response (Claude Code)')
+    if ($All) { $query.Raw | ConvertTo-Json -Depth 10 | Out-Host }
+    else      { Write-Host '  (suppressed; stored in $Global:claudeLastQuery. Use -All to display inline.)' -ForegroundColor DarkGray }
+
+    $_ProfileHelpers.WriteSection('Quota summary (Claude Code)')
+    if ($plan) {
+        Write-Host ("  Plan: {0}" -f $plan) -ForegroundColor DarkGray
+    }
+    $rows = New-Object System.Collections.Generic.List[object]
+    $concerns = New-Object System.Collections.Generic.List[string]
+    $now = [DateTimeOffset]::Now
+    foreach ($limit in @($query.Windows)) {
+        $usedPercent = [Math]::Max(0.0, [Math]::Min(100.0, [double]$limit.UsedPercent))
+        $remainingPercent = 100 - $usedPercent
+        $status = if ($usedPercent -ge 100) {
+            'EXHAUSTED'
+        } elseif ($usedPercent -ge $CriticalPercent) {
+            'CRITICAL'
+        } elseif ($usedPercent -ge $LowPercent) {
+            'LOW'
+        } else {
+            'OK'
+        }
+
+        $resetText = 'n/a'
+        if ($limit.ResetAt -is [DateTimeOffset]) {
+            $resetLocal = $limit.ResetAt.ToLocalTime()
+            $delta = $resetLocal - $now
+            if ($delta.TotalSeconds -gt 0) {
+                $resetText = '{0} ({1} from now)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm'), ($_ProfileHelpers.FormatDuration($delta))
+                if ($delta.TotalHours -le $ResetWarnHours) {
+                    $concerns.Add(('[INFO] {0}: resets in {1}' -f $limit.Window, ($_ProfileHelpers.FormatDuration($delta))))
+                }
+            } else {
+                $resetText = '{0} (reset due)' -f $resetLocal.ToString('yyyy-MM-dd HH:mm')
+            }
+        }
+
+        $rows.Add([pscustomobject]@{
+            Window    = $limit.Window
+            Used      = '{0:N1}%' -f $usedPercent
+            Remaining = '{0:N1}%' -f $remainingPercent
+            Status    = $status
+            Reset     = $resetText
+        })
+        if ($status -ne 'OK') {
+            $concerns.Add(('[{0}] {1}: {2:N1}% remaining' -f $status, $limit.Window, $remainingPercent))
+        }
+    }
+    $rows | Format-Table -AutoSize -Wrap | Out-Host
+
+    if ($query.ExtraPercent -ne $null) {
+        Write-Host ("  Extra usage: {0:N1}% of the monthly allowance" -f $query.ExtraPercent) -ForegroundColor DarkGray
+    }
+
+    $_ProfileHelpers.WriteSection('Concerns (Claude Code)')
+    if ($concerns.Count -eq 0) {
+        Write-Host '  No concerns flagged.' -ForegroundColor Green
+    } else {
+        foreach ($concern in $concerns) { Write-Host ('  - ' + $concern) -ForegroundColor Yellow }
+    }
+
+    return $query.Raw
+}
+
+# --- Get-AllAiUsage --------------------------------------------------------
+# Discovers currently loaded Get-*Usage functions, confirms the complete list,
+# and invokes each accepted function sequentially.
+
+function Get-AllAiUsage {
+<#
+.SYNOPSIS
+    Discovers and sequentially runs all currently loaded Get-*Usage functions.
+.DESCRIPTION
+    Finds imported functions whose names match Get-*Usage, excludes this
+    aggregate function, and displays the sorted execution list. Prompts once
+    before running anything; pressing Enter accepts the default Yes response.
+    Each discovered FunctionInfo is invoked directly so the reviewed command
+    cannot change through later name resolution. A terminating failure in one
+    function is reported without preventing the remaining functions from running.
+.EXAMPLE
+    Get-AllAiUsage
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-08
+#>
+    [CmdletBinding()]
+    param()
+
+    $_ProfileHelpers.WriteUsageTimestamp($MyInvocation.MyCommand.Name)
+
+    $selfName = $MyInvocation.MyCommand.Name
+    $usageFunctions = @(
+        Get-Command -Name 'Get-*Usage' -CommandType Function -ListImported -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ine $selfName } |
+            Sort-Object Name
+    )
+
+    if ($usageFunctions.Count -eq 0) {
+        Write-Host 'No other Get-*Usage functions are currently loaded.' -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ("Discovered {0} Get-*Usage function(s):" -f $usageFunctions.Count) -ForegroundColor Cyan
+    for ($index = 0; $index -lt $usageFunctions.Count; $index++) {
+        $usageFunction = $usageFunctions[$index]
+        $origin = if ($usageFunction.ModuleName) { " ($($usageFunction.ModuleName))" } else { '' }
+        Write-Host ('  {0}. {1}{2}' -f ($index + 1), $usageFunction.Name, $origin)
+    }
+
+    while ($true) {
+        $choice = (Read-Host -Prompt ("Run these {0} usage function(s) sequentially? (Y/n)" -f $usageFunctions.Count)).Trim()
+        if (-not $choice -or $choice -match '^(y|yes)$') { break }
+        if ($choice -match '^(n|no)$') {
+            Write-Host 'AI usage queries cancelled.' -ForegroundColor Yellow
+            return
+        }
+        Write-Warning 'Enter Y or N, or press Enter to accept the default (Y).'
+    }
+
+    for ($index = 0; $index -lt $usageFunctions.Count; $index++) {
+        $usageFunction = $usageFunctions[$index]
+        Write-Host ("`n>>> [{0}/{1}] {2}" -f ($index + 1), $usageFunctions.Count, $usageFunction.Name) -ForegroundColor Cyan
+        try {
+            & $usageFunction
+        } catch {
+            Write-Warning ("{0} failed: {1}" -f $usageFunction.Name, $_.Exception.Message)
+        }
+    }
+}
+
+function Save-WebFile {
+    <#
+.SYNOPSIS
+    Downloads a URL to a file using concurrent HTTP range requests (aria2-style).
+.DESCRIPTION
+    Wraps an embedded C# program (compiled once per session via Add-Type, the same
+    pattern as Clear-WorkingSet) that splits a download into N contiguous byte
+    ranges and fetches them over parallel connections, writing each range to its
+    offset in a pre-allocated file. On a link where a single connection is
+    throttled server-side (e.g. GitHub's release CDN caps one connection to
+    ~30 MB/s), this is several times faster than a plain Invoke-WebRequest.
+
+    Range support is detected with a one-byte probe: a 206 response carrying a
+    Content-Range total means chunking is possible. Otherwise -- unsupported
+    ranges, unknown size, a file below -ChunkThresholdMB, or any hard error --
+    it transparently falls back to a single streaming download, so it is never
+    slower-by-design than Invoke-WebRequest, only sometimes faster.
+
+    Files smaller than -ChunkThresholdMB are single-streamed on purpose: they
+    usually complete within the CDN's initial burst allowance where one
+    connection is already full speed, so chunking would only add overhead.
+.PARAMETER Uri
+    The URL to download. Redirects are followed; the resolved URL is reused for
+    every chunk.
+.PARAMETER OutFile
+    Destination path. If omitted, the (URL-decoded) file name from the URL is used
+    in the current directory.
+.PARAMETER Chunks
+    Number of parallel connections when chunking (default 8, range 1-32). 8
+    captures nearly all the available speedup on GitHub's CDN; more barely helps.
+.PARAMETER MinChunkMB
+    Minimum size per chunk (default 2). Caps the effective chunk count on smaller
+    files so each connection still transfers a worthwhile amount.
+.PARAMETER ChunkThresholdMB
+    Only files at or above this size are chunked (default 16); smaller ones are
+    single-streamed.
+.PARAMETER TimeoutSec
+    Per-connection read/write timeout in seconds (default 600).
+.PARAMETER Force
+    Overwrite an existing destination file.
+.PARAMETER Quiet
+    Suppress the live progress line and the completion summary.
+.EXAMPLE
+    Save-WebFile 'https://example.com/big.zip'
+    # Chunked download to .\big.zip with a live progress line.
+.EXAMPLE
+    Save-WebFile -Uri $url -OutFile C:\tmp\a.zip -Chunks 16 -Force
+.OUTPUTS
+    System.IO.FileInfo for the downloaded file, or nothing on failure (a
+    terminating error is written).
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+
+    Correctness note: chunked output is byte-identical to a single download
+    (verified by SHA-256). Requires HttpWebRequest (Windows PowerShell / .NET).
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string] $Uri,
+        [Parameter(Position = 1)]
+        [string] $OutFile,
+        [ValidateRange(1, 32)]
+        [int]    $Chunks = 8,
+        [double] $MinChunkMB = 2,
+        [double] $ChunkThresholdMB = 16,
+        [int]    $TimeoutSec = 600,
+        [switch] $Force,
+        [switch] $Quiet
+    )
+
+    # Compile the embedded chunked-download program once into the session; repeat
+    # calls reuse the loaded type. Guarded by a global flag like Clear-WorkingSet.
+    if ($null -eq $Global:hasChunkDownloaderType) {
+        $code = @"
+using System;
+using System.IO;
+using System.Net;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+
+namespace ChunkDownload
+{
+    public class DownloadResult
+    {
+        public bool Success;
+        public long Bytes;
+        public long ExpectedBytes;
+        public long ElapsedMs;
+        public int Chunks;
+        public bool FellBack;
+        public string Error;
+        public string FinalUrl;
+    }
+
+    public class Downloader
+    {
+        static long _written;
+
+        static Downloader()
+        {
+            try { ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | (SecurityProtocolType)12288; }
+            catch { ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12; }
+            ServicePointManager.DefaultConnectionLimit = 256;
+            ServicePointManager.Expect100Continue = false;
+        }
+
+        static HttpWebRequest MakeReq(string url, int timeoutMs)
+        {
+            HttpWebRequest r = (HttpWebRequest)WebRequest.Create(url);
+            r.Method = "GET";
+            r.AllowAutoRedirect = true;
+            r.UserAgent = "$_DefaultUserAgent";
+            r.Timeout = 60000;
+            r.ReadWriteTimeout = timeoutMs;
+            r.KeepAlive = true;
+            r.Proxy = WebRequest.DefaultWebProxy;
+            return r;
+        }
+
+        // Returns total size if the server supports ranges (206 + Content-Range), else -1. Sets finalUrl.
+        static long Probe(string url, int timeoutMs, out string finalUrl)
+        {
+            finalUrl = url;
+            HttpWebRequest r = MakeReq(url, timeoutMs);
+            r.AddRange(0, 0);
+            using (HttpWebResponse resp = (HttpWebResponse)r.GetResponse())
+            {
+                finalUrl = resp.ResponseUri.ToString();
+                if (resp.StatusCode == HttpStatusCode.PartialContent)
+                {
+                    string cr = resp.Headers["Content-Range"];
+                    if (!string.IsNullOrEmpty(cr))
+                    {
+                        int slash = cr.LastIndexOf('/');
+                        if (slash >= 0)
+                        {
+                            long t;
+                            if (long.TryParse(cr.Substring(slash + 1).Trim(), out t) && t > 0) return t;
+                        }
+                    }
+                }
+                return -1;
+            }
+        }
+
+        static void ProgressLoop(long total, ManualResetEvent done)
+        {
+            DateTime start = DateTime.UtcNow;
+            bool more = true;
+            while (more)
+            {
+                more = !done.WaitOne(400);
+                long w = Interlocked.Read(ref _written);
+                double secs = (DateTime.UtcNow - start).TotalSeconds;
+                double mbps = secs > 0 ? (w / 1048576.0) / secs : 0;
+                double pct = total > 0 ? (w * 100.0 / total) : 0;
+                Console.Write(string.Format("\r      {0,5:0.0}%  {1,7:0.0} / {2,7:0.0} MB  {3,6:0.0} MB/s   ",
+                    pct, w / 1048576.0, total / 1048576.0, mbps));
+            }
+            Console.Write("\n");
+        }
+
+        static void DownloadChunk(string url, string origUrl, string path, long start, long end, int timeoutMs, int maxRetries)
+        {
+            int attempt = 0;
+            string useUrl = url;
+            // Resume offset: partial bytes from a truncated connection are kept
+            // on disk and the next attempt re-requests only the remainder, so
+            // each byte is counted once and a deterministic truncation point
+            // cannot trap the retry loop on the same full range.
+            long pos = start;
+            long totalGot = 0;
+            long want = end - start + 1;
+            while (true)
+            {
+                attempt++;
+                long reqStart = pos;
+                try
+                {
+                    HttpWebRequest r = MakeReq(useUrl, timeoutMs);
+                    r.AddRange(pos, end);
+                    using (HttpWebResponse resp = (HttpWebResponse)r.GetResponse())
+                    using (Stream rs = resp.GetResponseStream())
+                    using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+                    {
+                        // Guard against a server that ignores Range: writing a full
+                        // 200 body at this offset would silently corrupt the file.
+                        if (resp.StatusCode != HttpStatusCode.PartialContent)
+                            throw new IOException("Expected 206 for range request, got " + (int)resp.StatusCode);
+                        string cr = resp.Headers["Content-Range"];
+                        if (string.IsNullOrEmpty(cr) || !cr.StartsWith("bytes " + pos + "-"))
+                            throw new IOException("Range mismatch: Content-Range '" + cr + "' does not start at " + pos);
+                        fs.Seek(pos, SeekOrigin.Begin);
+                        byte[] buf = new byte[81920];
+                        int n;
+                        long got = 0;
+                        while ((n = rs.Read(buf, 0, buf.Length)) > 0)
+                        {
+                            fs.Write(buf, 0, n);
+                            Interlocked.Add(ref _written, n);
+                            got += n;
+                            totalGot += n;
+                            pos += n;
+                        }
+                        // A dropped connection can surface as a clean end-of-stream
+                        // instead of an exception; the pre-allocated file would keep
+                        // zeros for the missing tail and pass the final size check.
+                        // Resume the remainder instead of re-fetching the whole range.
+                        long reqWant = end - reqStart + 1;
+                        if (got != reqWant)
+                        {
+                            if (attempt > maxRetries)
+                                throw new IOException(string.Format("Short read: got {0} of {1} bytes for range {2}-{3}", totalGot, want, start, end));
+                            Thread.Sleep(500 * attempt);
+                            continue;
+                        }
+                    }
+                    return;
+                }
+                catch (WebException we)
+                {
+                    // A 403 usually means a time-limited signed CDN URL expired; re-resolve from the original.
+                    HttpWebResponse er = we.Response as HttpWebResponse;
+                    if (er != null && (int)er.StatusCode == 403 && useUrl != origUrl) useUrl = origUrl;
+                    if (attempt > maxRetries)
+                    {
+                        if (we.Message != null && we.Message.IndexOf("Short read", StringComparison.OrdinalIgnoreCase) >= 0) throw;
+                        throw new IOException(string.Format("Short read: got {0} of {1} bytes for range {2}-{3} ({4})", totalGot, want, start, end, we.Message), we);
+                    }
+                    Thread.Sleep(500 * attempt);
+                }
+                catch
+                {
+                    if (attempt > maxRetries) throw;
+                    Thread.Sleep(500 * attempt);
+                }
+            }
+        }
+
+        static void SingleStream(string url, string path, int timeoutMs)
+        {
+            HttpWebRequest r = MakeReq(url, timeoutMs);
+            using (HttpWebResponse resp = (HttpWebResponse)r.GetResponse())
+            using (Stream rs = resp.GetResponseStream())
+            using (FileStream fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                byte[] buf = new byte[81920];
+                int n;
+                while ((n = rs.Read(buf, 0, buf.Length)) > 0)
+                {
+                    fs.Write(buf, 0, n);
+                    Interlocked.Add(ref _written, n);
+                }
+            }
+        }
+
+        public static DownloadResult Download(string url, string path, int chunks, long minChunkBytes, long chunkThresholdBytes, int timeoutSec, bool quiet)
+        {
+            DownloadResult res = new DownloadResult();
+            res.ExpectedBytes = -1;
+            Interlocked.Exchange(ref _written, 0);
+            DateTime t0 = DateTime.UtcNow;
+            int timeoutMs = timeoutSec * 1000;
+
+            string finalUrl = url;
+            long total = -1;
+            try { total = Probe(url, timeoutMs, out finalUrl); }
+            catch { total = -1; finalUrl = url; }
+            res.FinalUrl = finalUrl;
+
+            if (chunks < 1) chunks = 1;
+            int useChunks = chunks;
+            bool chunked = total > 0 && total >= chunkThresholdBytes;
+            if (chunked)
+            {
+                res.ExpectedBytes = total;
+                long maxByMin = total / Math.Max(minChunkBytes, 1L);
+                if (maxByMin < 1) maxByMin = 1;
+                if (useChunks > maxByMin) useChunks = (int)maxByMin;
+                if (useChunks < 1) useChunks = 1;
+                if (useChunks == 1) chunked = false;
+            }
+
+            ManualResetEvent done = new ManualResetEvent(false);
+            Thread progThread = null;
+
+            try
+            {
+                if (!chunked)
+                {
+                    res.FellBack = true;
+                    res.Chunks = 1;
+                    if (!quiet && total > 0) { progThread = new Thread(delegate() { ProgressLoop(total, done); }); progThread.Start(); }
+                    SingleStream(total > 0 ? finalUrl : url, path, timeoutMs);
+                }
+                else
+                {
+                    res.Chunks = useChunks;
+                    using (FileStream fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite)) { fs.SetLength(total); }
+                    if (!quiet) { progThread = new Thread(delegate() { ProgressLoop(total, done); }); progThread.Start(); }
+                    long chunkSize = (total + useChunks - 1) / useChunks;
+                    List<Task> tasks = new List<Task>();
+                    for (int i = 0; i < useChunks; i++)
+                    {
+                        long s = (long)i * chunkSize;
+                        long e = Math.Min(s + chunkSize - 1, total - 1);
+                        if (s > e) break;
+                        long cs = s, ce = e;
+                        tasks.Add(Task.Factory.StartNew(delegate() { DownloadChunk(finalUrl, url, path, cs, ce, timeoutMs, 5); }, TaskCreationOptions.LongRunning));
+                    }
+                    Task.WaitAll(tasks.ToArray());
+                }
+                done.Set();
+                if (progThread != null) progThread.Join();
+
+                FileInfo fi = new FileInfo(path);
+                res.Bytes = fi.Length;
+                if (total > 0 && fi.Length != total) { res.Success = false; res.Error = string.Format("size mismatch: got {0}, expected {1}", fi.Length, total); }
+                else { res.Success = true; }
+            }
+            catch (Exception ex)
+            {
+                done.Set();
+                if (progThread != null) { try { progThread.Join(); } catch { } }
+                res.Success = false;
+                res.Error = Flatten(ex);
+            }
+            res.ElapsedMs = (long)(DateTime.UtcNow - t0).TotalMilliseconds;
+            return res;
+        }
+
+        static string Flatten(Exception e)
+        {
+            AggregateException ae = e as AggregateException;
+            if (ae != null)
+            {
+                StringBuilder sb = new StringBuilder();
+                foreach (Exception inner in ae.Flatten().InnerExceptions) sb.Append(inner.Message + "; ");
+                return sb.ToString();
+            }
+            return e.Message;
+        }
+    }
+}
+"@
+        Add-Type -TypeDefinition $code
+        $Global:hasChunkDownloaderType = $true
+    }
+
+    # Derive the output path from the URL when not supplied (URL-decoded leaf name).
+    if (-not $OutFile) {
+        $leaf = [System.IO.Path]::GetFileName(([Uri]$Uri).AbsolutePath)
+        if ([string]::IsNullOrEmpty($leaf)) { $leaf = 'download.bin' }
+        $OutFile = Join-Path (Get-Location).Path ([Uri]::UnescapeDataString($leaf))
+    }
+    $OutFile = [System.IO.Path]::GetFullPath($OutFile)
+    $dir = Split-Path -Parent $OutFile
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    if ((Test-Path -LiteralPath $OutFile) -and -not $Force) {
+        Write-Error "File already exists: $OutFile (use -Force to overwrite)."
+        return
+    }
+
+    $res = [ChunkDownload.Downloader]::Download(
+        $Uri, $OutFile, $Chunks, [long]($MinChunkMB * 1MB), [long]($ChunkThresholdMB * 1MB), $TimeoutSec, [bool]$Quiet)
+
+    if (-not $res.Success) {
+        if (Test-Path -LiteralPath $OutFile) { Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue }
+        Write-Error ("Download failed for {0}: {1}" -f $Uri, $res.Error)
+        return
+    }
+
+    if (-not $Quiet) {
+        $mb = $res.Bytes / 1MB
+        $sec = $res.ElapsedMs / 1000.0
+        $rate = if ($sec -gt 0) { $mb / $sec } else { 0 }
+        $mode = if ($res.FellBack) { 'single-stream' } else { ('{0} chunks' -f $res.Chunks) }
+        Write-Host ("      {0:N1} MB in {1:N1}s ({2:N1} MB/s, {3})" -f $mb, $sec, $rate, $mode) -ForegroundColor DarkGray
+    }
+
+    return (Get-Item -LiteralPath $OutFile)
+}
+
+function Install-Fonts {
+    <#
+.SYNOPSIS
+    Downloads and installs a curated catalog of fonts into Windows.
+.DESCRIPTION
+    Iterates the pinned font catalog in $_FontInstallInternal.Packs. For each
+    enabled pack it processes one item fully before moving on -- download ->
+    selective extract -> install -> delete temporary files -- so peak disk usage
+    stays close to a single archive rather than the whole catalog.
+
+    Installs per-user by default (%LOCALAPPDATA%\Microsoft\Windows\Fonts plus the
+    HKCU Fonts registry key), which needs no administrator rights. Pass -AllUsers
+    to install machine-wide (C:\Windows\Fonts + HKLM), which requires an elevated
+    session.
+
+    Idempotency is filename-based and works at two levels: a cheap pre-download
+    probe skips a whole pack when its representative font is already present, and
+    each individual font already in the target folder is skipped at install time.
+    Pass -Force to re-download and overwrite regardless.
+
+    ZIP extraction uses .NET's System.IO.Compression. Compact 7z packs use the
+    libarchive-based tar.exe included with current Windows; 7-Zip is not required.
+
+    Failed downloads are warned (with the URL) and collected into a summary at the
+    end so a broken/moved release can be spotted and its Url updated.
+.PARAMETER Name
+    One or more pack names (see the Name column of -ListOnly) to limit the run to.
+    Matching is case-insensitive and substring-based. Omit to process all packs.
+.PARAMETER Force
+    Reinstall even when the font already appears installed (re-downloads and
+    overwrites both the file and its registry entry).
+.PARAMETER AllUsers
+    Install machine-wide instead of per-user. Requires an elevated (admin) shell.
+.PARAMETER Extended
+    Also process the extended (opt-in) packs marked Extended=$true in the catalog,
+    such as the large Adobe Source Han families and the superseded JetBrainsMono
+    fallback.
+.PARAMETER ListOnly
+    Print the catalog (names, sizes, extended state, notes) and the estimated
+    download total, then exit without downloading or installing anything.
+.PARAMETER Retries
+    How many extra times to re-download and re-extract a pack after a transient
+    failure (default 2, so up to 3 attempts total). Only transient errors are
+    retried -- corrupt-archive/truncated-zip signatures and common network hiccups
+    (e.g. the intermittent "A local file header is corrupt" seen on large chunked
+    GitHub downloads). Genuine failures (bad URL, 404) are reported immediately
+    without wasting retries. Set 0 to disable retrying.
+.EXAMPLE
+    Install-Fonts -ListOnly
+    # Review the catalog and total download size before committing to a run.
+.EXAMPLE
+    Install-Fonts
+    # Install every standard pack per-user (skips the extended Source Han giants).
+.EXAMPLE
+    Install-Fonts -Name Pretendard,FiraCode,D2Coding
+    # Install just the named packs.
+.EXAMPLE
+    Install-Fonts -Extended -Name SourceHanMono
+    # Opt into one of the large extended CJK packs.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+
+    Adding a new pack? Inspect the archive first with the helper:
+        $_ProfileHelpers.ShowFontArchive('<zip-url-or-path>')
+        $_ProfileHelpers.ShowFontArchive($url, '<candidate-Include-regex>')
+    It lists every entry with its size, reads each font's registered family
+    name (to pick TTF vs OTF vs variable -- some builds rename the family with
+    an "OTF"/"variable" suffix), and, given an Include regex, previews exactly
+    which entries would be extracted -- i.e. the Include, Probe, Bytes and Fonts
+    values a new Packs entry needs.
+#>
+    [CmdletBinding()]
+    param(
+        [string[]] $Name,
+        [switch]   $Force,
+        [switch]   $AllUsers,
+        [switch]   $Extended,
+        [switch]   $ListOnly,
+        [ValidateRange(0, 10)]
+        [int]      $Retries = 2
+    )
+
+    $cfg = $_FontInstallInternal
+
+    # Windows PowerShell 5.1 does not load the ZipFile assembly by default
+    # (PowerShell 7+ does); load it so selective extraction works on both.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+
+    # Resolve install target (per-user vs machine-wide) up front.
+    if ($AllUsers) {
+        if (-not (Test-IsAdministrator)) {
+            Write-Host "Install-Fonts -AllUsers requires an elevated (Administrator) session." -ForegroundColor Red
+            return
+        }
+        $fontsDir = $cfg.MachineFontsDir
+        $regPath  = $cfg.MachineRegPath
+        $machine  = $true
+    } else {
+        $fontsDir = $cfg.UserFontsDir
+        $regPath  = $cfg.UserRegPath
+        $machine  = $false
+    }
+
+    # Select packs: standard packs unless -Extended, then optional -Name filter.
+    $packs = $cfg.Packs | Where-Object { -not $_.Extended -or $Extended }
+    if ($Name) {
+        $packs = $packs | Where-Object {
+            $p = $_
+            $Name | Where-Object { $p.Name -like "*$_*" }
+        }
+    }
+    $packs = @($packs)
+
+    # Human-readable byte formatter for the size report.
+    $fmtSize = {
+        param([long]$b)
+        if ($b -ge 1GB) { return ('{0:N2} GB' -f ($b / 1GB)) }
+        if ($b -ge 1MB) { return ('{0:N1} MB' -f ($b / 1MB)) }
+        if ($b -ge 1KB) { return ('{0:N0} KB' -f ($b / 1KB)) }
+        return ('{0} B' -f $b)
+    }
+
+    if ($packs.Count -eq 0) {
+        Write-Host "No matching font packs to install." -ForegroundColor Yellow
+        return
+    }
+
+    # Pre-run summary: number of packs, per-pack size, and estimated totals.
+    $totalBytes = ($packs | Measure-Object -Property Bytes -Sum).Sum
+    $totalFonts = ($packs | Measure-Object -Property Fonts -Sum).Sum
+    Write-Host ''
+    Write-Host ("== Install-Fonts: {0} pack(s), ~{1} font file(s), ~{2} to download ==" -f `
+        $packs.Count, $totalFonts, (& $fmtSize $totalBytes)) -ForegroundColor Cyan
+    Write-Host ("   Target: {0} ({1})" -f $fontsDir, ($(if ($machine) { 'all users' } else { 'current user' }))) -ForegroundColor DarkGray
+    $i = 0
+    foreach ($p in $packs) {
+        $i++
+        $tag = if ($p.Extended) { ' [extended]' } elseif ($p.Bytes -ge 50MB) { ' [LARGE]' } else { '' }
+        Write-Host ("   {0,2}. {1,-20} {2,10}  ~{3} fonts{4}" -f $i, $p.Name, (& $fmtSize $p.Bytes), $p.Fonts, $tag)
+        if ($ListOnly -and $p.Note) { Write-Host ("       {0}" -f $p.Note) -ForegroundColor DarkGray }
+    }
+
+    if ($ListOnly) { return }
+
+    # Fail before confirmation or downloading when a selected 7z pack cannot be
+    # handled by Windows' inbox libarchive-based tar.exe.
+    if (($packs | Where-Object Kind -eq '7z') -and
+        -not (Get-Command tar.exe -CommandType Application -ErrorAction SilentlyContinue)) {
+        Write-Error 'Selected font packs require 7z extraction, but Windows tar.exe is unavailable.'
+        return
+    }
+
+    # Short confirmation before doing any network/disk work (Enter defaults to Yes).
+    $choice = Read-Host -Prompt ("Proceed with downloading and installing {0} font pack(s)? (Y/n)" -f $packs.Count)
+    if ($choice -in @('n', 'N')) {
+        Write-Host "Aborting. Nothing was downloaded or installed." -ForegroundColor Yellow
+        return
+    }
+
+    # Ensure the target folder and registry key exist before installing.
+    if (-not (Test-Path -LiteralPath $fontsDir)) {
+        New-Item -ItemType Directory -Path $fontsDir -Force | Out-Null
+    }
+    if (-not (Test-Path -LiteralPath $regPath)) {
+        New-Item -Path $regPath -Force | Out-Null
+    }
+
+    # P/Invoke for live font registration + notifying running apps of the change.
+    if (-not ('FontInstaller.NativeMethods' -as [type])) {
+        Add-Type -Namespace FontInstaller -Name NativeMethods -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("gdi32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern int AddFontResource(string lpFilename);
+
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint Msg, System.IntPtr wParam, System.IntPtr lParam, uint fuFlags, uint uTimeout, out System.IntPtr lpdwResult);
+'@
+    }
+
+    # Copy a single font file to the target folder and register it. Returns
+    # 'installed' or 'skipped' (already present and -Force not set).
+    $installOne = {
+        param([string]$SrcPath)
+        $leaf = Split-Path -Path $SrcPath -Leaf
+        $dest = Join-Path $fontsDir $leaf
+        if ((Test-Path -LiteralPath $dest) -and -not $Force) { return 'skipped' }
+        Copy-Item -LiteralPath $SrcPath -Destination $dest -Force
+        $ext    = [System.IO.Path]::GetExtension($leaf).ToLowerInvariant()
+        $suffix = if ($ext -eq '.otf') { '(OpenType)' } else { '(TrueType)' }
+        # Registry value NAME must be unique per file; the font's own name table
+        # supplies the family shown in apps, so a filename-based label is safe.
+        $valueName = ('{0} {1}' -f [System.IO.Path]::GetFileNameWithoutExtension($leaf), $suffix)
+        # Machine scope stores the bare filename (relative to Windows\Fonts);
+        # per-user scope requires the full path.
+        $regData = if ($machine) { $leaf } else { $dest }
+        New-ItemProperty -Path $regPath -Name $valueName -Value $regData -PropertyType String -Force | Out-Null
+        [void][FontInstaller.NativeMethods]::AddFontResource($dest)
+        return 'installed'
+    }
+
+    # Classify a download/extract error as transient (worth re-downloading) vs
+    # permanent (bad URL, 404 -- reported immediately, no retry). The dominant
+    # transient case is a chunked download that lands a byte-corrupt archive, which
+    # surfaces only at extract time as ".ExtractToFile ... A local file header is
+    # corrupt" or a truncated central directory; for 7z via tar.exe the same zeroed
+    # region surfaces as "Unexpected Property ID" (its header parser reading zero
+    # bytes); a truncated HTTP range surfaces as "Short read ... for range" and
+    # is resumed within Save-WebFile, retried here only when resume also fails.
+    # Network stalls are covered too. Patterns are literal failure signatures so a
+    # 4xx status alone never matches.
+    $isTransientError = {
+        param([string]$Message)
+        if ([string]::IsNullOrEmpty($Message)) { return $false }
+        return ($Message -match '(?i)(local file header is corrupt|central directory|end of (the )?stream|unexpected end( of archive)?|damaged 7-zip archive|unexpected property id|exit delayed from previous errors|data error|corrupt|crc|block length|compressed data|number of entries|short read|got \d+ of \d+ bytes for range|range mismatch|expected 206 for range request|timed out|timeout|connection|transport|prematurely|reset by|unable to read data|actively refused)')
+    }
+
+    # Temp working directory (single archive at a time; cleaned per pack).
+    $work = Join-Path ([System.IO.Path]::GetTempPath()) ('fonts_' + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $work -Force | Out-Null
+
+    $totalInstalled = 0
+    $totalSkipped   = 0
+    $failed         = @()
+
+    try {
+        $i = 0
+        foreach ($p in $packs) {
+            $i++
+            Write-Host ''
+            Write-Host ("[{0}/{1}] {2} ({3})" -f $i, $packs.Count, $p.Name, (& $fmtSize $p.Bytes)) -ForegroundColor White
+
+            # Cheap pre-download skip: representative font already installed?
+            $probePath = Join-Path $fontsDir $p.Probe
+            if ((Test-Path -LiteralPath $probePath) -and -not $Force) {
+                Write-Host ("      already installed ({0}); skipping download." -f $p.Probe) -ForegroundColor DarkGray
+                continue
+            }
+
+            $dl = Join-Path $work ([System.IO.Path]::GetFileName(([Uri]$p.Url).AbsolutePath))
+            Write-Host ("      source: {0}" -f $p.Url) -ForegroundColor DarkGray
+
+            # Download AND extract are retried as one unit: the intermittent
+            # "local file header is corrupt" is a byte-corrupt chunked download that
+            # only shows up at extract time, so re-extracting the same file cannot
+            # help -- only a fresh download can. Each attempt starts its counters
+            # from zero and, on the winning attempt, already-installed fonts from a
+            # partial earlier attempt are simply skipped (idempotent by filename).
+            $maxAttempts   = 1 + $Retries
+            $packInstalled = 0
+            $packSkipped   = 0
+            $packOk        = $false
+            $lastError     = $null
+            for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+                if ($attempt -gt 1) {
+                    Write-Host ("      retry {0}/{1} (transient error: {2})" -f `
+                        ($attempt - 1), ($maxAttempts - 1), $lastError) -ForegroundColor Yellow
+                    Start-Sleep -Seconds ([math]::Min(10, 2 * ($attempt - 1)))
+                }
+                $packInstalled = 0
+                $packSkipped   = 0
+                try {
+                    Write-Host "      downloading..." -ForegroundColor DarkGray
+                    # Chunked concurrent download; several times faster than a single
+                    # connection on GitHub's throttled CDN for the larger packs, with
+                    # a transparent single-stream fallback. -ErrorAction Stop routes
+                    # any failure into the catch below.
+                    Save-WebFile -Uri $p.Url -OutFile $dl -Force -TimeoutSec 1800 -ErrorAction Stop | Out-Null
+
+                    if ($p.Kind -eq 'File') {
+                        # URL is itself a font file: install it directly.
+                        $r = & $installOne $dl
+                        if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
+                    } elseif ($p.Kind -eq '7z') {
+                        # Keep 7z handling behind the shared helper; it validates
+                        # archive paths and returns only the selected extracted files.
+                        $extractDir = Join-Path $work ('extract_' + [System.Guid]::NewGuid().ToString('N'))
+                        try {
+                            $fontPaths = @($_ProfileHelpers.Expand7ZipArchive($dl, $extractDir, $p.Include))
+                            foreach ($fontPath in $fontPaths) {
+                                $r = & $installOne $fontPath
+                                if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
+                            }
+                        } finally {
+                            if (Test-Path -LiteralPath $extractDir) {
+                                Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+                            }
+                        }
+                    } elseif ($p.Kind -eq 'Zip') {
+                        # Open the archive and extract ONLY the entries we want, one
+                        # at a time, so we never expand the full archive to disk.
+                        $zip = [System.IO.Compression.ZipFile]::OpenRead($dl)
+                        try {
+                            foreach ($entry in $zip.Entries) {
+                                if ([string]::IsNullOrEmpty($entry.Name)) { continue }   # directory
+                                $rel = $entry.FullName
+                                # Guard against macOS archive cruft regardless of Include.
+                                if ($rel -like '*__MACOSX*' -or $entry.Name -like '._*') { continue }
+                                if ($rel -notmatch $p.Include) { continue }
+                                $tmp = Join-Path $work $entry.Name
+                                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $tmp, $true)
+                                $r = & $installOne $tmp
+                                if ($r -eq 'installed') { $packInstalled++ } else { $packSkipped++ }
+                                Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+                            }
+                        } finally {
+                            $zip.Dispose()
+                        }
+                    } else {
+                        throw "Unsupported font pack kind '$($p.Kind)' for '$($p.Name)'."
+                    }
+                    $packOk = $true
+                    break
+                } catch {
+                    $lastError = $_.Exception.Message
+                    $canRetry  = ($attempt -lt $maxAttempts) -and (& $isTransientError $lastError)
+                    if ($canRetry) {
+                        Write-Warning ("Attempt {0}/{1} FAILED for '{2}': {3}" -f $attempt, $maxAttempts, $p.Name, $lastError)
+                    } else {
+                        $suffix = if ($attempt -gt 1) { (" after {0} attempts" -f $attempt) } else { '' }
+                        Write-Warning ("Install FAILED for '{0}'{1}: {2}" -f $p.Name, $suffix, $lastError)
+                        Write-Warning ("  URL: {0}  -- verify/update this Url in `$_FontInstallInternal.Packs" -f $p.Url)
+                        $failed += $p
+                        break
+                    }
+                } finally {
+                    # Always drop the (possibly corrupt) archive so a retry re-downloads.
+                    if (Test-Path -LiteralPath $dl) { Remove-Item -LiteralPath $dl -Force -ErrorAction SilentlyContinue }
+                }
+            }
+
+            if ($packOk) {
+                $totalInstalled += $packInstalled
+                $totalSkipped   += $packSkipped
+                Write-Host ("      installed {0}, skipped {1} (running total installed: {2})" -f `
+                    $packInstalled, $packSkipped, $totalInstalled) -ForegroundColor Green
+            }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    # Notify running applications that the font set changed (WM_FONTCHANGE to
+    # HWND_BROADCAST) so new fonts appear without a sign-out.
+    if ($totalInstalled -gt 0) {
+        $result = [System.IntPtr]::Zero
+        [void][FontInstaller.NativeMethods]::SendMessageTimeout(
+            [System.IntPtr]0xffff, 0x001D, [System.IntPtr]::Zero, [System.IntPtr]::Zero, 2, 1000, [ref]$result)
+    }
+
+    Write-Host ''
+    Write-Host ("== Done: {0} installed, {1} skipped, {2} download failure(s). ==" -f `
+        $totalInstalled, $totalSkipped, $failed.Count) -ForegroundColor Cyan
+    if ($failed.Count -gt 0) {
+        Write-Host "   Failed packs (check/update their Url):" -ForegroundColor Yellow
+        foreach ($f in $failed) { Write-Host ("     - {0}: {1}" -f $f.Name, $f.Url) -ForegroundColor Yellow }
+    }
+}
+
+function Enable-WindowsSudo {
+    <#
+.SYNOPSIS
+    Enables the inbox Windows Sudo command in inline mode.
+.DESCRIPTION
+    Requires Windows 11 version 24H2 (build 26100) or later. Requests elevation
+    once and configures sudo.exe to run elevated commands in the current console.
+.EXAMPLE
+    PS C:\> Enable-WindowsSudo
+.OUTPUTS
+    System.Boolean. True when inline Windows Sudo is enabled; otherwise false.
+.NOTES
+    Inline mode lets unelevated processes share console input with the elevated
+    process. Enable it only on a trusted interactive workstation.
+#>
+    [CmdletBinding()]
+    param()
+
+    $sudoPath = Join-Path $env:SystemRoot 'System32\sudo.exe'
+    $windowsVersion = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue
+    $build = 0
+    if ($windowsVersion -and -not [int]::TryParse([string]$windowsVersion.CurrentBuildNumber, [ref]$build)) {
+        $build = 0
+    }
+
+    if ($build -lt 26100 -or -not (Test-Path -LiteralPath $sudoPath -PathType Leaf)) {
+        Write-Error 'Windows Sudo requires Windows 11 version 24H2 (build 26100) or later.'
+        return $false
+    }
+
+    $sudoConfigPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo'
+    $sudoConfig = Get-ItemProperty -LiteralPath $sudoConfigPath -ErrorAction SilentlyContinue
+    if ($sudoConfig -and $sudoConfig.Enabled -eq 3) {
+        Write-Host 'Windows Sudo is already enabled in inline mode.' -ForegroundColor Green
+        return $true
+    }
+
+    try {
+        $process = Start-Process -FilePath $sudoPath -ArgumentList @('config', '--enable', 'normal') `
+            -Verb RunAs -Wait -PassThru -ErrorAction Stop
+    } catch {
+        Write-Error "Windows Sudo setup was cancelled or failed: $($_.Exception.Message)"
+        return $false
+    }
+
+    $sudoConfig = Get-ItemProperty -LiteralPath $sudoConfigPath -ErrorAction SilentlyContinue
+    if ($process.ExitCode -ne 0 -or -not $sudoConfig -or $sudoConfig.Enabled -ne 3) {
+        Write-Error "Windows Sudo did not enable inline mode (exit code $($process.ExitCode))."
+        return $false
+    }
+
+    Write-Host 'Windows Sudo is enabled in inline mode.' -ForegroundColor Green
+    return $true
+}
+
+function Enable-LongPathSupport {
+    <#
+.SYNOPSIS
+    Ensures Win32 long path support (LongPathsEnabled=1) is enabled.
+.DESCRIPTION
+    Checks HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled.
+    When it is not 1, sets it directly in an elevated session or launches
+    reg.exe through a UAC prompt otherwise, then reads the value back and
+    reports the result. Only applications that declare longPathAware in their
+    manifest benefit, and processes already running keep the old value.
+.PARAMETER NoElevate
+    Report the current state only; never write or prompt for elevation.
+.EXAMPLE
+    PS C:\> Enable-LongPathSupport
+.OUTPUTS
+    System.Boolean. True when LongPathsEnabled is 1 after the call.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-11
+#>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([switch]$NoElevate)
+
+    $keyPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
+    $readValue = { (Get-ItemProperty -LiteralPath $keyPath -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled }
+
+    if ((& $readValue) -eq 1) {
+        Write-Host 'Win32 long paths: already enabled.' -ForegroundColor Green
+        return $true
+    }
+    if ($NoElevate) {
+        Write-Warning 'Win32 long paths are disabled. Run Enable-LongPathSupport from a normal (non -UserScope) session to enable them.'
+        return $false
+    }
+
+    $process = $null
+    try {
+        if (Test-IsAdministrator) {
+            New-ItemProperty -LiteralPath $keyPath -Name LongPathsEnabled -PropertyType DWord -Value 1 -Force -ErrorAction Stop | Out-Null
+        }
+        else {
+            # reg.exe avoids quoting/profile loading of an elevated PowerShell child.
+            # The window is left visible on purpose so the elevated action is not hidden.
+            $regPath = Join-Path $env:SystemRoot 'System32\reg.exe'
+            $regArgs = @('add', 'HKLM\SYSTEM\CurrentControlSet\Control\FileSystem', '/v', 'LongPathsEnabled', '/t', 'REG_DWORD', '/d', '1', '/f')
+            Write-Host 'Win32 long paths are disabled. Requesting administrator rights (UAC) to run:' -ForegroundColor Yellow
+            Write-Host "  $regPath $($regArgs -join ' ')" -ForegroundColor Yellow
+            $process = Start-Process -FilePath $regPath -ArgumentList $regArgs -Verb RunAs -Wait -PassThru -ErrorAction Stop
+        }
+    }
+    catch {
+        Write-Warning "Enabling Win32 long paths was cancelled or failed: $($_.Exception.Message)"
+        return $false
+    }
+
+    # Read back instead of trusting the exit code; HKLM is readable unelevated.
+    if ((& $readValue) -ne 1) {
+        $exitInfo = if ($process) { " (reg.exe exit code $($process.ExitCode))" } else { '' }
+        Write-Warning "LongPathsEnabled is still not 1$exitInfo."
+        return $false
+    }
+
+    Write-Host 'Win32 long paths enabled. Already-running processes keep the old value: restart terminals (a reboot may be required). Only longPathAware apps benefit.' -ForegroundColor Green
+    return $true
+}
+
+function Invoke-Elevated {
+    <#
+.SYNOPSIS
+    Runs a native command or PowerShell script block with administrator rights.
+.DESCRIPTION
+    Uses the inbox Windows Sudo command and the normal UAC consent flow. Native
+    executables receive arguments directly. PowerShell cmdlets, functions,
+    pipelines, and expressions must be supplied as one script block.
+.PARAMETER NoProfile
+    Prevents the elevated PowerShell child from loading PowerShell profiles.
+.PARAMETER Command
+    A native executable plus arguments, or one PowerShell script block.
+.EXAMPLE
+    PS C:\> Invoke-Elevated winget upgrade --all
+.EXAMPLE
+    PS C:\> Invoke-Elevated { Get-Service -Name wuauserv | Restart-Service }
+.EXAMPLE
+    PS C:\> Invoke-Elevated -NoProfile { whoami /groups }
+.NOTES
+    A script block runs in a new process and does not inherit live variables or
+    objects from the calling session.
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$NoProfile,
+
+        [Parameter(Mandatory = $true, Position = 0, ValueFromRemainingArguments = $true)]
+        [object[]]$Command
+    )
+
+    $sudoPath = Join-Path $env:SystemRoot 'System32\sudo.exe'
+    $windowsVersion = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue
+    $build = 0
+    if ($windowsVersion -and -not [int]::TryParse([string]$windowsVersion.CurrentBuildNumber, [ref]$build)) {
+        $build = 0
+    }
+
+    if ($build -lt 26100 -or -not (Test-Path -LiteralPath $sudoPath -PathType Leaf)) {
+        Write-Error 'Invoke-Elevated requires Windows 11 version 24H2 (build 26100) or later.'
+        return
+    }
+
+    $sudoConfig = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo' -ErrorAction SilentlyContinue
+    if (-not $sudoConfig -or $sudoConfig.Enabled -ne 3) {
+        Write-Error 'Windows Sudo is not enabled in inline mode. Run Enable-WindowsSudo first.'
+        return
+    }
+
+    if ($Command.Count -eq 1 -and $Command[0] -is [scriptblock]) {
+        $powerShellPath = (Get-Process -Id $PID -ErrorAction Stop).MainModule.FileName
+        $location = $ExecutionContext.SessionState.Path.CurrentLocation.Path.Replace("'", "''")
+        $scriptText = $Command[0].ToString()
+        $wrappedCommand = @"
+`$ProgressPreference = 'SilentlyContinue'
+Set-Location -LiteralPath '$location'
+`$global:LASTEXITCODE = `$null
+& {
+$scriptText
+}
+`$commandSucceeded = `$?
+`$nativeExitCode = `$global:LASTEXITCODE
+if (`$null -ne `$nativeExitCode) { exit `$nativeExitCode }
+if (-not `$commandSucceeded) { exit 1 }
+"@
+        $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($wrappedCommand))
+        $powerShellArguments = @('-NoLogo', '-OutputFormat', 'Text')
+        if ($NoProfile) { $powerShellArguments += '-NoProfile' }
+        $powerShellArguments += @('-EncodedCommand', $encodedCommand)
+
+        & $sudoPath $powerShellPath @powerShellArguments
+        return
+    }
+
+    if ($Command[0] -isnot [string]) {
+        Write-Error 'The command must be a native executable name or a single PowerShell script block.'
+        return
+    }
+
+    $nativeCommand = Get-Command -Name ([string]$Command[0]) -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $nativeCommand) {
+        Write-Error "'$($Command[0])' is not a native executable. Wrap PowerShell commands in braces: Invoke-Elevated { <command> }."
+        return
+    }
+
+    $nativeArguments = if ($Command.Count -gt 1) { $Command[1..($Command.Count - 1)] } else { @() }
+    & $sudoPath $nativeCommand.Source @nativeArguments
+}
+
+function Read-AppLockerPolicy {
+    <#
+.SYNOPSIS
+    Reads the local or effective AppLocker policy.
+
+.DESCRIPTION
+    Returns the policy XML text together with the parsed document. The raw text
+    is kept so a backup can be written before the document is modified.
+
+.PARAMETER Effective
+    Read the merged effective policy instead of the local one.
+
+.OUTPUTS
+    PSCustomObject with Raw (the policy XML) and Document (parsed XML).
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$Effective
+    )
+
+    $raw = if ($Effective) { Get-AppLockerPolicy -Effective -Xml } else { Get-AppLockerPolicy -Local -Xml }
+
+    $document = New-Object System.Xml.XmlDocument
+    $document.PreserveWhitespace = $true
+    if ($raw -is [System.Xml.XmlDocument]) {
+        # Accept an already parsed document as well as the XML text the cmdlet
+        # returns, so the policy can be fed in from either shape.
+        $document = $raw
+        $raw = $document.OuterXml
+    }
+    else {
+        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = '<AppLockerPolicy Version="1" />' }
+        $document.LoadXml($raw)
+    }
+
+    return [pscustomobject]@{ Raw = $raw; Document = $document }
+}
+
+function Resolve-AppLockerTargetFile {
+    <#
+.SYNOPSIS
+    Finds the executable a file name refers to.
+
+.DESCRIPTION
+    Hash and publisher rules are built from the real file, so it has to be
+    located first. When -FilePath is given, that file is used. Otherwise the
+    name is looked up in PATH and in the usual install locations.
+
+    Returns $null when the name does not resolve to exactly one file, so the
+    caller can ask for an explicit path instead of guessing.
+
+.PARAMETER FileName
+    The file name to look for, for example 'example.exe'.
+
+.PARAMETER FilePath
+    Full path of the file to use instead of searching.
+
+.OUTPUTS
+    System.String with the resolved path, or $null.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName,
+
+        [string]$FilePath
+    )
+
+    if ($FilePath) {
+        $resolved = Resolve-Path -LiteralPath $FilePath -ErrorAction SilentlyContinue
+        if (-not $resolved) { return $null }
+        if (-not (Test-Path -LiteralPath $resolved.Path -PathType Leaf)) { return $null }
+        return $resolved.Path
+    }
+
+    $candidates = @()
+    foreach ($directory in ($env:PATH -split ';')) {
+        if (-not $directory) { continue }
+        $probe = Join-Path $directory $FileName
+        if (Test-Path -LiteralPath $probe -PathType Leaf) { $candidates += (Get-Item -LiteralPath $probe).FullName }
+    }
+
+    $roots = @(
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)},
+        $env:LOCALAPPDATA,
+        $env:ProgramData
+    )
+    foreach ($root in $roots) {
+        if (-not $root -or -not (Test-Path -LiteralPath $root)) { continue }
+        $found = @(Get-ChildItem -LiteralPath $root -Filter $FileName -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+            Where-Object { -not $_.PSIsContainer } |
+            Select-Object -ExpandProperty FullName)
+        $candidates += $found
+    }
+
+    $candidates = @($candidates | Sort-Object -Unique)
+    if ($candidates.Count -ne 1) { return $null }
+    return $candidates[0]
+}
+
+function Test-AppLockerLiveEnforcement {
+    <#
+.SYNOPSIS
+    Probes a filename block and verifies launch failures against AppLocker events.
+.DESCRIPTION
+    Uses a temporary copy of cmd.exe in the rule's directory. Only an AppLocker
+    8004 event matching this path, user, and launch interval confirms a block.
+    Missing evidence or an unusable probe returns Enforced = $null.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)][string]$FileName,
+        [string]$Directory
+    )
+
+    if ($FileName -match '[\\/:*?"<>|]' -or $FileName -in '.', '..') {
+        throw "FileName must be a bare file name: $FileName"
+    }
+    if ($Directory -and -not (Test-Path -LiteralPath $Directory -PathType Container)) {
+        return [pscustomobject]@{ Enforced = $null; Detail = "Probe directory does not exist: $Directory" }
+    }
+    $probeDirectory = if ($Directory) { $Directory } else { [System.IO.Path]::GetTempPath() }
+    $probeFile = [System.IO.Path]::GetFullPath((Join-Path $probeDirectory $FileName))
+    if (Test-Path -LiteralPath $probeFile) {
+        return [pscustomobject]@{ Enforced = $null; Detail = "Probe file already exists: $probeFile" }
+    }
+    if (-not $PSCmdlet.ShouldProcess($probeFile, 'Create, launch, and remove AppLocker probe')) {
+        return [pscustomobject]@{ Enforced = $null; Detail = 'Probe skipped' }
+    }
+
+    $created = $false
+    try {
+        Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $probeFile -ErrorAction Stop
+        $created = $true
+        $started = Get-Date
+        $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        try {
+            # /d suppresses cmd AutoRun hooks so probing cannot execute user startup commands.
+            Start-Process -FilePath $probeFile -ArgumentList '/d', '/c', 'exit' -WindowStyle Hidden -Wait -ErrorAction Stop
+            return [pscustomobject]@{ Enforced = $false; Detail = 'Probe launch succeeded' }
+        }
+        catch {
+            $launchError = $_.Exception.Message
+            $finished = Get-Date
+            # Delivery can lag process creation. Bound the wait and require exact
+            # path/user/time correlation instead of interpreting any launch error as a block.
+            foreach ($attempt in 1..3) {
+                $events = @(Get-WinEvent -FilterHashtable @{
+                    LogName = 'Microsoft-Windows-AppLocker/EXE and DLL'
+                    Id = 8004
+                    StartTime = $started
+                    EndTime = $finished
+                } -ErrorAction SilentlyContinue)
+                foreach ($event in $events) {
+                    # Check the evidence itself as well as the event-log query.
+                    if ($event.Id -ne 8004 -or $null -eq $event.TimeCreated -or
+                        $event.TimeCreated -lt $started -or $event.TimeCreated -gt $finished) { continue }
+                    $xml = [xml]$event.ToXml()
+                    $pathNode = $xml.SelectSingleNode("//*[local-name()='FilePath'] | //*[@Name='FilePath']")
+                    $userNode = $xml.SelectSingleNode("//*[local-name()='TargetUser'] | //*[@Name='TargetUser']")
+                    if ($pathNode -and $userNode -and
+                        [string]::Equals($pathNode.InnerText, $probeFile, [System.StringComparison]::OrdinalIgnoreCase) -and
+                        $userNode.InnerText -eq $userSid) {
+                        return [pscustomobject]@{ Enforced = $true; Detail = 'Matching AppLocker block event 8004' }
+                    }
+                }
+                if ($attempt -lt 3) { Start-Sleep -Milliseconds 200 }
+            }
+            return [pscustomobject]@{ Enforced = $null; Detail = "Launch failed without matching AppLocker evidence: $launchError" }
+        }
+    }
+    catch {
+        return [pscustomobject]@{ Enforced = $null; Detail = $_.Exception.Message }
+    }
+    finally {
+        if ($created) { Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Repair-AppLockerEnforcement {
+    <#
+.SYNOPSIS
+    Verifies filename blocks and attempts bounded policy/service recovery once per batch.
+.DESCRIPTION
+    Audit-only policies and declined operations are left unverified. Per-file
+    results are retained; a failed or skipped probe cannot verify the whole batch.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)][string[]]$FileName,
+        [string]$Directory,
+        [switch]$NoGroupPolicyRefresh,
+        [string]$EnforcementMode = 'Enabled'
+    )
+
+    $names = @($FileName | Sort-Object -Unique)
+    $recovery = @()
+    $probes = @($names | ForEach-Object {
+        [pscustomobject]@{ FileName = $_; Enforced = $null; Detail = 'Probe skipped' }
+    })
+    if ($EnforcementMode -eq 'AuditOnly' -or
+        -not $PSCmdlet.ShouldProcess(($names -join ', '), 'Verify AppLocker and attempt policy/service recovery')) {
+        return [pscustomobject]@{ Enforcement = 'Unverified'; Recovery = @(); NeedsReboot = $false; Probes = $probes }
+    }
+
+    # Refresh every result after each shared recovery step. This also catches a
+    # previously verified target becoming unenforced after a policy refresh.
+    $runProbes = {
+        foreach ($name in $names) {
+            $result = Test-AppLockerLiveEnforcement -FileName $name -Directory $Directory -Confirm:$false
+            [pscustomobject]@{ FileName = $name; Enforced = $result.Enforced; Detail = $result.Detail }
+        }
+    }
+    $probes = @(& $runProbes)
+    if (@($probes | Where-Object { $_.Enforced -eq $false }).Count -gt 0 -and -not $NoGroupPolicyRefresh) {
+        & gpupdate.exe /force | Out-Null
+        if ($LASTEXITCODE -eq 0) { $recovery += 'Group Policy refresh' }
+        Start-Sleep -Seconds 4
+        $probes = @(& $runProbes)
+    }
+    if (@($probes | Where-Object { $_.Enforced -eq $false }).Count -gt 0) {
+        try {
+            Restart-Service -Name 'AppIDSvc' -Force -ErrorAction Stop -Confirm:$false
+            $recovery += 'AppIDSvc restart'
+        }
+        catch {
+            Write-Warning ("Could not restart the Application Identity service: {0}" -f $_.Exception.Message)
+        }
+        foreach ($attempt in 1..3) {
+            Start-Sleep -Seconds 3
+            $probes = @(& $runProbes)
+            if (@($probes | Where-Object { $_.Enforced -eq $false }).Count -eq 0) { break }
+        }
+    }
+    $enforcementStatus = if (@($probes | Where-Object { $_.Enforced -eq $false }).Count -gt 0) {
+        'NotEnforced'
+    }
+    elseif ($probes.Count -eq 0 -or @($probes | Where-Object { $null -eq $_.Enforced }).Count -gt 0) {
+        'Unverified'
+    }
+    elseif ($recovery.Count -gt 0) { 'Recovered' }
+    else { 'Verified' }
+    return [pscustomobject]@{
+        Enforcement = $enforcementStatus
+        Recovery = $recovery
+        NeedsReboot = $false
+        Probes = $probes
+    }
+}
+
+function Write-AppLockerEnforcementStatus {
+    <#
+.SYNOPSIS
+    Prints the observed enforcement verdict without diagnosing an unproven cause.
+#>
+    param(
+        [Parameter(Mandatory = $true)][string]$Enforcement,
+        [object[]]$Recovery = @()
+    )
+    if ($Enforcement -eq 'Verified') {
+        Write-Host 'Enforcement: verified with a live launch probe' -ForegroundColor Green
+    }
+    elseif ($Enforcement -eq 'Recovered') {
+        Write-Host ("Enforcement: recovered after {0}" -f ($Recovery -join ' + ')) -ForegroundColor Yellow
+    }
+    elseif ($Enforcement -eq 'NotEnforced') {
+        Write-Host 'Enforcement: a probe launch succeeded. Review effective policy and AppLocker events.' -ForegroundColor Red
+    }
+    else {
+        Write-Host 'Enforcement: unverified (probe skipped or evidence unavailable)' -ForegroundColor Yellow
+    }
+}
+
+function Enable-AppLockerServiceStartup {
+    <#
+.SYNOPSIS
+    Configures and verifies Automatic startup and starts Application Identity.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param()
+
+    if (-not (Test-IsAdministrator)) { throw 'AppIDSvc configuration requires an elevated PowerShell session.' }
+    $service = Get-Service -Name AppIDSvc -ErrorAction Stop
+    if ($service.StartType -ne 'Automatic' -or $service.Status -ne 'Running') {
+        if (-not $PSCmdlet.ShouldProcess('AppIDSvc', 'Configure Automatic startup and start service')) { return }
+        if ($service.StartType -ne 'Automatic') {
+            # Application Identity is protected; use the documented service-control command.
+            $output = @(& sc.exe config AppIDSvc start= auto 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw "AppIDSvc startup configuration failed (exit $LASTEXITCODE): $($output -join ' ')" }
+            $service = Get-Service -Name AppIDSvc -ErrorAction Stop
+            if ($service.StartType -ne 'Automatic') { throw 'AppIDSvc startup configuration did not become Automatic.' }
+        }
+        if ($service.Status -ne 'Running') { Start-Service -Name AppIDSvc -ErrorAction Stop }
+    }
+    $service = Get-Service -Name AppIDSvc -ErrorAction Stop
+    if ($service.StartType -ne 'Automatic' -or $service.Status -ne 'Running') {
+        throw 'AppIDSvc did not reach Automatic startup and Running status.'
+    }
+    return [pscustomobject]@{ Action = 'ServiceConfigured'; StartType = $service.StartType; Status = $service.Status; Enforcement = 'Unverified' }
+}
+
+function Write-AppLockerServiceStatus {
+    <#
+.SYNOPSIS
+    Reports Application Identity service readiness without claiming enforcement.
+#>
+    param()
+
+    try {
+        $service = Get-Service -Name 'AppIDSvc' -ErrorAction Stop
+    }
+    catch {
+        if ($_.FullyQualifiedErrorId -like 'NoServiceFoundForGivenName*') {
+            Write-Host 'AppIDSvc: not found; service prerequisite unavailable.' -ForegroundColor Red
+        }
+        else {
+            Write-Host ("AppIDSvc: state unknown; service query failed: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+        }
+        return
+    }
+    $state = '{0} (startup {1})' -f $service.Status, $service.StartType
+    if ($service.Status -ne 'Running') {
+        Write-Host ("AppIDSvc: {0}; service prerequisite is not running." -f $state) -ForegroundColor Red
+    }
+    else {
+        Write-Host ("AppIDSvc: {0}; service is running; enforcement requires live probe evidence." -f $state) -ForegroundColor DarkGray
+    }
+    if ($service.StartType -eq 'Disabled') {
+        Write-Host 'AppIDSvc startup is disabled.' -ForegroundColor Red
+    }
+    elseif ($service.StartType -ne 'Automatic') {
+        Write-Host 'AppIDSvc is not configured for automatic startup. Add-AppLockerBlock -PersistServiceStartup can configure it.' -ForegroundColor Yellow
+    }
+}
+
+function Stop-AppLockerProcesses {
+    <#
+.SYNOPSIS
+    Stops running processes for every requested filename, returning successful PIDs.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)][string[]]$FileName
+    )
+
+    $processNames = @($FileName | ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension($_) } | Sort-Object -Unique)
+    foreach ($processName in $processNames) {
+        foreach ($process in @(Get-Process -Name $processName -ErrorAction SilentlyContinue)) {
+            if ($PSCmdlet.ShouldProcess("$processName ($($process.Id))", 'Stop blocked process')) {
+                try {
+                    Stop-Process -Id $process.Id -Force -ErrorAction Stop -Confirm:$false
+                    $process.Id
+                }
+                catch { Write-Warning ("Could not stop process {0}: {1}" -f $process.Id, $_.Exception.Message) }
+            }
+        }
+    }
+}
+
+function Add-AppLockerBlock {
+    <#
+.SYNOPSIS
+    Adds, lists, or reverts AppLocker executable filename blocks on this machine.
+
+.DESCRIPTION
+    Writes a Deny rule into the EXE rule collection of the local AppLocker
+    policy so a given executable can no longer run, and keeps the rest of the
+    machine working. AppLocker allows a file only when it matches an allow
+    rule, so a Deny rule on its own blocks every other executable too. The
+    helper therefore maintains two supporting rules:
+
+      - an allow-all rule for Everyone, added only when the effective policy
+        has no allow rule for EXE files (adding one next to an existing
+        allowlist would widen that allowlist),
+      - an allow-all-signed rule for packaged apps, added only when the policy
+        has neither executable nor packaged-app rules, because enforcing EXE
+        rules blocks every packaged app otherwise (Start menu, Settings, ...).
+
+    Both supporting rules and the Deny rule carry a marker in their
+    Description, so -List can separate them from hand-written policy and
+    -Revert can remove exactly what this profile created.
+
+    -List probes the machine and reports the filename blocks that currently
+    exist. -Revert removes a block by file name, by rule name, or by rule id
+    and drops the supporting rules again once no Deny rule is left.
+
+.PARAMETER Name
+    Executable file name(s) to block, for example 'example.exe'. With -Path,
+    a name relative to that directory.
+
+.PARAMETER Mode
+    How the executable is identified:
+
+      - Path (default): the rule matches the file name in any directory. A
+        renamed copy of the file is not blocked.
+      - Hash: the rule matches this exact binary by content. A renamed copy is
+        still blocked, but the rule stops matching after the program updates.
+      - Publisher: the rule matches by code-signing identity, so it survives
+        both renames and program updates. It can also match other files from
+        the same publisher, so the affected files are reported before the rule
+        is written.
+
+.PARAMETER FilePath
+    Path of the executable to fingerprint for the Hash and Publisher modes. When
+    omitted, the file is looked up by name in PATH and the usual install
+    locations; the rule is only added when exactly one file matches.
+
+.PARAMETER Path
+    Optional directory that scopes the rule to a single location. Without it
+    the rule matches the file name in any directory. Path mode only.
+
+.PARAMETER Enforcement
+    Enforcement mode for the EXE rule collection: 'Enabled' blocks the file,
+    'AuditOnly' only logs it. When omitted, an existing collection keeps its
+    current mode and a newly created collection is set to 'Enabled'.
+
+.PARAMETER BackupDirectory
+    Directory that receives a copy of the local policy before it is changed.
+    Defaults to the user temp directory.
+
+.PARAMETER PersistServiceStartup
+    Also set the Application Identity service to start automatically. Without
+    it the service is only started for the current session. May be used alone
+    without -Name to configure and start the service without changing policy.
+    Service readiness does not verify rule enforcement.
+
+.PARAMETER NoGroupPolicyRefresh
+    Skip the gpupdate refresh that makes the new policy effective.
+
+.PARAMETER VerifyPath
+    Path of an existing executable to evaluate after the policy is applied.
+
+.PARAMETER Force
+    With -Revert, also remove matching rules that this profile did not
+    create. With the Publisher mode, accept a rule that also matches other
+    files from the same publisher.
+
+.PARAMETER Format
+    With -List, print the blocks as a table instead of returning objects.
+
+.PARAMETER List
+    Report the filename blocks that currently exist instead of changing them.
+
+.PARAMETER Revert
+    Remove an existing block instead of adding one.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe
+    Blocks example.exe in any directory and keeps other executables running.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name app.exe -Path 'C:\Tools'
+    Blocks C:\Tools\app.exe only.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe -Mode Hash
+    Blocks that exact binary, so a renamed copy is blocked too.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe -Mode Publisher
+    Blocks every copy of that program from the same publisher, so renames and
+    program updates do not get around it.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -List
+    Lists the filename blocks that currently exist.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Revert -Name example.exe
+    Removes the block for example.exe again.
+
+.EXAMPLE
+    PS C:\> Add-AppLockerBlock -Name example.exe -StopRunning
+    Blocks example.exe, verifies enforcement with a live launch probe, and
+    stops processes of that name that are already running.
+
+.PARAMETER NoLiveVerify
+    Skips the live launch probe that verifies the block is actually enforced.
+
+.PARAMETER StopRunning
+    Also stops processes of the blocked file name that are already running.
+    An AppLocker Deny rule never terminates existing processes.
+
+.OUTPUTS
+    For -List, one object per filename block. Otherwise a summary object.
+    ProbeResults contains per-file launch evidence. NeedsReboot is false because
+    these probes cannot diagnose whether a reboot is required.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+
+    Adding and reverting a block requires an elevated PowerShell session;
+    AppLocker rules are enforced by the Application Identity service. -List
+    only reads the policy and works without elevation.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High', DefaultParameterSetName = 'Add')]
+    param(
+        [Parameter(ParameterSetName = 'Add', Position = 0)]
+        [Parameter(ParameterSetName = 'Revert', Mandatory = $true, Position = 0)]
+        [string[]]$Name,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [ValidateSet('Path', 'Hash', 'Publisher')]
+        [string]$Mode = 'Path',
+
+        [Parameter(ParameterSetName = 'Add')]
+        [string]$FilePath,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [string]$Path,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [ValidateSet('Enabled', 'AuditOnly')]
+        [string]$Enforcement,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [Parameter(ParameterSetName = 'Revert')]
+        [string]$BackupDirectory = $env:TEMP,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [switch]$PersistServiceStartup,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [Parameter(ParameterSetName = 'Revert')]
+        [switch]$NoGroupPolicyRefresh,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [string]$VerifyPath,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [switch]$NoLiveVerify,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [switch]$StopRunning,
+
+        [Parameter(ParameterSetName = 'Add')]
+        [Parameter(ParameterSetName = 'Revert')]
+        [switch]$Force,
+
+        [Parameter(ParameterSetName = 'List')]
+        [switch]$Format,
+
+        [Parameter(ParameterSetName = 'List', Mandatory = $true)]
+        [switch]$List,
+
+        [Parameter(ParameterSetName = 'Revert', Mandatory = $true)]
+        [switch]$Revert
+    )
+
+    $ErrorActionPreference = 'Stop'
+
+    if ($PSCmdlet.ParameterSetName -eq 'Add' -and $Name.Count -eq 0) {
+        if (-not $PersistServiceStartup) { throw 'Specify -Name or use -PersistServiceStartup for service-only setup.' }
+        $ruleOptions = @('Mode', 'FilePath', 'Path', 'Enforcement', 'BackupDirectory', 'NoGroupPolicyRefresh', 'VerifyPath', 'NoLiveVerify', 'StopRunning', 'Force')
+        foreach ($option in $ruleOptions) {
+            if ($PSBoundParameters.ContainsKey($option)) { throw "-$option requires -Name; service-only setup accepts -PersistServiceStartup and common parameters." }
+        }
+        $result = Enable-AppLockerServiceStartup -WhatIf:$WhatIfPreference
+        Write-AppLockerServiceStatus
+        Write-AppLockerEnforcementStatus -Enforcement Unverified
+        return $result
+    }
+
+    Import-Module AppLocker -ErrorAction Stop
+
+    $managedMarker = $_AppLockerInternal.ManagedMarker
+    $everyoneSid = $_AppLockerInternal.EveryoneSid
+
+    # Listing only reads the policy, so it works without elevation.
+    if ($PSCmdlet.ParameterSetName -eq 'List') {
+        $local = Read-AppLockerPolicy
+        $effective = Read-AppLockerPolicy -Effective
+
+        $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($local.Document, 'Exe')
+        $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($local.Document, 'Appx')
+        $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Exe')
+        $effectiveAppx = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Appx')
+
+        $localExeRules = if ($localExe) { @($_ProfileHelpers.GetAppLockerRules($localExe)) } else { @() }
+        $localAppxRules = if ($localAppx) { @($_ProfileHelpers.GetAppLockerRules($localAppx)) } else { @() }
+        $effectiveExeRules = if ($effectiveExe) { @($_ProfileHelpers.GetAppLockerRules($effectiveExe)) } else { @() }
+        $effectiveAppxRules = if ($effectiveAppx) { @($_ProfileHelpers.GetAppLockerRules($effectiveAppx)) } else { @() }
+
+        $localExeIds = @($localExeRules | ForEach-Object { $_.GetAttribute('Id') })
+        $localAppxIds = @($localAppxRules | ForEach-Object { $_.GetAttribute('Id') })
+
+        # The effective policy is a snapshot that only catches up with the
+        # local policy after a Group Policy refresh, so the local rules are
+        # read live and the effective policy only adds the rules that a Group
+        # Policy contributes. Listing the snapshot alone would hide a rule
+        # that was just added and keep showing a rule that was just removed.
+        $domainExeRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveExeRules, $localExeIds, $managedMarker)
+        $domainAppxRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveAppxRules, $localAppxIds, $managedMarker)
+        $mergedExeRules = @($localExeRules) + @($domainExeRules)
+        $mergedAppxRules = @($localAppxRules) + @($domainAppxRules)
+
+        $report = @($_ProfileHelpers.GetAppLockerBlockReport($mergedExeRules, $managedMarker, $localExeIds))
+
+        Write-Host ''
+        Write-Host '== AppLocker executable filename blocks ==' -ForegroundColor Cyan
+        $exeMode = if ($localExe) { $localExe.GetAttribute('EnforcementMode') }
+                   elseif ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') }
+                   else { 'NotConfigured' }
+        $allowCount = @($mergedExeRules | Where-Object { $_.GetAttribute('Action') -eq 'Allow' }).Count
+        $appxCount = $mergedAppxRules.Count
+        Write-Host ("   EXE enforcement mode : {0}" -f $exeMode) -ForegroundColor DarkGray
+        Write-Host ("   EXE allow rules      : {0}" -f $allowCount) -ForegroundColor DarkGray
+        Write-Host ("   Packaged app rules   : {0}" -f $appxCount) -ForegroundColor DarkGray
+        Write-Host ("   Filename blocks      : {0}" -f $report.Count) -ForegroundColor DarkGray
+        Write-AppLockerServiceStatus
+
+        if ($Format) {
+            if ($report.Count -gt 0) {
+                Write-Host ''
+                $report | Format-Table FileName, Mode, Action, Scope, Managed, Target -AutoSize | Out-Host
+            }
+            else {
+                Write-Host '   (none)' -ForegroundColor DarkGray
+            }
+            return
+        }
+
+        # Without -Format the objects are returned so they can be piped or
+        # filtered; printing them here as well would duplicate the output.
+        return $report
+    }
+
+    if ($PSCmdlet.ParameterSetName -eq 'Revert') {
+        # The revert path reuses Remove-AppLockerBlock; -WhatIf and -Confirm
+        # propagate because both functions support ShouldProcess.
+        Remove-AppLockerBlock -Name $Name -Force:$Force -BackupDirectory $BackupDirectory `
+            -NoGroupPolicyRefresh:$NoGroupPolicyRefresh
+        return
+    }
+
+    # Changing the policy needs administrator rights.
+    if (-not (Test-IsAdministrator)) {
+        throw 'Add-AppLockerBlock requires an elevated PowerShell session. Re-run as Administrator.'
+    }
+
+    # --- resolve the rule target for every requested file name ---------------
+    $targets = @()
+    foreach ($item in $Name) {
+        if ([string]::IsNullOrWhiteSpace($item)) { throw 'File name must not be empty.' }
+        if ($item -match '[\\/]') {
+            throw "'$item' must be a file name without a directory. Use -Path to scope the rule to a directory."
+        }
+        if ($item.Contains('*') -or $item.Contains('?')) {
+            throw "'$item' must not contain wildcard characters."
+        }
+        $targets += [pscustomobject]@{ FileName = $item }
+    }
+
+    if ($Mode -eq 'Path' -and $Path -and $FilePath) {
+        throw '-Path and -FilePath cannot be combined; -Path scopes a path rule to a directory, -FilePath points at the file to fingerprint.'
+    }
+
+    $local = Read-AppLockerPolicy
+    $effective = Read-AppLockerPolicy -Effective
+    $localDoc = $local.Document
+    $effectiveDoc = $effective.Document
+
+    $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Exe')
+    $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Appx')
+    $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effectiveDoc, 'Exe')
+    $effectiveAppx = $_ProfileHelpers.GetAppLockerRuleCollection($effectiveDoc, 'Appx')
+
+    $localExeRules = if ($localExe) { @($_ProfileHelpers.GetAppLockerRules($localExe)) } else { @() }
+    $localAppxRules = if ($localAppx) { @($_ProfileHelpers.GetAppLockerRules($localAppx)) } else { @() }
+    $effectiveExeRules = if ($effectiveExe) { @($_ProfileHelpers.GetAppLockerRules($effectiveExe)) } else { @() }
+    $effectiveAppxRules = if ($effectiveAppx) { @($_ProfileHelpers.GetAppLockerRules($effectiveAppx)) } else { @() }
+
+    # Rules that come from a Group Policy rather than from the local policy.
+    # Merging is additive, so the effective set is local rules plus the
+    # domain-only rules from the effective policy. Working from that merged
+    # view keeps the decision stable even before a Group Policy refresh.
+    $localExeIds = @($localExeRules | ForEach-Object { $_.GetAttribute('Id') })
+    $localAppxIds = @($localAppxRules | ForEach-Object { $_.GetAttribute('Id') })
+    $domainExeRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveExeRules, $localExeIds, $managedMarker)
+    $domainAppxRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveAppxRules, $localAppxIds, $managedMarker)
+
+    $mergedExeRules = @($localExeRules) + @($domainExeRules)
+    $mergedAppxRules = @($localAppxRules) + @($domainAppxRules)
+    $mergedAllowCount = @($mergedExeRules | Where-Object { $_.GetAttribute('Action') -eq 'Allow' }).Count
+
+    # Skip names that are already blocked by a rule of the same kind.
+    $existingTargets = @()
+    foreach ($rule in $localExeRules) {
+        if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
+        $info = $_ProfileHelpers.GetAppLockerRuleInfo($rule)
+        if ($info.Mode -eq 'Path') { $existingTargets += $info.Path }
+        elseif ($info.Mode -eq 'Hash') { $existingTargets += $info.Hash }
+        elseif ($info.Mode -eq 'Publisher') { $existingTargets += $info.Publisher }
+    }
+
+    $blocked = @()
+    $alreadyBlocked = @()
+    foreach ($target in $targets) {
+        $rulePath = $null
+        $ruleHash = $null
+        $rulePublisher = $null
+        $fileInfo = $null
+        $resolvedPath = $null
+        $isBlocked = $false
+
+        if ($Mode -eq 'Path') {
+            # Concatenation rather than interpolation: PowerShell only expands
+            # a member in a double-quoted string when the member exists on the
+            # object's .NET type, which a PSCustomObject property does not.
+            $rulePath = if ($Path) { [System.IO.Path]::Combine($Path, $target.FileName) } else { '*\' + $target.FileName }
+            $isBlocked = @($existingTargets | Where-Object {
+                [string]::Equals($_, $rulePath, [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count -gt 0
+        }
+        else {
+            # Hash and Publisher rules are built from the real file, so it has
+            # to be found first.
+            $resolved = Resolve-AppLockerTargetFile -FileName $target.FileName -FilePath $FilePath
+            if (-not $resolved) {
+                throw ("Could not resolve '{0}' to exactly one file. Pass -FilePath with the full path to the executable." -f $target.FileName)
+            }
+            $fileInfo = Get-AppLockerFileInformation -Path $resolved -ErrorAction Stop
+            $resolvedPath = $resolved
+
+            if ($Mode -eq 'Hash') {
+                # The Authenticode PE image hash AppLocker uses, not the flat
+                # file hash: the flat hash never matches.
+                $ruleHash = $_ProfileHelpers.ConvertToAppLockerHashValue($fileInfo.Hash)
+                $isBlocked = @($existingTargets | Where-Object {
+                    [string]::Equals($_, $ruleHash, [System.StringComparison]::OrdinalIgnoreCase)
+                }).Count -gt 0
+            }
+            else {
+                $rulePublisher = $fileInfo.Publisher.PublisherName
+                $isBlocked = @($existingTargets | Where-Object {
+                    [string]::Equals($_, $rulePublisher, [System.StringComparison]::OrdinalIgnoreCase)
+                }).Count -gt 0
+            }
+        }
+
+        if ($isBlocked) {
+            $alreadyBlocked += $target.FileName
+            continue
+        }
+
+        $blocked += [pscustomobject]@{
+            FileName  = $target.FileName
+            RulePath  = $rulePath
+            RuleHash  = $ruleHash
+            Publisher = $rulePublisher
+            FileInfo  = $fileInfo
+            FilePath  = $resolvedPath
+        }
+    }
+
+    if ($blocked.Count -eq 0) {
+        if ($PersistServiceStartup) { $null = Enable-AppLockerServiceStartup -WhatIf:$WhatIfPreference }
+        Write-Host "Already blocked: $($alreadyBlocked -join ', ')" -ForegroundColor Yellow
+        $enforcementStatus = 'Unverified'
+        $recovery = @()
+        $needsReboot = $false
+        $stopped = @()
+        $probeResults = @()
+        if ($Mode -eq 'Path' -and -not $NoLiveVerify) {
+            # The rule exists on paper; make sure it is also actually enforced,
+            # and recover the pipeline if it is not (this is how a block that
+            # was added before an installer ran can still fail to stop it).
+            $status = Repair-AppLockerEnforcement -FileName $alreadyBlocked -Directory $Path -NoGroupPolicyRefresh:$NoGroupPolicyRefresh -EnforcementMode $(if ($effectiveExe -and $effectiveExe.GetAttribute('EnforcementMode') -eq 'AuditOnly') { 'AuditOnly' } else { $localExe.GetAttribute('EnforcementMode') }) -WhatIf:$WhatIfPreference
+            $enforcementStatus = $status.Enforcement
+            $recovery = @($status.Recovery)
+            $needsReboot = $status.NeedsReboot
+            $probeResults = @($status.Probes)
+            Write-AppLockerEnforcementStatus -Enforcement $enforcementStatus -Recovery $recovery
+        }
+        if ($StopRunning) {
+            $stopped = @(Stop-AppLockerProcesses -FileName $alreadyBlocked -WhatIf:$WhatIfPreference)
+            if ($stopped.Count -gt 0) {
+                Write-Host ("Stopped running processes: {0}" -f ($stopped -join ', ')) -ForegroundColor DarkGray
+            }
+        }
+        Write-AppLockerServiceStatus
+        return [pscustomobject]@{
+            Action           = 'AlreadyBlocked'
+            BlockedFiles     = @($alreadyBlocked)
+            Mode             = $Mode
+            BackupPath       = $null
+            EnforcementMode  = $(if ($effectiveExe) { $effectiveExe.GetAttribute('EnforcementMode') } else { 'NotConfigured' })
+            Enforcement      = $enforcementStatus
+            NeedsReboot      = $needsReboot
+            ProbeResults     = $probeResults
+            StoppedPids      = $stopped
+            Verification     = $null
+        }
+    }
+
+    # A publisher rule matches by signing identity, which can also cover other
+    # files from the same publisher. The affected files are reported, and a rule
+    # that reaches beyond the requested file needs -Force to be written.
+    $collateral = @()
+    if ($Mode -eq 'Publisher') {
+        $publisher = $blocked[0].FileInfo.Publisher
+        # The product and binary names narrow the rule; an empty product name
+        # still matches every file of that publisher that has no product name.
+        $productName = if ($publisher.HasProductName) { $publisher.ProductName } else { '' }
+        $binaryName = if ($publisher.HasBinaryName) { $publisher.BinaryName } else { '*' }
+
+        $probe = New-Object System.Xml.XmlDocument
+        $probe.LoadXml('<AppLockerPolicy Version="1" />')
+        $probeExe = $_ProfileHelpers.NewAppLockerRuleCollection($probe, 'Exe', 'Enabled')
+        [void]$probe.DocumentElement.AppendChild($probeExe)
+        $probeRule = $_ProfileHelpers.NewAppLockerFilePublisherRule($probe, 'probe', 'probe', 'Deny', $everyoneSid, $publisher.PublisherName, $productName, $binaryName)
+        [void]$probeExe.AppendChild($probeRule)
+        $probeFile = Join-Path ([System.IO.Path]::GetTempPath()) ('applocker-probe-{0}.xml' -f [guid]::NewGuid().ToString('N'))
+        [System.IO.File]::WriteAllText($probeFile, $probe.OuterXml, [System.Text.UTF8Encoding]::new($false))
+        try {
+            $searchRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA, $env:ProgramData)
+            $candidates = @()
+            foreach ($searchRoot in $searchRoots) {
+                if (-not $searchRoot -or -not (Test-Path -LiteralPath $searchRoot)) { continue }
+                $candidates += @(Get-ChildItem -LiteralPath $searchRoot -Filter '*.exe' -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.PSIsContainer } |
+                    Select-Object -ExpandProperty FullName)
+            }
+            foreach ($candidate in $candidates) {
+                $decision = Test-AppLockerPolicy -XmlPolicy $probeFile -Path $candidate -User 'Everyone' -ErrorAction SilentlyContinue
+                if (-not $decision) { continue }
+                if ($decision.PolicyDecision -eq 'Denied' -and $decision.FilePath -ne $blocked[0].FilePath) {
+                    $collateral += $decision.FilePath
+                }
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue
+        }
+
+        if ($collateral.Count -gt 0 -and -not $Force) {
+            Write-Host ("A publisher rule for this file also matches {0} other executable(s):" -f $collateral.Count) -ForegroundColor Yellow
+            $collateral | Sort-Object -Unique | Select-Object -First 20 | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+            if ($collateral.Count -gt 20) { Write-Host '  ...' -ForegroundColor Yellow }
+            throw 'Re-run with -Force to add a rule that also blocks those files.'
+        }
+        if ($collateral.Count -gt 0) {
+            Write-Host ("Publisher rule also matches {0} other executable(s)." -f $collateral.Count) -ForegroundColor Yellow
+        }
+    }
+
+    # An allow-all rule is required so that the new Deny rule does not turn the
+    # EXE collection into an allowlist that blocks everything else. It is only
+    # safe to add it when the merged policy has no allow rule at all.
+    $needAllowBaseline = ($mergedAllowCount -eq 0)
+    # Packaged apps are blocked as soon as EXE rules are enforced and the
+    # packaged-app collection has no rules, so the same rule applies there.
+    $needAppxBaseline = ($mergedExeRules.Count -eq 0 -and $mergedAppxRules.Count -eq 0)
+
+    if (-not $PSCmdlet.ShouldProcess(
+            "AppLocker EXE policy ($($blocked.FileName -join ', '))",
+            'Block executable by filename')) {
+        return
+    }
+
+    if (-not $localExe) {
+        $newEnforcementMode = if ($Enforcement) { $Enforcement } else { 'Enabled' }
+        $localExe = $_ProfileHelpers.NewAppLockerRuleCollection($localDoc, 'Exe', $newEnforcementMode)
+        [void]$localDoc.DocumentElement.AppendChild($localExe)
+    }
+    elseif ($Enforcement) {
+        $localExe.SetAttribute('EnforcementMode', $Enforcement)
+    }
+
+    if ($needAllowBaseline) {
+        $hasAllowAll = @($localExeRules | Where-Object {
+            $_.GetAttribute('Action') -eq 'Allow' -and
+            [string]::Equals($_ProfileHelpers.GetAppLockerRulePath($_), '*', [System.StringComparison]::OrdinalIgnoreCase)
+        }).Count -gt 0
+        if (-not $hasAllowAll) {
+            $baseline = $_ProfileHelpers.NewAppLockerFilePathRule($localDoc, 'Allow all executables', $managedMarker, 'Allow', $everyoneSid, '*')
+            [void]$localExe.AppendChild($baseline)
+        }
+    }
+
+    if ($needAppxBaseline) {
+        if (-not $localAppx) {
+            $localAppx = $_ProfileHelpers.NewAppLockerRuleCollection($localDoc, 'Appx', 'Enabled')
+            [void]$localDoc.DocumentElement.AppendChild($localAppx)
+        }
+        $appxRule = $_ProfileHelpers.NewAppLockerFilePublisherRule($localDoc, 'Allow all signed packaged apps', $managedMarker, 'Allow', $everyoneSid)
+        [void]$localAppx.AppendChild($appxRule)
+    }
+
+    foreach ($target in $blocked) {
+        $description = '{0} (mode={1})' -f $managedMarker, $Mode.ToLowerInvariant()
+        if ($Mode -eq 'Path') {
+            $rule = $_ProfileHelpers.NewAppLockerFilePathRule($localDoc, "Block $($target.FileName)", $description, 'Deny', $everyoneSid, $target.RulePath)
+            [void]$localExe.AppendChild($rule)
+        }
+        elseif ($Mode -eq 'Hash') {
+            # The length is informational only; AppLocker matches on the hash.
+            $fileLength = 0
+            $fileItem = Get-Item -LiteralPath $target.FilePath -ErrorAction SilentlyContinue
+            if ($fileItem) { $fileLength = $fileItem.Length }
+            $rule = $_ProfileHelpers.NewAppLockerFileHashRule($localDoc, "Block $($target.FileName)", $description, $everyoneSid, $target.RuleHash, $target.FileName, $fileLength)
+            [void]$localExe.AppendChild($rule)
+        }
+        else {
+            $publisher = $target.FileInfo.Publisher
+            # The product and binary names narrow the rule to the requested
+            # program; without them it would cover every file of that publisher.
+            $productName = if ($publisher.HasProductName) { $publisher.ProductName } else { '' }
+            $binaryName = if ($publisher.HasBinaryName) { $publisher.BinaryName } else { '*' }
+            $rule = $_ProfileHelpers.NewAppLockerFilePublisherRule($localDoc, "Block $($target.FileName)", $description, 'Deny', $everyoneSid, $publisher.PublisherName, $productName, $binaryName)
+            [void]$localExe.AppendChild($rule)
+        }
+    }
+
+    # Back up the policy exactly as it was before the change.
+    if (-not (Test-Path -LiteralPath $BackupDirectory)) {
+        $null = New-Item -ItemType Directory -Path $BackupDirectory -Force
+    }
+    $backupPath = Join-Path $BackupDirectory ("AppLocker-backup-{0}.xml" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [System.IO.File]::WriteAllText($backupPath, $local.Raw, [System.Text.UTF8Encoding]::new($false))
+
+    $policyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("AppLocker-{0}.xml" -f [guid]::NewGuid().ToString('N'))
+    [System.IO.File]::WriteAllText($policyFile, $localDoc.OuterXml, [System.Text.UTF8Encoding]::new($false))
+    try {
+        Set-AppLockerPolicy -XmlPolicy $policyFile -ErrorAction Stop
+    }
+    finally {
+        Remove-Item -LiteralPath $policyFile -Force -ErrorAction SilentlyContinue
+    }
+
+    # AppLocker enforcement depends on the Application Identity service.
+    if ($PersistServiceStartup) { $null = Enable-AppLockerServiceStartup -WhatIf:$WhatIfPreference }
+    $service = Get-Service -Name 'AppIDSvc' -ErrorAction SilentlyContinue
+    if (-not $service) {
+        Write-Warning 'The Application Identity service (AppIDSvc) was not found; AppLocker rules may not be enforced.'
+    }
+    else {
+        if ($service.StartType -eq 'Disabled') {
+            Write-Warning 'The Application Identity service is disabled; AppLocker rules will not be enforced.'
+        }
+        if ($service.Status -ne 'Running') {
+            try {
+                Start-Service -Name 'AppIDSvc' -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "Could not start the Application Identity service: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    if (-not $NoGroupPolicyRefresh) {
+        & gpupdate.exe /force | Out-Null
+    }
+
+    $effectiveAfter = Read-AppLockerPolicy -Effective
+    $effectiveExeAfter = $_ProfileHelpers.GetAppLockerRuleCollection($effectiveAfter.Document, 'Exe')
+    $modeAfter = if ($effectiveExeAfter) { $effectiveExeAfter.GetAttribute('EnforcementMode') } else { 'NotConfigured' }
+
+    $decision = $null
+    if ($VerifyPath) {
+        if (-not (Test-Path -LiteralPath $VerifyPath)) {
+            throw "VerifyPath does not exist: $VerifyPath"
+        }
+        $decision = Get-AppLockerPolicy -Effective |
+            Test-AppLockerPolicy -Path $VerifyPath -User "$env:USERDOMAIN\$env:USERNAME"
+    }
+
+    $enforcementStatus = 'Unverified'
+    $recovery = @()
+    $needsReboot = $false
+    $probeResults = @()
+    if ($Mode -eq 'Path' -and -not $NoLiveVerify) {
+        # Policy checks only evaluate XML; AppLocker can be fully configured
+        # (service running, policy-applied events logged) while the kernel-side
+        # AppID pipeline evaluates nothing. Probe a real launch and recover.
+        $status = Repair-AppLockerEnforcement -FileName @($targets.FileName) -Directory $Path -NoGroupPolicyRefresh:$NoGroupPolicyRefresh -EnforcementMode $(if ($effectiveExeAfter -and $effectiveExeAfter.GetAttribute('EnforcementMode') -eq 'AuditOnly') { 'AuditOnly' } else { $localExe.GetAttribute('EnforcementMode') }) -WhatIf:$WhatIfPreference
+        $enforcementStatus = $status.Enforcement
+        $recovery = @($status.Recovery)
+        $needsReboot = $status.NeedsReboot
+        $probeResults = @($status.Probes)
+    }
+
+    # A Deny rule never terminates processes that are already running, so a
+    # block only takes full effect once those are stopped by hand.
+    $stopped = @()
+    if ($StopRunning) {
+        $stopped = @(Stop-AppLockerProcesses -FileName @($targets.FileName) -WhatIf:$WhatIfPreference)
+    }
+
+    Write-Host ''
+    Write-Host ("Blocked: {0}" -f ($blocked.FileName -join ', ')) -ForegroundColor Green
+    if ($alreadyBlocked.Count -gt 0) {
+        Write-Host ("Already blocked: {0}" -f ($alreadyBlocked -join ', ')) -ForegroundColor DarkGray
+    }
+    Write-Host ("Mode: {0}" -f $Mode) -ForegroundColor DarkGray
+    if ($Mode -eq 'Hash') {
+        Write-Host ("Hash: {0}" -f ($blocked.RuleHash -join ', ')) -ForegroundColor DarkGray
+        Write-Host 'A hash rule stops matching after the program updates.' -ForegroundColor Yellow
+    }
+    if ($Mode -eq 'Publisher') {
+        Write-Host ("Publisher: {0}" -f ($blocked.Publisher -join ', ')) -ForegroundColor DarkGray
+    }
+    Write-Host ("EXE enforcement mode: {0}" -f $modeAfter) -ForegroundColor DarkGray
+    Write-Host ("Policy backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+    if ($decision) {
+        Write-Host ("Verify {0}: {1}" -f $VerifyPath, $decision.PolicyDecision) -ForegroundColor DarkGray
+    }
+    Write-AppLockerEnforcementStatus -Enforcement $enforcementStatus -Recovery $recovery
+    Write-AppLockerServiceStatus
+    if ($stopped.Count -gt 0) {
+        Write-Host ("Stopped running processes: {0}" -f ($stopped -join ', ')) -ForegroundColor DarkGray
+    }
+
+    return [pscustomobject]@{
+        Action           = 'Blocked'
+        BlockedFiles     = @($blocked.FileName)
+        BlockedPaths     = @($blocked.RulePath)
+        BlockedHashes    = @($blocked.RuleHash)
+        BlockedPublishers = @($blocked.Publisher)
+        Mode             = $Mode
+        AlreadyBlocked   = @($alreadyBlocked)
+        BackupPath       = $backupPath
+        EnforcementMode  = $modeAfter
+        Enforcement      = $enforcementStatus
+        NeedsReboot      = $needsReboot
+        ProbeResults     = $probeResults
+        StoppedPids      = @($stopped)
+        Verification     = $(if ($decision) { $decision.PolicyDecision } else { $null })
+    }
+}
+
+function Remove-AppLockerBlock {
+    <#
+.SYNOPSIS
+    Removes AppLocker executable filename blocks from the local policy.
+
+.DESCRIPTION
+    Deletes the EXE Deny rules that match the given file names, rule names, or
+    rule ids, and drops the allow-all and packaged-app rules that this profile
+    added once no Deny rule is left. Rules that were not created by
+    Add-AppLockerBlock are kept unless -Force is given, so hand-written policy
+    is never removed by accident.
+
+.PARAMETER Name
+    File name(s), rule name(s), or rule id(s) of the blocks to remove.
+
+.PARAMETER Force
+    Also remove matching rules that Add-AppLockerBlock did not create.
+
+.PARAMETER BackupDirectory
+    Directory that receives a copy of the local policy before it is changed.
+    Defaults to the user temp directory.
+
+.PARAMETER NoGroupPolicyRefresh
+    Skip the gpupdate refresh that makes the change effective.
+
+.EXAMPLE
+    PS C:\> Remove-AppLockerBlock -Name example.exe
+    Removes the filename block for example.exe.
+
+.EXAMPLE
+    PS C:\> Remove-AppLockerBlock -Name example.exe -Force
+    Removes the block even when it was created outside this profile.
+
+.OUTPUTS
+    A summary object describing what was removed.
+
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+
+    Requires an elevated PowerShell session.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string[]]$Name,
+
+        [switch]$Force,
+
+        [string]$BackupDirectory = $env:TEMP,
+
+        [switch]$NoGroupPolicyRefresh
+    )
+
+    $ErrorActionPreference = 'Stop'
+
+    if (-not (Test-IsAdministrator)) {
+        throw 'Remove-AppLockerBlock requires an elevated PowerShell session. Re-run as Administrator.'
+    }
+
+    Import-Module AppLocker -ErrorAction Stop
+
+    $managedMarker = $_AppLockerInternal.ManagedMarker
+
+    $local = Read-AppLockerPolicy
+    $effective = Read-AppLockerPolicy -Effective
+    $localDoc = $local.Document
+
+    $localExe = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Exe')
+    $localAppx = $_ProfileHelpers.GetAppLockerRuleCollection($localDoc, 'Appx')
+    $effectiveExe = $_ProfileHelpers.GetAppLockerRuleCollection($effective.Document, 'Exe')
+
+    $removed = @()
+    $removedDetails = @()
+    $kept = @()
+
+    if ($localExe) {
+        foreach ($rule in @($_ProfileHelpers.GetAppLockerRules($localExe))) {
+            if ($rule.GetAttribute('Action') -ne 'Deny') { continue }
+            $info = $_ProfileHelpers.GetAppLockerRuleInfo($rule)
+            $leaf = if ($info.Path) { ($info.Path -split '[\\/]')[-1] } else { '' }
+            $isManaged = ($info.Description -like "*$managedMarker*")
+
+            $matches = @($Name | Where-Object {
+                $candidate = $_
+                [string]::Equals($info.RuleId, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($info.Name, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($leaf, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($info.Target, $candidate, [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count -gt 0
+            if (-not $matches) { continue }
+
+            if (-not $isManaged -and -not $Force) {
+                $kept += "$($info.Name) ($($info.Mode): $($info.Target))"
+                continue
+            }
+            [void]$localExe.RemoveChild($rule)
+            $removed += $info.Target
+            $removedDetails += "$($info.Mode): $($info.Target)"
+        }
+    }
+
+    if ($removed.Count -eq 0) {
+        if ($kept.Count -gt 0) {
+            Write-Host 'Matching rules were not created by Add-AppLockerBlock and were left in place:' -ForegroundColor Yellow
+            $kept | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+            Write-Host 'Re-run with -Force to remove them anyway.' -ForegroundColor Yellow
+        }
+        else {
+            # Nothing local matched; the block may come from a Group Policy.
+            # Only rules that a Group Policy contributes are considered: the
+            # effective policy is a snapshot and can still hold a rule this
+            # profile created and that has since been removed.
+            $localExeIds = $_ProfileHelpers.GetAppLockerRuleIdList($localExe)
+            $effectiveExeRules = if ($effectiveExe) { @($_ProfileHelpers.GetAppLockerRules($effectiveExe)) } else { @() }
+            $domainExeRules = $_ProfileHelpers.GetAppLockerDomainRules($effectiveExeRules, $localExeIds, $managedMarker)
+            $report = @($_ProfileHelpers.GetAppLockerBlockReport($domainExeRules, $managedMarker, @()))
+            $foreign = @($report | Where-Object {
+                $_.Scope -eq 'GroupPolicy' -and
+                ($_.FileName -in $Name -or $_.Target -in $Name)
+            })
+            if ($foreign.Count -gt 0) {
+                Write-Host 'The matching block comes from a Group Policy and cannot be removed from this machine:' -ForegroundColor Yellow
+                $foreign | ForEach-Object { Write-Host "  $($_.Mode): $($_.Target)" -ForegroundColor Yellow }
+            }
+            else {
+                Write-Host 'No matching filename block was found.' -ForegroundColor Yellow
+            }
+        }
+
+        Write-AppLockerServiceStatus
+        return [pscustomobject]@{
+            Action      = 'NotFound'
+            Removed     = @()
+            RemovedDetails = @()
+            Kept        = @($kept)
+            BackupPath  = $null
+        }
+    }
+
+    if (-not $PSCmdlet.ShouldProcess(
+            "AppLocker EXE policy ($($removed -join ', '))",
+            'Remove executable filename block')) {
+        return
+    }
+
+    # The allow-all rule exists only to keep other executables running while a
+    # Deny rule is present, so it goes once no Deny rule is left.
+    $remaining = if ($localExe) { @($_ProfileHelpers.GetAppLockerRules($localExe)) } else { @() }
+    $remainingDeny = @($remaining | Where-Object { $_.GetAttribute('Action') -eq 'Deny' })
+    if ($remainingDeny.Count -eq 0) {
+        foreach ($rule in @($remaining | Where-Object {
+            $_.GetAttribute('Description') -like "*$managedMarker*" -and
+            [string]::Equals($_ProfileHelpers.GetAppLockerRulePath($_), '*', [System.StringComparison]::OrdinalIgnoreCase)
+        })) {
+            [void]$localExe.RemoveChild($rule)
+        }
+        $remaining = @($_ProfileHelpers.GetAppLockerRules($localExe))
+    }
+    if ($remaining.Count -eq 0) {
+        [void]$localDoc.DocumentElement.RemoveChild($localExe)
+        $localExe = $null
+    }
+
+    # The packaged-app rule only matters while EXE rules are enforced locally.
+    if ($null -eq $localExe -and $localAppx) {
+        foreach ($rule in @($_ProfileHelpers.GetAppLockerRules($localAppx) |
+                Where-Object { $_.GetAttribute('Description') -like "*$managedMarker*" })) {
+            [void]$localAppx.RemoveChild($rule)
+        }
+        if (@($_ProfileHelpers.GetAppLockerRules($localAppx)).Count -eq 0) {
+            [void]$localDoc.DocumentElement.RemoveChild($localAppx)
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $BackupDirectory)) {
+        $null = New-Item -ItemType Directory -Path $BackupDirectory -Force
+    }
+    $backupPath = Join-Path $BackupDirectory ("AppLocker-backup-{0}.xml" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [System.IO.File]::WriteAllText($backupPath, $local.Raw, [System.Text.UTF8Encoding]::new($false))
+
+    $policyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("AppLocker-{0}.xml" -f [guid]::NewGuid().ToString('N'))
+    [System.IO.File]::WriteAllText($policyFile, $localDoc.OuterXml, [System.Text.UTF8Encoding]::new($false))
+    try {
+        Set-AppLockerPolicy -XmlPolicy $policyFile -ErrorAction Stop
+    }
+    finally {
+        Remove-Item -LiteralPath $policyFile -Force -ErrorAction SilentlyContinue
+    }
+
+    if (-not $NoGroupPolicyRefresh) {
+        & gpupdate.exe /force | Out-Null
+    }
+
+    Write-Host ''
+    Write-Host ("Removed: {0}" -f ($removedDetails -join ', ')) -ForegroundColor Green
+    if ($kept.Count -gt 0) {
+        Write-Host ("Kept (not created here): {0}" -f ($kept -join ', ')) -ForegroundColor Yellow
+    }
+    Write-Host ("Policy backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+
+    Write-AppLockerServiceStatus
+    return [pscustomobject]@{
+        Action         = 'Removed'
+        Removed        = @($removed)
+        RemovedDetails = @($removedDetails)
+        Kept           = @($kept)
+        BackupPath     = $backupPath
+    }
+}
+
+function Invoke-WindowsUpdateScan {
+    <#
+.SYNOPSIS
+    Scans for pending Windows Updates without making any system changes.
+.DESCRIPTION
+    Queries the Microsoft.Update.Session COM API for applicable updates and prints
+    a summary table (KB, SizeMB, Severity, Reboot requirement, Title).
+    Can be run in non-elevated user sessions.
+.EXAMPLE
+    PS C:\> Invoke-WindowsUpdateScan
+.OUTPUTS
+    Microsoft.Update.SearchResult or $null
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param()
+
+    try {
+        $session  = New-Object -ComObject Microsoft.Update.Session
+        $searcher = $session.CreateUpdateSearcher()
+        $searcher.ServerSelection = 2
+    } catch {
+        Write-Host "Failed to create Microsoft.Update.Session COM object: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+
+    Write-Host "Scanning for Windows Updates..." -ForegroundColor Cyan
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $result = $searcher.Search("IsInstalled=0 AND IsHidden=0")
+    } catch {
+        Write-Host "Scan threw: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host ($_ProfileHelpers.ResolveWUHResult($_.Exception.HResult)) -ForegroundColor Red
+        return $null
+    }
+    $sw.Stop()
+
+    $color = switch ($result.ResultCode) { 2 {'Green'} 3 {'Yellow'} default {'Red'} }
+    Write-Host ("Scan finished in {0:N1}s - {1}" -f `
+        $sw.Elapsed.TotalSeconds, ($_ProfileHelpers.ResolveWUResultCode($result.ResultCode))) -ForegroundColor $color
+
+    foreach ($w in $result.Warnings) {
+        Write-Host ("  WARN {0} {1}" -f ($_ProfileHelpers.ResolveWUHResult($w.HResult)), $w.Message) -ForegroundColor Yellow
+    }
+
+    if ($result.ResultCode -notin 2,3) { Write-Host "Result not trustworthy." -ForegroundColor Red; return $result }
+
+    if ($result.Updates.Count -eq 0) {
+        if ($result.ResultCode -eq 3) {
+            Write-Host "No updates returned, but scan reported errors - inconclusive." -ForegroundColor Yellow
+        } else {
+            Write-Host "No applicable updates available - system is up to date." -ForegroundColor Green
+        }
+        if ((New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired) {
+            Write-Host "Note: reboot pending - more updates may appear after restart." -ForegroundColor Yellow
+        }
+        return $result
+    }
+
+    Write-Host "$($result.Updates.Count) update(s) available:" -ForegroundColor Yellow
+    $result.Updates | ForEach-Object {
+        [pscustomobject]@{
+            KB        = ($_.KBArticleIDs -join ',')
+            SizeMB    = [math]::Round($_.MaxDownloadSize / 1MB, 1)
+            Severity  = $_.MsrcSeverity
+            Reboot    = $_.InstallationBehavior.RebootBehavior -ne 0
+            Dl        = $_.IsDownloaded
+            Title     = if ($_.Title.Length -gt 60) { $_.Title.Substring(0,57) + '...' } else { $_.Title }
+        }
+    } | Format-Table -AutoSize | Out-Host
+
+    return $result
+}
+
+function Invoke-WindowsUpdate {
+    <#
+.SYNOPSIS
+    Downloads and installs pending Windows Updates. Requires Administrator rights.
+.DESCRIPTION
+    Scans, downloads, and installs pending updates using the Windows Update Agent API.
+    Fails immediately if running in an un-elevated PowerShell session.
+.PARAMETER ScanOnly
+    Delegates to Invoke-WindowsUpdateScan without attempting download or installation.
+.EXAMPLE
+    PS C:\> Invoke-WindowsUpdate
+.EXAMPLE
+    PS C:\> Invoke-WindowsUpdate -ScanOnly
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-07
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$ScanOnly
+    )
+
+    if ($ScanOnly) {
+        Invoke-WindowsUpdateScan
+        return
+    }
+
+    $isAdmin = ([Security.Principal.WindowsPrincipal]`
+                [Security.Principal.WindowsIdentity]::GetCurrent()
+               ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if (-not $isAdmin) {
+        Write-Host "Error: Administrator rights are required to download and install Windows Updates." -ForegroundColor Red
+        Write-Host "Please re-run PowerShell as Administrator (e.g. right-click -> 'Run as Administrator' or 'sudo powershell')." -ForegroundColor Yellow
+        return
+    }
+
+    $scanResult = Invoke-WindowsUpdateScan
+    if ($null -eq $scanResult -or $scanResult.Updates.Count -eq 0) {
+        return
+    }
+
+    try {
+        $session = New-Object -ComObject Microsoft.Update.Session
+    } catch {
+        Write-Host "Failed to create Microsoft.Update.Session COM object: $($_.Exception.Message)" -ForegroundColor Red
+        return
+    }
+
+    # --- Download ---
+    $coll = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($u in $scanResult.Updates) {
+        if ($u.InstallationBehavior.CanRequestUserInput) {
+            Write-Host "Skipping (needs user input): $($u.Title)" -ForegroundColor Yellow
+            continue
+        }
+        if (-not $u.EulaAccepted) { $u.AcceptEula() }
+        $null = $coll.Add($u)
+    }
+    if ($coll.Count -eq 0) { Write-Host "Nothing eligible to install." -ForegroundColor Yellow; return }
+
+    Write-Host "Downloading $($coll.Count) update(s)..." -ForegroundColor Cyan
+    $dl = $session.CreateUpdateDownloader()
+    $dl.Updates = $coll
+    try { $dlResult = $dl.Download() }
+    catch {
+        Write-Host "Download threw: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host ($_ProfileHelpers.ResolveWUHResult($_.Exception.HResult)) -ForegroundColor Red
+        return
+    }
+    Write-Host ("Download: {0}" -f ($_ProfileHelpers.ResolveWUResultCode($dlResult.ResultCode)))
+
+    for ($i = 0; $i -lt $coll.Count; $i++) {
+        $ur = $dlResult.GetUpdateResult($i)
+        if ($ur.ResultCode -ne 2) {
+            Write-Host ("  FAILED {0}`n         {1}" -f `
+                $coll.Item($i).Title, ($_ProfileHelpers.ResolveWUHResult($ur.HResult))) -ForegroundColor Red
+        }
+    }
+
+    # --- Install (only what actually downloaded) ---
+    $ready = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($u in $coll) { if ($u.IsDownloaded) { $null = $ready.Add($u) } }
+
+    if ($ready.Count -eq 0) {
+        Write-Host "No updates downloaded successfully - nothing to install." -ForegroundColor Red
+        return
+    }
+
+    Write-Host "Installing $($ready.Count) update(s)..." -ForegroundColor Cyan
+    $inst = $session.CreateUpdateInstaller()
+    $inst.Updates = $ready
+    try { $r = $inst.Install() }
+    catch {
+        Write-Host "Install threw: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host ($_ProfileHelpers.ResolveWUHResult($_.Exception.HResult)) -ForegroundColor Red
+        return
+    }
+
+    Write-Host ("Install: {0}  RebootRequired={1}" -f `
+        ($_ProfileHelpers.ResolveWUResultCode($r.ResultCode)), $r.RebootRequired)
+
+    $(for ($i = 0; $i -lt $ready.Count; $i++) {
+        $ur = $r.GetUpdateResult($i)
+        [pscustomobject]@{
+            Result  = $_ProfileHelpers.ResolveWUResultCode($ur.ResultCode)
+            HResult = '0x{0:X8}' -f $ur.HResult
+            Title   = $ready.Item($i).Title
+        }
+    }) | Format-Table -AutoSize -Wrap | Out-Host
+}
+
+function Use-GhCredential {
+    <#
+.SYNOPSIS
+    Uses GitHub CLI for the current repository's GitHub HTTPS credentials.
+.DESCRIPTION
+    Replaces the repository-local GitHub credential helpers with an empty
+    reset entry followed by gh. Repeated calls do not add duplicate entries.
+    Uses the active gh account; select it separately with gh auth switch.
+    Prints the active account when available; lookup failures are ignored.
+    SSH remotes are unaffected.
+.EXAMPLE
+    PS C:\repo> Use-GhCredential
+    Configures this repository to use gh for github.com HTTPS authentication.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-10
+#>
+    [CmdletBinding()]
+    param()
+
+    foreach ($command in 'git', 'gh') {
+        if (-not (Get-Command $command -CommandType Application -ErrorAction SilentlyContinue)) {
+            throw "$command must be installed and available on PATH."
+        }
+    }
+
+    git rev-parse --git-dir *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'Run Use-GhCredential inside a Git repository.' }
+
+    # Preserve the empty native argument in Windows PowerShell 5.1.
+    # The empty helper resets helpers inherited from other configuration scopes.
+    git --% config --local --replace-all credential.https://github.com.helper ""
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to reset the repository GitHub credential helpers.' }
+
+    git config --local --add credential.https://github.com.helper '!gh auth git-credential'
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to configure the gh credential helper.' }
+
+    Write-Host 'This repository now uses gh for GitHub HTTPS credentials.' -ForegroundColor Green
+    # Account lookup is informational and must not fail credential setup.
+    try {
+        $statusJson = gh auth status --active --hostname github.com --json hosts --no-refresh 2>$null
+        if ($LASTEXITCODE -eq 0 -and $statusJson) {
+            $status = $statusJson | ConvertFrom-Json -ErrorAction Stop
+            $account = $status.hosts.'github.com' | Where-Object { $_.active -and $_.login } | Select-Object -First 1
+            if ($account) {
+                Write-Host ("Current gh account: {0} (github.com)" -f $account.login) -ForegroundColor DarkGray
+            }
+        }
+    } catch {
+        # Keep the original output when gh cannot report an account.
+    }
+    Write-Host 'Authenticate with gh auth login or select an account with gh auth switch.' -ForegroundColor DarkGray
+}
+
+# Auto-load vault credentials at profile load time so every session starts with
+# keys available. Uses -Quiet to avoid printing key counts in transient shells.
+Load-AiApiKeysFromCS -Quiet
