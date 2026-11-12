@@ -1033,10 +1033,10 @@ nrd() {
 
     local i
     for ((i = 1; i <= max_attempts; i++)); do
-      # Same portable slice form as the color draw: plain 0-based subscripts
-      # select empty strings under zsh's 1-based indexing.
-      name="$(printf '%s' "${colors[@]:$((RANDOM % ${#colors[@]})):1}")"
-      name="$name-$(printf '%s' "${adjectives[@]:$((RANDOM % ${#adjectives[@]})):1}")"
+      # Only the adjective/noun subscripts needed porting: the name must lead
+      # with the retry loop's chosen $color so its used-color avoidance and
+      # the exhaustion warning actually describe the created directory.
+      name="$color-$(printf '%s' "${adjectives[@]:$((RANDOM % ${#adjectives[@]})):1}")"
       name="$name-$(printf '%s' "${nouns[@]:$((RANDOM % ${#nouns[@]})):1}")"
       $verbose && echo "attempt $i: $name"
       [[ ! -e "$base_path/$name" ]] && break

@@ -196,6 +196,34 @@ test_generated_name_has_nonempty_components() {
   [[ "$name" =~ ^[a-z]+-[a-z]+-[a-z]+$ ]] || fail "generated name '$name' has an empty component"
 }
 
+# Print the nrd color palette parsed from the extracted embedded block.
+nrd_palette() {
+  awk '/^  local colors=\($/{ emit = 1; next } emit && /^  \)$/{ exit } emit { print }' \
+    "$TEST_ROOT/nrd_block.sh" | tr ' ' '\n' | sed '/^$/d'
+}
+
+test_exhausted_palette_warns_and_uses_that_color() {
+  # Seed one child directory per palette color so every draw collides; the
+  # retry loop must warn with its final color and the created directory must
+  # actually lead with it (a name draw re-picking a color would disagree).
+  local base="$TEST_ROOT/exhausted" color warned name new="" entry
+  mkdir -p "$base"
+  write_embedded_nrd
+  for color in $(nrd_palette); do mkdir -p "$base/$color-seed-x"; done
+  local stderr_file="$TEST_ROOT/nrd-stderr.txt"
+  (cd "$base" && nrd >/dev/null 2>"$stderr_file") || fail 'nrd failed'
+  warned="$(sed -n "s/.*using '\\([a-z]*\\)' anyway.*/\\1/p" "$stderr_file")"
+  [[ -n "$warned" ]] || fail 'expected a palette-exhaustion warning'
+  for entry in "$base"/*; do
+    [[ -d "$entry" ]] || continue
+    case "$(basename "$entry")" in *-seed-x) continue ;; esac
+    [[ -z "$new" ]] || fail 'multiple new child directories created'
+    new="$(basename "$entry")"
+  done
+  [[ -n "$new" ]] || fail 'no new child directory was created'
+  [[ "$new" == "$warned-"* ]] || fail "created '$new' does not lead with the warned color '$warned'"
+}
+
 run_test 'bash: empty directory scan succeeds' test_empty_directory_scan_succeeds
 run_test 'bash: directory with only files succeeds' test_directory_with_only_files_succeeds
 run_test 'bash: existing color-prefixed children scanned' test_existing_color_children_still_scanned
@@ -203,6 +231,7 @@ run_test 'bash: explicit name unchanged' test_explicit_name_is_unchanged
 run_test 'bash: parent path with spaces succeeds' test_parent_path_with_spaces_succeeds
 run_test 'bash: caller options unchanged' test_caller_options_unchanged_after_run
 run_test 'bash: generated name has nonempty components' test_generated_name_has_nonempty_components
+run_test 'bash: exhausted palette warns and uses that color' test_exhausted_palette_warns_and_uses_that_color
 run_test 'installer: version 2 block upgrades once, rerun idempotent' test_old_version_marker_upgrades_once_and_idempotent
 
 if command -v zsh >/dev/null 2>&1; then
