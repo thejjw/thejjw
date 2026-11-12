@@ -2545,8 +2545,8 @@ function Invoke-And {
 .DESCRIPTION
     Emulates bash's && chaining for Windows PowerShell 5.1, which has no &&/||
     operators. Each block runs only when every earlier block succeeded. A
-    block succeeds when it writes no errors and any native executable in it
-    exits with code 0.
+    block succeeds when it wrote no errors to $Error while it ran and the
+    final native exit code visible after it is 0.
 
     It reads $Error instead of $?: invoking a script block resets $? in the
     caller even when the block's last statement failed with a non-terminating
@@ -2554,8 +2554,16 @@ function Invoke-And {
 
     Commands joined inside a single block run relative to each other like
     with ';': a failing cmdlet does not stop a native exe later in the same
-    block, but anything the block wrote to $Error (or a nonzero exe exit
-    code) still fails the whole chain.
+    block. PowerShell keeps one session-wide $LASTEXITCODE, so the helper
+    only sees the exit code of the last native command that ran in the
+    block: an earlier native failure there is overwritten by any later
+    native command ({ cmd /c exit 3; cmd /c exit 0 } succeeds), while
+    ordinary output does not overwrite it, so a failing exe followed only
+    by output still fails the chain. To short-circuit reliably, run one
+    native operation per block: then { cmd /c exit 3 } { cmd /c exit 0 }.
+    Checking $LASTEXITCODE after the whole chain cannot recover a native
+    failure that a later native command in the same block overwrote --
+    anything the block wrote to $Error, however, always fails the chain.
 
     A terminating error in a block is reported as exit code 1 and rethrown,
     so the error record still reaches the caller.
@@ -2572,11 +2580,13 @@ function Invoke-And {
 
     Returns 3 without running the second block; $LASTEXITCODE is 3.
 .OUTPUTS
-    System.Int32. The exit code of the chain: 0 when every block succeeded,
-    otherwise the failing exit code (1 for a terminating error).
+    The success-stream output of each block that ran, followed by a final
+    System.Int32 on normal completion: 0 when every block succeeded,
+    otherwise the failing exit code (1 for a terminating error, which is
+    rethrown instead of returned).
 .NOTES
     Author: jjw(@thejjw)
-    Last Edit: 2026-10
+    Last Edit: 2026-11
 #>
     [CmdletBinding()]
     param(

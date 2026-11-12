@@ -30,28 +30,43 @@ Describe 'Invoke-And' {
     }
 
     It 'short-circuits on a failing cmdlet and reports exit code 1' {
-        $sentinel = 'unchanged'
         $threw = $false
-        $last = $null
+        $result = $null
         try {
-            $out = @(then { Write-Error 'boom' } { $sentinel = 'overwritten' })
-            $last = $out[-1]
+            $result = @(then { Write-Error 'boom' } { 'ran-later' })
         } catch { $threw = $true }
 
         # Pester's ErrorActionPreference makes the error terminating (throwing),
-        # a plain shell leaves it non-terminating (returning 1); the second
-        # block must be skipped either way.
-        ($threw -or ($last -eq 1)) | Should -BeTrue
-        $sentinel | Should -Be 'unchanged'
+        # a plain shell leaves it non-terminating (returning 1). Either way the
+        # second block is skipped: its 'ran-later' output never appears.
+        if ($threw) { $result | Should -BeNullOrEmpty }
+        else { $result | Should -Be 1 }
         $global:LASTEXITCODE | Should -Be 1
     }
 
-    It 'propagates a native executable failing exit code' {
-        $sentinel = 'unchanged'
-        $result = @(then { cmd /c exit 3 } { $sentinel = 'overwritten' })
+    It 'propagates a native executable failing exit code and skips later blocks' {
+        $result = @(then { cmd /c exit 3 } { 'ran-later' })
 
+        # The missing 'ran-later' output proves the second block never ran.
         $result | Should -Be 3
-        $sentinel | Should -Be 'unchanged'
+        $global:LASTEXITCODE | Should -Be 3
+    }
+
+    It 'keeps only the last native exit code when several exes share one block' {
+        # Documented last-native semantics: the earlier exit 3 is overwritten
+        # by the later exit 0, so the block succeeds and the next block runs
+        # despite the failed exe -- the masking this helper cannot detect.
+        $result = @(then { cmd /c exit 3; cmd /c exit 0 } { 'later' })
+
+        $result | Should -Be @('later', 0)
+        $global:LASTEXITCODE | Should -Be 0
+    }
+
+    It 'preserves a native failure followed only by ordinary output in its block' {
+        # Output does not touch $LASTEXITCODE, so the exe failure survives.
+        $result = @(then { cmd /c exit 3; 'plain output' })
+
+        $result | Should -Be @('plain output', 3)
         $global:LASTEXITCODE | Should -Be 3
     }
 
@@ -63,10 +78,13 @@ Describe 'Invoke-And' {
     }
 
     It 'propagates a terminating error and reports exit code 1' {
-        $sentinel = 'unchanged'
-        { then { throw 'boom' } { $sentinel = 'overwritten' } } | Should -Throw 'boom'
+        # A shared hashtable mutates only if the second block actually runs;
+        # a plain local assignment inside & $block would not prove anything
+        # because the block executes in a child scope.
+        $state = @{ laterRan = $false }
+        { then { throw 'boom' } { $state.laterRan = $true } } | Should -Throw 'boom'
 
-        $sentinel | Should -Be 'unchanged'
+        $state.laterRan | Should -BeFalse
         $global:LASTEXITCODE | Should -Be 1
     }
 
@@ -94,10 +112,9 @@ $functionAst = $ast.Find({ param($node)
 if (-not $functionAst) { throw 'Could not load Invoke-And from the profile.' }
 . ([scriptblock]::Create($functionAst.Extent.Text))
 Set-Alias then Invoke-And
-$sentinel = 'unchanged'
-$result = @(then { Write-Error 'boom' -ErrorAction Continue } { $sentinel = 'overwritten' })
+$result = @(then { Write-Error 'boom' -ErrorAction Continue } { Write-Output 'ran-later' })
 Write-Output ('code=' + $result[-1])
-Write-Output ('sentinel=' + $sentinel)
+Write-Output ('laterRan=' + [bool]($result -contains 'ran-later'))
 Write-Output ('lastexit=' + $global:LASTEXITCODE)
 '@.Replace('[PROFILE]', $profilePath)
         Set-Content -LiteralPath $driverPath -Value $source
@@ -105,7 +122,7 @@ Write-Output ('lastexit=' + $global:LASTEXITCODE)
         $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $driverPath 2>$null
 
         $output | Should -Contain 'code=1'
-        $output | Should -Contain 'sentinel=unchanged'
+        $output | Should -Contain 'laterRan=False'
         $output | Should -Contain 'lastexit=1'
     }
 }
