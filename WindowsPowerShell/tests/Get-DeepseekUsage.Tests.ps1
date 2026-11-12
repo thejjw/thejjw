@@ -35,21 +35,6 @@ Describe 'Get-DeepseekUsage' {
             param($Title)
             [void]$script:sections.Add($Title)
         }
-        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name FormatTokens -Force -Value {
-            param([double]$Value)
-            if ($Value -le 0) { return '0' }
-            if ($Value -ge 1e9) { return ('{0:N2}B' -f ($Value / 1e9)) }
-            if ($Value -ge 1e6) { return ('{0:N2}M' -f ($Value / 1e6)) }
-            if ($Value -ge 1e3) { return ('{0:N2}K' -f ($Value / 1e3)) }
-            return ('{0:N0}' -f $Value)
-        }
-        $_ProfileHelpers | Add-Member -MemberType ScriptMethod -Name FormatPrice -Force -Value {
-            param([double]$Value)
-            $s = ('{0:N6}' -f $Value).TrimEnd('0')
-            if ($s.EndsWith('.')) { $s = $s.Substring(0, $s.Length - 1) }
-            return $s
-        }
-
         # Same payload the Linux implementation tests against.
         $fixtures = Join-Path $PSScriptRoot '..\..\hermes\aiusage\tests\fixtures'
         $script:deepseekBalanceJson = Get-Content (Join-Path $fixtures 'deepseek_balance.json') -Raw

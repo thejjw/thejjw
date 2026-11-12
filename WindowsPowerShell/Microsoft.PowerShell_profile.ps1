@@ -712,16 +712,16 @@ $_ProfileHelpers = New-Module -AsCustomObject -ScriptBlock {
     function FormatTokens {
         param([double]$Value)
         if ($Value -le 0) { return '0' }
-        if ($Value -ge 1e9) { return ('{0:N2}B' -f ($Value / 1e9)) }
-        if ($Value -ge 1e6) { return ('{0:N2}M' -f ($Value / 1e6)) }
-        if ($Value -ge 1e3) { return ('{0:N2}K' -f ($Value / 1e3)) }
-        return ('{0:N0}' -f $Value)
+        if ($Value -ge 1e9) { return ('{0}B' -f (FormatInvariant ($Value / 1e9) 'N2')) }
+        if ($Value -ge 1e6) { return ('{0}M' -f (FormatInvariant ($Value / 1e6) 'N2')) }
+        if ($Value -ge 1e3) { return ('{0}K' -f (FormatInvariant ($Value / 1e3) 'N2')) }
+        return (FormatInvariant $Value 'N0')
     }
 
     # Format a cost value as a compact decimal, stripping trailing zeros.
     function FormatPrice {
         param([double]$Value)
-        $s = ('{0:N6}' -f $Value).TrimEnd('0')
+        $s = (FormatInvariant $Value 'N6').TrimEnd('0')
         if ($s.EndsWith('.')) { $s = $s.Substring(0, $s.Length - 1) }
         return $s
     }
@@ -13118,14 +13118,14 @@ function Get-MinimaxUsage {
         if ($null -ne $wRatio -and $wRatio -gt $BurnWarnRatio) { $flags.Add('WEEKLY BURN > LINEAR') }
 
         if ($m.current_interval_total_count -gt 0) {
-            $iUsedStr = '{0}/{1} (burn {2}x)' -f $m.current_interval_usage_count, $m.current_interval_total_count, ($_ProfileHelpers.FormatInvariant([double]$iRatio, 'N2'))
+            $iUsedStr = '{0}/{1} (burn {2}x)' -f ($_ProfileHelpers.FormatInvariant($m.current_interval_usage_count, 'G')), ($_ProfileHelpers.FormatInvariant($m.current_interval_total_count, 'G')), ($_ProfileHelpers.FormatInvariant([double]$iRatio, 'N2'))
         } else {
             # No countable total means burn math cannot run: say so instead of
             # leaving a blank cell that reads as a healthy zero.
             $iUsedStr = 'no countable quota (total=0)'
         }
         if ($m.current_weekly_total_count -gt 0) {
-            $wUsedStr = '{0}/{1} (burn {2}x)' -f $m.current_weekly_usage_count, $m.current_weekly_total_count, ($_ProfileHelpers.FormatInvariant([double]$wRatio, 'N2'))
+            $wUsedStr = '{0}/{1} (burn {2}x)' -f ($_ProfileHelpers.FormatInvariant($m.current_weekly_usage_count, 'G')), ($_ProfileHelpers.FormatInvariant($m.current_weekly_total_count, 'G')), ($_ProfileHelpers.FormatInvariant([double]$wRatio, 'N2'))
         } else {
             $wUsedStr = 'no countable quota (total=0)'
         }
@@ -13285,11 +13285,11 @@ function Get-ZaiUsage {
         $callStats = $_ProfileHelpers.GetSeriesStats($modelData.x_time, $modelData.modelCallCount)
         $tokStats  = $_ProfileHelpers.GetSeriesStats($modelData.x_time, $modelData.tokensUsage)
         [pscustomobject]@{
-            Total_Calls    = $callStats.Total
-            Hourly_Avg     = ('{0:N2}' -f $callStats.Avg)
+            Total_Calls    = $_ProfileHelpers.FormatInvariant($callStats.Total, 'G')
+            Hourly_Avg     = $_ProfileHelpers.FormatInvariant($callStats.Avg, 'N2')
             Peak_Calls     = ('{0} at {1}' -f $callStats.Peak, $callStats.PeakHour)
-            Total_Tokens   = $tokStats.Total
-            Hourly_Tok_Avg = ('{0:N0}' -f $tokStats.Avg)
+            Total_Tokens   = $_ProfileHelpers.FormatInvariant($tokStats.Total, 'G')
+            Hourly_Tok_Avg = $_ProfileHelpers.FormatInvariant($tokStats.Avg, 'N0')
             Peak_Tokens    = ('{0} at {1}' -f $tokStats.Peak, $tokStats.PeakHour)
         } | Format-Table -AutoSize | Out-Host
     } else {
@@ -13303,20 +13303,20 @@ function Get-ZaiUsage {
         $zreStats = $_ProfileHelpers.GetSeriesStats($toolData.x_time, $toolData.zreadMcpCount)
         [pscustomobject]@{
             Tool       = 'network-search (search-prime)'
-            Total      = $netStats.Total
-            Hourly_Avg = ('{0:N2}' -f $netStats.Avg)
+            Total      = $_ProfileHelpers.FormatInvariant($netStats.Total, 'G')
+            Hourly_Avg = $_ProfileHelpers.FormatInvariant($netStats.Avg, 'N2')
             Peak       = ('{0} at {1}' -f $netStats.Peak, $netStats.PeakHour)
         },
         [pscustomobject]@{
             Tool       = 'web-reader'
-            Total      = $webStats.Total
-            Hourly_Avg = ('{0:N2}' -f $webStats.Avg)
+            Total      = $_ProfileHelpers.FormatInvariant($webStats.Total, 'G')
+            Hourly_Avg = $_ProfileHelpers.FormatInvariant($webStats.Avg, 'N2')
             Peak       = ('{0} at {1}' -f $webStats.Peak, $webStats.PeakHour)
         },
         [pscustomobject]@{
             Tool       = 'zread'
-            Total      = $zreStats.Total
-            Hourly_Avg = ('{0:N2}' -f $zreStats.Avg)
+            Total      = $_ProfileHelpers.FormatInvariant($zreStats.Total, 'G')
+            Hourly_Avg = $_ProfileHelpers.FormatInvariant($zreStats.Avg, 'N2')
             Peak       = ('{0} at {1}' -f $zreStats.Peak, $zreStats.PeakHour)
         } | Format-Table -AutoSize | Out-Host
 
@@ -13326,11 +13326,11 @@ function Get-ZaiUsage {
         $spikes += $_ProfileHelpers.GetSpikes($toolData.x_time, $toolData.zreadMcpCount, $zreStats.Avg, $SpikeRatio)
         if ($spikes.Count -gt 0) {
             Write-Host ''
-            Write-Host ('  Spikes (> {0:N1}x hourly avg):' -f $SpikeRatio)
+            Write-Host ('  Spikes (> {0}x hourly avg):' -f ($_ProfileHelpers.FormatInvariant($SpikeRatio, 'N1')))
             $spikes | ForEach-Object { Write-Host ('    {0}  ->  {1}' -f $_.Hour, $_.Value) }
         } else {
             Write-Host ''
-            Write-Host ('  No hourly spikes above {0:N1}x average.' -f $SpikeRatio) -ForegroundColor DarkGray
+            Write-Host ('  No hourly spikes above {0}x average.' -f ($_ProfileHelpers.FormatInvariant($SpikeRatio, 'N1'))) -ForegroundColor DarkGray
         }
     } else {
         Write-Host '  (no data)' -ForegroundColor DarkGray
@@ -13376,7 +13376,7 @@ function Get-ZaiUsage {
             $label = $_ProfileHelpers.GetZaiWindowLabel([int]$lim.unit, [int]$lim.number)
             foreach ($d in $lim.usageDetails) {
                 if ([int]$d.usage -le 0) { continue }
-                Write-Host ('    [{0}] {1}: {2}' -f $label, $d.modelCode, $d.usage)
+                Write-Host ('    [{0}] {1}: {2}' -f $label, $d.modelCode, ($_ProfileHelpers.FormatInvariant($d.usage, 'G')))
             }
         }
     } else {
@@ -13402,7 +13402,7 @@ function Get-ZaiUsage {
             $stats = $_ProfileHelpers.GetSeriesStats($toolData.x_time, $toolData.$seriesName)
             $spikes = $_ProfileHelpers.GetSpikes($toolData.x_time, $toolData.$seriesName, $stats.Avg, $SpikeRatio)
             if ($spikes.Count -gt 0) {
-                $concerns.Add(('[SPIKE] {0}: {1} hour(s) above {2:N1}x hourly avg' -f $seriesName, $spikes.Count, $SpikeRatio))
+                $concerns.Add(('[SPIKE] {0}: {1} hour(s) above {2}x hourly avg' -f $seriesName, $spikes.Count, ($_ProfileHelpers.FormatInvariant($SpikeRatio, 'N1'))))
             }
         }
     }
@@ -13524,9 +13524,9 @@ function Get-DeepseekUsage {
     $balanceRows = foreach ($b in $resp.balance_infos) {
         [pscustomobject]@{
             Currency     = [string]$b.currency
-            Total        = [double]$b.total_balance
-            Granted      = [double]$b.granted_balance
-            Topped_Up    = [double]$b.topped_up_balance
+            Total        = $_ProfileHelpers.FormatInvariant([double]$b.total_balance, 'G')
+            Granted      = $_ProfileHelpers.FormatInvariant([double]$b.granted_balance, 'G')
+            Topped_Up    = $_ProfileHelpers.FormatInvariant([double]$b.topped_up_balance, 'G')
             Is_Available = [bool]$resp.is_available
         }
     }
@@ -13564,7 +13564,7 @@ function Get-DeepseekUsage {
                 Action             = $r.Action
                 Unit               = $r.Unit
                 Cost               = ('{0} {1}' -f $cur, ($_ProfileHelpers.FormatPrice($cost)))
-                Available_Requests = ('{0:N0}' -f $reqs)
+                Available_Requests = $_ProfileHelpers.FormatInvariant($reqs, 'N0')
             })
         }
         $reqTitle = if ($cur -eq 'USD') { 'Estimated USD tool request budget (DeepSeek)' } else { 'Estimated CNY tool request budget (DeepSeek)' }
@@ -13585,10 +13585,10 @@ function Get-DeepseekUsage {
         $concerns.Add('[CRITICAL] is_available=false: account cannot make API calls')
     }
     if ($balances.ContainsKey('USD') -and $balances['USD'] -le $LowBalanceUsd) {
-        $concerns.Add(('[LOW] USD balance ${0:N2} at or below threshold ${1:N2}' -f $balances['USD'], $LowBalanceUsd))
+        $concerns.Add(('[LOW] USD balance ${0} at or below threshold ${1}' -f ($_ProfileHelpers.FormatInvariant($balances['USD'], 'N2')), ($_ProfileHelpers.FormatInvariant($LowBalanceUsd, 'N2'))))
     }
     if ($balances.ContainsKey('CNY') -and $balances['CNY'] -le $LowBalanceCny) {
-        $concerns.Add(('[LOW] CNY balance {0:N2} at or below threshold {1:N2}' -f $balances['CNY'], $LowBalanceCny))
+        $concerns.Add(('[LOW] CNY balance {0} at or below threshold {1}' -f ($_ProfileHelpers.FormatInvariant($balances['CNY'], 'N2')), ($_ProfileHelpers.FormatInvariant($LowBalanceCny, 'N2'))))
     }
     # Compare per currency: adding CNY to USD is not a meaningful quantity.
     $positive = @($balances.GetEnumerator() | Where-Object { $_.Value -gt 0 })
@@ -13698,7 +13698,7 @@ function Get-KimiUsage {
         Membership       = if ($resp.user -and $resp.user.membership) { $resp.user.membership.level } else { 'n/a' }
         Subscription     = if ($resp.PSObject.Properties['subType']) { $resp.subType } else { 'n/a' }
         Authentication   = if ($resp.authentication) { $resp.authentication.method } else { 'n/a' }
-        Parallel_Limit   = if ($resp.parallel) { $resp.parallel.limit } else { 'n/a' }
+        Parallel_Limit   = if ($resp.parallel -and $null -ne $resp.parallel.limit) { $_ProfileHelpers.FormatInvariant($resp.parallel.limit, 'G') } else { 'n/a' }
     } | Format-Table -AutoSize | Out-Host
 
     # Normalize weekly and rolling quota objects before formatting them together.
@@ -13778,7 +13778,7 @@ function Get-KimiUsage {
             [string]$detail.scope
         } elseif ($null -ne $duration) {
             if ($unit -like '*MINUTE*' -and [double]$duration -ge 60 -and ([double]$duration % 60) -eq 0) {
-                '{0:N0}h limit' -f ([double]$duration / 60)
+                '{0}h limit' -f ($_ProfileHelpers.FormatInvariant(([double]$duration / 60), 'N0'))
             } else {
                 "$duration$unitLabel limit"
             }
@@ -13838,18 +13838,18 @@ function Get-KimiUsage {
 
         $rows.Add([pscustomobject]@{
             Window            = $item.Label
-            Used              = if (-not $detail -and $null -ne $item.UsedRatio) { '{0}% used' -f ($_ProfileHelpers.FormatInvariant(100 * $item.UsedRatio, 'N2')) } elseif ($null -ne $used) { $used } else { 'n/a' }
-            Limit             = if ($null -ne $limit) { $limit } else { 'n/a' }
-            Remaining         = if ($null -ne $remaining) { $remaining } else { 'n/a' }
+            Used              = if (-not $detail -and $null -ne $item.UsedRatio) { '{0}% used' -f ($_ProfileHelpers.FormatInvariant(100 * $item.UsedRatio, 'N2')) } elseif ($null -ne $used) { $_ProfileHelpers.FormatInvariant($used, 'G') } else { 'n/a' }
+            Limit             = if ($null -ne $limit) { $_ProfileHelpers.FormatInvariant($limit, 'G') } else { 'n/a' }
+            Remaining         = if ($null -ne $remaining) { $_ProfileHelpers.FormatInvariant($remaining, 'G') } else { 'n/a' }
             Remaining_Percent = if ($null -ne $remainingPercent) { '{0}%' -f ($_ProfileHelpers.FormatInvariant($remainingPercent, 'N1')) } else { 'n/a' }
             Reset             = $resetText
         })
 
         if ($null -ne $remainingPercent) {
             if ($remainingPercent -le $CriticalPercent) {
-                $concerns.Add(('[CRITICAL] {0}: only {1:N1}% remaining' -f $item.Label, $remainingPercent))
+                $concerns.Add(('[CRITICAL] {0}: only {1}% remaining' -f $item.Label, ($_ProfileHelpers.FormatInvariant($remainingPercent, 'N1'))))
             } elseif ($remainingPercent -le $LowPercent) {
-                $concerns.Add(('[LOW]      {0}: {1:N1}% remaining' -f $item.Label, $remainingPercent))
+                $concerns.Add(('[LOW]      {0}: {1}% remaining' -f $item.Label, ($_ProfileHelpers.FormatInvariant($remainingPercent, 'N1'))))
             }
         }
         if ($null -ne $resetDelta -and $resetDelta.TotalSeconds -gt 0 -and $resetDelta.TotalHours -le $ResetWarnHours) {
@@ -13862,8 +13862,8 @@ function Get-KimiUsage {
     if ($resp.totalQuota) {
         $_ProfileHelpers.WriteSection('Aggregate quota (Kimi Code)')
         [pscustomobject]@{
-            Limit     = if ($null -ne $resp.totalQuota.limit) { $resp.totalQuota.limit } else { 'n/a' }
-            Remaining = if ($null -ne $resp.totalQuota.remaining) { $resp.totalQuota.remaining } else { 'n/a' }
+            Limit     = if ($null -ne $resp.totalQuota.limit) { $_ProfileHelpers.FormatInvariant($resp.totalQuota.limit, 'G') } else { 'n/a' }
+            Remaining = if ($null -ne $resp.totalQuota.remaining) { $_ProfileHelpers.FormatInvariant($resp.totalQuota.remaining, 'G') } else { 'n/a' }
         } | Format-Table -AutoSize | Out-Host
     }
 
@@ -13886,11 +13886,11 @@ function Get-KimiUsage {
         }
         [pscustomobject]@{
             Currency              = $currency
-            Balance               = '{0:N2}' -f ($leftCents / 100)
-            Total                 = '{0:N2}' -f ($totalCents / 100)
+            Balance               = $_ProfileHelpers.FormatInvariant(($leftCents / 100), 'N2')
+            Total                 = $_ProfileHelpers.FormatInvariant(($totalCents / 100), 'N2')
             Monthly_Limit_Enabled = [bool]$wallet.monthlyChargeLimitEnabled
-            Monthly_Limit         = if ($monthlyLimitCents -gt 0) { '{0:N2}' -f ($monthlyLimitCents / 100) } else { 'unlimited' }
-            Monthly_Used          = '{0:N2}' -f ($monthlyUsedCents / 100)
+            Monthly_Limit         = if ($monthlyLimitCents -gt 0) { $_ProfileHelpers.FormatInvariant(($monthlyLimitCents / 100), 'N2') } else { 'unlimited' }
+            Monthly_Used          = $_ProfileHelpers.FormatInvariant(($monthlyUsedCents / 100), 'N2')
         } | Format-Table -AutoSize | Out-Host
     } else {
         Write-Host '  No Extra Usage wallet reported.' -ForegroundColor DarkGray
