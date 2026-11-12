@@ -61,6 +61,9 @@ Describe 'Get-KimiUsage' {
     }
 
     It 'prefers the precomputed usages block and labels 5h/Weekly' {
+        # The fixture's resets are frozen timestamps; pin the clock so the
+        # 'from now' rendering never ages out.
+        Mock Get-Date { [datetime]'2026-11-12T00:00:00' }
         Mock Invoke-RestMethod { $script:kimiJson | ConvertFrom-Json }
 
         Get-KimiUsage -ApiKey 'test-key'
