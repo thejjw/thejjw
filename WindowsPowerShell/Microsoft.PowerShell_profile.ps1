@@ -4092,6 +4092,107 @@ function Convert-JxlToJpg {
     Write-Host "The script took $($elapsedTime.TotalSeconds) seconds to convert $total images."
 }
 
+function Split-Image {
+    <#
+.SYNOPSIS
+    Splits an image into two horizontal or vertical halves.
+.DESCRIPTION
+    Saves two PNG files beside the source image. Horizontal produces top and
+    bottom halves; Vertical produces left and right halves. The second half
+    receives the extra pixel when the dimension is odd. Existing outputs are
+    rejected before either half is written. The original image is preserved.
+.PARAMETER Path
+    Literal path to the source image file.
+.PARAMETER Direction
+    Cut direction: Horizontal (default) or Vertical.
+.EXAMPLE
+    Split-Image 'C:\Photos\photo.jpg'
+    Creates photo-top.png and photo-bottom.png beside photo.jpg.
+.EXAMPLE
+    Split-Image 'C:\Photos\photo.jpg' -Direction Vertical
+    Creates photo-left.png and photo-right.png beside photo.jpg.
+.EXAMPLE
+    Split-Image 'C:\Photos\photo.jpg' -WhatIf
+    Previews the output paths without creating files.
+.OUTPUTS
+    System.IO.FileInfo for each of the two output PNG files.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-11
+    Requires Windows and System.Drawing. Intended for static images supported
+    by System.Drawing, such as JPEG, PNG, and BMP, on Windows PowerShell 5.1+.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    [OutputType([System.IO.FileInfo])]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path,
+
+        [ValidateSet('Horizontal', 'Vertical')]
+        [string]$Direction = 'Horizontal'
+    )
+
+    $file = Get-Item -LiteralPath $Path -ErrorAction Stop
+    if ($file -isnot [System.IO.FileInfo]) {
+        throw "Source must be an image file: $Path"
+    }
+
+    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    $source = [System.Drawing.Bitmap]::new($file.FullName)
+    try {
+        $horizontal = $Direction -eq 'Horizontal'
+        $length = if ($horizontal) { $source.Height } else { $source.Width }
+        if ($length -lt 2) {
+            throw 'The dimension being split must be at least 2 pixels.'
+        }
+
+        $half = [int][Math]::Floor($length / 2)
+        $labels = if ($horizontal) { @('top', 'bottom') } else { @('left', 'right') }
+        $targets = @($labels | ForEach-Object {
+            Join-Path $file.DirectoryName ($file.BaseName + '-' + $_ + '.png')
+        })
+        foreach ($target in $targets) {
+            if (Test-Path -LiteralPath $target) {
+                throw "Output already exists: $target"
+            }
+        }
+
+        if (-not $PSCmdlet.ShouldProcess(($targets -join ', '), "Split image ($Direction)")) {
+            return
+        }
+
+        for ($i = 0; $i -lt 2; $i++) {
+            # Preserve all pixels when the selected dimension is odd.
+            $offset = if ($i -eq 0) { 0 } else { $half }
+            $size = if ($i -eq 0) { $half } else { $length - $half }
+            $rect = if ($horizontal) {
+                [System.Drawing.Rectangle]::new(0, $offset, $source.Width, $size)
+            } else {
+                [System.Drawing.Rectangle]::new($offset, 0, $size, $source.Height)
+            }
+
+            $crop = $source.Clone($rect, $source.PixelFormat)
+            $stream = $null
+            try {
+                # CreateNew also prevents overwrites if a file appears after validation.
+                $stream = [System.IO.File]::Open($targets[$i], [System.IO.FileMode]::CreateNew)
+                $crop.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+            }
+            finally {
+                if ($stream) { $stream.Dispose() }
+                $crop.Dispose()
+            }
+        }
+        Write-Verbose "Split '$($file.FullName)' into: $($targets -join ', ')"
+    }
+    finally {
+        $source.Dispose()
+    }
+
+    Get-Item -LiteralPath $targets -ErrorAction Stop
+}
+
 function Get-IpInfo {
     <#
 .SYNOPSIS
