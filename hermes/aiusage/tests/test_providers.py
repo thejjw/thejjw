@@ -10,7 +10,9 @@ import json
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
+from aiusage.cli import collect
 from aiusage.providers import deepseek, kimi, minimax, zai
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -50,6 +52,71 @@ class ZaiTests(unittest.TestCase):
     def test_failed_envelope_raises_instead_of_rendering_zeros(self):
         with self.assertRaises(RuntimeError):
             zai.parse({"code": 1001, "success": False, "msg": "invalid api key"})
+
+
+class ZaiFetchTests(unittest.TestCase):
+    """fetch() must keep a valid quota when optional activity is unavailable."""
+
+    QUOTA = fixture("zai_quota-limit.json")
+    MODEL = fixture("zai_model-usage.json")
+    TOOL = fixture("zai_tool-usage.json")
+
+    def fetch_with(self, responses: list) -> zai.UsageReport:
+        """Run zai.fetch with get_json returning the given objects in call order."""
+        with mock.patch.object(zai, "get_json", side_effect=responses):
+            return zai.fetch("test-key", fetched_at=NOW)
+
+    def test_rejected_model_envelope_keeps_quota(self):
+        report = self.fetch_with(
+            [self.QUOTA, {"code": 429, "success": False, "msg": "rate limited"}, self.TOOL]
+        )
+
+        self.assertTrue(report.windows)
+        self.assertEqual(report.details, ["24h tools: none"])
+
+    def test_rejected_tool_envelope_keeps_quota_and_model_activity(self):
+        report = self.fetch_with(
+            [self.QUOTA, self.MODEL, {"code": 429, "success": False, "msg": "rate limited"}]
+        )
+
+        self.assertTrue(report.windows)
+        self.assertEqual(report.details, ["24h: 57 calls · 5.79M tokens (GLM-5.3-Flash 5.79M)"])
+
+    def test_both_optional_failures_keep_quota(self):
+        report = self.fetch_with(
+            [self.QUOTA, {"code": 429, "success": False}, {"code": 429, "success": False}]
+        )
+
+        self.assertTrue(report.windows)
+        self.assertEqual(report.details, [])
+
+    def test_transport_failures_stay_best_effort(self):
+        report = self.fetch_with([self.QUOTA, ConnectionError("boom"), self.TOOL])
+
+        self.assertTrue(report.windows)
+        self.assertEqual(report.details, ["24h tools: none"])
+
+    def test_rejected_quota_still_fails_the_provider(self):
+        with mock.patch.object(
+            zai, "get_json", return_value={"code": 1001, "success": False, "msg": "invalid api key"}
+        ):
+            with self.assertRaises(RuntimeError):
+                zai.fetch("test-key", fetched_at=NOW)
+
+    def test_all_successful_output_matches_parse(self):
+        report = self.fetch_with([self.QUOTA, self.MODEL, self.TOOL])
+
+        expected = zai.parse(self.QUOTA, self.MODEL, self.TOOL, fetched_at=NOW)
+        self.assertEqual(report, expected)
+
+    def test_collection_keeps_zai_available_when_optional_activity_fails(self):
+        responses = [self.QUOTA, {"code": 429, "success": False, "msg": "rate limited"}, self.TOOL]
+        with mock.patch.object(zai, "get_json", side_effect=responses):
+            reports = collect(["zai"], explicit={"zai": "test-key"})
+
+        self.assertIsNone(reports[0].unavailable_reason)
+        self.assertTrue(reports[0].available)
+        self.assertTrue(reports[0].windows)
 
 
 class KimiTests(unittest.TestCase):

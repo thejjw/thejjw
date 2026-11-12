@@ -146,6 +146,11 @@ def fetch(api_key: str, *, fetched_at: datetime | None = None) -> UsageReport:
     for name, target in (("model-usage", "model"), ("tool-usage", "tool")):
         try:
             result = get_json(f"{BASE}/{name}{query}", headers)
+            # An HTTP-200 failure envelope passes get_json but raises later in
+            # parse(), outside any best-effort boundary, and would erase the
+            # quota already fetched. Validate it here; keep the original
+            # envelope because parse() unwraps optional payloads itself.
+            _unwrap(result)
         except Exception:
             result = None
         if target == "model":
