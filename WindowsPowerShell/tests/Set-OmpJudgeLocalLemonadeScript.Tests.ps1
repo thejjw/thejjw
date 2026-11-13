@@ -135,7 +135,9 @@ Describe 'Set-OmpJudgeLocalLemonade.ps1 helpers' {
             $before = [IO.File]::ReadAllBytes($modelsPath)
 
             # Read-only preflight stubs: both tools exist, Lemonade answers, omp answers.
-            Mock Get-Command { [pscustomobject]@{ Source = 'tool' } } -ParameterFilter { $Name -in 'lemonade', 'omp' }
+            Mock Update-SetupPath { }
+            Mock Initialize-Lemonade { [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = '{"port":8000,"version":"test"}' } }
+            Mock Get-Command { [pscustomobject]@{ Source = 'tool' } } -ParameterFilter { $Name -eq 'omp' }
             Mock Invoke-Cli { [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = '{"port":8000,"version":"test"}' } } -ParameterFilter { $Command -eq 'lemonade' }
             Mock Invoke-Omp {
                 if ($Arguments.Count -ge 2 -and $Arguments[0] -eq 'config' -and $Arguments[1] -eq 'path') {

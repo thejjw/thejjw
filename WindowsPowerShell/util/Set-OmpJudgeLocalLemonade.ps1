@@ -18,6 +18,9 @@
     omp files are touched only after the Lemonade test prompt succeeds, and are backed up first.
     Re-running is safe: the managed models.yml block is replaced in place.
 
+.PARAMETER NonInteractive
+    Suppresses the optional AMD graphics installation offer when Lemonade is missing.
+
 .PARAMETER Checkpoint
     Hugging Face checkpoint (repo:variant) registered when no LFM3 model exists yet. Any variant of
     the same repo that is already registered from Hugging Face is reused.
@@ -47,7 +50,8 @@ param(
     [string]$ProviderId = 'lemonade',
     [ValidateRange(2048, 262144)]
     [int]$ContextWindow = 32768,
-    [int]$MinLlamaCppBuild = 11960
+    [int]$MinLlamaCppBuild = 11960,
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = 'Stop'
@@ -117,7 +121,7 @@ function Invoke-LemonadeLive([string[]]$Arguments) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & lemonade @Arguments | Out-Host
+        & $script:LemonadeExe @Arguments | Out-Host
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previous
@@ -504,20 +508,131 @@ function Show-Report([string]$Title, $Lemonade, $Omp, $Test = $null) {
 # Main
 # ---------------------------------------------------------------------------------------------
 
+# Adds newly installed command directories to this process only.
+function Update-SetupPath {
+    $entries = @($env:PATH -split ';' | Where-Object { $_ })
+    foreach ($scope in 'Machine', 'User') {
+        foreach ($entry in ([Environment]::GetEnvironmentVariable('PATH', $scope) -split ';')) {
+            if ($entry -and $entries -notcontains $entry) { $entries += $entry }
+        }
+    }
+    $env:PATH = $entries -join ';'
+}
+
+# Reads installer locations without depending on PowerShell's registry view.
+function Get-LemonadeInstallRoots {
+    foreach ($hive in [Microsoft.Win32.RegistryHive]::CurrentUser, [Microsoft.Win32.RegistryHive]::LocalMachine) {
+        foreach ($view in [Microsoft.Win32.RegistryView]::Registry64, [Microsoft.Win32.RegistryView]::Registry32) {
+            $base = $null; $key = $null
+            try {
+                $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, $view)
+                $key = $base.OpenSubKey('Software\AMD\Lemonade Server')
+                if ($key) { [string]$key.GetValue('InstallLocation') }
+            } finally {
+                if ($key) { $key.Dispose() }
+                if ($base) { $base.Dispose() }
+            }
+        }
+    }
+}
+
+# Finds the CLI and distinguishes an absent install from damaged installer metadata.
+function Find-Lemonade {
+    $command = Get-Command lemonade.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) { return $command.Source }
+    $registered = @(Get-LemonadeInstallRoots | Where-Object { $_ })
+    $roots = @($registered) + @(Join-Path $env:LOCALAPPDATA 'lemonade_server'; Join-Path $env:ProgramFiles 'Lemonade Server')
+    foreach ($root in $roots) {
+        $candidate = Join-Path $root 'bin\lemonade.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    if ($registered.Count) { Stop-Setup 'Lemonade installation is damaged. Repair or reinstall Lemonade Server.' @('https://lemonade-server.ai/docs/guide/install/') }
+}
+
+# Reports installation eligibility; inference remains the actual model compatibility test.
+function Get-LemonadeEligibility {
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        if ([int]$os.BuildNumber -lt 22000 -or $os.ProductType -ne 1 -or $os.OSArchitecture -notmatch '64' -or $env:PROCESSOR_ARCHITECTURE -notin 'AMD64','x86' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') {
+            return [pscustomobject]@{ Eligible = $false; Reason = 'Assisted installation requires Windows 11 x64.' }
+        }
+        $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | Where-Object {
+            ($_.PNPDeviceID -match 'VEN_1002' -or (-not $_.PNPDeviceID -and $_.AdapterCompatibility -match 'AMD|ATI|Advanced Micro Devices')) -and
+            $null -ne $_.ConfigManagerErrorCode -and $_.ConfigManagerErrorCode -eq 0 -and $_.Status -eq 'OK' -and $_.DriverVersion
+        })
+        if ($gpus.Count) { return [pscustomobject]@{ Eligible = $true; Reason = (($gpus | ForEach-Object { "$($_.Name) (driver $($_.DriverVersion))" }) -join ', ') } }
+        [pscustomobject]@{ Eligible = $false; Reason = 'No enabled, healthy AMD graphics adapter with a driver was detected.' }
+    } catch { [pscustomobject]@{ Eligible = $false; Reason = "Could not determine AMD graphics eligibility: $_" } }
+}
+
+# Requests explicit consent, defaulting to refusal when input is unavailable.
+function Confirm-LemonadeInstall {
+    if ($NonInteractive -or -not [Environment]::UserInteractive -or [Console]::IsInputRedirected) { return $false }
+    try { (Read-Host 'Install AMD Lemonade Server with winget and continue? [y/N]').Trim() -match '^(?i:y|yes)$' } catch { $false }
+}
+
+# Runs Winget with live output and returns its native exit code.
+function Install-Lemonade([string]$WingetPath) {
+        $previous = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $WingetPath install --exact --id AMD.LemonadeServer --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Host
+            $code = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previous }
+    $code
+}
+
+# Installs only after consent, then resolves and waits for the newly installed server.
+function Initialize-Lemonade {
+    $directions = @('winget install --exact --id AMD.LemonadeServer --source winget', 'https://lemonade-server.ai/docs/guide/install/')
+    $script:LemonadeExe = Find-Lemonade
+    $installed = $false
+    if (-not $script:LemonadeExe) {
+        $eligibility = Get-LemonadeEligibility
+        Write-Host "  $($eligibility.Reason)"
+        if (-not $eligibility.Eligible) { Stop-Setup 'Lemonade was not found; assisted installation is not available.' $directions }
+        $winget = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $winget) { Stop-Setup 'Winget was not found.' $directions }
+        if (-not (Confirm-LemonadeInstall)) { Stop-Setup 'Lemonade installation was not authorized.' $directions }
+        $code = Install-Lemonade $winget.Source
+        if ($code -ne 0) { Stop-Setup "Winget exited with code $code. Resolve the installation or restart requirement, then retry." $directions }
+        Update-SetupPath
+        $script:LemonadeExe = Find-Lemonade
+        if (-not $script:LemonadeExe) { Stop-Setup 'Winget completed, but lemonade.exe could not be found.' $directions }
+        $installed = $true
+    }
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $launched = $false
+    do {
+        $status = Invoke-Cli $script:LemonadeExe @('status', '--json')
+        if ($status.ExitCode -eq 0) {
+            try {
+                $server = $status.StdOut | ConvertFrom-Json -ErrorAction Stop
+                if ([int]$server.port -gt 0 -and [int]$server.port -le 65535 -and $server.version) { return $status }
+            } catch { }
+        }
+        if (-not $installed) { break }
+        if (-not $launched) {
+            $serverExe = Join-Path (Split-Path $script:LemonadeExe) 'LemonadeServer.exe'
+            if (Test-Path -LiteralPath $serverExe -PathType Leaf) { Start-Process -FilePath $serverExe -ArgumentList '--silent' -WindowStyle Hidden | Out-Null }
+            $launched = $true
+        }
+        Start-Sleep -Seconds 2
+    } while ($timer.Elapsed.TotalSeconds -lt 60)
+    Stop-Setup 'Lemonade Server is not reachable or returned invalid status.' @('Start Lemonade Server from the Start menu, then retry.', $status.StdErr, $status.StdOut)
+}
+
 # Runs the setup: preflight, initial report, Lemonade backend/model, omp configuration, final report.
 function Invoke-Setup {
     Write-Section 'Preflight'
-    foreach ($tool in 'lemonade', 'omp') {
-        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-            Stop-Setup "'$tool' is not on PATH." @(
-                'Install AMD Lemonade Server (https://lemonade-server.ai) and oh-my-pi (omp), open a new terminal, and re-run.')
-        }
+    Update-SetupPath
+    if (-not (Get-Command omp -ErrorAction SilentlyContinue)) {
+        Stop-Setup 'omp was not found on PATH.' @('Install: bun install -g @oh-my-pi/pi-coding-agent', 'Website: https://github.com/can1357/oh-my-pi', 'Run omp once, then retry Set-OmpJudgeLocalLemonade.')
     }
-    $status = Invoke-Cli 'lemonade' @('status', '--json')
-    if ($status.ExitCode -ne 0) {
-        Stop-Setup 'Lemonade Server is not reachable.' @(
-            'Start Lemonade Server (Start menu: Lemonade Server, or LemonadeServer.exe), then re-run.', $status.StdErr, $status.StdOut)
-    }
+    $script:OmpVersion = (Invoke-Omp @('--version')).StdOut.Trim()
+    $script:AgentDir = (Invoke-Omp @('config', 'path')).StdOut.Trim()
+    if (-not (Test-Path -LiteralPath $script:AgentDir)) { Stop-Setup 'Run omp once to initialize its configuration, then retry.' }
+    $status = Initialize-Lemonade
     $server = $status.StdOut | ConvertFrom-Json
     # LEMONADE_HOST may hold the server's bind address; a wildcard bind is reached via loopback.
     $lemonadeHost = if ($env:LEMONADE_HOST -and $env:LEMONADE_HOST -notin '0.0.0.0', '::', '[::]', '*') { $env:LEMONADE_HOST } else { '127.0.0.1' }

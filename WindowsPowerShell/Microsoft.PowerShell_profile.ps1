@@ -7832,6 +7832,8 @@ function Set-OmpJudgeLocalLemonade {
     Context size Lemonade loads the model with, and the window omp budgets for it.
 .PARAMETER MinLlamaCppBuild
     Oldest llama.cpp build that supports LFM3.
+.PARAMETER NonInteractive
+    Suppresses the optional Lemonade installation prompt.
 .PARAMETER UpdateScript
     Forces downloading the latest script from the remote repository before running.
 .EXAMPLE
@@ -7852,6 +7854,7 @@ function Set-OmpJudgeLocalLemonade {
         [ValidateRange(2048, 262144)]
         [int]$ContextWindow,
         [int]$MinLlamaCppBuild,
+        [switch]$NonInteractive,
         [switch]$UpdateScript
     )
 
@@ -7948,6 +7951,8 @@ function Set-OmpJudgeLocalLemonade {
         $cliArgs.Add('-MinLlamaCppBuild')
         $cliArgs.Add($MinLlamaCppBuild.ToString())
     }
+
+    if ($NonInteractive) { $cliArgs.Add('-NonInteractive') }
 
     $psExe = if ($PSVersionTable.PSVersion.Major -ge 6) { 'pwsh.exe' } else { 'powershell.exe' }
     & $psExe @cliArgs
@@ -12385,7 +12390,7 @@ function Remove-AiApiKeysFromCS {
 # The opusplan model alias provides an automated hybrid approach:
 # In plan mode - Uses opus for complex reasoning and architecture decisions
 # In execution mode - Automatically switches to sonnet for code generation and implementation
-# This gives you the best of both worlds: Opusâ€™s superior reasoning for planning, and Sonnetâ€™s efficiency for execution.
+# This gives you the best of both worlds: OpusÃ¢â‚¬â„¢s superior reasoning for planning, and SonnetÃ¢â‚¬â„¢s efficiency for execution.
 # The plan-mode Opus phase uses the same context window as the opus model setting.
 # When opus and sonnet resolve to models that run with the 1M context window by default (as the
 # current models do on the Anthropic API), both phases run with it.
