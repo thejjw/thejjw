@@ -414,13 +414,16 @@ $_AiToolsInternal = @{
     )
     # Keep this registry synchronized with AI CLIs managed by Install-AiTools
     # that ship a native self-update command. Probe defaults to Cmd; set it when
-    # a CLI's updater probe differs from the command. npm-installed packages are
+    # a CLI's updater probe differs from the command. VersionArgs, when set, is
+    # run against the resolved command just before the updater; its first output
+    # line is shown as the currently installed version (codex's updater only
+    # prints the resolved new version). npm-installed packages are
     # not listed here -- aiu updates them straight from NpmPackages and
     # MoreAiNpmPackages above.
     UpgradeCommands        = @(
         @{ Label = 'agy';      Cmd = 'agy';      Args = @('update') },
         @{ Label = 'claude';   Cmd = 'claude';   Args = @('update') },
-        @{ Label = 'codex';    Cmd = 'codex';    Args = @('update') },
+        @{ Label = 'codex';    Cmd = 'codex';    Args = @('update'); VersionArgs = @('--version') },
         @{ Label = 'opencode'; Cmd = 'opencode'; Args = @('upgrade') },
         @{ Label = 'cursor';   Cmd = 'agent';    Probe = 'cursor-agent'; Args = @('update') },
         @{ Label = 'rea';      Cmd = 'rea';      Args = @('update') }
@@ -12737,7 +12740,14 @@ function Invoke-AiUpgrade {
         if ($probe -ne $tool.Cmd -and -not (Get-Command $tool.Cmd -ErrorAction SilentlyContinue)) {
             continue
         }
-        Write-Host ">>> $($tool.Label): $($tool.Cmd) $($tool.Args -join ' ')" -ForegroundColor Cyan
+        # VersionArgs probe (see registry comment): show the currently installed
+        # version on the stage header before the updater's own output.
+        $versionNote = ''
+        if ($tool.VersionArgs) {
+            $currentVersion = (& $probe @($tool.VersionArgs) 2>$null | Select-Object -First 1)
+            if ($currentVersion) { $versionNote = " [$currentVersion]" }
+        }
+        Write-Host ">>> $($tool.Label)$versionNote`: $($tool.Cmd) $($tool.Args -join ' ')" -ForegroundColor Cyan
         & $tool.Cmd @($tool.Args)
     }
 
