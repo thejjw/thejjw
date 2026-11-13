@@ -557,7 +557,7 @@ function Get-LemonadeEligibility {
             return [pscustomobject]@{ Eligible = $false; Reason = 'Assisted installation requires Windows 11 x64.' }
         }
         $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | Where-Object {
-            ($_.PNPDeviceID -match 'VEN_1002' -or (-not $_.PNPDeviceID -and $_.AdapterCompatibility -match 'AMD|ATI|Advanced Micro Devices')) -and
+            ($_.PNPDeviceID -match 'VEN_1002' -or (-not $_.PNPDeviceID -and $_.AdapterCompatibility -match '(?i)\b(?:AMD|ATI|Advanced Micro Devices)\b')) -and
             $null -ne $_.ConfigManagerErrorCode -and $_.ConfigManagerErrorCode -eq 0 -and $_.Status -eq 'OK' -and $_.DriverVersion
         })
         if ($gpus.Count) { return [pscustomobject]@{ Eligible = $true; Reason = (($gpus | ForEach-Object { "$($_.Name) (driver $($_.DriverVersion))" }) -join ', ') } }
@@ -582,8 +582,37 @@ function Install-Lemonade([string]$WingetPath) {
     $code
 }
 
+# Runs status with concurrent pipe reads and a deadline, including pipe drain time.
+function Invoke-LemonadeStatus([string]$Executable, [int]$TimeoutMilliseconds = 5000) {
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
+    $process.StartInfo.FileName = $Executable
+    $process.StartInfo.Arguments = 'status --json'
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $null = $process.Start()
+        # Both streams must drain concurrently; a full stderr pipe must not block stdout.
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $remaining = [Math]::Max(0, $TimeoutMilliseconds - [int]$clock.ElapsedMilliseconds)
+        $exited = $process.WaitForExit($remaining)
+        $remaining = [Math]::Max(0, $TimeoutMilliseconds - [int]$clock.ElapsedMilliseconds)
+        $drained = $false
+        if ($exited) { $drained = [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout, $stderr), $remaining) }
+        if (-not $exited -or -not $drained) {
+            if (-not $process.HasExited) { $process.Kill(); $null = $process.WaitForExit(100) }
+            return [pscustomobject]@{ ExitCode = -1; StdOut = ''; StdErr = 'Lemonade status timed out.' }
+        }
+        [pscustomobject]@{ ExitCode = $process.ExitCode; StdOut = $stdout.Result; StdErr = $stderr.Result }
+    } finally { $process.Dispose() }
+}
+
 # Installs only after consent, then resolves and waits for the newly installed server.
-function Initialize-Lemonade {
+function Initialize-Lemonade([double]$StartupTimeoutSeconds = 60) {
     $directions = @('winget install --exact --id AMD.LemonadeServer --source winget', 'https://lemonade-server.ai/docs/guide/install/')
     $script:LemonadeExe = Find-Lemonade
     $installed = $false
@@ -604,21 +633,23 @@ function Initialize-Lemonade {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $launched = $false
     do {
-        $status = Invoke-Cli $script:LemonadeExe @('status', '--json')
-        if ($status.ExitCode -eq 0) {
+        $remaining = [Math]::Max(1, [Math]::Min(5000, [int](($StartupTimeoutSeconds - $timer.Elapsed.TotalSeconds) * 1000)))
+        $status = Invoke-LemonadeStatus $script:LemonadeExe $remaining
+        if ($status.ExitCode -eq 0 -and $timer.Elapsed.TotalSeconds -lt $StartupTimeoutSeconds) {
             try {
                 $server = $status.StdOut | ConvertFrom-Json -ErrorAction Stop
                 if ([int]$server.port -gt 0 -and [int]$server.port -le 65535 -and $server.version) { return $status }
             } catch { }
         }
-        if (-not $installed) { break }
+        if (-not $installed -or $timer.Elapsed.TotalSeconds -ge $StartupTimeoutSeconds) { break }
         if (-not $launched) {
             $serverExe = Join-Path (Split-Path $script:LemonadeExe) 'LemonadeServer.exe'
             if (Test-Path -LiteralPath $serverExe -PathType Leaf) { Start-Process -FilePath $serverExe -ArgumentList '--silent' -WindowStyle Hidden | Out-Null }
             $launched = $true
         }
-        Start-Sleep -Seconds 2
-    } while ($timer.Elapsed.TotalSeconds -lt 60)
+        $remaining = [int](($StartupTimeoutSeconds - $timer.Elapsed.TotalSeconds) * 1000)
+        if ($remaining -gt 0) { Start-Sleep -Milliseconds ([Math]::Min(2000, $remaining)) }
+    } while ($timer.Elapsed.TotalSeconds -lt $StartupTimeoutSeconds)
     Stop-Setup 'Lemonade Server is not reachable or returned invalid status.' @('Start Lemonade Server from the Start menu, then retry.', $status.StdErr, $status.StdOut)
 }
 
@@ -641,9 +672,6 @@ function Invoke-Setup {
     $script:LemonadeHeaders = @{}
     if ($env:LEMONADE_API_KEY) { $script:LemonadeHeaders.Authorization = "Bearer $env:LEMONADE_API_KEY" }
 
-    $script:OmpVersion = (Invoke-Omp @('--version')).StdOut.Trim()
-    $script:AgentDir = (Invoke-Omp @('config', 'path')).StdOut.Trim()
-    if (-not (Test-Path -LiteralPath $script:AgentDir)) { Stop-Setup "omp agent directory '$script:AgentDir' does not exist. Run omp once to initialize it." }
     $yamlFile = Join-Path $script:AgentDir 'models.yaml'
     $script:ModelsPath = if ((Test-Path -LiteralPath $yamlFile) -and -not (Test-Path -LiteralPath (Join-Path $script:AgentDir 'models.yml'))) { $yamlFile } else { Join-Path $script:AgentDir 'models.yml' }
     $configYaml = Join-Path $script:AgentDir 'config.yaml'

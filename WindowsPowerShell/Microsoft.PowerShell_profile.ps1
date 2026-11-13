@@ -12390,7 +12390,7 @@ function Remove-AiApiKeysFromCS {
 # The opusplan model alias provides an automated hybrid approach:
 # In plan mode - Uses opus for complex reasoning and architecture decisions
 # In execution mode - Automatically switches to sonnet for code generation and implementation
-# This gives you the best of both worlds: OpusÃ¢â‚¬â„¢s superior reasoning for planning, and SonnetÃ¢â‚¬â„¢s efficiency for execution.
+# This gives you the best of both worlds: Opusâ€™s superior reasoning for planning, and Sonnetâ€™s efficiency for execution.
 # The plan-mode Opus phase uses the same context window as the opus model setting.
 # When opus and sonnet resolve to models that run with the 1M context window by default (as the
 # current models do on the Anthropic API), both phases run with it.
