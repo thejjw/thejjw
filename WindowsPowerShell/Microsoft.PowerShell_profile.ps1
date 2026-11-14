@@ -370,6 +370,7 @@ $_AiToolsInternal = @{
         OmpTps                 = 'https://raw.githubusercontent.com/thejjw/thejjw/main/omp/extensions/tps.ts'
         OmpJudgeLocalLemonade  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpJudgeLocalLemonade.ps1'
         OmpJudgeLocalLlamaCpp  = 'https://raw.githubusercontent.com/thejjw/thejjw/main/WindowsPowerShell/util/Set-OmpJudgeLocalLlamaCpp.ps1'
+        HerdrApp               = 'https://releases.herdr.dev/app/install.ps1'
     }
 
     # REA reverse-engineering toolchain used by the -REA stage of Install-AiTools.
@@ -12001,6 +12002,7 @@ function Install-AiTools {
             Write-Host " - kimi (Kimi Code CLI)"
             Write-Host " - grok (Grok CLI)"
             Write-Host " - cursor (Cursor CLI / agent)"
+            Write-Host " - herdr-app (Herdr desktop app)"
         }
         # Install Antigravity and Claude CLIs using their recommended installers
         Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
@@ -12079,6 +12081,28 @@ function Install-AiTools {
                     $null = Add-UserPathEntry -Path $cursorAgentDir
                 } catch {
                     Write-Host "Failed to install Cursor CLI: $_" -ForegroundColor Red
+                }
+            }
+        }
+
+        # Herdr installs and updates itself; keep this install-only so aiu does not
+        # own an updater that upstream may change (background update on next launch).
+        if ($MoreAi) {
+            if (-not (Get-Command herdr-app -ErrorAction SilentlyContinue)) {
+                Write-Host "herdr-app not found; installing via $($_AiToolsInternal.Urls.HerdrApp)..." -ForegroundColor Yellow
+                $LASTEXITCODE = 0
+                & powershell -NoProfile -ExecutionPolicy ByPass -Command "irm '$($_AiToolsInternal.Urls.HerdrApp)' | iex"
+                if ($LASTEXITCODE) {
+                    Write-Host "Failed to install herdr-app (exit $LASTEXITCODE)." -ForegroundColor Red
+                } else {
+                    # The installer runs in a child process; mirror its PATH writes here.
+                    foreach ($dir in @(
+                        (Join-Path $env:LOCALAPPDATA 'Programs\herdr-app'),
+                        (Join-Path $env:LOCALAPPDATA 'Programs\herdr-core')
+                    )) {
+                        if (Test-Path -LiteralPath $dir) { $null = Add-UserPathEntry -Path $dir }
+                    }
+                    Write-Host "herdr-app installed. Telemetry is on by default; disable in Settings > Privacy." -ForegroundColor DarkGray
                 }
             }
         }
