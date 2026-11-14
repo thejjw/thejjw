@@ -26,10 +26,10 @@ if ($inputJson) {
         $tokensOut = 0.0
         $ctxMax = 0.0
         if ($state.context_window) {
-            if ($state.context_window.used_percentage -ne $null) { $usedPct = [double]$state.context_window.used_percentage }
-            if ($state.context_window.total_input_tokens -ne $null) { $tokensIn = [double]$state.context_window.total_input_tokens }
-            if ($state.context_window.total_output_tokens -ne $null) { $tokensOut = [double]$state.context_window.total_output_tokens }
-            if ($state.context_window.context_window_size -ne $null) { $ctxMax = [double]$state.context_window.context_window_size }
+            if ($null -ne $state.context_window.used_percentage) { $usedPct = [double]$state.context_window.used_percentage }
+            if ($null -ne $state.context_window.total_input_tokens) { $tokensIn = [double]$state.context_window.total_input_tokens }
+            if ($null -ne $state.context_window.total_output_tokens) { $tokensOut = [double]$state.context_window.total_output_tokens }
+            if ($null -ne $state.context_window.context_window_size) { $ctxMax = [double]$state.context_window.context_window_size }
         }
         
         $plan = if ($state.plan_tier) { $state.plan_tier } else { "unknown-tier" }
@@ -43,7 +43,6 @@ if ($inputJson) {
         # Color codes (ANSI escape sequences)
         $esc = [char]27
         $reset = "$esc[0m"
-        $bold = "$esc[1m"
         $green = "$esc[32m"
         $cyan = "$esc[36m"
         $yellow = "$esc[33m"

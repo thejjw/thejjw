@@ -10,11 +10,11 @@ Describe 'Set-OmpJudgeLocalLemonade.ps1 helpers' {
         foreach ($function in $functions) { . ([scriptblock]::Create($function.Extent.Text)) }
 
         # Script-level constants the helpers read.
-        $AbortToken = 'OMP_LEMONADE_SETUP_ABORTED'
-        $MarkerStart = '# >>> omp-lemonade-judge'
-        $MarkerEnd = '# <<< omp-lemonade-judge'
-        $ProviderId = 'lemonade'
-        $MinLlamaCppBuild = 11960
+        $script:AbortToken = 'OMP_LEMONADE_SETUP_ABORTED'
+        $script:MarkerStart = '# >>> omp-lemonade-judge'
+        $script:MarkerEnd = '# <<< omp-lemonade-judge'
+        $script:ProviderId = 'lemonade'
+        $script:MinLlamaCppBuild = 11960
 
         # Builds a models.yml from raw lines and returns the parsed plan.
         function New-Models([string[]]$Content) {

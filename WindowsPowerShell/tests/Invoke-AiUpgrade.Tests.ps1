@@ -57,7 +57,7 @@ Describe 'Invoke-AiUpgrade managed packages' {
 
 
     BeforeEach {
-        $_AiToolsInternal = @{
+        $script:_AiToolsInternal = @{
             UpgradeCommands        = @()
             WingetPackages         = @('ZhipuAI.ZCode')
             ExtendedWingetPackages = @('Microsoft.VCRedist.2015+.x64')
@@ -153,7 +153,7 @@ Describe 'Invoke-AiUpgrade managed packages' {
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Format-UpgradeElapsed'
         }, $true)
         . ([scriptblock]::Create($formatter.Extent.Text))
-        $runClock = [pscustomobject]@{ Elapsed = [timespan]::FromSeconds(90061) }
+        $script:runClock = [pscustomobject]@{ Elapsed = [timespan]::FromSeconds(90061) }
         Format-UpgradeElapsed | Should -Be '25:01:01'
     }
 

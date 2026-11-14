@@ -2,10 +2,10 @@ Describe 'Lemonade prerequisite handling' {
     BeforeAll {
         $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '..\util\Set-OmpJudgeLocalLemonade.ps1'), [ref]$null, [ref]$null)
         foreach ($f in $ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { . ([scriptblock]::Create($f.Extent.Text)) }
-        $AbortToken = 'OMP_LEMONADE_SETUP_ABORTED'
+        $script:AbortToken = 'OMP_LEMONADE_SETUP_ABORTED'
     }
     BeforeEach {
-        $NonInteractive = $false
+        $script:NonInteractive = $false
         Mock Write-Host { }
         Mock Update-SetupPath { }
         Mock Get-LemonadeInstallRoots { }
@@ -43,7 +43,7 @@ Describe 'Lemonade prerequisite handling' {
         { Find-Lemonade } | Should -Throw $AbortToken
     }
     It 'suppresses prompting in noninteractive mode' {
-        $NonInteractive = $true
+        $script:NonInteractive = $true
         Confirm-LemonadeInstall | Should -BeFalse
         Should -Invoke Read-Host -Times 0
     }

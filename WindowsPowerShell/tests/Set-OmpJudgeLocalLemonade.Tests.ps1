@@ -1,3 +1,7 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidAssignmentToAutomaticVariable', 'PROFILE')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'PROFILE')]
+param()
+
 Describe 'Set-OmpJudgeLocalLemonade' {
     BeforeAll {
         function Invoke-WebRequest2 {
@@ -42,7 +46,7 @@ Describe 'Set-OmpJudgeLocalLemonade' {
             CurrentUserCurrentHost = Join-Path $script:mockProfileDir 'Microsoft.PowerShell_profile.ps1'
         }
 
-        $_AiToolsInternal = @{
+        $script:_AiToolsInternal = @{
             Urls = @{
                 OmpJudgeLocalLemonade = 'https://example.invalid/util/Set-OmpJudgeLocalLemonade.ps1'
             }

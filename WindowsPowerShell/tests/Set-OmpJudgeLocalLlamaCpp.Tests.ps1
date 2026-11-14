@@ -1,3 +1,7 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidAssignmentToAutomaticVariable', 'PROFILE')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'PROFILE')]
+param()
+
 Describe 'Set-OmpJudgeLocalLlamaCpp' {
     BeforeAll {
         function Invoke-WebRequest2 {
@@ -48,7 +52,7 @@ param($Checkpoint, $ModelId, $ProviderId, $Backend, $ContextWindow, [int]$Port, 
             CurrentUserCurrentHost = Join-Path $script:mockProfileDir 'Microsoft.PowerShell_profile.ps1'
         }
 
-        $_AiToolsInternal = @{
+        $script:_AiToolsInternal = @{
             Urls = @{
                 OmpJudgeLocalLlamaCpp = 'https://example.invalid/util/Set-OmpJudgeLocalLlamaCpp.ps1'
             }

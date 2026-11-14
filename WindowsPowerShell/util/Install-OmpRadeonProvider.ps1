@@ -68,7 +68,6 @@ $ProviderId = 'amd-radeon'
 $BaseUrl = 'https://developer.amd.com.cn/radeon/api/v1'
 $VaultResource = 'AMDRC_API_KEY'
 $VaultUserName = 'api-key'
-$DevDate = "October 4, 2026"
 
 # Verified against the live endpoint: every id below completed a real omp bash tool loop.
 # Vision/Tokenizer come from /radeon/api/v1/models metadata.

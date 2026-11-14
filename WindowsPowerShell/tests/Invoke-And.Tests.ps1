@@ -1,3 +1,6 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingCmdletAliases', '')]
+param()
+
 Describe 'Invoke-And' {
     BeforeAll {
         $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'

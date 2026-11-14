@@ -58,9 +58,9 @@ Describe 'Get-QwenUsage' {
             return $credential
         }
         $script:vault | Add-Member -MemberType ScriptMethod -Name Add -Value {
-            param($credential)
-            [void]$script:savedCredentials.Add($credential)
-            $script:storedCookie = $credential.Password
+            param($vaultItem)
+            [void]$script:savedCredentials.Add($vaultItem)
+            $script:storedCookie = $vaultItem.Password
         }
 
         Mock New-Object {

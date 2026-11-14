@@ -24,7 +24,7 @@ Describe 'Install-AgySettings' {
         $script:settingsJson = Join-Path $script:agyDir 'settings.json'
         $script:sentinel = Join-Path $script:agyDir '.config_setup_done'
         $null = New-Item -ItemType Directory -Path $script:agyDir -Force
-        $_AiToolsInternal = @{ Urls = @{ AgyStatusline = 'https://example.invalid/agy_statusline.ps1' } }
+        $script:_AiToolsInternal = @{ Urls = @{ AgyStatusline = 'https://example.invalid/agy_statusline.ps1' } }
 
         Mock Join-Path {
             if ($Path -eq $HOME -and $ChildPath -eq '.gemini\antigravity-cli') {

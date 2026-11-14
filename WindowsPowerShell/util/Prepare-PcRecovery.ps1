@@ -253,7 +253,7 @@ function Invoke-SafeStep([string]$Name, [scriptblock]$Body, [string[]]$Manual = 
 }
 
 # Creates a directory when missing. Gated so -WhatIf writes nothing.
-function Ensure-Directory {
+function Initialize-Directory {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Path)
     if (Test-Path -LiteralPath $Path) { return }
@@ -669,7 +669,7 @@ function Save-CatalogRow {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param($Row, [string]$Root)
     $dir = Join-Path (Join-Path $Root $script:DirIsos) $Row.Category
-    Ensure-Directory -Path $dir
+    Initialize-Directory -Path $dir
     $outFile = Join-Path $dir $Row.FileName
     $expected = $Row.Hash
     if ($Row.HashKind -eq 'Rolling') {
@@ -728,7 +728,7 @@ function Install-Ventoy {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [switch]$CleanDownloads)
     $ventoyDir = Join-Path $Root $script:DirVentoy
-    Ensure-Directory -Path $ventoyDir
+    Initialize-Directory -Path $ventoyDir
     $ventoyManual = @(
         'Download the Windows zip by hand from ' + $script:VentoyReleasesUrl + ',',
         "verify it against sha256.txt, and extract it into $ventoyDir."
@@ -812,7 +812,7 @@ function Save-RufusTools {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root)
     $toolsDir = Join-Path $Root 'tools'
-    Ensure-Directory -Path $toolsDir
+    Initialize-Directory -Path $toolsDir
     $ok = $true
     $release = Get-GitHubLatestAsset -Repo 'pbatard/rufus' -AssetPattern '^rufus-.*p\.exe$'
     if (-not $release) {
@@ -855,7 +855,7 @@ function Get-WindowsIsoViaFido {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root)
     $installersDir = Join-Path (Join-Path $Root $script:DirIsos) '03-Installers'
-    Ensure-Directory -Path $installersDir
+    Initialize-Directory -Path $installersDir
     $existing = Find-WindowsIso -InstallersDir $installersDir
     if ($existing.Count -gt 0) {
         Write-Ok "Skipped (present): $($existing[0].Name)"
@@ -913,7 +913,7 @@ function Invoke-Tiny11Build {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [switch]$Elevate, [switch]$CleanDownloads)
     $builderDir = Join-Path (Join-Path $Root $script:DirTools) $script:DirBuilder
-    Ensure-Directory -Path $builderDir
+    Initialize-Directory -Path $builderDir
     $release = Get-GitHubLatestAsset -Repo 'ntdevlabs/tiny11builder' -AssetPattern '^Tiny11Builder-.*-win-x64\.zip$' -HashSuffix '.sha256'
     if (-not $release) { return $false }
     $builderManual = @(
@@ -960,7 +960,7 @@ function Invoke-Tiny11Build {
     }
     $installersDir = Join-Path (Join-Path $Root $script:DirIsos) $script:DirInstallers
     $tiny11Dir = Join-Path $installersDir $script:DirTiny11
-    Ensure-Directory -Path $tiny11Dir
+    Initialize-Directory -Path $tiny11Dir
     $finalIso = Join-Path $tiny11Dir $script:FileTiny11Iso
     if (Test-Path -LiteralPath $finalIso) {
         Write-Ok 'Skipped (present): tiny11.iso'
@@ -1146,13 +1146,13 @@ function Invoke-PreparePcRecovery {
         $script:VerifiedHashes = @{}
         $script:Sidecars = @{}
         Initialize-ElevationState -Elevate:$Elevate
-        Ensure-Directory -Path $Root
-        Ensure-Directory -Path (Join-Path $Root $script:DirTools)
-        Ensure-Directory -Path (Join-Path $Root $script:DirVentoy)
-        Ensure-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '01-Network')
-        Ensure-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '02-Rescue')
-        Ensure-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '03-Installers')
-        Ensure-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc')
+        Initialize-Directory -Path $Root
+        Initialize-Directory -Path (Join-Path $Root $script:DirTools)
+        Initialize-Directory -Path (Join-Path $Root $script:DirVentoy)
+        Initialize-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '01-Network')
+        Initialize-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '02-Rescue')
+        Initialize-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '03-Installers')
+        Initialize-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc')
         Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {

@@ -10,17 +10,17 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
         foreach ($function in $functions) { . ([scriptblock]::Create($function.Extent.Text)) }
 
         # Script-level constants the helpers read; all paths point into TestDrive.
-        $AbortToken = 'OMP_LLAMACPP_SETUP_ABORTED'
-        $MarkerStart = '# >>> omp-llamacpp-judge'
-        $MarkerEnd = '# <<< omp-llamacpp-judge'
-        $MinLlamaCppBuild = 11960
-        $PortRangeSize = 49
-        $KvBytesPerToken = 30KB
-        $DiskMarginBytes = 512MB
-        $ProviderId = 'llama-cpp-tiny'
-        $Root = Join-Path $TestDrive 'llama-cpp-tiny'
-        $BinRoot = Join-Path $Root 'bin'
-        $ModelsDir = Join-Path $Root 'models'
+        $script:AbortToken = 'OMP_LLAMACPP_SETUP_ABORTED'
+        $script:MarkerStart = '# >>> omp-llamacpp-judge'
+        $script:MarkerEnd = '# <<< omp-llamacpp-judge'
+        $script:MinLlamaCppBuild = 11960
+        $script:PortRangeSize = 49
+        $script:KvBytesPerToken = 30KB
+        $script:DiskMarginBytes = 512MB
+        $script:ProviderId = 'llama-cpp-tiny'
+        $script:Root = Join-Path $TestDrive 'llama-cpp-tiny'
+        $script:BinRoot = Join-Path $script:Root 'bin'
+        $script:ModelsDir = Join-Path $script:Root 'models'
 
         # Builds a fake GitHub release object.
         function New-Release([string]$Tag, [string[]]$Assets, [switch]$NoDigest, [switch]$Draft, [switch]$Prerelease) {
@@ -516,7 +516,7 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
     }
 
     Context 'service helpers' {
-        BeforeAll { $ServiceName = 'llama-cpp-tiny' }
+        BeforeAll { $script:ServiceName = 'llama-cpp-tiny' }
 
         It 'adds the start/stop ACE before the SACL, once' {
             $sddl = 'D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRC;;;IU)S:(AU;FA;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;WD)'
@@ -731,9 +731,9 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
             # Read-only preflight stubs: omp exists, curl exists, omp answers.
             $CurlExe = Join-Path $TestDrive 'curl.exe'
             Set-Content -LiteralPath $CurlExe -Value 'stub'
-            $ServerConfigPath = Join-Path $TestDrive 'server.json'
+            $script:ServerConfigPath = Join-Path $TestDrive 'server.json'
             # The initial report probes the logon task; keep it out of the real scheduler.
-            $TaskName = 'llama-cpp-tiny'
+            $script:TaskName = 'llama-cpp-tiny'
             Mock Get-AutoStartTask { $null }
             Mock Get-Command { [pscustomobject]@{ Source = 'omp' } } -ParameterFilter { $Name -eq 'omp' }
             Mock Invoke-Omp {

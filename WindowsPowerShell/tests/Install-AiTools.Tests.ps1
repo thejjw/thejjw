@@ -1,3 +1,6 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '_AiToolsInternal')]
+param()
+
 BeforeAll {
     $script:userPathBeforeInstallAiToolsTests = [Environment]::GetEnvironmentVariable('PATH', 'User')
 }

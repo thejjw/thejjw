@@ -19,13 +19,13 @@ Describe 'AppLocker live enforcement safety' {
         function New-TestBlockEvent {
             param([string]$Path, [string]$Sid)
             $escapedPath = [System.Security.SecurityElement]::Escape($Path)
-            $event = [pscustomobject]@{
+            $eventRecord = [pscustomobject]@{
                 Id = 8004
                 TimeCreated = Get-Date
                 Xml = "<Event><EventData><Data Name='FilePath'>$escapedPath</Data><Data Name='TargetUser'>$Sid</Data></EventData></Event>"
             }
-            $event | Add-Member -MemberType ScriptMethod -Name ToXml -Value { $this.Xml }
-            return $event
+            $eventRecord | Add-Member -MemberType ScriptMethod -Name ToXml -Value { $this.Xml }
+            return $eventRecord
         }
     }
 
@@ -78,9 +78,9 @@ Describe 'AppLocker live enforcement safety' {
         It 'rejects audit events even when path and user match' {
             Mock Start-Process { throw 'Access denied' }
             Mock Get-WinEvent {
-                $event = New-TestBlockEvent -Path (Join-Path $TestDrive 'probe.exe') -Sid ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
-                $event.Id = 8003
-                $event
+                $eventRecord = New-TestBlockEvent -Path (Join-Path $TestDrive 'probe.exe') -Sid ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+                $eventRecord.Id = 8003
+                $eventRecord
             }
             (Test-AppLockerLiveEnforcement -FileName 'probe.exe' -Directory $TestDrive -Confirm:$false).Enforced | Should -BeNullOrEmpty
         }
@@ -88,9 +88,9 @@ Describe 'AppLocker live enforcement safety' {
         It 'rejects stale block events even when path and user match' {
             Mock Start-Process { throw 'Access denied' }
             Mock Get-WinEvent {
-                $event = New-TestBlockEvent -Path (Join-Path $TestDrive 'probe.exe') -Sid ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
-                $event.TimeCreated = $script:probeTime.AddMinutes(-1)
-                $event
+                $eventRecord = New-TestBlockEvent -Path (Join-Path $TestDrive 'probe.exe') -Sid ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+                $eventRecord.TimeCreated = $script:probeTime.AddMinutes(-1)
+                $eventRecord
             }
             (Test-AppLockerLiveEnforcement -FileName 'probe.exe' -Directory $TestDrive -Confirm:$false).Enforced | Should -BeNullOrEmpty
         }

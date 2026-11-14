@@ -69,23 +69,23 @@ Describe 'AI API key credential helpers' {
             return $credential
         }
         $script:vault | Add-Member -MemberType ScriptMethod -Name Add -Value {
-            param($credential)
-            if ($script:failBailianSave -and $credential.Resource -eq 'BAILIAN_TOKEN_PLAN_API_KEY') {
+            param($vaultItem)
+            if ($script:failBailianSave -and $vaultItem.Resource -eq 'BAILIAN_TOKEN_PLAN_API_KEY') {
                 throw 'Simulated Bailian save failure.'
             }
 
-            [void]$this.Saved.Add($credential)
+            [void]$this.Saved.Add($vaultItem)
         }
         $script:vault | Add-Member -MemberType ScriptMethod -Name RetrieveAll -Value {
             if ($script:failRetrieveAll) { throw 'Simulated vault enumeration failure.' }
             return @($this.All)
         }
         $script:vault | Add-Member -MemberType ScriptMethod -Name Remove -Value {
-            param($credential)
-            if ($credential.Resource -eq $script:failRemoveResource) {
-                throw "Simulated removal failure: $($credential.Resource)"
+            param($vaultItem)
+            if ($vaultItem.Resource -eq $script:failRemoveResource) {
+                throw "Simulated removal failure: $($vaultItem.Resource)"
             }
-            [void]$this.Removed.Add($credential)
+            [void]$this.Removed.Add($vaultItem)
         }
 
         $script:processNames = @('KIMI_CODE_PLAN_API_KEY', 'OPENCODE_GO_API_KEY', 'TEST_GROUPED_API_KEY', 'TEST_OTHER_API_KEY')

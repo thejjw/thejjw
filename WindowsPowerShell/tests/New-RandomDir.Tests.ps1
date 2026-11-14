@@ -1,3 +1,6 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingCmdletAliases', '')]
+param()
+
 Describe 'New-RandomDir' {
     BeforeAll {
         $profilePath = Join-Path $PSScriptRoot '..\Microsoft.PowerShell_profile.ps1'
@@ -15,7 +18,7 @@ Describe 'New-RandomDir' {
         if (-not $functionAst) { throw 'Could not load New-RandomDir from the profile.' }
         . ([scriptblock]::Create($functionAst.Extent.Text))
         Set-Alias nrd New-RandomDir
-        $_NrdInternal = @{
+        $script:_NrdInternal = @{
             Colors = @('lavender')
             Adjectives = @('small')
             Nouns = @('meadow')
@@ -24,11 +27,11 @@ Describe 'New-RandomDir' {
     }
 
     BeforeEach {
-        $originalLocation = Get-Location
+        $script:originalLocation = Get-Location
     }
 
     AfterEach {
-        Set-Location -LiteralPath $originalLocation.Path
+        Set-Location -LiteralPath $script:originalLocation.Path
     }
 
     It 'creates a randomly named directory and enters it' {
@@ -72,7 +75,7 @@ Describe 'New-RandomDir' {
         { nrd -BasePath $baseFile -Name child -g -a } | Should -Throw
 
         Should -Invoke git -Times 0 -Exactly
-        (Get-Location).Path | Should -Be $originalLocation.Path
+        (Get-Location).Path | Should -Be $script:originalLocation.Path
         (Get-Content -LiteralPath $baseFile -Raw).Trim() | Should -Be 'keep me'
     }
 }
