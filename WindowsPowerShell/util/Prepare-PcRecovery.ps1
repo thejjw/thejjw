@@ -636,10 +636,23 @@ function Get-WindowsIsoViaFido {
     }
     if (-not $PSCmdlet.ShouldProcess($installersDir, 'Resolve Windows 11 URL via Fido and download')) { return $true }
     $powerShellPath = (Get-Process -Id $PID -ErrorAction Stop).MainModule.FileName
-    $result = Invoke-Cli -Command $powerShellPath -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $fidoPath, '-Win', 'Windows 11', '-Rel', 'Latest', '-Arch', 'x64', '-GetUrl')
-    $url = @($result.StdOut -split "`r?`n" | Where-Object { $_ -match '^https?://' } | ForEach-Object { $_.Trim() }) | Select-Object -Last 1
-    if ($result.ExitCode -ne 0 -or -not $url) {
-        $detail = if ($result.StdErr) { $result.StdErr } else { 'Fido printed no URL.' }
+    # Fido reports errors via Write-Host (child stdout), not stderr; keep the
+    # tail for the failure detail. Retry a few times with a pause: Microsoft's
+    # Sentinel rate-limits the download-links endpoint transiently.
+    $url = ''
+    $lastOutput = ''
+    $attempts = 3
+    for ($n = 1; $n -le $attempts; $n++) {
+        $result = Invoke-Cli -Command $powerShellPath -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $fidoPath, '-Win', 'Windows 11', '-Rel', 'Latest', '-Arch', 'x64', '-GetUrl')
+        $url = @($result.StdOut -split "`r?`n" | Where-Object { $_ -match '^https?://' } | ForEach-Object { $_.Trim() }) | Select-Object -Last 1
+        if ($result.ExitCode -eq 0 -and $url) { break }
+        $lastOutput = (($result.StdOut + "`n" + $result.StdErr).Trim() | Select-Object -Last 1)
+        if ($lastOutput.Length -gt 300) { $lastOutput = '...' + $lastOutput.Substring($lastOutput.Length - 300) }
+        if ($n -lt $attempts) { Start-Sleep -Seconds 10 }
+        $url = ''
+    }
+    if (-not $url) {
+        $detail = if ($lastOutput) { "Fido printed no URL. Last output: $lastOutput" } else { 'Fido printed no URL.' }
         Write-Failure -Name 'Windows 11 ISO' -Detail "Fido resolution failed: $detail" -Manual @(
             'Open https://www.microsoft.com/en-US/software-download/Windows11 and download the ISO by hand,',
             "then place the Win*.iso file into $installersDir."

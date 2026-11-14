@@ -291,8 +291,34 @@ Describe 'Prepare-PcRecovery.ps1' {
             New-Item -ItemType Directory -Path $tools -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $tools 'Fido.ps1') -Value 'x' -NoNewline
             Mock Invoke-Cli { [pscustomobject]@{ ExitCode = 1; StdOut = ''; StdErr = 'blocked' } }
+            Mock Start-Sleep { }
             { Get-WindowsIsoViaFido -Root $root } | Should -Not -Throw
             $script:Failures | Should -HaveCount 1
+        }
+
+        It 'routes a failed Rufus download to Write-Failure instead of throwing' {
+            Reset-State
+            $root = Join-Path $TestDrive 'norufus'
+            # One call only: a second call would record a second (Fido) failure.
+            $toolsDir = Join-Path $root 'tools'
+            New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $toolsDir 'Fido.ps1') -Value 'x' -NoNewline
+            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v4.15'; Name = 'rufus-4.15p.exe'; ZipUrl = 'https://example.invalid/rufus.exe'; HashUrl = '' } }
+            Mock Invoke-Cli { [pscustomobject]@{ ExitCode = 22; StdOut = ''; StdErr = 'HTTP 404' } }
+            Save-RufusTools -Root $root | Should -BeFalse
+            $script:Failures.Name | Should -Contain 'Rufus portable'
+        }
+        It 'leaves the persistent User PATH unchanged' {
+            $before = [Environment]::GetEnvironmentVariable('Path', 'User')
+            Reset-State
+            $root = Join-Path $TestDrive 'pathrun'
+            $ventoyDir = Join-Path $root 'ventoy'
+            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = 'https://example.invalid/b.zip.sha256' } }
+            Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
+            Mock Save-VerifiedFile { return $true }
+            Mock Expand-Archive { Set-Content -LiteralPath (Join-Path $ventoyDir 'Ventoy2Disk.exe') -Value 'e' -NoNewline }
+            { Install-Ventoy -Root $root } | Should -Not -Throw
+            [Environment]::GetEnvironmentVariable('Path', 'User') | Should -Be $before
         }
 
         It 'routes a missing official ISO to a Tiny11 skip-failure' {
