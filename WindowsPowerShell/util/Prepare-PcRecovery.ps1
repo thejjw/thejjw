@@ -707,7 +707,7 @@ function Get-WindowsIsoViaFido {
     if (-not (Test-Path -LiteralPath $fidoPath)) {
         Write-Failure -Name 'Windows 11 ISO' -Detail 'Fido.ps1 is missing; cannot resolve the Microsoft URL.' -Manual @(
             'Open https://www.microsoft.com/en-US/software-download/Windows11 and download the ISO by hand,',
-            "then place the Win*.iso file into $installersDir."
+            "then place the Windows ISO (Win11_*.iso or en-us_windows_11_*.iso) into $installersDir."
         )
         return $false
     }
@@ -732,7 +732,7 @@ function Get-WindowsIsoViaFido {
         $detail = if ($lastOutput) { "Fido printed no URL. Last output: $lastOutput" } else { 'Fido printed no URL.' }
         Write-Failure -Name 'Windows 11 ISO' -Detail "Fido resolution failed: $detail" -Manual @(
             'Open https://www.microsoft.com/en-US/software-download/Windows11 and download the ISO by hand,',
-            "then place the Win*.iso file into $installersDir."
+            "then place the Windows ISO (Win11_*.iso or en-us_windows_11_*.iso) into $installersDir."
         )
         return $false
     }
@@ -814,7 +814,7 @@ function Invoke-Tiny11Build {
     $official = Find-WindowsIso -InstallersDir $installersDir
     if ($official.Count -eq 0) {
         Write-Failure -Name 'Tiny11 ISO' -Detail 'No official Windows ISO to build from.' -Manual @(
-            'Place the official Win*.iso into 03-Installers first (Fido step above), then re-run.'
+            'Place the official Windows ISO (Win11_*.iso or en-us_windows_11_*.iso) into 03-Installers first (Fido step above), then re-run.'
         )
         return $false
     }
@@ -941,6 +941,7 @@ function Write-ReadmeFile {
     }
 }
 
+# Prints the summary table plus the consolidated manual-retry block. Returns
 # 1 when any failure was recorded, else 0.
 function Write-Summary {
     Write-Section 'Summary'
@@ -1006,7 +1007,7 @@ function Invoke-PreparePcRecovery {
         Write-Step 'Catalog ISOs (netboot first)'
         Save-CatalogIsos -Root $Root -NetbootArch $NetbootArch -MintHwe $MintHwe
         Write-Step 'Windows 11 ISO via Fido'
-        Invoke-SafeStep -Name 'Windows 11 ISO' -Manual @('Open https://www.microsoft.com/en-US/software-download/Windows11 and place the Win*.iso into isos\03-Installers\.') -Body {
+        Invoke-SafeStep -Name 'Windows 11 ISO' -Manual @('Open https://www.microsoft.com/en-US/software-download/Windows11 and place the Windows ISO (Win11_*.iso or en-us_windows_11_*.iso) into isos\03-Installers\.') -Body {
             Get-WindowsIsoViaFido -Root $Root | Out-Null
         }
         if (-not $SkipTiny11) {
@@ -1019,10 +1020,26 @@ function Invoke-PreparePcRecovery {
         }
         # Refresh the isos readme from the selected rows so the tree documents
         # what this run aimed to fetch, including sizes and re-verify notes.
+        # Then append what is actually present for the two non-catalog entries
+        # (official Windows ISO, Tiny11 build output) so the file describes
+        # the real tree, not just the plan.
         $isoLines = Get-RecoveryCatalog | Where-Object {
             (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
             (($_.MintHwe -eq '') -or ($_.MintHwe -eq $MintHwe))
         } | ForEach-Object { '{0}\ {1}  {2} -- {3}' -f $_.Category, $_.FileName, $_.SizeNote, $_.Check }
+        $installersDir = Join-Path (Join-Path $Root 'isos') '03-Installers'
+        $winIso = Find-WindowsIso -InstallersDir $installersDir | Select-Object -First 1
+        if ($winIso) {
+            $isoLines += '03-Installers\ {0}  Official Windows 11 ISO (kept as downloaded; Microsoft links expire, no hash pinned).' -f $winIso.Name
+        } else {
+            $isoLines += '03-Installers\ (Windows 11 ISO not present yet -- resolve via Fido or place Win11_*.iso / en-us_windows_11_*.iso by hand.)'
+        }
+        $tinyIso = Join-Path (Join-Path $installersDir 'tiny11') 'tiny11.iso'
+        if (Test-Path -LiteralPath $tinyIso) {
+            $isoLines += '03-Installers\tiny11\tiny11.iso  Built by tiny11builder from the official ISO above.'
+        } else {
+            $isoLines += '03-Installers\tiny11\ (empty -- build with -Elevate once the official ISO is present.)'
+        }
         Write-ReadmeFile -Path (Join-Path (Join-Path $Root 'isos') 'README.txt') -Text ((Get-IsosReadmeTemplate) -f ($isoLines -join "`r`n"))
         return (Write-Summary)
     } finally {

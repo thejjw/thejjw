@@ -339,8 +339,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'isos') 'README.txt'))
             $isosText | Should -Match 'HBCD_PE_x64.iso'
             $isosText | Should -Match 'Unversioned URL'
+            $isosText | Should -Match 'Windows 11 ISO not present yet'
+            $isosText | Should -Match 'tiny11\\\s+\(empty'
         }
-
         It 'keeps the Tiny11 builder under tools' {
             Reset-State
             $root = Join-Path $TestDrive 'tpath'
