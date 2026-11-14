@@ -10989,6 +10989,48 @@ function Add-UserPathEntry {
     }
 }
 
+function Set-HerdrTelemetry {
+    <#
+.SYNOPSIS
+    Turns Herdr app telemetry on or off in settings.json.
+.DESCRIPTION
+    Merges the telemetry flag into the Herdr app's settings.json without dropping
+    other preferences. The running app reloads the file within a second; turning
+    it off also deletes the local install ID and any unsent reports.
+.PARAMETER Enabled
+    $true opts in, $false opts out.
+.EXAMPLE
+    PS C:\> Set-HerdrTelemetry -Enabled $false
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-11
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool] $Enabled
+    )
+
+    $homeDir = if ($env:HERDR_APP_HOME) { $env:HERDR_APP_HOME }
+               elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME 'herdr-app' }
+               else { Join-Path $HOME '.config\herdr-app' }
+    $path = Join-Path $homeDir 'settings.json'
+
+    New-Item -ItemType Directory -Force -Path $homeDir | Out-Null
+    $obj = if (Test-Path -LiteralPath $path) {
+        try { Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -ErrorAction Stop }
+        catch { throw "Refusing to rewrite invalid settings.json at ${path}: $($_.Exception.Message)" }
+    }
+    else { [pscustomobject]@{} }
+
+    $obj | Add-Member -NotePropertyName telemetry -NotePropertyValue $Enabled -Force
+    # .NET, not Set-Content: Windows PowerShell writes a BOM that serde rejects.
+    $tmp = "$path.tmp"
+    [IO.File]::WriteAllText($tmp, ($obj | ConvertTo-Json -Depth 20))
+    Move-Item -Force -LiteralPath $tmp -Destination $path
+    Write-Host "Herdr telemetry: $(if ($Enabled) { 'on' } else { 'off' }) ($path)"
+}
+
 function Get-GlobalNpmInventory {
     <#
 .SYNOPSIS
@@ -12102,7 +12144,17 @@ function Install-AiTools {
                     )) {
                         if (Test-Path -LiteralPath $dir) { $null = Add-UserPathEntry -Path $dir }
                     }
-                    Write-Host "herdr-app installed. Telemetry is on by default; disable in Settings > Privacy." -ForegroundColor DarkGray
+                    # Default telemetry off; opt in explicitly in Settings > Privacy.
+                    $herdrHome = if ($env:HERDR_APP_HOME) { $env:HERDR_APP_HOME }
+                                 elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME 'herdr-app' }
+                                 else { Join-Path $HOME '.config\herdr-app' }
+                    $herdrSettings = Join-Path $herdrHome 'settings.json'
+                    if (-not (Test-Path -LiteralPath $herdrSettings)) {
+                        New-Item -ItemType Directory -Force -Path $herdrHome | Out-Null
+                        # .NET, not Set-Content: Windows PowerShell writes a BOM that serde rejects.
+                        [IO.File]::WriteAllText($herdrSettings, '{ "telemetry": false }')
+                    }
+                    Write-Host "herdr-app installed. Telemetry is off by default; enable it in Settings > Privacy." -ForegroundColor DarkGray
                 }
             }
         }
