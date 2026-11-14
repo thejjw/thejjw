@@ -69,9 +69,79 @@ $script:CurlExe = Join-Path $env:SystemRoot 'System32\curl.exe'
 $script:FidoUrl = 'https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps1'
 $script:Tiny11MakerUrl = 'https://raw.githubusercontent.com/ntdevlabs/tiny11builder/winui-preview/tiny11maker.ps1'
 $script:Tiny11AnswerUrl = 'https://raw.githubusercontent.com/ntdevlabs/tiny11builder/winui-preview/autounattend.xml'
+$script:OscdimgUrl = 'https://msdl.microsoft.com/download/symbols/oscdimg.exe/3D44737265000/oscdimg.exe'
 $script:Failures = @()
 $script:Results = @()
 $script:UseSudo = $false
+
+# -----------------------------------------------------------------------------
+# Maintained text blocks. These two readmes are written into the download tree
+# (root README.txt, isos\README.txt) on every run; edit the text inside these
+# two functions, not in the tree, so a re-run never loses the update.
+# Functions are the loadable unit (tests dot-source functions only), so the
+# text lives here instead of in top-level assignments. Keep ASCII, no BOM.
+# -----------------------------------------------------------------------------
+
+# What the destination root is and how to use it.
+function Get-RootReadmeText {
+    @'
+PC RECOVERY USB - download tree
+================================
+Built by util/Prepare-PcRecovery.ps1. Re-running the script is safe: files
+that already match their expected hash are skipped, interrupted downloads
+resume from their .partial file.
+
+STRUCTURE
+  ventoy\            Ventoy media tool (Ventoy2Disk.exe lives here).
+                     Run Ventoy2Disk.exe, pick the USB stick, Install, then
+                     copy the ISO files below onto the USB drive.
+  tools\             Rufus portable, Fido.ps1, and tiny11builder\.
+  isos\01-Network\   netboot.xyz network-boot image (needs internet to use).
+  isos\02-Rescue\    Hiren's BootCD PE, SystemRescue, Clonezilla.
+  isos\03-Installers\ Ubuntu Server, Rocky, Debian netinst, Mint, antiX,
+                     Fedora, the Windows 11 ISO (Fido's Win11_*.iso name or
+                     the official en-us_windows_11_*.iso name), tiny11\.
+  isos\04-etc\       Spare room for drivers, notes, one-off utilities.
+  isos\README.txt    Per-folder contents, sizes, and re-verify notes.
+
+WINDOWS 11 ISO
+  Resolved in English (en-US) through Fido headless. Microsoft links expire,
+  so it is kept without hash verification. If Fido is blocked, download from
+  https://www.microsoft.com/en-US/software-download/Windows11 by hand and
+  place the file (Win11_*.iso or en-us_windows_11_*.iso) into
+  isos\03-Installers\.
+
+TINY11 BUILD
+  Produces isos\03-Installers\tiny11\tiny11.iso from the official ISO.
+  Needs -Elevate (inline sudo pre-enabled) or an elevated shell.
+  See tools\tiny11builder\ for the builder files used.
+'@
+}
+
+# Per-folder contents of isos\. {0} is replaced with one line per
+# downloaded-or-selected ISO: "<folder>\ <file>  <size note> -- <check>".
+function Get-IsosReadmeTemplate {
+    @'
+RECOVERY ISO SET
+================
+Grouped for a Ventoy USB: copy these files onto the Ventoy drive and boot.
+Re-verify any file later with the Check note next to it.
+
+{0}
+
+FOLDERS
+  01-Network\    Small network-boot images and bootloaders.
+  02-Rescue\     Offline-capable rescue and imaging environments.
+  03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
+  04-etc\        Misc files that do not fit the other categories.
+
+NOTES
+  - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
+  - Windows and Tiny11 ISOs usually need Secure Boot off (or Ventoy's key
+    enrolled); test before relying on them.
+  - netboot.xyz needs a working network connection to be useful.
+'@
+}
 
 # -----------------------------------------------------------------------------
 # Messaging helpers. All routine output goes through these two cmdlets only.
@@ -612,6 +682,13 @@ function Save-RufusTools {
     return $ok
 }
 
+# Finds official Windows ISOs in the installers folder, newest first.
+# Matches Fido-style names (Win11_*.iso) and official Microsoft names
+# (en-us_windows_11_*.iso). Never matches the tiny11\ build output.
+function Find-WindowsIso([string]$InstallersDir) {
+    @(Get-ChildItem -LiteralPath $InstallersDir -Filter '*.iso' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(Win11|Win10|en-us_windows_1[01])' } | Sort-Object LastWriteTime -Descending)
+}
+
 # Resolves an official Windows 11 ISO URL through Fido headless and downloads
 # it into isos\03-Installers\. Microsoft links expire, so no hash is pinned:
 # only a failed step records a failure. Never throws.
@@ -620,7 +697,7 @@ function Get-WindowsIsoViaFido {
     param([string]$Root)
     $installersDir = Join-Path (Join-Path $Root 'isos') '03-Installers'
     Ensure-Directory -Path $installersDir
-    $existing = @(Get-ChildItem -LiteralPath $installersDir -Filter 'Win*.iso' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+    $existing = Find-WindowsIso -InstallersDir $installersDir
     if ($existing.Count -gt 0) {
         Write-Ok "Skipped (present): $($existing[0].Name)"
         $script:Results += [pscustomobject]@{ Name = 'Windows 11 ISO'; Status = 'Skipped'; Detail = $existing[0].Name }
@@ -643,7 +720,7 @@ function Get-WindowsIsoViaFido {
     $lastOutput = ''
     $attempts = 3
     for ($n = 1; $n -le $attempts; $n++) {
-        $result = Invoke-Cli -Command $powerShellPath -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $fidoPath, '-Win', 'Windows 11', '-Rel', 'Latest', '-Arch', 'x64', '-GetUrl')
+        $result = Invoke-Cli -Command $powerShellPath -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $fidoPath, '-Win', 'Windows 11', '-Rel', 'Latest', '-Lang', 'English', '-Arch', 'x64', '-GetUrl')
         $url = @($result.StdOut -split "`r?`n" | Where-Object { $_ -match '^https?://' } | ForEach-Object { $_.Trim() }) | Select-Object -Last 1
         if ($result.ExitCode -eq 0 -and $url) { break }
         $lastOutput = (($result.StdOut + "`n" + $result.StdErr).Trim() | Select-Object -Last 1)
@@ -674,7 +751,7 @@ function Get-WindowsIsoViaFido {
 function Invoke-Tiny11Build {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [switch]$Elevate, [switch]$CleanDownloads)
-    $builderDir = Join-Path $Root 'tiny11builder'
+    $builderDir = Join-Path (Join-Path $Root 'tools') 'tiny11builder'
     Ensure-Directory -Path $builderDir
     $release = Get-GitHubLatestAsset -Repo 'ntdevlabs/tiny11builder' -AssetPattern '^Tiny11Builder-.*-win-x64\.zip$' -HashSuffix '.sha256'
     if (-not $release) { return $false }
@@ -734,7 +811,7 @@ function Invoke-Tiny11Build {
         $script:Results += [pscustomobject]@{ Name = 'Tiny11 ISO'; Status = 'Skipped'; Detail = 'present' }
         return $true
     }
-    $official = @(Get-ChildItem -LiteralPath $installersDir -Filter 'Win*.iso' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+    $official = Find-WindowsIso -InstallersDir $installersDir
     if ($official.Count -eq 0) {
         Write-Failure -Name 'Tiny11 ISO' -Detail 'No official Windows ISO to build from.' -Manual @(
             'Place the official Win*.iso into 03-Installers first (Fido step above), then re-run.'
@@ -760,11 +837,24 @@ function Invoke-Tiny11Build {
             return $false
         }
     }
+    # Pre-stage oscdimg.exe the same way: the maker downloads it with
+    # Invoke-WebRequest (no timeout) when neither the ADK nor the local copy
+    # exists, which can stall the elevated child forever. The maker deletes
+    # it when it finishes, so re-stage it on every run.
+    $oscdimgPath = Join-Path $builderDir 'oscdimg.exe'
+    $adkOscdimg = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\x64\Oscdimg\oscdimg.exe'
+    if (-not (Test-Path -LiteralPath $adkOscdimg) -and -not (Test-Path -LiteralPath $oscdimgPath)) {
+        if (-not (Invoke-FileDownload -Url $script:OscdimgUrl -OutFile $oscdimgPath)) {
+            Write-Failure -Name 'Tiny11 ISO' -Detail 'oscdimg.exe download failed.' -Manual @(
+                "Save $($script:OscdimgUrl) into $oscdimgPath by hand, then re-run."
+            )
+            return $false
+        }
+    }
     $scratchLetter = ([IO.Path]::GetPathRoot($Root)).Substring(0, 1).ToUpperInvariant()
     $escapedIso = ($official[0].FullName).Replace("'", "''")
     $escapedMaker = ($makerPath).Replace("'", "''")
     $escapedFinal = ($finalIso).Replace("'", "''")
-    $escapedAnswer = ($answerPath).Replace("'", "''")
     # The child must NOT use 'Stop': the maker depends on non-terminating errors
     # (absent install.esd, already-removed packages, reg edits). 'Continue' keeps
     # the builder's own error tolerance; the try/catch here still reports failure.
@@ -835,8 +925,22 @@ function Write-PlanTable {
         Write-Host ("  {0,-28} {1,-42} {2}" -f $row.Category, $row.FileName, $row.SizeNote)
     }
 }
+# Writes a maintained text block to the tree (BOMless UTF-8, CRLF endings).
+# Runs under ShouldProcess so -WhatIf writes nothing. Never throws.
+function Write-ReadmeFile {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param([string]$Path, [string]$Text)
+    if (-not $PSCmdlet.ShouldProcess($Path, 'Write readme')) { return }
+    try {
+        [IO.File]::WriteAllText($Path, ($Text -replace "`r`n", "`n").Replace("`n", "`r`n"), [Text.UTF8Encoding]::new($false))
+    } catch {
+        $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
+        Write-Failure -Name (Split-Path -Leaf $Path) -Detail "Readme write failed: $detail" -Manual @(
+            "Create $Path by hand; the tree works without it."
+        )
+    }
+}
 
-# Prints the summary table plus the consolidated manual-retry block. Returns
 # 1 when any failure was recorded, else 0.
 function Write-Summary {
     Write-Section 'Summary'
@@ -890,6 +994,7 @@ function Invoke-PreparePcRecovery {
         Ensure-Directory -Path (Join-Path (Join-Path $Root 'isos') '02-Rescue')
         Ensure-Directory -Path (Join-Path (Join-Path $Root 'isos') '03-Installers')
         Ensure-Directory -Path (Join-Path (Join-Path $Root 'isos') '04-etc')
+        Write-ReadmeFile -Path (Join-Path $Root 'README.txt') -Text (Get-RootReadmeText)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null
@@ -912,6 +1017,13 @@ function Invoke-PreparePcRecovery {
         } else {
             Write-Detail 'Tiny11 build skipped by -SkipTiny11.'
         }
+        # Refresh the isos readme from the selected rows so the tree documents
+        # what this run aimed to fetch, including sizes and re-verify notes.
+        $isoLines = Get-RecoveryCatalog | Where-Object {
+            (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
+            (($_.MintHwe -eq '') -or ($_.MintHwe -eq $MintHwe))
+        } | ForEach-Object { '{0}\ {1}  {2} -- {3}' -f $_.Category, $_.FileName, $_.SizeNote, $_.Check }
+        Write-ReadmeFile -Path (Join-Path (Join-Path $Root 'isos') 'README.txt') -Text ((Get-IsosReadmeTemplate) -f ($isoLines -join "`r`n"))
         return (Write-Summary)
     } finally {
         [Console]::OutputEncoding = $savedEncoding

@@ -290,10 +290,11 @@ Describe 'Prepare-PcRecovery.ps1' {
             $tools = Join-Path $root 'tools'
             New-Item -ItemType Directory -Path $tools -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $tools 'Fido.ps1') -Value 'x' -NoNewline
-            Mock Invoke-Cli { [pscustomobject]@{ ExitCode = 1; StdOut = ''; StdErr = 'blocked' } }
+            Mock Invoke-Cli { $script:fidoArgs = $Arguments; [pscustomobject]@{ ExitCode = 1; StdOut = ''; StdErr = 'blocked' } }
             Mock Start-Sleep { }
             { Get-WindowsIsoViaFido -Root $root } | Should -Not -Throw
             $script:Failures | Should -HaveCount 1
+            ($script:fidoArgs -join ' ') | Should -Match "-Lang English"
         }
 
         It 'routes a failed Rufus download to Write-Failure instead of throwing' {
@@ -319,6 +320,39 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Expand-Archive { Set-Content -LiteralPath (Join-Path $ventoyDir 'Ventoy2Disk.exe') -Value 'e' -NoNewline }
             { Install-Ventoy -Root $root } | Should -Not -Throw
             [Environment]::GetEnvironmentVariable('Path', 'User') | Should -Be $before
+        }
+
+        It 'writes the root and isos readmes from the top-of-script blocks' {
+            Reset-State
+            $root = Join-Path $TestDrive 'readme'
+            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = 'https://example.invalid/b.zip.sha256' } }
+            Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
+            Mock Install-Ventoy { return $true }
+            Mock Save-RufusTools { return $true }
+            Mock Save-CatalogIsos { }
+            Mock Get-WindowsIsoViaFido { return $true }
+            Mock Invoke-Tiny11Build { return $true }
+            Invoke-PreparePcRecovery -Root $root | Out-Null
+            $rootText = [IO.File]::ReadAllText((Join-Path $root 'README.txt'))
+            $rootText | Should -Match 'tiny11builder'
+            $rootText | Should -Match 'en-US'
+            $isosText = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'isos') 'README.txt'))
+            $isosText | Should -Match 'HBCD_PE_x64.iso'
+            $isosText | Should -Match 'Unversioned URL'
+        }
+
+        It 'keeps the Tiny11 builder under tools' {
+            Reset-State
+            $root = Join-Path $TestDrive 'tpath'
+            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = 'https://example.invalid/b.zip.sha256' } }
+            Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'z' -NoNewline; return $true }
+            Mock Expand-Archive { }
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'm' -NoNewline; return $true }
+            New-Item -ItemType Directory -Path (Join-Path (Join-Path $root 'isos') '03-Installers') -Force | Out-Null
+            { Invoke-Tiny11Build -Root $root } | Should -Not -Throw
+            Test-Path -LiteralPath (Join-Path (Join-Path $root 'tools') 'tiny11builder') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $root 'tiny11builder') | Should -BeFalse
         }
 
         It 'routes a missing official ISO to a Tiny11 skip-failure' {
