@@ -3042,10 +3042,10 @@ function Get-NewPassword {
         return $set[(Get-Random -Minimum 0 -Maximum $set.Length)]
     }
 
-    function IsValidPassword($password) {
+    function IsValidPassword($candidate) {
         $lastChar = ''
         $count = 1
-        foreach ($char in $password.ToCharArray()) {
+        foreach ($char in $candidate.ToCharArray()) {
             if ($char -eq $lastChar) {
                 $count++
                 if ($count -gt $MaxConsecutive) {
@@ -3511,7 +3511,7 @@ function Send-SshKey {
 
         # Prefer explicit path to ssh-keygen if available (compatible with Windows PowerShell v5.1)
         $cmd = Get-Command ssh-keygen -ErrorAction SilentlyContinue
-        if ($cmd -ne $null) { $sshCmd = $cmd.Source } else { $sshCmd = 'ssh-keygen' }
+        if ($null -ne $cmd) { $sshCmd = $cmd.Source } else { $sshCmd = 'ssh-keygen' }
 
         $sshArgs = @('-t', 'ed25519', '-f', $privateKey, '-N', '')
 
@@ -3931,7 +3931,6 @@ function Convert-JpgToJxl {
     }
     $startTime = Get-Date
     $jobs = @()
-    $i = 0
 
     foreach ($image in $images) {
         # Throttle by polling running-job count; WinPS 5.1 lacks the
@@ -4476,7 +4475,7 @@ Last Edit: Aug 2025
     # Separate classification for certutil install planning -- uses
     # 'CA'/'EndEntity' labels instead of 'Intermediate'/'Leaf' to align
     # with certutil's own store naming (Root, CA, My).
-    function Classify-Certificate {
+    function Resolve-CertificateKind {
         param([System.Security.Cryptography.X509Certificates.X509Certificate2] $Certificate)
 
         $isSelfSigned = Test-SelfSignedCertificate -Certificate $Certificate
@@ -4526,7 +4525,7 @@ Last Edit: Aug 2025
         return $path
     }
 
-    function Escape-CertutilArgument {
+    function Format-CertutilArgument {
         param([string] $Argument)
         if ($Argument -match '\s') { return "`"$Argument`"" }
         return $Argument
@@ -4544,14 +4543,14 @@ Last Edit: Aug 2025
         )
         
         $certutil = $_ProfileHelpers.GetCertutilPath()
-        $args = @()
-        if (-not $MachineStore) { $args += '-user' }
-        $args += '-addstore'
-        $args += $StoreName
-        $args += $CertificatePath
+        $certutilArgs = @()
+        if (-not $MachineStore) { $certutilArgs += '-user' }
+        $certutilArgs += '-addstore'
+        $certutilArgs += $StoreName
+        $certutilArgs += $CertificatePath
 
         # Properly escape arguments that contain spaces
-        $escapedArgs = $args | ForEach-Object { Escape-CertutilArgument $_ }
+        $escapedArgs = $certutilArgs | ForEach-Object { Format-CertutilArgument $_ }
         $argumentString = $escapedArgs -join ' '
 
         Write-Verbose ("certutil {0}" -f $argumentString)
@@ -4729,7 +4728,7 @@ Last Edit: Aug 2025
     if ($InstallMethod -eq 'Certutil') {
         $plan = @()
         foreach ($cert in $toInstall) {
-            $type = Classify-Certificate -Certificate $cert
+            $type = Resolve-CertificateKind -Certificate $cert
             $path = if ($SaveToFiles) {
                 # Already saved, just get the path
                 $safeName = $_ProfileHelpers.NewSafeFileNameFromCertificateName($cert.Subject)
@@ -5015,7 +5014,7 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         $serverChainElements = [System.Collections.ArrayList]::new()
         $ssl = [System.Net.Security.SslStream]::new(
             $tcp.GetStream(), $false,
-            { param($sender, $cert, $chain, $errors) 
+            { param($sslSender, $cert, $chain, $errors) 
                 if ($chain) { foreach ($e in $chain.ChainElements) { [void]$serverChainElements.Add($e.Certificate) } }
                 return $true 
             }.GetNewClosure()
@@ -5627,7 +5626,7 @@ function Invoke-LoginAudit {
         }
     }
 
-    function Md-Table($rows, $columns) {
+    function Format-MdTable($rows, $columns) {
         if (-not $rows) { return "_(none)_`n" }
         $sb = [System.Text.StringBuilder]::new()
         [void]$sb.AppendLine('| ' + ($columns -join ' | ') + ' |')
@@ -5761,23 +5760,23 @@ function Invoke-LoginAudit {
 
     $md += "## Breakdown by user + logon type (4624)"
     $md += ""
-    $md += (Md-Table $userBreakdown @('Count', 'Group'))
+    $md += (Format-MdTable $userBreakdown @('Count', 'Group'))
 
     $md += "## Human-type logons (Interactive / Unlock / RDP / CachedInteractive)"
     $md += ""
     $md += "Logon types 2, 7, 10, 11. These are the events that represent a real person signing in."
     $md += ""
-    $md += (Md-Table ($human | Sort-Object Time -Descending) @('Time', 'User', 'Domain', 'LogonTypeName', 'Workstation', 'IP'))
+    $md += (Format-MdTable ($human | Sort-Object Time -Descending) @('Time', 'User', 'Domain', 'LogonTypeName', 'Workstation', 'IP'))
 
     $md += "## Network logons from non-SYSTEM accounts (type 3)"
     $md += ""
     $md += "Remote access to this machine (SMB shares, WinRM, etc.) that used a real user credential."
     $md += ""
-    $md += (Md-Table ($netNonSys | Sort-Object Time -Descending) @('Time', 'User', 'Domain', 'IP', 'Workstation'))
+    $md += (Format-MdTable ($netNonSys | Sort-Object Time -Descending) @('Time', 'User', 'Domain', 'IP', 'Workstation'))
 
     $md += "## Failed logons (4625)"
     $md += ""
-    $md += (Md-Table ($fail | Sort-Object Time -Descending) @('Time', 'User', 'Domain', 'LogonTypeName', 'Reason', 'SubStatus', 'IP', 'Workstation'))
+    $md += (Format-MdTable ($fail | Sort-Object Time -Descending) @('Time', 'User', 'Domain', 'LogonTypeName', 'Reason', 'SubStatus', 'IP', 'Workstation'))
 
     $md += "## Account lockouts (4740, last 30 days)"
     $md += ""
@@ -5788,7 +5787,7 @@ function Invoke-LoginAudit {
             CallerComputer = $_.Properties[1].Value
         }
     }
-    $md += (Md-Table $lockoutRows @('Time', 'LockedAccount', 'CallerComputer'))
+    $md += (Format-MdTable $lockoutRows @('Time', 'LockedAccount', 'CallerComputer'))
 
     $md += "## Logon type reference"
     $md += ""
@@ -5930,10 +5929,10 @@ function Invoke-RebootAudit {
     }
 
     function Get-EventDataMap {
-        param([System.Diagnostics.Eventing.Reader.EventRecord]$Event)
+        param([System.Diagnostics.Eventing.Reader.EventRecord]$EventRecord)
         $map = @{}
         try {
-            [xml]$xml = $Event.ToXml()
+            [xml]$xml = $EventRecord.ToXml()
             foreach ($data in $xml.Event.EventData.Data) {
                 $name = [string]$data.Name
                 if (-not $name) { continue }
@@ -5975,12 +5974,12 @@ function Invoke-RebootAudit {
     }
 
     function Get-WerDetails {
-        param([System.Diagnostics.Eventing.Reader.EventRecord]$Event)
+        param([System.Diagnostics.Eventing.Reader.EventRecord]$EventRecord)
 
         $code = $null
         $dump = $null
-        if ($Event.Message -match '(?i)bugcheck was:\s+(0x[0-9a-f]+)') { $code = $Matches[1].ToUpperInvariant() }
-        if ($Event.Message -match '(?i)dump was saved in:\s+([^\r\n]+)') { $dump = $Matches[1].Trim() }
+        if ($EventRecord.Message -match '(?i)bugcheck was:\s+(0x[0-9a-f]+)') { $code = $Matches[1].ToUpperInvariant() }
+        if ($EventRecord.Message -match '(?i)dump was saved in:\s+([^\r\n]+)') { $dump = $Matches[1].Trim() }
 
         return [pscustomobject]@{
             BugcheckCode = $code
@@ -8864,7 +8863,7 @@ Last Edit: 2026-10
     # (Bash has no backslash escape inside single quotes, so this is the only way)
     # Bash has no backslash escape inside single quotes; the only way to embed a
     # literal quote is to end the quote, add an escaped quote, and reopen: 'foo'\''bar'
-    function Escape-BashSingleQuotedValue {
+    function Format-BashSingleQuotedValue {
         param([string]$Value)
         if ($null -eq $Value) { return "''" }
         return "'" + ($Value -replace "'", "'`"'`"'") + "'"
@@ -9059,14 +9058,14 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
     # BaseUrl is conditionally included to avoid sending an empty value that
     # would override the remote's default (Anthropic direct) endpoint.
     $envParts = [System.Collections.Generic.List[string]]@(
-        "ANTHROPIC_API_KEY=$(Escape-BashSingleQuotedValue $ApiKey)"
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL=$(Escape-BashSingleQuotedValue $HaikuModel)"
-        "ANTHROPIC_DEFAULT_SONNET_MODEL=$(Escape-BashSingleQuotedValue $SonnetModel)"
-        "ANTHROPIC_DEFAULT_OPUS_MODEL=$(Escape-BashSingleQuotedValue $OpusModel)"
-        "CLAUDE_CODE_SUBAGENT_MODEL=$(Escape-BashSingleQuotedValue $SubagentModel)"
-        "CLAUDE_CODE_AUTO_COMPACT_WINDOW=$(Escape-BashSingleQuotedValue $AutoCompactWindow)"
-        "API_TIMEOUT_MS=$(Escape-BashSingleQuotedValue $TimeoutMs)"
-        "CLAUDE_CODE_DISABLE_1M_CONTEXT=$(Escape-BashSingleQuotedValue $Disable1M)"
+        "ANTHROPIC_API_KEY=$(Format-BashSingleQuotedValue $ApiKey)"
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL=$(Format-BashSingleQuotedValue $HaikuModel)"
+        "ANTHROPIC_DEFAULT_SONNET_MODEL=$(Format-BashSingleQuotedValue $SonnetModel)"
+        "ANTHROPIC_DEFAULT_OPUS_MODEL=$(Format-BashSingleQuotedValue $OpusModel)"
+        "CLAUDE_CODE_SUBAGENT_MODEL=$(Format-BashSingleQuotedValue $SubagentModel)"
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW=$(Format-BashSingleQuotedValue $AutoCompactWindow)"
+        "API_TIMEOUT_MS=$(Format-BashSingleQuotedValue $TimeoutMs)"
+        "CLAUDE_CODE_DISABLE_1M_CONTEXT=$(Format-BashSingleQuotedValue $Disable1M)"
     )
 
     # Claude Code exits when bypass mode is requested under uid 0 unless it is told
@@ -9074,23 +9073,23 @@ HOME="$CC_HOME" claude --dangerously-skip-permissions
     # explicit root login (RemoteUser root, or the legacy root@host form) gets the
     # marker; non-root sessions keep the stock behavior.
     if ($RemoteUser -eq 'root' -or $RemoteHost -imatch '^root@') {
-        $envParts.Add("IS_SANDBOX=$(Escape-BashSingleQuotedValue '1')")
+        $envParts.Add("IS_SANDBOX=$(Format-BashSingleQuotedValue '1')")
     }
 
     if (-not [string]::IsNullOrWhiteSpace($BaseUrl)) {
-        $envParts.Insert(1, "ANTHROPIC_BASE_URL=$(Escape-BashSingleQuotedValue $BaseUrl)")
+        $envParts.Insert(1, "ANTHROPIC_BASE_URL=$(Format-BashSingleQuotedValue $BaseUrl)")
     }
     if (-not [string]::IsNullOrWhiteSpace($AnthropicModel)) {
-        $envParts.Add("ANTHROPIC_MODEL=$(Escape-BashSingleQuotedValue $AnthropicModel)")
+        $envParts.Add("ANTHROPIC_MODEL=$(Format-BashSingleQuotedValue $AnthropicModel)")
     }
     if (-not [string]::IsNullOrWhiteSpace($FableModel)) {
-        $envParts.Add("ANTHROPIC_DEFAULT_FABLE_MODEL=$(Escape-BashSingleQuotedValue $FableModel)")
+        $envParts.Add("ANTHROPIC_DEFAULT_FABLE_MODEL=$(Format-BashSingleQuotedValue $FableModel)")
     }
     if (-not [string]::IsNullOrWhiteSpace($EffortLevel)) {
-        $envParts.Add("CLAUDE_CODE_EFFORT_LEVEL=$(Escape-BashSingleQuotedValue $EffortLevel)")
+        $envParts.Add("CLAUDE_CODE_EFFORT_LEVEL=$(Format-BashSingleQuotedValue $EffortLevel)")
     }
     if (-not [string]::IsNullOrWhiteSpace($MaxContextTokens)) {
-        $envParts.Add("CLAUDE_CODE_MAX_CONTEXT_TOKENS=$(Escape-BashSingleQuotedValue $MaxContextTokens)")
+        $envParts.Add("CLAUDE_CODE_MAX_CONTEXT_TOKENS=$(Format-BashSingleQuotedValue $MaxContextTokens)")
     }
     $envPrefix = $envParts -join ' '
 
@@ -12370,6 +12369,7 @@ function Load-AiApiKeysFromCS {
         Author: jjw(@thejjw)
         Last Edit: 2026-08
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '')]
     [CmdletBinding()]
     param(
         [switch]$Quiet
@@ -15579,7 +15579,7 @@ function Get-ClaudeUsage {
     }
     $rows | Format-Table -AutoSize -Wrap | Out-Host
 
-    if ($query.ExtraPercent -ne $null) {
+    if ($null -ne $query.ExtraPercent) {
         Write-Host ("  Extra usage: {0:N1}% of the monthly allowance" -f $query.ExtraPercent) -ForegroundColor DarkGray
     }
 
@@ -16776,11 +16776,11 @@ function Test-AppLockerLiveEnforcement {
                     StartTime = $started
                     EndTime = $finished
                 } -ErrorAction SilentlyContinue)
-                foreach ($event in $events) {
+                foreach ($eventRecord in $events) {
                     # Check the evidence itself as well as the event-log query.
-                    if ($event.Id -ne 8004 -or $null -eq $event.TimeCreated -or
-                        $event.TimeCreated -lt $started -or $event.TimeCreated -gt $finished) { continue }
-                    $xml = [xml]$event.ToXml()
+                    if ($eventRecord.Id -ne 8004 -or $null -eq $eventRecord.TimeCreated -or
+                        $eventRecord.TimeCreated -lt $started -or $eventRecord.TimeCreated -gt $finished) { continue }
+                    $xml = [xml]$eventRecord.ToXml()
                     $pathNode = $xml.SelectSingleNode("//*[local-name()='FilePath'] | //*[@Name='FilePath']")
                     $userNode = $xml.SelectSingleNode("//*[local-name()='TargetUser'] | //*[@Name='TargetUser']")
                     if ($pathNode -and $userNode -and
@@ -17738,14 +17738,14 @@ function Remove-AppLockerBlock {
             $leaf = if ($info.Path) { ($info.Path -split '[\\/]')[-1] } else { '' }
             $isManaged = ($info.Description -like "*$managedMarker*")
 
-            $matches = @($Name | Where-Object {
+            $isMatch = @($Name | Where-Object {
                 $candidate = $_
                 [string]::Equals($info.RuleId, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
                 [string]::Equals($info.Name, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
                 [string]::Equals($leaf, $candidate, [System.StringComparison]::OrdinalIgnoreCase) -or
                 [string]::Equals($info.Target, $candidate, [System.StringComparison]::OrdinalIgnoreCase)
             }).Count -gt 0
-            if (-not $matches) { continue }
+            if (-not $isMatch) { continue }
 
             if (-not $isManaged -and -not $Force) {
                 $kept += "$($info.Name) ($($info.Mode): $($info.Target))"
