@@ -11018,7 +11018,7 @@ function Set-HerdrTelemetry {
 
     New-Item -ItemType Directory -Force -Path $homeDir | Out-Null
     $obj = if (Test-Path -LiteralPath $path) {
-        try { Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -ErrorAction Stop }
+        try { Get-Content -Raw -LiteralPath $path -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop }
         catch { throw "Refusing to rewrite invalid settings.json at ${path}: $($_.Exception.Message)" }
     }
     else { [pscustomobject]@{} }
