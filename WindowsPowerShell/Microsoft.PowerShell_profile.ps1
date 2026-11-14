@@ -11469,6 +11469,55 @@ function Install-ReaToolchain {
     Write-Host '  - Restart PowerShell so other shells inherit the new environment variables.' -ForegroundColor Yellow
 }
 
+function Install-HerdrApp {
+    <#
+.SYNOPSIS
+    Installs the Herdr desktop app when it is missing.
+.DESCRIPTION
+    Runs Herdr's own per-user installer, adds the app and core folders to the
+    current session's PATH, and writes settings.json with telemetry off when no
+    settings file exists. Calling it again is a no-op once herdr-app resolves;
+    updates stay with the app's own updater.
+.EXAMPLE
+    PS C:\> Install-HerdrApp
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-11
+#>
+    [CmdletBinding()]
+    param()
+
+    if (Get-Command herdr-app -ErrorAction SilentlyContinue) { return }
+
+    Write-Host "herdr-app not found; installing via $($_AiToolsInternal.Urls.HerdrApp)..." -ForegroundColor Yellow
+    $LASTEXITCODE = 0
+    & powershell -NoProfile -ExecutionPolicy ByPass -Command "irm '$($_AiToolsInternal.Urls.HerdrApp)' | iex"
+    if ($LASTEXITCODE) {
+        Write-Host "Failed to install herdr-app (exit $LASTEXITCODE)." -ForegroundColor Red
+        return
+    }
+
+    # The installer runs in a child process; mirror its PATH writes here.
+    foreach ($dir in @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\herdr-app'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\herdr-core')
+    )) {
+        if (Test-Path -LiteralPath $dir) { $null = Add-UserPathEntry -Path $dir }
+    }
+
+    # Default telemetry off; opt in explicitly in Settings > Privacy.
+    $herdrHome = if ($env:HERDR_APP_HOME) { $env:HERDR_APP_HOME }
+                 elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME 'herdr-app' }
+                 else { Join-Path $HOME '.config\herdr-app' }
+    $herdrSettings = Join-Path $herdrHome 'settings.json'
+    if (-not (Test-Path -LiteralPath $herdrSettings)) {
+        New-Item -ItemType Directory -Force -Path $herdrHome | Out-Null
+        # .NET, not Set-Content: Windows PowerShell writes a BOM that serde rejects.
+        [IO.File]::WriteAllText($herdrSettings, '{ "telemetry": false }')
+    }
+    Write-Host "herdr-app installed. Telemetry is off by default; enable it in Settings > Privacy." -ForegroundColor DarkGray
+}
+
 function Install-AiTools {
     <#
 .SYNOPSIS
@@ -11617,8 +11666,6 @@ function Install-AiTools {
     if ($MoreAi) {
         $npmPackages += $_AiToolsInternal.MoreAiNpmPackages
     }
-    # Installer-stage CLIs are not winget/npm ids; track the ones -Customize can skip.
-    $installHerdrApp = [bool]$MoreAi
 
     $setupLabels = @('standard')
     if ($UserScope) { $setupLabels += 'userscope' }
@@ -11672,7 +11719,7 @@ function Install-AiTools {
         Write-Host " - kimi (Kimi Code CLI)"
         Write-Host " - grok (Grok CLI)"
         Write-Host " - cursor (Cursor CLI / agent)"
-        if ($installHerdrApp) { Write-Host " - herdr-app (Herdr desktop app)" }
+        Write-Host " - herdr-app (Herdr desktop app)"
     }
 
     if ($REA) {
@@ -11683,24 +11730,21 @@ function Install-AiTools {
     }
 
     # -Customize offers an interactive pruning pass over the pending install
-    # lists (PowerShell modules, winget packages, npm globals, and the
-    # herdr-app installer) before the confirmation prompt. Ids are matched
-    # case-insensitively against each list.
+    # lists (PowerShell modules, winget packages, npm globals) before the
+    # confirmation prompt. Ids are matched case-insensitively against each list.
     if ($Customize) {
         while ($true) {
-            $entry = Read-Host -Prompt 'Enter a package id (or herdr-app) to remove from the install lists (press Enter to proceed)'
+            $entry = Read-Host -Prompt 'Enter a package id to remove from the install lists (press Enter to proceed)'
             if ([string]::IsNullOrWhiteSpace($entry)) { break }
 
             $modulesBefore = $powerShellModules.Count
             $wingetBefore = $wingetPackages.Count
             $npmBefore = $npmPackages.Count
-            $herdrBefore = $installHerdrApp
 
             # Filters rebind the local copies; $_AiToolsInternal is never mutated.
             $powerShellModules = @($powerShellModules | Where-Object { $_.Name -ine $entry })
             $wingetPackages = @($wingetPackages | Where-Object { $_ -ine $entry })
             $npmPackages = @($npmPackages | Where-Object { $_ -ine $entry })
-            if ($entry -ieq 'herdr-app') { $installHerdrApp = $false }
 
             if ($powerShellModules.Count -lt $modulesBefore) {
                 Write-Host "Removed '$entry' from PowerShell modules ($($powerShellModules.Count) remaining)." -ForegroundColor Yellow
@@ -11711,14 +11755,11 @@ function Install-AiTools {
             elseif ($npmPackages.Count -lt $npmBefore) {
                 Write-Host "Removed '$entry' from npm packages ($($npmPackages.Count) remaining)." -ForegroundColor Yellow
             }
-            elseif ($herdrBefore -and -not $installHerdrApp) {
-                Write-Host "Removed 'herdr-app' from installer CLIs." -ForegroundColor Yellow
-            }
             else {
                 Write-Host "Package id '$entry' was not found in any install list." -ForegroundColor Red
             }
         }
-        Write-Host "Pending lists now: PowerShell modules $($powerShellModules.Count), winget $($wingetPackages.Count), npm $($npmPackages.Count), herdr-app $(if ($installHerdrApp) { 'install' } else { 'skip' })." -ForegroundColor Cyan
+        Write-Host "Pending lists now: PowerShell modules $($powerShellModules.Count), winget $($wingetPackages.Count), npm $($npmPackages.Count)." -ForegroundColor Cyan
     }
 
     if (-not $Auto) {
@@ -12053,7 +12094,7 @@ function Install-AiTools {
             Write-Host " - kimi (Kimi Code CLI)"
             Write-Host " - grok (Grok CLI)"
             Write-Host " - cursor (Cursor CLI / agent)"
-            if ($installHerdrApp) { Write-Host " - herdr-app (Herdr desktop app)" }
+            Write-Host " - herdr-app (Herdr desktop app)"
         }
         # Install Antigravity and Claude CLIs using their recommended installers
         Write-Host "Verifying CLIs and Configuring AI tool settings..." -ForegroundColor Cyan
@@ -12138,34 +12179,8 @@ function Install-AiTools {
 
         # Herdr installs and updates itself; keep this install-only so aiu does not
         # own an updater that upstream may change (background update on next launch).
-        if ($MoreAi -and $installHerdrApp) {
-            if (-not (Get-Command herdr-app -ErrorAction SilentlyContinue)) {
-                Write-Host "herdr-app not found; installing via $($_AiToolsInternal.Urls.HerdrApp)..." -ForegroundColor Yellow
-                $LASTEXITCODE = 0
-                & powershell -NoProfile -ExecutionPolicy ByPass -Command "irm '$($_AiToolsInternal.Urls.HerdrApp)' | iex"
-                if ($LASTEXITCODE) {
-                    Write-Host "Failed to install herdr-app (exit $LASTEXITCODE)." -ForegroundColor Red
-                } else {
-                    # The installer runs in a child process; mirror its PATH writes here.
-                    foreach ($dir in @(
-                        (Join-Path $env:LOCALAPPDATA 'Programs\herdr-app'),
-                        (Join-Path $env:LOCALAPPDATA 'Programs\herdr-core')
-                    )) {
-                        if (Test-Path -LiteralPath $dir) { $null = Add-UserPathEntry -Path $dir }
-                    }
-                    # Default telemetry off; opt in explicitly in Settings > Privacy.
-                    $herdrHome = if ($env:HERDR_APP_HOME) { $env:HERDR_APP_HOME }
-                                 elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME 'herdr-app' }
-                                 else { Join-Path $HOME '.config\herdr-app' }
-                    $herdrSettings = Join-Path $herdrHome 'settings.json'
-                    if (-not (Test-Path -LiteralPath $herdrSettings)) {
-                        New-Item -ItemType Directory -Force -Path $herdrHome | Out-Null
-                        # .NET, not Set-Content: Windows PowerShell writes a BOM that serde rejects.
-                        [IO.File]::WriteAllText($herdrSettings, '{ "telemetry": false }')
-                    }
-                    Write-Host "herdr-app installed. Telemetry is off by default; enable it in Settings > Privacy." -ForegroundColor DarkGray
-                }
-            }
+        if ($MoreAi) {
+            Install-HerdrApp
         }
 
         # Install the REA reverse-engineering toolchain (REA CLI + Ghidra) on request.
