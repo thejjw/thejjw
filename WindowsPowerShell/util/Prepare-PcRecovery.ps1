@@ -848,7 +848,7 @@ function Get-WindowsIsoViaFido {
         Write-Failure -Name 'Windows 11 ISO' -Detail 'Fido.ps1 is missing; cannot resolve the Microsoft URL.' -Manual @(
             'Open ' + $script:MsDownloadPage + ' and download the ISO by hand,',
             "then place the Windows ISO (" + $script:WinIsoNaming + ") into $installersDir.",
-			$script:ThirdPartyTip
+            $script:ThirdPartyTip
         )
         return $false
     }
@@ -874,7 +874,7 @@ function Get-WindowsIsoViaFido {
         Write-Failure -Name 'Windows 11 ISO' -Detail "Fido resolution failed: $detail" -Manual @(
             'Open ' + $script:MsDownloadPage + ' and download the ISO by hand,',
             "then place the Windows ISO (" + $script:WinIsoNaming + ") into $installersDir.",
-			$script:ThirdPartyTip
+            $script:ThirdPartyTip
         )
         return $false
     }
