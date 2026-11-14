@@ -109,6 +109,10 @@ $script:FileReadme = 'README.txt'
 $script:MsDownloadPage = 'https://www.microsoft.com/en-US/software-download/Windows11'
 $script:ThirdPartyTip = 'TIP: visit https://massgrave.dev/ for third party downloads'
 $script:WinIsoNaming = 'Win11_*.iso or en-us_windows_11_*.iso'
+# Shared manual-retry hint for the scripted Tiny11 build (used in failure text
+# and the orchestration label). {0} is the ISO the user mounts.
+$script:MakerHintAdmin = 'mount the official Windows ISO, and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> as admin.'
+$script:MakerHintElevated = 'Mount {0} and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell.'
 $script:Failures = @()
 $script:Results = @()
 $script:UseSudo = $false
@@ -888,8 +892,8 @@ function Get-WindowsIsoViaFido {
 # Downloads the tiny11builder release zip (verified) plus the legacy
 # tiny11maker.ps1 build script, then runs the privileged build: mount the
 # official ISO, run the maker, move tiny11.iso into isos\03-Installers\tiny11.
-# Without -Elevate (or without inline sudo) records a skip-failure instead of
-# prompting. Never throws.
+# The manual-retry hint ($script:MakerHint) is shared so its wording and the
+# child text above cannot drift apart. Never throws.
 function Invoke-Tiny11Build {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [switch]$Elevate, [switch]$CleanDownloads)
@@ -900,7 +904,7 @@ function Invoke-Tiny11Build {
     if (-not $release.HashUrl) {
         Write-Failure -Name 'Tiny11 builder' -Detail 'Release has no published .sha256 sidecar.' -Manual @(
             'Download the builder by hand from https://github.com/ntdevlabs/tiny11builder/releases/latest,',
-            'mount the official Windows ISO, and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> as admin.'
+            $script:MakerHintAdmin
         )
         return $false
     }
@@ -910,7 +914,7 @@ function Invoke-Tiny11Build {
         $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
         Write-Failure -Name 'Tiny11 builder' -Detail "Hash download failed: $detail" -Manual @(
             'Download the builder by hand from https://github.com/ntdevlabs/tiny11builder/releases/latest,',
-            'mount the official Windows ISO, and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> as admin.'
+            $script:MakerHintAdmin
         )
         return $false
     }
@@ -918,7 +922,7 @@ function Invoke-Tiny11Build {
     if (-not $expected) {
         Write-Failure -Name 'Tiny11 builder' -Detail "No checksum entry for $($release.Name)." -Manual @(
             'Download the builder by hand from https://github.com/ntdevlabs/tiny11builder/releases/latest,',
-            'mount the official Windows ISO, and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> as admin.'
+            $script:MakerHintAdmin
         )
         return $false
     }
@@ -939,13 +943,13 @@ function Invoke-Tiny11Build {
         if (-not (Invoke-FileDownload -Url $script:Tiny11MakerUrl -OutFile $makerPath)) {
             Write-Failure -Name 'Tiny11 builder' -Detail "tiny11maker.ps1 download failed." -Manual @(
                 "Save $($script:Tiny11MakerUrl) into $makerPath by hand,",
-                'mount the official Windows ISO, and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> as admin.'
+                $script:MakerHintAdmin
             )
             return $false
         }
     }
-    $installersDir = Join-Path (Join-Path $Root $script:DirIsos) '03-Installers'
-    $tiny11Dir = Join-Path $installersDir 'tiny11'
+    $installersDir = Join-Path (Join-Path $Root $script:DirIsos) $script:DirInstallers
+    $tiny11Dir = Join-Path $installersDir $script:DirTiny11
     Ensure-Directory -Path $tiny11Dir
     $finalIso = Join-Path $tiny11Dir $script:FileTiny11Iso
     if (Test-Path -LiteralPath $finalIso) {
@@ -1027,20 +1031,20 @@ try {
     Remove-Item 'function:Read-Host' -ErrorAction SilentlyContinue
     Dismount-DiskImage -ImagePath '$escapedIso' -ErrorAction SilentlyContinue
 }
-Move-Item -LiteralPath (Join-Path (Split-Path -LiteralPath '$escapedMaker') $script:FileTiny11Iso) -Destination '$escapedFinal' -Force
+Move-Item -LiteralPath (Join-Path (Split-Path -LiteralPath '$escapedMaker') 'tiny11.iso') -Destination '$escapedFinal' -Force
 "@
     try {
         Invoke-Elevated ([scriptblock]::Create($buildText))
     } catch {
         $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
         Write-Failure -Name 'Tiny11 ISO' -Detail "Elevated build failed: $detail" -Manual @(
-            "Mount $($official[0].Name) and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell,"
+            ($script:MakerHintElevated -f $official[0].Name)
         )
         return $false
     }
     if (-not (Test-Path -LiteralPath $finalIso)) {
         Write-Failure -Name 'Tiny11 ISO' -Detail 'Build finished without producing tiny11.iso.' -Manual @(
-            "Mount $($official[0].Name) and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell,"
+            ($script:MakerHintElevated -f $official[0].Name)
         )
         return $false
     }
@@ -1155,7 +1159,7 @@ function Invoke-PreparePcRecovery {
         }
         if (-not $SkipTiny11) {
             Write-Step 'Tiny11 build'
-            Invoke-SafeStep -Name 'Tiny11 ISO' -Manual @('Mount the official ISO and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell.') -Body {
+            Invoke-SafeStep -Name 'Tiny11 ISO' -Manual @(($script:MakerHintElevated -f 'the official ISO')) -Body {
                 Invoke-Tiny11Build -Root $Root -Elevate:$Elevate -CleanDownloads:$CleanDownloads | Out-Null
             }
         } else {
