@@ -292,6 +292,7 @@ Describe 'Install-AiTools npm packages' {
         function Install-QwenSettings {}
         function Install-KimiSettings {}
         function Install-GrokSettings {}
+        function Install-HerdrApp {}
         function Add-UserPathEntry { param([string]$Path) }
         function Test-IsAdministrator { return $false }
         function Enable-LongPathSupport { param([switch]$NoElevate) return $true }
@@ -989,6 +990,7 @@ Describe 'Install-AiTools -REA switch' {
         function Install-KimiSettings {}
         function Install-GrokSettings {}
         function Install-ReaToolchain {}
+        function Install-HerdrApp {}
         function Add-UserPathEntry { param([string]$Path) }
         function Test-IsAdministrator { return $false }
         function Enable-LongPathSupport { param([switch]$NoElevate) return $true }
