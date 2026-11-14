@@ -118,14 +118,23 @@ TINY11 BUILD
 '@
 }
 
-# Per-folder contents of isos\. {0} is replaced with one line per
-# downloaded-or-selected ISO: "<folder>\ <file>  <size note> -- <check>".
+# Per-folder contents of isos\. {0} is replaced with one block per ISO:
+# project blurb, release, size, the SHA-256 known at write time, and how
+# to re-verify. Hashes recorded here are a cheap local integrity check:
+# compare with Get-FileHash before trusting a file, and re-check against
+# the upstream source (the Re-verify line) when freshness matters.
 function Get-IsosReadmeTemplate {
     @'
 RECOVERY ISO SET
 ================
 Grouped for a Ventoy USB: copy these files onto the Ventoy drive and boot.
-Re-verify any file later with the Check note next to it.
+Each entry below names the file, what it is, and the SHA-256 recorded when
+this file was written. To verify a file cheaply, hash it locally:
+
+  powershell -NoProfile -Command "Get-FileHash <file> -Algorithm SHA256"
+
+and compare with the SHA-256 below. To confirm it is still current,
+follow the Re-verify note for that entry.
 
 {0}
 
@@ -504,20 +513,67 @@ function Save-VerifiedFile {
 
 function Get-RecoveryCatalog {
     @(
-        [pscustomobject]@{ Name = 'netboot.xyz'; Category = '01-Network'; FileName = 'netboot.xyz.iso'; Url = 'https://boot.netboot.xyz/ipxe/netboot.xyz.iso'; AlternateUrl = ''; Hash = ''; HashKind = 'Rolling'; ChecksumUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; NetbootVariant = 'x64'; MintHwe = ''; SizeNote = 'Small network-boot ISO.'; Updated = 'Rolling release.'; Check = 'Re-download netboot.xyz-sha256-checksums.txt and match the ISO filename.' },
-        [pscustomobject]@{ Name = 'netboot.xyz multi-arch'; Category = '01-Network'; FileName = 'netboot.xyz-multiarch.iso'; Url = 'https://boot.netboot.xyz/ipxe/netboot.xyz-multiarch.iso'; AlternateUrl = ''; Hash = ''; HashKind = 'Rolling'; ChecksumUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; NetbootVariant = 'multi'; MintHwe = ''; SizeNote = 'Combined x86_64 + ARM64 network-boot ISO.'; Updated = 'Rolling release.'; Check = 'Re-download netboot.xyz-sha256-checksums.txt and match the ISO filename.' },
-        [pscustomobject]@{ Name = "Hiren's BootCD PE x64"; Category = '02-Rescue'; FileName = 'HBCD_PE_x64.iso'; Url = 'https://www.hirensbootcd.org/files/HBCD_PE_x64.iso'; AlternateUrl = ''; Hash = '8c4c670c9c84d6c4b5a9c32e0aa5a55d8c23de851d259207d54679ea774c2498'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; SizeNote = 'About 3.06 GB.'; Updated = 'Unversioned URL.'; Check = 'Unversioned URL; re-pin hash only after official announcement.' },
-        [pscustomobject]@{ Name = 'SystemRescue'; Category = '02-Rescue'; FileName = 'systemrescue-13.03-amd64.iso'; Url = 'https://sourceforge.net/projects/systemrescuecd/files/sysresccd-x86/13.03/systemrescue-13.03-amd64.iso/download'; AlternateUrl = ''; Hash = 'b71b98ba6b92145524cb1a72206b9888a59861ad6fb05d127faf618ca0136891'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; SizeNote = 'Version 13.03.'; Updated = '2026-11.'; Check = 'SourceForge Files page for sysresccd-x86 13.03 plus its .sha256 sidecar.' },
-        [pscustomobject]@{ Name = 'Clonezilla'; Category = '02-Rescue'; FileName = 'clonezilla-live-3.3.3-37-amd64.iso'; Url = 'https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-37/clonezilla-live-3.3.3-37-amd64.iso/download'; AlternateUrl = ''; Hash = '3079458d926a37d3533e5d5caeb61b6e49c2dc69e2c97e0332ef37986bb3414f'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; SizeNote = 'Version 3.3.3-37.'; Updated = '2026-11.'; Check = 'SourceForge Files page for clonezilla_live_stable 3.3.3-37 plus its published SHA-256.' },
-        [pscustomobject]@{ Name = 'Ubuntu Server'; Category = '03-Installers'; FileName = 'ubuntu-26.04.1-live-server-amd64.iso'; Url = 'https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso'; AlternateUrl = ''; Hash = 'cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; SizeNote = 'About 2.7 GB.'; Updated = '26.04.1.'; Check = 'releases.ubuntu.com SHA256SUMS for 26.04.1.' },
-        [pscustomobject]@{ Name = 'Rocky Linux minimal'; Category = '03-Installers'; FileName = 'Rocky-8.10-x86_64-minimal.iso'; Url = 'https://download.rockylinux.org/pub/rocky/8/isos/x86_64/Rocky-8.10-x86_64-minimal.iso'; AlternateUrl = ''; Hash = '231d21db029e900b305d8e23ff7a61d06bb4e873cb170bd4a85f4e6dd896748f'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; SizeNote = 'About 3.14 GB.'; Updated = '8.10.'; Check = 'Rocky-8.10-x86_64-minimal.iso.CHECKSUM in the same directory.' },
-        [pscustomobject]@{ Name = 'Debian netinst'; Category = '03-Installers'; FileName = 'debian-13.7.0-amd64-netinst.iso'; Url = 'https://cdimage.debian.org/debian-cd/13.7.0/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; AlternateUrl = 'https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; Hash = 'a7ef94ac2fb9a7fec454552abd629b7cc9d5155c886165a45649f5ce6167e355'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; SizeNote = 'About 400 MB.'; Updated = '13.7.0.'; Check = 'Debian cdimage SHA256SUMS for 13.7.0 (upstream-verified 2026-11-14); versioned path first, /current/ fallback.' },
-        [pscustomobject]@{ Name = 'Linux Mint Xfce'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit.iso'; Url = 'https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-xfce-64bit.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/stable/22.3/linuxmint-22.3-xfce-64bit.iso'; Hash = '45a835b5dddaf40e84d776549e0b19b3fbd49673b6cc6434ebddbfcd217df776'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; SizeNote = 'About 3.0 GB.'; Updated = '22.3.'; Check = 'mirrors.kernel.org/linuxmint stable/22.3 sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
-        [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 6.17'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; Hash = '8c8eb200642bca2f34b7f22e812e4ac3d97483b06b188355cdff8ff98f03f550'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '6.17'; SizeNote = 'HWE kernel 6.17; fetch only with -MintHwe 6.17.'; Updated = '22.3.'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
-        [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 7.0'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Hash = '17475774172776978f24677a847a62d7595c5bee34cb1f96ee3d26eedeca33c8'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '7.0'; SizeNote = 'HWE kernel 7.0; fetch only with -MintHwe 7.0.'; Updated = '22.3.'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
-        [pscustomobject]@{ Name = 'antiX full'; Category = '03-Installers'; FileName = 'antiX-26.1_x64-full.iso'; Url = 'https://sourceforge.net/projects/antix-linux/files/Final/antiX-26.1/antiX-26.1_x64-full.iso/download'; AlternateUrl = ''; Hash = '293381af0b7c48399abe015da8f67d41fd34372b73c4aafcf53747fbaed22371'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; SizeNote = 'About 2.5 GB.'; Updated = '26.1.'; Check = 'SourceForge Final/antiX-26.1 file list plus the .sha256 sidecar.' },
-        [pscustomobject]@{ Name = 'Fedora Workstation Live'; Category = '03-Installers'; FileName = 'Fedora-Workstation-Live-45-1.4.x86_64.iso'; Url = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso'; AlternateUrl = ''; Hash = '68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; SizeNote = 'About 2.72 GB.'; Updated = '45-1.4.'; Check = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM in the same directory.' }
+        [pscustomobject]@{ Name = 'netboot.xyz'; Category = '01-Network'; FileName = 'netboot.xyz.iso'; Url = 'https://boot.netboot.xyz/ipxe/netboot.xyz.iso'; AlternateUrl = ''; Hash = ''; HashKind = 'Rolling'; ChecksumUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; NetbootVariant = 'x64'; MintHwe = ''; About = 'Network-boot menu that loads installer and utility images over the internet (needs a working network connection).'; Released = 'Rolling release (re-resolved every run).'; SizeNote = 'Small network-boot ISO.'; Check = 'Re-download netboot.xyz-sha256-checksums.txt and match the ISO filename.' },
+        [pscustomobject]@{ Name = 'netboot.xyz multi-arch'; Category = '01-Network'; FileName = 'netboot.xyz-multiarch.iso'; Url = 'https://boot.netboot.xyz/ipxe/netboot.xyz-multiarch.iso'; AlternateUrl = ''; Hash = ''; HashKind = 'Rolling'; ChecksumUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; NetbootVariant = 'multi'; MintHwe = ''; About = 'netboot.xyz combined image for x86_64 and ARM64 machines.'; Released = 'Rolling release (re-resolved every run).'; SizeNote = 'Combined x86_64 + ARM64 network-boot ISO.'; Check = 'Re-download netboot.xyz-sha256-checksums.txt and match the ISO filename.' },
+        [pscustomobject]@{ Name = "Hiren's BootCD PE x64"; Category = '02-Rescue'; FileName = 'HBCD_PE_x64.iso'; Url = 'https://www.hirensbootcd.org/files/HBCD_PE_x64.iso'; AlternateUrl = ''; Hash = '8c4c670c9c84d6c4b5a9c32e0aa5a55d8c23de851d259207d54679ea774c2498'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Windows PE rescue environment with disk, partition, recovery, and antivirus tools.'; Released = 'Unversioned build (URL carries no version).'; SizeNote = 'About 3.06 GB.'; Check = 'Unversioned URL; re-pin hash only after official announcement.' },
+        [pscustomobject]@{ Name = 'SystemRescue'; Category = '02-Rescue'; FileName = 'systemrescue-13.03-amd64.iso'; Url = 'https://sourceforge.net/projects/systemrescuecd/files/sysresccd-x86/13.03/systemrescue-13.03-amd64.iso/download'; AlternateUrl = ''; Hash = 'b71b98ba6b92145524cb1a72206b9888a59861ad6fb05d127faf618ca0136891'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Arch-based Linux rescue toolkit (disk tools, filesystem repair, network utilities).'; Released = 'Version 13.03, November 2026.'; SizeNote = 'Version 13.03.'; Check = 'SourceForge Files page for sysresccd-x86 13.03 plus its .sha256 sidecar.' },
+        [pscustomobject]@{ Name = 'Clonezilla'; Category = '02-Rescue'; FileName = 'clonezilla-live-3.3.3-37-amd64.iso'; Url = 'https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-37/clonezilla-live-3.3.3-37-amd64.iso/download'; AlternateUrl = ''; Hash = '3079458d926a37d3533e5d5caeb61b6e49c2dc69e2c97e0332ef37986bb3414f'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Disk imaging and cloning (device-to-device and device-to-image). UEFI and Secure Boot capable amd64 build.'; Released = 'Version 3.3.3-37, November 2026.'; SizeNote = 'Version 3.3.3-37.'; Check = 'SourceForge Files page for clonezilla_live_stable 3.3.3-37 (pin rests on the draft: folder publishes no sidecar).' },
+        [pscustomobject]@{ Name = 'Ubuntu Server'; Category = '03-Installers'; FileName = 'ubuntu-26.04.1-live-server-amd64.iso'; Url = 'https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso'; AlternateUrl = ''; Hash = 'cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Ubuntu Server installer (minimal CLI base; add ubuntu-desktop afterwards for a desktop).'; Released = 'Version 26.04.1.'; SizeNote = 'About 2.7 GB.'; Check = 'releases.ubuntu.com SHA256SUMS for 26.04.1.' },
+        [pscustomobject]@{ Name = 'Rocky Linux minimal'; Category = '03-Installers'; FileName = 'Rocky-8.10-x86_64-minimal.iso'; Url = 'https://download.rockylinux.org/pub/rocky/8/isos/x86_64/Rocky-8.10-x86_64-minimal.iso'; AlternateUrl = ''; Hash = '231d21db029e900b305d8e23ff7a61d06bb4e873cb170bd4a85f4e6dd896748f'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Minimal offline installer for a small RHEL-compatible server/CLI base (supported to May 2029).'; Released = 'Version 8.10.'; SizeNote = 'About 3.14 GB.'; Check = 'Rocky-8.10-x86_64-minimal.iso.CHECKSUM in the same directory.' },
+        [pscustomobject]@{ Name = 'Debian netinst'; Category = '03-Installers'; FileName = 'debian-13.7.0-amd64-netinst.iso'; Url = 'https://cdimage.debian.org/debian-cd/13.7.0/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; AlternateUrl = 'https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; Hash = 'a7ef94ac2fb9a7fec454552abd629b7cc9d5155c886165a45649f5ce6167e355'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Small Debian network installer (Debian 13 includes non-free firmware for Wi-Fi/BT/GPU).'; Released = 'Version 13.7.0.'; SizeNote = 'About 400 MB.'; Check = 'Debian cdimage SHA256SUMS for 13.7.0 (upstream-verified 2026-11-14); versioned path first, /current/ fallback.' },
+        [pscustomobject]@{ Name = 'Linux Mint Xfce'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit.iso'; Url = 'https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-xfce-64bit.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/stable/22.3/linuxmint-22.3-xfce-64bit.iso'; Hash = '45a835b5dddaf40e84d776549e0b19b3fbd49673b6cc6434ebddbfcd217df776'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Live/installer ISO with the Xfce desktop (based on Ubuntu 24.04 LTS, kernel 6.14).'; Released = 'Version 22.3.'; SizeNote = 'About 3.0 GB.'; Check = 'mirrors.kernel.org/linuxmint stable/22.3 sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
+        [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 6.17'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; Hash = '8c8eb200642bca2f34b7f22e812e4ac3d97483b06b188355cdff8ff98f03f550'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '6.17'; About = 'Mint Xfce with the newer HWE 6.17 kernel for hardware the regular ISO does not support.'; Released = 'Version 22.3 (HWE 6.17).'; SizeNote = 'HWE kernel 6.17; fetch only with -MintHwe 6.17.'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
+        [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 7.0'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Hash = '17475774172776978f24677a847a62d7595c5bee34cb1f96ee3d26eedeca33c8'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '7.0'; About = 'Mint Xfce with the newer HWE 7.0 kernel for hardware the regular ISO does not support.'; Released = 'Version 22.3 (HWE 7.0).'; SizeNote = 'HWE kernel 7.0; fetch only with -MintHwe 7.0.'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
+        [pscustomobject]@{ Name = 'antiX full'; Category = '03-Installers'; FileName = 'antiX-26.1_x64-full.iso'; Url = 'https://sourceforge.net/projects/antix-linux/files/Final/antiX-26.1/antiX-26.1_x64-full.iso/download'; AlternateUrl = ''; Hash = '293381af0b7c48399abe015da8f67d41fd34372b73c4aafcf53747fbaed22371'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Debian 13-based, systemd-free live/installer with a desktop; suits modern and older PCs alike.'; Released = 'Version 26.1.'; SizeNote = 'About 2.5 GB.'; Check = 'SourceForge Final/antiX-26.1 file list plus the .sha256 sidecar.' },
+        [pscustomobject]@{ Name = 'Fedora Workstation Live'; Category = '03-Installers'; FileName = 'Fedora-Workstation-Live-45-1.4.x86_64.iso'; Url = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso'; AlternateUrl = ''; Hash = '68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Live desktop installer with GNOME.'; Released = 'Version 45-1.4.'; SizeNote = 'About 2.72 GB.'; Check = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM in the same directory.' }
     )
+}
+
+# Builds one readme block for a catalog row. When the file is present on disk,
+# the actual SHA-256 and byte size are recorded so the file verifies itself
+# without a network round-trip; otherwise the known size note is shown.
+# Never throws: hashing failures degrade to the size note only.
+function Format-IsoReadmeEntry($Row, [string]$Root) {
+    $lines = @()
+    $lines += "== $($Row.Name) ($($Row.Category)\$($Row.FileName)) =="
+    $lines += $Row.About
+    $lines += "Release: $($Row.Released)  Size: $($Row.SizeNote)"
+    $path = Join-Path (Join-Path (Join-Path $Root 'isos') $Row.Category) $Row.FileName
+    if (Test-Path -LiteralPath $path) {
+        try {
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            $bytes = (Get-Item -LiteralPath $path).Length
+            $lines += "SHA-256 (on disk at write time): $hash"
+            $lines += "Bytes on disk: $bytes"
+        } catch {
+            $lines += 'On-disk hash unavailable; see size note above.'
+        }
+    } else {
+        $lines += 'Not present in this tree (download did not complete or was not selected).'
+    }
+    if ($Row.Hash) {
+        $lines += "Expected SHA-256 (catalog, $($Row.HashKind)): $($Row.Hash.ToLowerInvariant())"
+    }
+    $lines += "Re-verify: $($Row.Check)"
+    return ($lines -join "`r`n")
+}
+# Builds one readme block for a hand-placed or locally built ISO: hashes the
+# actual file so the reader gets a cheap integrity check even though no
+# catalog hash exists. Never throws; hashing failures degrade gracefully.
+function Format-ManualIsoReadmeEntry([string]$Title, [string]$Path, [string]$Folder, [string]$Note) {
+    $lines = @()
+    $leaf = Split-Path -Leaf $Path
+    $lines += "== $Title ($Folder\$leaf) =="
+    $lines += $Note
+    try {
+        $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $bytes = (Get-Item -LiteralPath $Path).Length
+        $lines += "SHA-256 (on disk at write time): $hash"
+        $lines += "Bytes on disk: $bytes"
+    } catch {
+        $lines += 'On-disk hash unavailable; file may have moved since the write.'
+    }
+    return ($lines -join "`r`n")
 }
 
 # Downloads one catalog row into its category folder. Selects Rolling hashes
@@ -1018,29 +1074,28 @@ function Invoke-PreparePcRecovery {
         } else {
             Write-Detail 'Tiny11 build skipped by -SkipTiny11.'
         }
-        # Refresh the isos readme from the selected rows so the tree documents
-        # what this run aimed to fetch, including sizes and re-verify notes.
-        # Then append what is actually present for the two non-catalog entries
-        # (official Windows ISO, Tiny11 build output) so the file describes
-        # the real tree, not just the plan.
-        $isoLines = Get-RecoveryCatalog | Where-Object {
+        # Refresh the isos readme: one block per selected catalog row (with
+        # the on-disk hash when present), then the two non-catalog entries
+        # (official Windows ISO, Tiny11 output) hashed the same way, so the
+        # file is a self-contained verification sheet for the real tree.
+        $isoBlocks = Get-RecoveryCatalog | Where-Object {
             (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
             (($_.MintHwe -eq '') -or ($_.MintHwe -eq $MintHwe))
-        } | ForEach-Object { '{0}\ {1}  {2} -- {3}' -f $_.Category, $_.FileName, $_.SizeNote, $_.Check }
+        } | ForEach-Object { Format-IsoReadmeEntry -Row $_ -Root $Root }
         $installersDir = Join-Path (Join-Path $Root 'isos') '03-Installers'
         $winIso = Find-WindowsIso -InstallersDir $installersDir | Select-Object -First 1
         if ($winIso) {
-            $isoLines += '03-Installers\ {0}  Official Windows 11 ISO (kept as downloaded; Microsoft links expire, no hash pinned).' -f $winIso.Name
+            $isoBlocks += (Format-ManualIsoReadmeEntry -Title 'Official Windows 11 ISO' -Path $winIso.FullName -Folder '03-Installers' -Note 'Kept as downloaded; Microsoft links expire, so no hash is pinned in the catalog.')
         } else {
-            $isoLines += '03-Installers\ (Windows 11 ISO not present yet -- resolve via Fido or place Win11_*.iso / en-us_windows_11_*.iso by hand.)'
+            $isoBlocks += '== Official Windows 11 ISO (not present) ==' + "`r`n" + 'Resolve via Fido or place Win11_*.iso / en-us_windows_11_*.iso by hand.'
         }
         $tinyIso = Join-Path (Join-Path $installersDir 'tiny11') 'tiny11.iso'
         if (Test-Path -LiteralPath $tinyIso) {
-            $isoLines += '03-Installers\tiny11\tiny11.iso  Built by tiny11builder from the official ISO above.'
+            $isoBlocks += (Format-ManualIsoReadmeEntry -Title 'Tiny11 ISO (built locally)' -Path $tinyIso -Folder '03-Installers\tiny11' -Note 'Built by tiny11builder from the official ISO above. Rebuild rather than re-verify against upstream.')
         } else {
-            $isoLines += '03-Installers\tiny11\ (empty -- build with -Elevate once the official ISO is present.)'
+            $isoBlocks += '== Tiny11 ISO (not present) ==' + "`r`n" + 'Build with -Elevate once the official ISO is present.'
         }
-        Write-ReadmeFile -Path (Join-Path (Join-Path $Root 'isos') 'README.txt') -Text ((Get-IsosReadmeTemplate) -f ($isoLines -join "`r`n"))
+        Write-ReadmeFile -Path (Join-Path (Join-Path $Root 'isos') 'README.txt') -Text ((Get-IsosReadmeTemplate) -f ($isoBlocks -join "`r`n`r`n"))
         return (Write-Summary)
     } finally {
         [Console]::OutputEncoding = $savedEncoding

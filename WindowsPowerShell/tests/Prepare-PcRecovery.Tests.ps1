@@ -325,7 +325,9 @@ Describe 'Prepare-PcRecovery.ps1' {
         It 'writes the root and isos readmes from the top-of-script blocks' {
             Reset-State
             $root = Join-Path $TestDrive 'readme'
-            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = 'https://example.invalid/b.zip.sha256' } }
+            $hbcdDir = Join-Path (Join-Path $root 'isos') '02-Rescue'
+            New-Item -ItemType Directory -Path $hbcdDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $hbcdDir 'HBCD_PE_x64.iso') -Value 'bytes' -NoNewline
             Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
             Mock Install-Ventoy { return $true }
             Mock Save-RufusTools { return $true }
@@ -338,10 +340,38 @@ Describe 'Prepare-PcRecovery.ps1' {
             $rootText | Should -Match 'en-US'
             $isosText = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'isos') 'README.txt'))
             $isosText | Should -Match 'HBCD_PE_x64.iso'
+            $isosText | Should -Match 'Windows PE rescue environment'
             $isosText | Should -Match 'Unversioned URL'
-            $isosText | Should -Match 'Windows 11 ISO not present yet'
-            $isosText | Should -Match 'tiny11\\\s+\(empty'
+            $isosText | Should -Match 'SHA-256 \(on disk at write time\)'
+            $isosText | Should -Match 'Official Windows 11 ISO \(not present\)'
+            $isosText | Should -Match 'Tiny11 ISO \(not present\)'
         }
+
+        It 'formats a readme block with the on-disk hash when present' {
+            Reset-State
+            $root = Join-Path $TestDrive 'fmt'
+            $dir = Join-Path (Join-Path $root 'isos') '02-Rescue'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $file = Join-Path $dir 'HBCD_PE_x64.iso'
+            Set-Content -LiteralPath $file -Value 'bytes' -NoNewline
+            $sha = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            $row = Get-RecoveryCatalog | Where-Object { $_.FileName -eq 'HBCD_PE_x64.iso' } | Select-Object -First 1
+            $block = Format-IsoReadmeEntry -Row $row -Root $root
+            $block | Should -Match 'Windows PE rescue environment'
+            $block | Should -Match $sha
+            $block | Should -Match '8c4c670c9c84d6c4b5a9c32e0aa5a55d8c23de851d259207d54679ea774c2498'
+        }
+
+        It 'hashes a hand-placed ISO with no catalog hash' {
+            Reset-State
+            $file = Join-Path $TestDrive 'manual.iso'
+            Set-Content -LiteralPath $file -Value 'manual-bytes' -NoNewline
+            $sha = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            $block = Format-ManualIsoReadmeEntry -Title 'Official Windows 11 ISO' -Path $file -Folder '03-Installers' -Note 'Kept as downloaded.'
+            $block | Should -Match $sha
+            $block | Should -Match 'Bytes on disk'
+        }
+
         It 'keeps the Tiny11 builder under tools' {
             Reset-State
             $root = Join-Path $TestDrive 'tpath'
