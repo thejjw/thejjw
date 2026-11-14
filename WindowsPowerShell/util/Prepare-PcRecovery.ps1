@@ -46,19 +46,23 @@
     Last Updated: November 14, 2026
 
     Catalog: per-ISO About / Released / SizeNote / Hash / Check rows in
-    Get-RecoveryCatalog. Update Hash + Released + SizeNote together on
-    a re-pin; Rolling rows need no edits. Take dates from checksum
-    Last-Modified, SourceForge file dates, or the project page.
+    Get-RecoveryCatalog. Re-pin Pinned rows only (Hash + Released +
+    SizeNote together); Rolling rows resolve live, Manual rows are
+    handled by dedicated functions. Dates come from checksum headers,
+    SourceForge file dates, or the project page -- never guess.
     HWE Mint rows share the kernel.org tree; one AlternateUrl pattern
-    covers all three. Manual rows use functions, never raw URLs.
-    Sentinel may reject Fido per IP (transient; retried 3x with pauses,
-    then place Win11_*.iso or en-us_windows_11_*.iso by hand).
-    kernel.org stalls large ISOs on some networks (Princeton fallback).
+    covers all three (kernel.org stalls large ISOs: Princeton fallback).
+    Sentinel may refuse Fido per IP: "Sentinel marked this request as
+    rejected" is transient (retried 3x), then place the ISO by hand.
+    Elevation: sudo.exe inline mode raises a UAC consent dialog and waits;
+    unattended -Elevate runs need elevate-without-prompting
+    (ConsentPromptBehaviorAdmin 0) or they hang there with no output.
     Partials: keep on transport failure (curl 18/28/33/52/55/56), delete
     only on server reject (22/36), so -C - resumes.
-    Tiny11: 95 MB WinUI zip is hash context only; the build is maker
-    (28 KB) + oscdimg (140 KB) + answer file (2 KB), staged per run.
-    Child uses 'Continue', shadowed Read-Host, unloaded HKLM\z* hives.
+    Tiny11: scripted build is maker (28 KB) + oscdimg (140 KB) + answer
+    file (2 KB), staged per run; the 95 MB WinUI zip is hash context
+    only and never runs. Child uses 'Continue', shadowed Read-Host,
+    unloaded HKLM\z* hives.
     Suite: Invoke-Pester .\tests\Prepare-PcRecovery.Tests.ps1 (offline).
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
