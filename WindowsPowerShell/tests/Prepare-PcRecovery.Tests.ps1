@@ -33,7 +33,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         # Resets recorded failures/results between tests.
-        function Reset-State { $script:Failures = @(); $script:Results = @(); $script:UseSudo = $false }
+        function Reset-State { $script:Failures = @(); $script:Results = @(); $script:UseSudo = $false; $script:VerifiedHashes = @{}; $script:Sidecars = @{} }
     }
 
     Context 'shared constants' {
@@ -371,6 +371,20 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match 'SHA-256 \(verified this run\)'
             $isosText | Should -Match 'Official Windows 11 ISO \(not present\)'
             $isosText | Should -Match 'Tiny11 ISO \(not present\)'
+        }
+
+        It 'fetches the checksum sidecar next to the ISO and lists it' {
+            Reset-State
+            $root = Join-Path $TestDrive 'sidecar'
+            $dir = Join-Path (Join-Path $root 'isos') '03-Installers'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $row = [pscustomobject]@{ Name = 'T-row'; Category = '03-Installers'; FileName = 'T.iso'; Url = 'https://example.invalid/T.iso'; AlternateUrl = ''; Hash = ('ab' * 32); HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'T'; Released = 'T'; SizeNote = 'T'; Check = 'T'; SidecarUrl = 'https://example.invalid/T.sha256'; SidecarName = 'T.iso.sha256' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'bytes' -NoNewline; return $true }
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'hashline' -NoNewline; return $true }
+            Save-CatalogRow -Row $row -Root $root | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $dir 'T.iso.sha256') | Should -BeTrue
+            $block = Format-IsoReadmeEntry -Row $row -Root $root
+            $block | Should -Match 'Checksum file \(shipped alongside\): T\.iso\.sha256'
         }
 
         It 'formats a readme block with the on-disk hash when present' {
