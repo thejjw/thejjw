@@ -17764,6 +17764,154 @@ function Remove-AppLockerBlock {
     }
 }
 
+function Invoke-SystemUpdate {
+    <#
+.SYNOPSIS
+    Upgrades WinGet packages, then scans or installs Windows Updates (alias isu).
+.DESCRIPTION
+    Requests elevation before updates start and runs both stages in one elevated
+    worker. If inline Windows Sudo is not enabled, asks permission to run
+    Enable-WindowsSudo first. Setup and worker elevation may each request UAC.
+    WinGet accepts agreements and requests silent, noninteractive operation.
+    Installer behavior can vary. Reports stage timestamps and total wall time,
+    including consent and elevation. Completion means both stages were attempted;
+    consult their diagnostics for individual update failures. Never reboots.
+.PARAMETER InstallWindowsUpdates
+    Downloads and installs Windows Updates instead of only scanning.
+.PARAMETER UserScope
+    Restricts WinGet to user-scope packages and suppresses installer elevation.
+    Requires a non-elevated session; cannot combine with InstallWindowsUpdates.
+.EXAMPLE
+    isu
+.EXAMPLE
+    isu -InstallWindowsUpdates
+.EXAMPLE
+    isu -UserScope
+#>
+    [CmdletBinding()]
+    param(
+        [switch]$InstallWindowsUpdates,
+        [switch]$UserScope
+    )
+
+    if ($UserScope -and $InstallWindowsUpdates) {
+        throw 'Cannot combine -UserScope and -InstallWindowsUpdates.'
+    }
+    $isAdmin = Test-IsAdministrator
+    if ($UserScope -and $isAdmin) {
+        throw 'Cannot use -UserScope in an elevated PowerShell session. Run from a standard, non-elevated session.'
+    }
+
+    $originalTitle = $null
+    try { $originalTitle = $Host.UI.RawUI.WindowTitle } catch {}
+    $runClock = [Diagnostics.Stopwatch]::StartNew()
+    $startedUtc = [datetime]::UtcNow
+    $runCompleted = $false
+
+    # Match aiu's cumulative hours, including runs longer than 24 hours.
+    function Format-SystemUpdateElapsed {
+        param([timespan]$Elapsed)
+        return ('{0:00}:{1:mm\:ss}' -f [math]::Floor($Elapsed.TotalHours), $Elapsed)
+    }
+
+    Write-Host "Invoke-SystemUpdate started at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')." -ForegroundColor Cyan
+    try {
+        # This block is self-contained: the elevated child only needs the existing
+        # Windows Update helpers, not an installed copy of Invoke-SystemUpdate.
+        $worker = {
+            $updateCommand = if ($installUpdates) { 'Invoke-WindowsUpdate' } else { 'Invoke-WindowsUpdateScan' }
+            if (-not (Get-Command $updateCommand -CommandType Function -ErrorAction SilentlyContinue)) {
+                throw "Missing $updateCommand. Load the updated Windows PowerShell profile and rerun isu."
+            }
+
+            # The UTC start time crosses the process boundary and includes UAC wait.
+            function Write-SystemUpdateStage {
+                param([string]$Title)
+                $elapsed = [datetime]::UtcNow - $updateStartedUtc
+                $formatted = '{0:00}:{1:mm\:ss}' -f [math]::Floor($elapsed.TotalHours), $elapsed
+                Write-Host ('[{0} | +{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $formatted, $Title) -ForegroundColor DarkCyan
+            }
+
+            Write-SystemUpdateStage 'WinGet upgrades'
+            $wingetCommand = Get-Command winget -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $wingetCommand) {
+                Write-Warning 'WinGet is not available; continuing to Windows Update.'
+            }
+            else {
+                $arguments = @('upgrade', '--all', '--silent', '--disable-interactivity',
+                    '--accept-package-agreements', '--accept-source-agreements', '--authentication-mode', 'silent')
+                if ($userOnly) { $arguments += @('--scope', 'user') }
+                $previousCompat = $env:__COMPAT_LAYER
+                try {
+                    if ($userOnly) { $env:__COMPAT_LAYER = 'RunAsInvoker' }
+                    $process = Start-Process -FilePath $wingetCommand.Source -ArgumentList $arguments -NoNewWindow -Wait -PassThru -ErrorAction Stop
+                    # WinGet uses this HRESULT when there are no applicable upgrades.
+                    if ($process.ExitCode -notin 0, -1978335189) {
+                        Write-Warning "WinGet upgrade returned exit code $($process.ExitCode); continuing to Windows Update."
+                    }
+                }
+                catch {
+                    Write-Warning "WinGet upgrade failed: $($_.Exception.Message); continuing to Windows Update."
+                }
+                finally {
+                    if ($null -eq $previousCompat) {
+                        Remove-Item Env:\__COMPAT_LAYER -ErrorAction SilentlyContinue
+                    }
+                    else { $env:__COMPAT_LAYER = $previousCompat }
+                }
+            }
+
+            Write-SystemUpdateStage $(if ($installUpdates) { 'Windows Update installation' } else { 'Windows Update scan' })
+            & $updateCommand
+        }
+
+        # Embed only typed values; live caller variables are not inherited by sudo.
+        $workerText = '$installUpdates = ${0}; $userOnly = ${1}; $updateStartedUtc = [datetime]::new({2}, [DateTimeKind]::Utc)' -f
+            $InstallWindowsUpdates.IsPresent, $UserScope.IsPresent, $startedUtc.Ticks
+        $worker = [scriptblock]::Create($workerText + [Environment]::NewLine + $worker.ToString())
+
+        if (-not $UserScope -and -not $isAdmin) {
+            $sudoPath = Join-Path $env:SystemRoot 'System32\sudo.exe'
+            $windowsVersion = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue
+            if ([int]$windowsVersion.CurrentBuildNumber -lt 26100 -or -not (Test-Path -LiteralPath $sudoPath -PathType Leaf)) {
+                throw 'Windows Sudo requires Windows 11 24H2 or later. Use isu -UserScope or run isu from an elevated session.'
+            }
+            $configPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo'
+            $sudoConfig = Get-ItemProperty -LiteralPath $configPath -ErrorAction SilentlyContinue
+            if (-not $sudoConfig -or $sudoConfig.Enabled -ne 3) {
+                $answer = Read-Host 'Enable inline Windows Sudo with Enable-WindowsSudo? This changes the sudo configuration. [y/N]'
+                if ($answer -notmatch '^(?i:y|yes)$') {
+                    Write-Warning 'Run Enable-WindowsSudo and rerun this command, or use isu -UserScope.'
+                    return
+                }
+                $enabled = Enable-WindowsSudo -ErrorAction Stop
+                $sudoConfig = Get-ItemProperty -LiteralPath $configPath -ErrorAction SilentlyContinue
+                if (-not $enabled -or -not $sudoConfig -or $sudoConfig.Enabled -ne 3) {
+                    throw 'Windows Sudo setup did not complete. Run Enable-WindowsSudo and rerun this command, or use isu -UserScope.'
+                }
+            }
+            # One early UAC approval covers both stages, including Windows Update installation.
+            $global:LASTEXITCODE = 0
+            Invoke-Elevated $worker -ErrorAction Stop
+            if ($LASTEXITCODE -ne 0) { throw "Elevated update worker exited with code $LASTEXITCODE. Rerun this command after resolving the error." }
+        }
+        else {
+            & $worker
+        }
+        $runCompleted = $true
+    }
+    finally {
+        $runClock.Stop()
+        try {
+            if ($originalTitle) { $Host.UI.RawUI.WindowTitle = $originalTitle }
+        } catch {}
+        $outcome = if ($runCompleted) { 'completed' } else { 'stopped early' }
+        Write-Host ('Invoke-SystemUpdate {0} at {1}; wall time {2}.' -f $outcome, (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), (Format-SystemUpdateElapsed $runClock.Elapsed)) -ForegroundColor Cyan
+    }
+}
+
+Set-Alias -Name isu -Value Invoke-SystemUpdate
+
 function Invoke-WindowsUpdateScan {
     <#
 .SYNOPSIS
