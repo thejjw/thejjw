@@ -7821,11 +7821,12 @@ OUTPUT FORMAT: a single JSON array of strings with ONLY the IDs that are NOT tex
 function Set-OmpJudgeLocalLemonade {
     <#
 .SYNOPSIS
-    Configures oh-my-pi (omp) to use LiquidAI LFM3-1.7B via Lemonade as judge model.
+    Configures oh-my-pi (omp) to use LiquidAI LFM3-1.7B via Lemonade as judge/tiny model, with memory inheriting tiny.
 .DESCRIPTION
     Probes for the local util\Set-OmpJudgeLocalLemonade.ps1 script under the profile directory
     or downloads it from the repository if missing (or when -UpdateScript is supplied).
-    Executes the script in an isolated PowerShell process.
+    Executes the script in an isolated PowerShell process. The previous judge/tiny models are
+    preserved as local fallbacks.
 .PARAMETER Checkpoint
     Hugging Face checkpoint (repo:variant) registered when no LFM3 model exists yet.
 .PARAMETER ModelName

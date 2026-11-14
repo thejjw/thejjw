@@ -116,6 +116,62 @@ Describe 'Set-OmpJudgeLocalLemonade.ps1 helpers' {
             (Read-ModelsYaml $flow).Mode | Should -Be 'flow'
         }
     }
+    Context 'role assignment' {
+        It 'inherits the previous tiny role for memory while LFM3 takes over both selectors' {
+            $script:saved = @{}
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
+                            modelRoles             = @{ value = @{ judge = 'local/lfm2-1.2b'; tiny = 'local/lfm2-1.2b' } }
+                            'retry.fallbackChains' = @{ value = @{ judge = @('local/lfm2-1.2b') } }
+                        } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
+            Set-OmpModelRoles 'lemonade/user.LFM3-1.7B'
+            $script:saved['modelRoles']['judge'] | Should -Be 'lemonade/user.LFM3-1.7B'
+            $script:saved['modelRoles']['tiny'] | Should -Be 'lemonade/user.LFM3-1.7B'
+            $script:saved['modelRoles'].Contains('memory') | Should -BeFalse
+            @($script:saved['retry.fallbackChains']['tiny']) | Should -Be @('local/lfm2-1.2b')
+            @($script:saved['retry.fallbackChains']['memory']) | Should -Be @('local/lfm2-1.2b')
+        }
+
+        It 'writes explicit empty tiny and memory chains without a previous tiny role' {
+            $script:saved = @{}
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{ modelRoles = @{ value = @{ judge = 'local/lfm2-1.2b' } } } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
+            Set-OmpModelRoles 'lemonade/user.LFM3-1.7B'
+            @($script:saved['retry.fallbackChains']['judge']) | Should -Be @('local/lfm2-1.2b')
+            @($script:saved['retry.fallbackChains']['tiny']) | Should -Be @()
+            @($script:saved['retry.fallbackChains']['memory']) | Should -Be @()
+        }
+
+        It 'leaves the target role configuration untouched without writing settings' {
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
+                            modelRoles             = @{ value = @{ judge = 'lemonade/user.LFM3-1.7B'; tiny = 'lemonade/user.LFM3-1.7B' } }
+                            'retry.fallbackChains' = @{ value = @{ judge = @('local/lfm2-1.2b'); tiny = @('local/lfm2-1.2b'); memory = @('local/lfm2-1.2b') } }
+                        } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { }
+            Set-OmpModelRoles 'lemonade/user.LFM3-1.7B'
+            Should -Invoke Set-OmpRecordSetting -Times 0
+        }
+
+        It 'preserves an explicit memory selection and its existing chain' {
+            $script:saved = @{}
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
+                            modelRoles             = @{ value = @{ tiny = 'local/lfm2-1.2b'; memory = 'other/memory' } }
+                            'retry.fallbackChains' = @{ value = @{ memory = @('other/fallback') } }
+                        } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
+            Set-OmpModelRoles 'lemonade/user.LFM3-1.7B'
+            $script:saved['modelRoles']['memory'] | Should -Be 'other/memory'
+            @($script:saved['retry.fallbackChains']['memory']) | Should -Be @('other/fallback')
+        }
+    }
     Context 'setup stops before mutations on a collision' {
         It 'reports conflict, runs no mutating helper, and leaves models.yml untouched' {
             $script:agentDir = Join-Path $TestDrive 'agent'
@@ -161,7 +217,7 @@ Describe 'Set-OmpJudgeLocalLemonade.ps1 helpers' {
             # Every helper past the preflight must stay unused: zero calls is the assertion.
             Mock Get-BackendTargetVersion { throw 'MUTATION: backend resolution' }
             Mock Write-ModelsYaml { throw 'MUTATION: models.yml write' }
-            Mock Set-OmpJudge { throw 'MUTATION: omp settings write' }
+            Mock Set-OmpModelRoles { throw 'MUTATION: omp settings write' }
             Mock Backup-File { throw 'MUTATION: backup' }
             Mock Invoke-TestPrompt { throw 'MUTATION: test prompt' }
 
@@ -169,7 +225,7 @@ Describe 'Set-OmpJudgeLocalLemonade.ps1 helpers' {
 
             Should -Invoke Get-BackendTargetVersion -Times 0
             Should -Invoke Write-ModelsYaml -Times 0
-            Should -Invoke Set-OmpJudge -Times 0
+            Should -Invoke Set-OmpModelRoles -Times 0
             Should -Invoke Backup-File -Times 0
             Should -Invoke Invoke-TestPrompt -Times 0
             [IO.File]::ReadAllBytes($modelsPath) | Should -Be $before
