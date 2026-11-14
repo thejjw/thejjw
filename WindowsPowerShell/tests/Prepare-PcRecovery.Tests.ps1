@@ -10,13 +10,20 @@ Describe 'Prepare-PcRecovery.ps1' {
         foreach ($function in $functions) { . ([scriptblock]::Create($function.Extent.Text)) }
 
         # Script-level state the helpers read; every path points into TestDrive.
+        # Evaluate the script's own shared-name constant assignments (not stubs):
+        # a mangled constant (e.g. self-assignment to $null) surfaces here.
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso)' }, $true)
+        if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
+        foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
         $script:FidoUrl = 'https://example.invalid/Fido.ps1'
         $script:Tiny11MakerUrl = 'https://example.invalid/tiny11maker.ps1'
         $script:Tiny11AnswerUrl = 'https://example.invalid/autounattend.xml'
-        $script:Failures = @()
-        $script:Results = @()
-        $script:UseSudo = $false
+        $script:OscdimgUrl = 'https://example.invalid/oscdimg.exe'
+        $script:MsDownloadPage = 'https://example.invalid/windows11'
+        $script:ThirdPartyTip = 'TIP: example'
+        $script:WinIsoNaming = 'Win11_*.iso'
+        $script:VerifiedHashes = @{}
         # Lists only the catalog rows selected for the given switches (no downloads).
         function Select-CatalogFiles([string]$NetbootArch, [string]$MintHwe) {
             @(Get-RecoveryCatalog | Where-Object {
@@ -27,6 +34,25 @@ Describe 'Prepare-PcRecovery.ps1' {
 
         # Resets recorded failures/results between tests.
         function Reset-State { $script:Failures = @(); $script:Results = @(); $script:UseSudo = $false }
+    }
+
+    Context 'shared constants' {
+        It 'defines every shared name with a real value (no self-assignment)' {
+            $expected = @{
+                DirTools = 'tools'; DirVentoy = 'ventoy'; DirIsos = 'isos'
+                DirInstallers = '03-Installers'; DirTiny11 = 'tiny11'; DirBuilder = 'tiny11builder'
+                FileVentoyExe = 'Ventoy2Disk.exe'; FileFido = 'Fido.ps1'; FileTiny11Iso = 'tiny11.iso'
+                FileMaker = 'tiny11maker.ps1'; FileAnswer = 'autounattend.xml'; FileOscdimg = 'oscdimg.exe'
+                FileFacts = 'filefacts.json'; FileReadme = 'README.txt'
+            }
+            foreach ($name in $expected.Keys) {
+                $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
+                $actual | Should -Be $expected[$name]
+            }
+            $script:MsDownloadPage | Should -Match '^https://'
+            $script:ThirdPartyTip | Should -Not -BeNullOrEmpty
+            $script:WinIsoNaming | Should -Match 'Win11_'
+        }
     }
 
     Context 'catalog integrity' {
@@ -281,7 +307,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $root = Join-Path $TestDrive 'nofido'
             { Get-WindowsIsoViaFido -Root $root } | Should -Not -Throw
             $script:Failures | Should -HaveCount 1
-            $script:Failures[0].Manual | Should -Match 'microsoft.com'
+            $script:Failures[0].Manual | Should -Match 'example\.invalid/windows11'
         }
 
         It 'routes a failed Fido run to Write-Failure instead of throwing' {

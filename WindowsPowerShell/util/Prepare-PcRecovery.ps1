@@ -28,7 +28,7 @@
     x86_64 + ARM64 image.
 .PARAMETER MintHwe
     Extra Linux Mint HWE image to fetch: None, 6.17, or 7.0. The regular
-    Mint image is always fetched.
+    Mint image (without HWE version) is fetched by default.
 .PARAMETER CleanDownloads
     Delete tool ZIPs after extraction instead of keeping them for offline
     reuse.
@@ -87,6 +87,28 @@ $script:FidoUrl = 'https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps
 $script:Tiny11MakerUrl = 'https://raw.githubusercontent.com/ntdevlabs/tiny11builder/winui-preview/tiny11maker.ps1'
 $script:Tiny11AnswerUrl = 'https://raw.githubusercontent.com/ntdevlabs/tiny11builder/winui-preview/autounattend.xml'
 $script:OscdimgUrl = 'https://msdl.microsoft.com/download/symbols/oscdimg.exe/3D44737265000/oscdimg.exe'
+# Shared names: one edit point when Microsoft renames files or the tree layout
+# changes. Folder names are bare (no slashes); file names are exact leaves.
+$script:DirTools = 'tools'
+$script:DirVentoy = 'ventoy'
+$script:DirIsos = 'isos'
+$script:DirInstallers = '03-Installers'
+$script:DirTiny11 = 'tiny11'
+$script:DirBuilder = 'tiny11builder'
+$script:FileVentoyExe = 'Ventoy2Disk.exe'
+$script:FileFido = 'Fido.ps1'
+$script:FileRufusPatternNote = 'rufus-.*p\.exe'
+$script:FileTiny11Iso = 'tiny11.iso'
+$script:FileMaker = 'tiny11maker.ps1'
+$script:FileAnswer = 'autounattend.xml'
+$script:FileOscdimg = 'oscdimg.exe'
+$script:FileFacts = 'filefacts.json'
+$script:FileReadme = 'README.txt'
+# User-facing pointers: the official download page, the third-party fallback,
+# and the accepted Windows ISO naming, shared by readmes and failure text.
+$script:MsDownloadPage = 'https://www.microsoft.com/en-US/software-download/Windows11'
+$script:ThirdPartyTip = 'TIP: visit https://massgrave.dev/ for third party downloads'
+$script:WinIsoNaming = 'Win11_*.iso or en-us_windows_11_*.iso'
 $script:Failures = @()
 $script:Results = @()
 $script:UseSudo = $false
@@ -129,9 +151,11 @@ WINDOWS 11 ISO
   https://www.microsoft.com/en-US/software-download/Windows11 by hand and
   place the file (Win11_*.iso or en-us_windows_11_*.iso) into
   isos\03-Installers\.
+  TIP: visit https://massgrave.dev/ for third party download
 
 TINY11 BUILD
   Produces isos\03-Installers\tiny11\tiny11.iso from the official ISO.
+  (iso filename is always tiny11.iso. the base image comes from Windows iso in ..\)
   Needs -Elevate (inline sudo pre-enabled) or an elevated shell.
   See tools\tiny11builder\ for the builder files used.
 "@
@@ -563,7 +587,7 @@ function Format-IsoReadmeEntry($Row, [string]$Root) {
     $lines += "== $($Row.Name) ($($Row.Category)\$($Row.FileName)) =="
     $lines += $Row.About
     $lines += "Release: $($Row.Released)  Size: $($Row.SizeNote)"
-    $path = Join-Path (Join-Path (Join-Path $Root 'isos') $Row.Category) $Row.FileName
+    $path = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) $Row.Category) $Row.FileName
     if ($script:VerifiedHashes.ContainsKey($path)) {
         $lines += "SHA-256 (verified this run): $($script:VerifiedHashes[$path])"
     } elseif ($Row.Hash) {
@@ -583,7 +607,7 @@ function Format-IsoReadmeEntry($Row, [string]$Root) {
 function Get-ManualIsoFact([string]$Path, [string]$Root) {
     $item = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
     if (-not $item) { return $null }
-    $factsPath = Join-Path (Join-Path $Root 'tools') 'filefacts.json'
+    $factsPath = Join-Path (Join-Path $Root $script:DirTools) $script:FileFacts
     $facts = @{}
     if (Test-Path -LiteralPath $factsPath) {
         try {
@@ -634,7 +658,7 @@ function Format-ManualIsoReadmeEntry([string]$Title, [string]$Path, [string]$Fol
 function Save-CatalogRow {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param($Row, [string]$Root)
-    $dir = Join-Path (Join-Path $Root 'isos') $Row.Category
+    $dir = Join-Path (Join-Path $Root $script:DirIsos) $Row.Category
     Ensure-Directory -Path $dir
     $outFile = Join-Path $dir $Row.FileName
     $expected = $Row.Hash
@@ -709,7 +733,7 @@ function Install-Ventoy {
         return $false
     }
     Write-Detail "Ventoy hash for $($release.Name): $expected"
-    $exe = Join-Path $ventoyDir 'Ventoy2Disk.exe'
+    $exe = Join-Path $ventoyDir $script:FileVentoyExe
     if ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath (Join-Path $ventoyDir $release.Name)) -and (Test-LocalFileHash -Path (Join-Path $ventoyDir $release.Name) -ExpectedHash $expected)) {
         Write-Ok 'Skipped (present): Ventoy2Disk.exe'
         $script:Results += [pscustomobject]@{ Name = 'Ventoy'; Status = 'Skipped'; Detail = 'present, zip hash matches' }
@@ -726,7 +750,7 @@ function Install-Ventoy {
         Expand-Archive -LiteralPath $zipPath -DestinationPath $stageDir -Force
         try {
             $wrapper = @(Get-ChildItem -LiteralPath $stageDir -Directory) | Select-Object -First 1
-            $inner = if ($wrapper -and (Test-Path -LiteralPath (Join-Path $wrapper.FullName 'Ventoy2Disk.exe'))) { $wrapper.FullName } else { $stageDir }
+            $inner = if ($wrapper -and (Test-Path -LiteralPath (Join-Path $wrapper.FullName $script:FileVentoyExe))) { $wrapper.FullName } else { $stageDir }
             Get-ChildItem -LiteralPath $inner -Force | ForEach-Object {
                 $target = Join-Path $ventoyDir $_.Name
                 if (($_.PSIsContainer) -and (Test-Path -LiteralPath $target)) {
@@ -749,7 +773,7 @@ function Install-Ventoy {
         }
     }
     if (-not $WhatIfPreference) {
-        $exe = Join-Path $ventoyDir 'Ventoy2Disk.exe'
+        $exe = Join-Path $ventoyDir $script:FileVentoyExe
         if (-not (Test-Path -LiteralPath $exe)) {
             Write-Failure -Name 'Ventoy' -Detail 'Ventoy2Disk.exe missing after extraction.' -Manual @(
                 "Extract $zipPath into $ventoyDir by hand."
@@ -778,17 +802,17 @@ function Save-RufusTools {
         Write-Warning 'Rufus publishes no hash; the exe is kept as downloaded.'
         if (-not (Save-VerifiedFile -Url $release.ZipUrl -OutFile (Join-Path $toolsDir $release.Name) -Name 'Rufus portable')) { $ok = $false }
     }
-    $fidoPath = Join-Path $toolsDir 'Fido.ps1'
+    $fidoPath = Join-Path $toolsDir $script:FileFido
     if (Test-Path -LiteralPath $fidoPath) {
         Write-Ok 'Skipped (present): Fido.ps1'
-        $script:Results += [pscustomobject]@{ Name = 'Fido.ps1'; Status = 'Skipped'; Detail = 'present, no hash to check' }
+        $script:Results += [pscustomobject]@{ Name = $script:FileFido; Status = 'Skipped'; Detail = 'present, no hash to check' }
     } else {
         if ($PSCmdlet.ShouldProcess($fidoPath, "Download $($script:FidoUrl)")) {
             if (Invoke-FileDownload -Url $script:FidoUrl -OutFile $fidoPath) {
                 Write-Ok 'Downloaded: Fido.ps1'
-                $script:Results += [pscustomobject]@{ Name = 'Fido.ps1'; Status = 'Downloaded'; Detail = 'unverified upstream script' }
+                $script:Results += [pscustomobject]@{ Name = $script:FileFido; Status = 'Downloaded'; Detail = 'unverified upstream script' }
             } else {
-                Write-Failure -Name 'Fido.ps1' -Detail "Download failed: $($script:FidoUrl)" -Manual @(
+                Write-Failure -Name $script:FileFido -Detail "Download failed: $($script:FidoUrl)" -Manual @(
                     "Save $($script:FidoUrl) into $fidoPath by hand."
                 )
                 $ok = $false
@@ -811,7 +835,7 @@ function Find-WindowsIso([string]$InstallersDir) {
 function Get-WindowsIsoViaFido {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root)
-    $installersDir = Join-Path (Join-Path $Root 'isos') '03-Installers'
+    $installersDir = Join-Path (Join-Path $Root $script:DirIsos) '03-Installers'
     Ensure-Directory -Path $installersDir
     $existing = Find-WindowsIso -InstallersDir $installersDir
     if ($existing.Count -gt 0) {
@@ -819,11 +843,12 @@ function Get-WindowsIsoViaFido {
         $script:Results += [pscustomobject]@{ Name = 'Windows 11 ISO'; Status = 'Skipped'; Detail = $existing[0].Name }
         return $true
     }
-    $fidoPath = Join-Path (Join-Path $Root 'tools') 'Fido.ps1'
+    $fidoPath = Join-Path (Join-Path $Root $script:DirTools) $script:FileFido
     if (-not (Test-Path -LiteralPath $fidoPath)) {
         Write-Failure -Name 'Windows 11 ISO' -Detail 'Fido.ps1 is missing; cannot resolve the Microsoft URL.' -Manual @(
-            'Open https://www.microsoft.com/en-US/software-download/Windows11 and download the ISO by hand,',
-            "then place the Windows ISO (Win11_*.iso or en-us_windows_11_*.iso) into $installersDir."
+            'Open ' + $script:MsDownloadPage + ' and download the ISO by hand,',
+            "then place the Windows ISO (" + $script:WinIsoNaming + ") into $installersDir.",
+			$script:ThirdPartyTip
         )
         return $false
     }
@@ -847,8 +872,9 @@ function Get-WindowsIsoViaFido {
     if (-not $url) {
         $detail = if ($lastOutput) { "Fido printed no URL. Last output: $lastOutput" } else { 'Fido printed no URL.' }
         Write-Failure -Name 'Windows 11 ISO' -Detail "Fido resolution failed: $detail" -Manual @(
-            'Open https://www.microsoft.com/en-US/software-download/Windows11 and download the ISO by hand,',
-            "then place the Windows ISO (Win11_*.iso or en-us_windows_11_*.iso) into $installersDir."
+            'Open ' + $script:MsDownloadPage + ' and download the ISO by hand,',
+            "then place the Windows ISO (" + $script:WinIsoNaming + ") into $installersDir.",
+			$script:ThirdPartyTip
         )
         return $false
     }
@@ -867,7 +893,7 @@ function Get-WindowsIsoViaFido {
 function Invoke-Tiny11Build {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [switch]$Elevate, [switch]$CleanDownloads)
-    $builderDir = Join-Path (Join-Path $Root 'tools') 'tiny11builder'
+    $builderDir = Join-Path (Join-Path $Root $script:DirTools) $script:DirBuilder
     Ensure-Directory -Path $builderDir
     $release = Get-GitHubLatestAsset -Repo 'ntdevlabs/tiny11builder' -AssetPattern '^Tiny11Builder-.*-win-x64\.zip$' -HashSuffix '.sha256'
     if (-not $release) { return $false }
@@ -906,7 +932,7 @@ function Invoke-Tiny11Build {
     }
     # The release zip ships the WinUI app; the scripted build uses the legacy
     # maker script from the same repo branch (no published hash for it).
-    $makerPath = Join-Path $builderDir 'tiny11maker.ps1'
+    $makerPath = Join-Path $builderDir $script:FileMaker
     if (-not (Test-Path -LiteralPath $makerPath)) {
         if (-not $PSCmdlet.ShouldProcess($makerPath, "Download $($script:Tiny11MakerUrl)")) { return $true }
         Write-Warning 'tiny11maker.ps1 has no published hash; review it before the elevated build runs.'
@@ -918,10 +944,10 @@ function Invoke-Tiny11Build {
             return $false
         }
     }
-    $installersDir = Join-Path (Join-Path $Root 'isos') '03-Installers'
+    $installersDir = Join-Path (Join-Path $Root $script:DirIsos) '03-Installers'
     $tiny11Dir = Join-Path $installersDir 'tiny11'
     Ensure-Directory -Path $tiny11Dir
-    $finalIso = Join-Path $tiny11Dir 'tiny11.iso'
+    $finalIso = Join-Path $tiny11Dir $script:FileTiny11Iso
     if (Test-Path -LiteralPath $finalIso) {
         Write-Ok 'Skipped (present): tiny11.iso'
         $script:Results += [pscustomobject]@{ Name = 'Tiny11 ISO'; Status = 'Skipped'; Detail = 'present' }
@@ -930,7 +956,7 @@ function Invoke-Tiny11Build {
     $official = Find-WindowsIso -InstallersDir $installersDir
     if ($official.Count -eq 0) {
         Write-Failure -Name 'Tiny11 ISO' -Detail 'No official Windows ISO to build from.' -Manual @(
-            'Place the official Windows ISO (Win11_*.iso or en-us_windows_11_*.iso) into 03-Installers first (Fido step above), then re-run.'
+            'Place the official Windows ISO (' + $script:WinIsoNaming + ') into 03-Installers first (Fido step above), then re-run.'
         )
         return $false
     }
@@ -944,7 +970,7 @@ function Invoke-Tiny11Build {
     if (-not $PSCmdlet.ShouldProcess($finalIso, 'Mount official ISO and run tiny11maker.ps1 elevated')) { return $true }
     # Pre-stage autounattend.xml next to the maker: the script fetches it from a
     # deleted 'main' branch (404) when absent, and deletes it when it finishes.
-    $answerPath = Join-Path $builderDir 'autounattend.xml'
+    $answerPath = Join-Path $builderDir $script:FileAnswer
     if (-not (Test-Path -LiteralPath $answerPath)) {
         if (-not (Invoke-FileDownload -Url $script:Tiny11AnswerUrl -OutFile $answerPath)) {
             Write-Failure -Name 'Tiny11 ISO' -Detail 'autounattend.xml download failed.' -Manual @(
@@ -957,7 +983,7 @@ function Invoke-Tiny11Build {
     # Invoke-WebRequest (no timeout) when neither the ADK nor the local copy
     # exists, which can stall the elevated child forever. The maker deletes
     # it when it finishes, so re-stage it on every run.
-    $oscdimgPath = Join-Path $builderDir 'oscdimg.exe'
+    $oscdimgPath = Join-Path $builderDir $script:FileOscdimg
     $adkOscdimg = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\x64\Oscdimg\oscdimg.exe'
     if (-not (Test-Path -LiteralPath $adkOscdimg) -and -not (Test-Path -LiteralPath $oscdimgPath)) {
         if (-not (Invoke-FileDownload -Url $script:OscdimgUrl -OutFile $oscdimgPath)) {
@@ -1001,7 +1027,7 @@ try {
     Remove-Item 'function:Read-Host' -ErrorAction SilentlyContinue
     Dismount-DiskImage -ImagePath '$escapedIso' -ErrorAction SilentlyContinue
 }
-Move-Item -LiteralPath (Join-Path (Split-Path -LiteralPath '$escapedMaker') 'tiny11.iso') -Destination '$escapedFinal' -Force
+Move-Item -LiteralPath (Join-Path (Split-Path -LiteralPath '$escapedMaker') $script:FileTiny11Iso) -Destination '$escapedFinal' -Force
 "@
     try {
         Invoke-Elevated ([scriptblock]::Create($buildText))
@@ -1106,13 +1132,13 @@ function Invoke-PreparePcRecovery {
         $script:VerifiedHashes = @{}
         Initialize-ElevationState -Elevate:$Elevate
         Ensure-Directory -Path $Root
-        Ensure-Directory -Path (Join-Path $Root 'tools')
-        Ensure-Directory -Path (Join-Path $Root 'ventoy')
-        Ensure-Directory -Path (Join-Path (Join-Path $Root 'isos') '01-Network')
-        Ensure-Directory -Path (Join-Path (Join-Path $Root 'isos') '02-Rescue')
-        Ensure-Directory -Path (Join-Path (Join-Path $Root 'isos') '03-Installers')
-        Ensure-Directory -Path (Join-Path (Join-Path $Root 'isos') '04-etc')
-        Write-ReadmeFile -Path (Join-Path $Root 'README.txt') -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
+        Ensure-Directory -Path (Join-Path $Root $script:DirTools)
+        Ensure-Directory -Path (Join-Path $Root $script:DirVentoy)
+        Ensure-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '01-Network')
+        Ensure-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '02-Rescue')
+        Ensure-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '03-Installers')
+        Ensure-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc')
+        Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null
@@ -1124,7 +1150,7 @@ function Invoke-PreparePcRecovery {
         Write-Step 'Catalog ISOs (netboot first)'
         Save-CatalogIsos -Root $Root -NetbootArch $NetbootArch -MintHwe $MintHwe
         Write-Step 'Windows 11 ISO via Fido'
-        Invoke-SafeStep -Name 'Windows 11 ISO' -Manual @('Open https://www.microsoft.com/en-US/software-download/Windows11 and place the Windows ISO (Win11_*.iso or en-us_windows_11_*.iso) into isos\03-Installers\.') -Body {
+        Invoke-SafeStep -Name 'Windows 11 ISO' -Manual @('Open ' + $script:MsDownloadPage + ' and place the Windows ISO (' + $script:WinIsoNaming + ') into isos\03-Installers\.') -Body {
             Get-WindowsIsoViaFido -Root $Root | Out-Null
         }
         if (-not $SkipTiny11) {
@@ -1143,21 +1169,21 @@ function Invoke-PreparePcRecovery {
             (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
             (($_.MintHwe -eq '') -or ($_.MintHwe -eq $MintHwe))
         } | ForEach-Object { Format-IsoReadmeEntry -Row $_ -Root $Root }
-        $installersDir = Join-Path (Join-Path $Root 'isos') '03-Installers'
+        $installersDir = Join-Path (Join-Path $Root $script:DirIsos) '03-Installers'
         $winIso = Find-WindowsIso -InstallersDir $installersDir | Select-Object -First 1
         if ($winIso) {
             $isoBlocks += (Format-ManualIsoReadmeEntry -Title 'Official Windows 11 ISO' -Path $winIso.FullName -Folder '03-Installers' -Note 'Kept as downloaded; Microsoft links expire, so no hash is pinned in the catalog.' -Root $Root)
         } else {
             $isoBlocks += '== Official Windows 11 ISO (not present) ==' + "`r`n" + 'Resolve via Fido or place Win11_*.iso / en-us_windows_11_*.iso by hand.'
         }
-        $tinyIso = Join-Path (Join-Path $installersDir 'tiny11') 'tiny11.iso'
+        $tinyIso = Join-Path (Join-Path $installersDir 'tiny11') $script:FileTiny11Iso
         if (Test-Path -LiteralPath $tinyIso) {
             $tinyNote = 'Built by tiny11builder (legacy tiny11maker.ps1 script) from the official ISO above. Removes bundled apps (Clipchamp, News, Weather, Xbox, Teams, Copilot hooks), Edge/WebView2 binaries, OneDrive setup, and sponsored tasks; keeps Windows Update, Defender, WinRE, the Store, and shared runtimes. Practical limits: some removals need a reinstall of that app from the Store or Winget (Edge: reinstall from microsoft.com if a web-dependent installer needs it); hardware-check bypasses are baked in, so in-place upgrades on unsupported PCs stay possible but are untested; no product key is injected -- activate with your own license. Full parity IS recoverable through Windows Update afterwards for anything still serviced, but removed provisioned apps do not come back on their own -- reinstall them explicitly. Always test-boot the ISO (VM or spare stick) before relying on it.'
             $isoBlocks += (Format-ManualIsoReadmeEntry -Title 'Tiny11 ISO (built locally)' -Path $tinyIso -Folder '03-Installers\tiny11' -Note $tinyNote -Root $Root)
         } else {
             $isoBlocks += '== Tiny11 ISO (not present) ==' + "`r`n" + 'Build with -Elevate once the official ISO is present.'
         }
-        Write-ReadmeFile -Path (Join-Path (Join-Path $Root 'isos') 'README.txt') -Text ((Get-IsosReadmeTemplate -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC')) -f ($isoBlocks -join "`r`n`r`n"))
+        Write-ReadmeFile -Path (Join-Path (Join-Path $Root $script:DirIsos) $script:FileReadme) -Text ((Get-IsosReadmeTemplate -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC')) -f ($isoBlocks -join "`r`n`r`n"))
         return (Write-Summary)
     } finally {
         [Console]::OutputEncoding = $savedEncoding
