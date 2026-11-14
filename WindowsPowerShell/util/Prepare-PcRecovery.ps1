@@ -515,9 +515,9 @@ function Get-RecoveryCatalog {
     @(
         [pscustomobject]@{ Name = 'netboot.xyz'; Category = '01-Network'; FileName = 'netboot.xyz.iso'; Url = 'https://boot.netboot.xyz/ipxe/netboot.xyz.iso'; AlternateUrl = ''; Hash = ''; HashKind = 'Rolling'; ChecksumUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; NetbootVariant = 'x64'; MintHwe = ''; About = 'Network-boot menu that loads installer and utility images over the internet (needs a working network connection).'; Released = 'Rolling release (re-resolved every run).'; SizeNote = 'Small network-boot ISO.'; Check = 'Re-download netboot.xyz-sha256-checksums.txt and match the ISO filename.' },
         [pscustomobject]@{ Name = 'netboot.xyz multi-arch'; Category = '01-Network'; FileName = 'netboot.xyz-multiarch.iso'; Url = 'https://boot.netboot.xyz/ipxe/netboot.xyz-multiarch.iso'; AlternateUrl = ''; Hash = ''; HashKind = 'Rolling'; ChecksumUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; NetbootVariant = 'multi'; MintHwe = ''; About = 'netboot.xyz combined image for x86_64 and ARM64 machines.'; Released = 'Rolling release (re-resolved every run).'; SizeNote = 'Combined x86_64 + ARM64 network-boot ISO.'; Check = 'Re-download netboot.xyz-sha256-checksums.txt and match the ISO filename.' },
-        [pscustomobject]@{ Name = "Hiren's BootCD PE x64"; Category = '02-Rescue'; FileName = 'HBCD_PE_x64.iso'; Url = 'https://www.hirensbootcd.org/files/HBCD_PE_x64.iso'; AlternateUrl = ''; Hash = '8c4c670c9c84d6c4b5a9c32e0aa5a55d8c23de851d259207d54679ea774c2498'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Windows PE rescue environment with disk, partition, recovery, and antivirus tools.'; Released = 'Unversioned build (URL carries no version).'; SizeNote = 'About 3.06 GB.'; Check = 'Unversioned URL; re-pin hash only after official announcement.' },
+        [pscustomobject]@{ Name = "Hiren's BootCD PE x64"; Category = '02-Rescue'; FileName = 'HBCD_PE_x64.iso'; Url = 'https://www.hirensbootcd.org/files/HBCD_PE_x64.iso'; AlternateUrl = ''; Hash = '8c4c670c9c84d6c4b5a9c32e0aa5a55d8c23de851d259207d54679ea774c2498'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Windows PE rescue environment with disk, partition, recovery, and antivirus tools (BootCD PE x64 v1.0.8).'; Released = 'BootCD PE x64 v1.0.8 (2024); the URL itself carries no version, so the hash is pinned to that build.'; SizeNote = 'About 3.06 GB.'; Check = 'Unversioned URL; re-pin hash only after official announcement.' },
         [pscustomobject]@{ Name = 'SystemRescue'; Category = '02-Rescue'; FileName = 'systemrescue-13.03-amd64.iso'; Url = 'https://sourceforge.net/projects/systemrescuecd/files/sysresccd-x86/13.03/systemrescue-13.03-amd64.iso/download'; AlternateUrl = ''; Hash = 'b71b98ba6b92145524cb1a72206b9888a59861ad6fb05d127faf618ca0136891'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Arch-based Linux rescue toolkit (disk tools, filesystem repair, network utilities).'; Released = 'Version 13.03, November 2026.'; SizeNote = 'Version 13.03.'; Check = 'SourceForge Files page for sysresccd-x86 13.03 plus its .sha256 sidecar.' },
-        [pscustomobject]@{ Name = 'Clonezilla'; Category = '02-Rescue'; FileName = 'clonezilla-live-3.3.3-37-amd64.iso'; Url = 'https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-37/clonezilla-live-3.3.3-37-amd64.iso/download'; AlternateUrl = ''; Hash = '3079458d926a37d3533e5d5caeb61b6e49c2dc69e2c97e0332ef37986bb3414f'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Disk imaging and cloning (device-to-device and device-to-image). UEFI and Secure Boot capable amd64 build.'; Released = 'Version 3.3.3-37, November 2026.'; SizeNote = 'Version 3.3.3-37.'; Check = 'SourceForge Files page for clonezilla_live_stable 3.3.3-37 (pin rests on the draft: folder publishes no sidecar).' },
+        [pscustomobject]@{ Name = 'Clonezilla'; Category = '02-Rescue'; FileName = 'clonezilla-live-3.3.3-37-amd64.iso'; Url = 'https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-37/clonezilla-live-3.3.3-37-amd64.iso/download'; AlternateUrl = ''; Hash = '3079458d926a37d3533e5d5caeb61b6e49c2dc69e2c97e0332ef37986bb3414f'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Disk imaging and cloning (device-to-device and device-to-image). UEFI and Secure Boot capable amd64 build.'; Released = 'Version 3.3.3-37, September 2026 (SourceForge file date; pin rests on the draft: the folder publishes no sidecar).'; SizeNote = 'Version 3.3.3-37.'; Check = 'SourceForge Files page for clonezilla_live_stable 3.3.3-37 (pin rests on the draft: the folder publishes no sidecar).' },
         [pscustomobject]@{ Name = 'Ubuntu Server'; Category = '03-Installers'; FileName = 'ubuntu-26.04.1-live-server-amd64.iso'; Url = 'https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso'; AlternateUrl = ''; Hash = 'cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Ubuntu Server installer (minimal CLI base; add ubuntu-desktop afterwards for a desktop).'; Released = 'Version 26.04.1.'; SizeNote = 'About 2.7 GB.'; Check = 'releases.ubuntu.com SHA256SUMS for 26.04.1.' },
         [pscustomobject]@{ Name = 'Rocky Linux minimal'; Category = '03-Installers'; FileName = 'Rocky-8.10-x86_64-minimal.iso'; Url = 'https://download.rockylinux.org/pub/rocky/8/isos/x86_64/Rocky-8.10-x86_64-minimal.iso'; AlternateUrl = ''; Hash = '231d21db029e900b305d8e23ff7a61d06bb4e873cb170bd4a85f4e6dd896748f'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Minimal offline installer for a small RHEL-compatible server/CLI base (supported to May 2029).'; Released = 'Version 8.10.'; SizeNote = 'About 3.14 GB.'; Check = 'Rocky-8.10-x86_64-minimal.iso.CHECKSUM in the same directory.' },
         [pscustomobject]@{ Name = 'Debian netinst'; Category = '03-Installers'; FileName = 'debian-13.7.0-amd64-netinst.iso'; Url = 'https://cdimage.debian.org/debian-cd/13.7.0/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; AlternateUrl = 'https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; Hash = 'a7ef94ac2fb9a7fec454552abd629b7cc9d5155c886165a45649f5ce6167e355'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Small Debian network installer (Debian 13 includes non-free firmware for Wi-Fi/BT/GPU).'; Released = 'Version 13.7.0.'; SizeNote = 'About 400 MB.'; Check = 'Debian cdimage SHA256SUMS for 13.7.0 (upstream-verified 2026-11-14); versioned path first, /current/ fallback.' },
@@ -529,48 +529,80 @@ function Get-RecoveryCatalog {
     )
 }
 
-# Builds one readme block for a catalog row. When the file is present on disk,
-# the actual SHA-256 and byte size are recorded so the file verifies itself
-# without a network round-trip; otherwise the known size note is shown.
-# Never throws: hashing failures degrade to the size note only.
+# Verified hashes recorded during this run, keyed by full path. Pinned rows
+# are verified by the download engine; Rolling rows resolve live. The readme
+# reuses these instead of re-hashing gigabytes on every run.
+$script:VerifiedHashes = @{}
+
+# Builds one readme block for a catalog row. Uses the hash verified during
+# this run when available; otherwise falls back to the catalog hash for
+# Pinned rows. Never throws.
 function Format-IsoReadmeEntry($Row, [string]$Root) {
     $lines = @()
     $lines += "== $($Row.Name) ($($Row.Category)\$($Row.FileName)) =="
     $lines += $Row.About
     $lines += "Release: $($Row.Released)  Size: $($Row.SizeNote)"
     $path = Join-Path (Join-Path (Join-Path $Root 'isos') $Row.Category) $Row.FileName
+    if ($script:VerifiedHashes.ContainsKey($path)) {
+        $lines += "SHA-256 (verified this run): $($script:VerifiedHashes[$path])"
+    } elseif ($Row.Hash) {
+        $lines += "SHA-256 (catalog, $($Row.HashKind)): $($Row.Hash.ToLowerInvariant())"
+    }
     if (Test-Path -LiteralPath $path) {
-        try {
-            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-            $bytes = (Get-Item -LiteralPath $path).Length
-            $lines += "SHA-256 (on disk at write time): $hash"
-            $lines += "Bytes on disk: $bytes"
-        } catch {
-            $lines += 'On-disk hash unavailable; see size note above.'
-        }
+        $lines += "Bytes on disk: $((Get-Item -LiteralPath $path).Length)"
     } else {
         $lines += 'Not present in this tree (download did not complete or was not selected).'
-    }
-    if ($Row.Hash) {
-        $lines += "Expected SHA-256 (catalog, $($Row.HashKind)): $($Row.Hash.ToLowerInvariant())"
     }
     $lines += "Re-verify: $($Row.Check)"
     return ($lines -join "`r`n")
 }
-# Builds one readme block for a hand-placed or locally built ISO: hashes the
-# actual file so the reader gets a cheap integrity check even though no
-# catalog hash exists. Never throws; hashing failures degrade gracefully.
-function Format-ManualIsoReadmeEntry([string]$Title, [string]$Path, [string]$Folder, [string]$Note) {
+# Returns the SHA-256 plus size of a large non-catalog file, reusing a
+# small sidecar (tools\filefacts.json) when size and timestamp are unchanged
+# so re-runs cost seconds instead of re-hashing gigabytes. Never throws.
+function Get-ManualIsoFact([string]$Path, [string]$Root) {
+    $item = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+    if (-not $item) { return $null }
+    $factsPath = Join-Path (Join-Path $Root 'tools') 'filefacts.json'
+    $facts = @{}
+    if (Test-Path -LiteralPath $factsPath) {
+        try {
+            $raw = [IO.File]::ReadAllText($factsPath, [Text.Encoding]::UTF8)
+            foreach ($entry in ((ConvertFrom-Json -InputObject $raw).PSObject.Properties)) {
+                $facts[$entry.Name] = $entry.Value
+            }
+        } catch { $facts = @{} }
+    }
+    $known = $facts[$Path]
+    if ($known -and $known.Bytes -eq $item.Length -and $known.LastWriteUtc -eq $item.LastWriteTimeUtc.Ticks) {
+        return [pscustomobject]@{ Hash = [string]$known.Hash; Bytes = [long]$known.Bytes }
+    }
+    try {
+        $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    } catch {
+        return $null
+    }
+    $facts[$Path] = [pscustomobject]@{ Hash = $hash; Bytes = $item.Length; LastWriteUtc = $item.LastWriteTimeUtc.Ticks }
+    try {
+        $dir = Split-Path -Parent $factsPath
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        [IO.File]::WriteAllText($factsPath, (ConvertTo-Json -InputObject $facts -Depth 4), [Text.UTF8Encoding]::new($false))
+    } catch { }
+    return [pscustomobject]@{ Hash = $hash; Bytes = $item.Length }
+}
+
+# Builds one readme block for a hand-placed or locally built ISO: records the
+# actual file hash (via the sidecar cache) so the reader gets a cheap
+# integrity check even though no catalog hash exists. Never throws.
+function Format-ManualIsoReadmeEntry([string]$Title, [string]$Path, [string]$Folder, [string]$Note, [string]$Root) {
     $lines = @()
     $leaf = Split-Path -Leaf $Path
     $lines += "== $Title ($Folder\$leaf) =="
     $lines += $Note
-    try {
-        $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-        $bytes = (Get-Item -LiteralPath $Path).Length
-        $lines += "SHA-256 (on disk at write time): $hash"
-        $lines += "Bytes on disk: $bytes"
-    } catch {
+    $fact = Get-ManualIsoFact -Path $Path -Root $Root
+    if ($fact) {
+        $lines += "SHA-256 (on disk at write time): $($fact.Hash)"
+        $lines += "Bytes on disk: $($fact.Bytes)"
+    } else {
         $lines += 'On-disk hash unavailable; file may have moved since the write.'
     }
     return ($lines -join "`r`n")
@@ -589,7 +621,14 @@ function Save-CatalogRow {
         $expected = Get-RollingExpectedHash -Name $Row.Name -ChecksumUrl $Row.ChecksumUrl -FileName $Row.FileName -Manual @($Row.Check)
         if (-not $expected) { return $false }
     }
-    return (Save-VerifiedFile -Url $Row.Url -OutFile $outFile -ExpectedHash $expected -AlternateUrl $Row.AlternateUrl -Name $Row.Name)
+    $ok = (Save-VerifiedFile -Url $Row.Url -OutFile $outFile -ExpectedHash $expected -AlternateUrl $Row.AlternateUrl -Name $Row.Name)
+    # Record the hash this file verified against so the readme reuses it
+    # instead of re-hashing gigabytes. Skipped-verified files carry the
+    # same expected hash, so presence implies a match.
+    if ($ok -and $expected -and (Test-Path -LiteralPath $outFile)) {
+        $script:VerifiedHashes[$outFile] = $expected.ToLowerInvariant()
+    }
+    return $ok
 }
 
 # Downloads every selected catalog row, netboot first so network rescue is
@@ -1043,6 +1082,7 @@ function Invoke-PreparePcRecovery {
             return 0
         }
         Write-Section "Preparing recovery files in $Root"
+        $script:VerifiedHashes = @{}
         Initialize-ElevationState -Elevate:$Elevate
         Ensure-Directory -Path $Root
         Ensure-Directory -Path (Join-Path $Root 'tools')
@@ -1085,13 +1125,13 @@ function Invoke-PreparePcRecovery {
         $installersDir = Join-Path (Join-Path $Root 'isos') '03-Installers'
         $winIso = Find-WindowsIso -InstallersDir $installersDir | Select-Object -First 1
         if ($winIso) {
-            $isoBlocks += (Format-ManualIsoReadmeEntry -Title 'Official Windows 11 ISO' -Path $winIso.FullName -Folder '03-Installers' -Note 'Kept as downloaded; Microsoft links expire, so no hash is pinned in the catalog.')
+            $isoBlocks += (Format-ManualIsoReadmeEntry -Title 'Official Windows 11 ISO' -Path $winIso.FullName -Folder '03-Installers' -Note 'Kept as downloaded; Microsoft links expire, so no hash is pinned in the catalog.' -Root $Root)
         } else {
             $isoBlocks += '== Official Windows 11 ISO (not present) ==' + "`r`n" + 'Resolve via Fido or place Win11_*.iso / en-us_windows_11_*.iso by hand.'
         }
         $tinyIso = Join-Path (Join-Path $installersDir 'tiny11') 'tiny11.iso'
         if (Test-Path -LiteralPath $tinyIso) {
-            $isoBlocks += (Format-ManualIsoReadmeEntry -Title 'Tiny11 ISO (built locally)' -Path $tinyIso -Folder '03-Installers\tiny11' -Note 'Built by tiny11builder from the official ISO above. Rebuild rather than re-verify against upstream.')
+            $isoBlocks += (Format-ManualIsoReadmeEntry -Title 'Tiny11 ISO (built locally)' -Path $tinyIso -Folder '03-Installers\tiny11' -Note 'Built by tiny11builder from the official ISO above. Rebuild rather than re-verify against upstream.' -Root $Root)
         } else {
             $isoBlocks += '== Tiny11 ISO (not present) ==' + "`r`n" + 'Build with -Elevate once the official ISO is present.'
         }

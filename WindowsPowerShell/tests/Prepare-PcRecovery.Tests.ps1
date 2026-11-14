@@ -331,7 +331,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
             Mock Install-Ventoy { return $true }
             Mock Save-RufusTools { return $true }
-            Mock Save-CatalogIsos { }
+            Mock Save-CatalogIsos { $script:VerifiedHashes[(Join-Path (Join-Path (Join-Path $root 'isos') '02-Rescue') 'HBCD_PE_x64.iso')] = ('ab' * 32) }
             Mock Get-WindowsIsoViaFido { return $true }
             Mock Invoke-Tiny11Build { return $true }
             Invoke-PreparePcRecovery -Root $root | Out-Null
@@ -342,7 +342,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match 'HBCD_PE_x64.iso'
             $isosText | Should -Match 'Windows PE rescue environment'
             $isosText | Should -Match 'Unversioned URL'
-            $isosText | Should -Match 'SHA-256 \(on disk at write time\)'
+            $isosText | Should -Match 'SHA-256 \(verified this run\)'
             $isosText | Should -Match 'Official Windows 11 ISO \(not present\)'
             $isosText | Should -Match 'Tiny11 ISO \(not present\)'
         }
@@ -356,10 +356,11 @@ Describe 'Prepare-PcRecovery.ps1' {
             Set-Content -LiteralPath $file -Value 'bytes' -NoNewline
             $sha = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
             $row = Get-RecoveryCatalog | Where-Object { $_.FileName -eq 'HBCD_PE_x64.iso' } | Select-Object -First 1
+            $script:VerifiedHashes[$file] = $sha
             $block = Format-IsoReadmeEntry -Row $row -Root $root
             $block | Should -Match 'Windows PE rescue environment'
             $block | Should -Match $sha
-            $block | Should -Match '8c4c670c9c84d6c4b5a9c32e0aa5a55d8c23de851d259207d54679ea774c2498'
+            $block | Should -Match 'Bytes on disk: 5'
         }
 
         It 'hashes a hand-placed ISO with no catalog hash' {
@@ -367,7 +368,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $file = Join-Path $TestDrive 'manual.iso'
             Set-Content -LiteralPath $file -Value 'manual-bytes' -NoNewline
             $sha = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-            $block = Format-ManualIsoReadmeEntry -Title 'Official Windows 11 ISO' -Path $file -Folder '03-Installers' -Note 'Kept as downloaded.'
+            $block = Format-ManualIsoReadmeEntry -Title 'Official Windows 11 ISO' -Path $file -Folder '03-Installers' -Note 'Kept as downloaded.' -Root $TestDrive
             $block | Should -Match $sha
             $block | Should -Match 'Bytes on disk'
         }
