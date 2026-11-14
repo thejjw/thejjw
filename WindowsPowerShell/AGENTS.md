@@ -20,8 +20,8 @@ cmdlet defaults differ from PowerShell 7 and .NET:
 
 - JSON, TOML, YAML, and other files read by strict parsers (serde, Go, jq):
   `[IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))`.
-- Do not use `Set-Content -Encoding UTF8` for those files; it emits a BOM and
-  the parser rejects it.
+- Some consumers reject a BOM; default to BOMless UTF-8 unless the consumer
+  requires otherwise. `Set-Content -Encoding UTF8` emits a BOM on 5.1.
 - Avoid `Out-File` and `>` for data files.
 
 ## Source
@@ -32,9 +32,13 @@ cmdlet defaults differ from PowerShell 7 and .NET:
 
 ## Verify
 
-- No BOM (expected `7B` for JSON):
+- Run encoding checks in `powershell.exe -NoProfile`, using a BOMless UTF-8
+  fixture containing non-ASCII text.
+- No UTF-8 BOM: verify the leading bytes are not `EF BB BF`. `7B` is only
+  an example for a JSON object beginning immediately with `{`; arrays and
+  leading whitespace are valid too.
   `([IO.File]::ReadAllBytes($p)[0..2] | ForEach-Object { $_.ToString('X2') }) -join ' '`
 - Non-ASCII round trip: write a known string, read it back, and compare with
   `-ceq` plus code points. Do not trust console output; it may render `?`.
-- `ConvertTo-Json` on 5.1 escapes non-ASCII as `\uXXXX`; semantic round-trip
-  is fine.
+- JSON may contain literal non-ASCII characters; verify semantic round trips
+  with explicit UTF-8 decoding.
