@@ -7968,13 +7968,14 @@ function Set-OmpJudgeLocalLemonade {
 function Set-OmpJudgeLocalLlamaCpp {
     <#
 .SYNOPSIS
-    Configures oh-my-pi (omp) to use LiquidAI LFM3-1.7B via a self-managed llama.cpp server as judge model.
+    Configures oh-my-pi (omp) to use LiquidAI LFM3-1.7B via a self-managed llama.cpp server as judge/tiny model, with memory inheriting tiny.
 .DESCRIPTION
     Probes for the local util\Set-OmpJudgeLocalLlamaCpp.ps1 script under the profile directory
     or downloads it from the repository if missing (or when -UpdateScript is supplied).
     Executes the script in an isolated PowerShell process. Setup downloads llama.cpp and the
     model into ~\llama-cpp-tiny after printing the machine's resources and asking for
-    confirmation; -Start, -Stop and -Status manage the server afterwards.
+    confirmation, then preserves the previous judge/tiny models as local fallbacks;
+    -Start, -Stop and -Status manage the server afterwards.
 .PARAMETER Checkpoint
     Hugging Face checkpoint (owner/repo:variant) of the GGUF model.
 .PARAMETER ModelId

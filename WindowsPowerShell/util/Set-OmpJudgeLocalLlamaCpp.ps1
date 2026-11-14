@@ -2,8 +2,8 @@
 <#
 .SYNOPSIS
     Configures oh-my-pi (omp) to use a small local GGUF model (default LiquidAI LFM3-1.7B), served by
-    a self-managed llama.cpp `llama-server`, as its `judge` model: the classifier behind the `auto`
-    thinking level. Works on any Windows GPU vendor (Vulkan) or CPU only; no Lemonade/Ollama/Python.
+    a self-managed llama.cpp `llama-server`, as its `judge` and `tiny` models. The `memory` role stays
+    unset to inherit `tiny`. Works on any Windows GPU vendor (Vulkan) or CPU only; no Lemonade/Ollama/Python.
 
 .DESCRIPTION
     Setup (default):
@@ -16,7 +16,9 @@
     4. Downloads and verifies llama.cpp and the model under ~\llama-cpp-tiny, starts llama-server,
        and sends a test prompt. A new build that fails is rolled back to the previous build.
     5. Only after the test passes: adds a managed provider block to omp's models.yml and points
-       modelRoles.judge at it; the previous judge becomes the first judge fallback.
+       modelRoles.judge and modelRoles.tiny at it; memory is left unset to inherit tiny. The previous
+       judge/tiny models become each role's first fallback; memory preserves the previous effective
+       tiny or explicit memory selection. Explicit tiny/memory chains prevent online smol fallback.
 
     -Start / -Stop / -Status manage the server later (the optional logon task runs -Start).
     -Start never checks for updates; re-run setup to update llama.cpp.
@@ -33,7 +35,7 @@
 .PARAMETER ProviderId
     omp provider id for the llama-server endpoint (default llama-cpp-tiny, distinct from omp's
     built-in auto-discovered 'llama.cpp' provider). Changing it replaces the managed block and drops
-    the old id from the judge fallback chain.
+    the old id from the judge/tiny/memory fallback chains.
 
 .PARAMETER Backend
     auto (Vulkan build; GPU when a real Vulkan device exists, else CPU), vulkan (require a GPU) or
@@ -1028,10 +1030,10 @@ function ConvertTo-OrderedMap($Object) {
     $map
 }
 
-# Formats a fallback chain value for the report.
-function Format-Chain($Chains) {
-    if ($null -eq $Chains -or -not $Chains.PSObject.Properties['judge']) { return '(unset: built-in chain)' }
-    $entries = @($Chains.judge)
+# Formats a role's fallback chain value for the report.
+function Format-Chain($Chains, [string]$Role = 'judge') {
+    if ($null -eq $Chains -or -not $Chains.PSObject.Properties[$Role]) { return '(unset: built-in chain)' }
+    $entries = @($Chains.$Role)
     if ($entries.Count -eq 0) { return '[] (no fallback)' }
     $entries -join ', '
 }
@@ -1180,42 +1182,72 @@ function Get-OmpState {
     if ($listing.ExitCode -eq 0) {
         $selectors = @(($listing.StdOut | ConvertFrom-Json).models | ForEach-Object { "$($_.selector) (kind $($_.kind))" })
     }
+    $roles = Get-OmpSetting 'modelRoles'
     [pscustomobject]@{
         Provider  = Get-ProviderStatus $plan.Mode
         Plan      = $plan
         Listed    = $selectors
         ListError = if ($listing.ExitCode -ne 0) { $listing.StdErr } else { $null }
-        Judge     = [string](Get-OmpSetting 'modelRoles').judge
+        Judge     = [string]$roles.judge
+        Tiny      = [string]$roles.tiny
+        Memory    = [string]$roles.memory
         Chains    = Get-OmpSetting 'retry.fallbackChains'
         Thinking  = [string](Get-OmpSetting 'defaultThinkingLevel')
     }
 }
 
-# Points modelRoles.judge at $Selector and keeps the previous judge as the first fallback.
-# Selectors of $DropProvider (a provider id this run renamed away) are removed, not kept as
-# fallbacks, because that provider no longer exists.
+# Points modelRoles.judge and modelRoles.tiny at $Selector. Memory stays unset so it inherits tiny;
+# an existing explicit memory selection is kept. Each role's previous model becomes its first local
+# fallback. Tiny and memory always get explicit chains, even empty ones, because their unset chains
+# fall through to the online smol priority list. Selectors of $DropProvider (a provider id this run
+# renamed away) are removed rather than kept as fallbacks. An explicit memory selection using that
+# provider is removed so memory can inherit the new tiny role.
 # Only the global config layer is read and written so project/env values are not copied into it.
-function Set-OmpJudge([string]$Selector, [string]$DropProvider) {
+function Set-OmpModelRoles([string]$Selector, [string]$DropProvider) {
     $global = (Invoke-Omp @('config', 'list', '--scope', 'global', '--json')).StdOut | ConvertFrom-Json
     $roles = ConvertTo-OrderedMap $(if ($global.modelRoles) { $global.modelRoles.value })
     $chains = ConvertTo-OrderedMap $(if ($global.'retry.fallbackChains') { $global.'retry.fallbackChains'.value })
-
-    $previous = [string]$roles['judge']
     $dropped = if ($DropProvider) { "$DropProvider/*" } else { $null }
-    if ($dropped -and $previous -like $dropped) { $previous = '' }
-    if ([string]$roles['judge'] -ne $Selector) {
-        $roles['judge'] = $Selector
-        Set-OmpRecordSetting 'modelRoles' $roles
+    $previousJudge = [string]$roles['judge']
+    $previousTiny = [string]$roles['tiny']
+    $explicitMemory = [string]$roles['memory']
+    $rolesChanged = $false
+    if ($dropped -and $explicitMemory -like $dropped) {
+        $roles.Remove('memory')
+        $explicitMemory = ''
+        $rolesChanged = $true
+    }
+    foreach ($role in 'judge', 'tiny') {
+        if ([string]$roles[$role] -ne $Selector) { $roles[$role] = $Selector; $rolesChanged = $true }
+    }
+    # An explicit memory role is preserved; otherwise memory followed the previous tiny role before
+    # this update and now follows LFM3. Its fallback must preserve that previous tiny role.
+    $memoryActive = if ($explicitMemory) { $explicitMemory } else { $Selector }
+    $memoryPrevious = if ($explicitMemory) { $explicitMemory } else { $previousTiny }
+    $targets = [ordered]@{
+        judge  = @{ Active = $Selector; Previous = $previousJudge }
+        tiny   = @{ Active = $Selector; Previous = $previousTiny }
+        memory = @{ Active = $memoryActive; Previous = $memoryPrevious }
     }
 
-    $hadChain = $chains.Contains('judge')
-    $oldChain = if ($hadChain) { @($chains['judge']) } else { @() }
-    $newChain = @(@($previous) + $oldChain | Where-Object { $_ -and $_ -ne $Selector -and -not ($dropped -and $_ -like $dropped) } | Select-Object -Unique)
-    # Leave an unset chain alone when there is no previous judge to preserve.
-    if (($previous -or $hadChain) -and (($newChain -join "`n") -ne ($oldChain -join "`n") -or -not $hadChain)) {
-        $chains['judge'] = $newChain
-        Set-OmpRecordSetting 'retry.fallbackChains' $chains
+    $chainsChanged = $false
+    foreach ($role in $targets.Keys) {
+        $target = $targets[$role]
+        $previous = [string]$target.Previous
+        if ($dropped -and $previous -like $dropped) { $previous = '' }
+        $hadChain = $chains.Contains($role)
+        $oldChain = if ($hadChain) { @($chains[$role]) } else { @() }
+        $newChain = @(@($previous) + $oldChain | Where-Object { $_ -and $_ -ne $target.Active -and -not ($dropped -and $_ -like $dropped) } | Select-Object -Unique)
+        # Judge has no built-in priority chain, so preserve an unset chain when there is no previous
+        # judge. Tiny/memory need their explicit local boundary written on every first setup.
+        $changed = ($newChain -join "`n") -ne ($oldChain -join "`n") -or -not $hadChain
+        if (($role -ne 'judge' -or $previous -or $hadChain) -and $changed) {
+            $chains[$role] = $newChain
+            $chainsChanged = $true
+        }
     }
+    if ($rolesChanged) { Set-OmpRecordSetting 'modelRoles' $roles }
+    if ($chainsChanged) { Set-OmpRecordSetting 'retry.fallbackChains' $chains }
 }
 
 # Copies a file next to itself with a timestamp suffix and returns the backup path ($null if absent).
@@ -1280,7 +1312,11 @@ function Show-Report([string]$Title, $Llama, $Omp, $Test = $null) {
     $listed = if ($Omp.Listed.Count) { $Omp.Listed -join ', ' } elseif ($Omp.ListError) { "error: $($Omp.ListError)" } else { '(none)' }
     Write-Row "omp models '$ProviderId'" $listed ([bool]$Omp.Listed.Count)
     Write-Row 'modelRoles.judge' $(if ($Omp.Judge) { $Omp.Judge } else { '(unset: built-in chain)' }) ($Omp.Judge -like "$ProviderId/*")
+    Write-Row 'modelRoles.tiny' $(if ($Omp.Tiny) { $Omp.Tiny } else { '(unset: built-in chain)' }) ($Omp.Tiny -like "$ProviderId/*")
+    Write-Row 'modelRoles.memory' $(if ($Omp.Memory) { $Omp.Memory } else { '(unset: inherits tiny)' })
     Write-Row 'retry.fallbackChains.judge' (Format-Chain $Omp.Chains)
+    Write-Row 'retry.fallbackChains.tiny' (Format-Chain $Omp.Chains 'tiny')
+    Write-Row 'retry.fallbackChains.memory' (Format-Chain $Omp.Chains 'memory')
     Write-Row 'defaultThinkingLevel' $Omp.Thinking ($Omp.Thinking -eq 'auto')
 }
 
@@ -1315,7 +1351,7 @@ function Show-Plan($Resources, $Plan) {
     Write-Row 'Server RAM (estimate)' "~$(Format-Bytes $Plan.Requirement.RamEstimate) at ctx $($Plan.Context)"
     $idle = if ($IdleSleepSeconds -gt 0) { "idle-unload after $IdleSleepSeconds s" } else { 'no idle unload' }
     Write-Row 'Server' "127.0.0.1:$(Format-PortChoice $Plan.PortChoice), started now, $idle"
-    Write-Row 'omp' "models.yml block '$ProviderId', judge -> $ProviderId/$ModelId"
+    Write-Row 'omp' "models.yml block '$ProviderId', judge/tiny -> $ProviderId/$ModelId; memory inherits tiny"
     if (Get-JudgeService) {
         Write-Row 'Service' "'$ServiceName' restarted with these settings"
     } else {
@@ -1475,7 +1511,7 @@ function Invoke-Setup {
     # Step 12: omp provider and judge role (backups first; models.yml is restored if omp rejects it).
     $selector = "$ProviderId/$ModelId"
     $baseUrl = "http://127.0.0.1:$($config.port)/v1"
-    Write-Step "Configuring omp: provider '$ProviderId' in models.yml ($baseUrl), modelRoles.judge = $selector"
+    Write-Step "Configuring omp: provider '$ProviderId' in models.yml ($baseUrl), judge/tiny = $selector, memory inherits tiny"
     $script:Backups = @(@(Backup-File $script:ModelsPath; Backup-File $script:ConfigPath) | Where-Object { $_ })
     $modelsBackup = $script:Backups | Where-Object { $_ -like "$script:ModelsPath.*" } | Select-Object -First 1
     $modelsPlan = Read-ModelsYaml $script:ModelsPath
@@ -1489,7 +1525,7 @@ function Invoke-Setup {
         Stop-Setup "omp does not list $selector after editing models.yml; the file was restored." @($check.StdErr)
     }
     if ($check.StdErr) { Write-Warning "omp reported while loading models.yml: $($check.StdErr)" }
-    Set-OmpJudge $selector $renamedFrom
+    Set-OmpModelRoles $selector $renamedFrom
 
     # The service runs a copy of this script inside the root (readable by the service account).
     if ((Get-JudgeService) -and $PSCommandPath -and $PSCommandPath -ne $ServiceScriptPath) {
@@ -1509,14 +1545,15 @@ function Invoke-Setup {
     $finalOmp = Get-OmpState
     Show-Report 'Final state' (Get-LlamaState $config) $finalOmp $test
     if ($badBuild) { Write-Warning "Build $badBuild failed the test and was kept aside; running $($config.current). Re-run later to retry it." }
-    if ($finalOmp.Judge -ne $selector) {
-        Stop-Setup "modelRoles.judge resolves to '$($finalOmp.Judge)', not $selector." @(
-            'A project .omp/config.yml or another settings layer overrides it; run "omp config get modelRoles" in that directory.')
+    if ($finalOmp.Judge -ne $selector -or $finalOmp.Tiny -ne $selector) {
+        Stop-Setup "modelRoles.judge/tiny resolve to '$($finalOmp.Judge)' / '$($finalOmp.Tiny)', not $selector." @(
+            'A project .omp/config.yml or another settings layer overrides them; run "omp config get modelRoles" in that directory.')
     }
 
     Write-Section 'How to use it'
-    Write-Host "  - omp now sends judge-role requests to ${selector}: the 'auto' thinking-level classifier,"
-    Write-Host '    Smart unexpected-stop detection, AI staging in "omp git", and judge() in eval.'
+    Write-Host "  - omp now uses ${selector} for the judge and tiny roles; an unset memory role inherits tiny."
+    Write-Host "  - Judge powers the 'auto' thinking-level classifier, Smart unexpected-stop detection,"
+    Write-Host '    AI staging in "omp git", and judge() in eval.'
     if ($finalOmp.Thinking -eq 'auto') {
         Write-Host "  - defaultThinkingLevel is already 'auto', so every new omp session uses the classifier."
     } else {
@@ -1533,7 +1570,8 @@ function Invoke-Setup {
         Write-Host '  - It is not started at sign-in. Start it when needed (or re-run setup with -AutoStart):'
     }
     Write-Host '      Set-OmpJudgeLocalLlamaCpp -Start | -Stop | -Status'
-    Write-Host "  - While it is down omp uses: $(Format-Chain $finalOmp.Chains)"
+    Write-Host "  - While it is down: judge uses $(Format-Chain $finalOmp.Chains)"
+    Write-Host "    tiny uses $(Format-Chain $finalOmp.Chains 'tiny'); memory uses $(Format-Chain $finalOmp.Chains 'memory')"
     Write-Host '  - Update llama.cpp or the model: re-run Set-OmpJudgeLocalLlamaCpp (-Start never updates).'
     Write-Host "  - Logs: $(Format-HomePath $config.log)"
     Write-Host '  - Undo: restore the backups below (or delete the omp-llamacpp-judge block in models.yml and'

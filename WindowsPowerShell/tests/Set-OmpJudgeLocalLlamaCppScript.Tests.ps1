@@ -315,7 +315,7 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
         }
     }
 
-    Context 'provider rename' {
+    Context 'role assignment and provider rename' {
         It 'reports the provider id declared by an existing managed block' {
             $path = Join-Path $TestDrive 'models-rename.yml'
             $old = @('providers:', '  # >>> omp-llamacpp-judge (managed)', '  llamacpp:', "    baseUrl: 'x'", '  # <<< omp-llamacpp-judge')
@@ -329,7 +329,7 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
             $text | Should -Not -Match '(?m)^\s*llamacpp:'
         }
 
-        It 'drops the renamed provider from the judge and fallback chain' {
+        It 'drops the renamed provider from the roles and fallback chains' {
             $script:saved = @{}
             Mock Invoke-Omp {
                 [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
@@ -338,10 +338,13 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
                         } | ConvertTo-Json -Depth 5) }
             }
             Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
-            Set-OmpJudge 'llama-cpp-tiny/LFM3-1.7B' 'llamacpp'
+            Set-OmpModelRoles 'llama-cpp-tiny/LFM3-1.7B' 'llamacpp'
             $script:saved['modelRoles']['judge'] | Should -Be 'llama-cpp-tiny/LFM3-1.7B'
-            $script:saved['modelRoles']['tiny'] | Should -Be 'x/y'
+            $script:saved['modelRoles']['tiny'] | Should -Be 'llama-cpp-tiny/LFM3-1.7B'
+            $script:saved['modelRoles'].Contains('memory') | Should -BeFalse
             @($script:saved['retry.fallbackChains']['judge']) | Should -Be @('local/lfm2-1.2b')
+            @($script:saved['retry.fallbackChains']['tiny']) | Should -Be @('x/y')
+            @($script:saved['retry.fallbackChains']['memory']) | Should -Be @('x/y')
         }
 
         It 'keeps the previous judge as the first fallback without a rename' {
@@ -350,8 +353,51 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
                 [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{ modelRoles = @{ value = @{ judge = 'local/lfm2-1.2b' } } } | ConvertTo-Json -Depth 5) }
             }
             Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
-            Set-OmpJudge 'llama-cpp-tiny/LFM3-1.7B' $null
+            Set-OmpModelRoles 'llama-cpp-tiny/LFM3-1.7B' $null
             @($script:saved['retry.fallbackChains']['judge']) | Should -Be @('local/lfm2-1.2b')
+            @($script:saved['retry.fallbackChains']['tiny']) | Should -Be @()
+            @($script:saved['retry.fallbackChains']['memory']) | Should -Be @()
+        }
+
+        It 'inherits the previous tiny role for memory while LFM3 takes over both selectors' {
+            $script:saved = @{}
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
+                            modelRoles             = @{ value = @{ judge = 'local/lfm2-1.2b'; tiny = 'local/lfm2-1.2b' } }
+                            'retry.fallbackChains' = @{ value = @{ judge = @('local/lfm2-1.2b') } }
+                        } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
+            Set-OmpModelRoles 'llama-cpp-tiny/LFM3-1.7B' $null
+            $script:saved['modelRoles'].Contains('memory') | Should -BeFalse
+            @($script:saved['retry.fallbackChains']['tiny']) | Should -Be @('local/lfm2-1.2b')
+            @($script:saved['retry.fallbackChains']['memory']) | Should -Be @('local/lfm2-1.2b')
+        }
+
+        It 'leaves the target role configuration untouched without writing settings' {
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
+                            modelRoles             = @{ value = @{ judge = 'llama-cpp-tiny/LFM3-1.7B'; tiny = 'llama-cpp-tiny/LFM3-1.7B' } }
+                            'retry.fallbackChains' = @{ value = @{ judge = @('local/lfm2-1.2b'); tiny = @('local/lfm2-1.2b'); memory = @('local/lfm2-1.2b') } }
+                        } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { }
+            Set-OmpModelRoles 'llama-cpp-tiny/LFM3-1.7B' $null
+            Should -Invoke Set-OmpRecordSetting -Times 0
+        }
+
+        It 'preserves an explicit memory selection and its existing chain' {
+            $script:saved = @{}
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
+                            modelRoles             = @{ value = @{ tiny = 'local/lfm2-1.2b'; memory = 'other/memory' } }
+                            'retry.fallbackChains' = @{ value = @{ memory = @('other/fallback') } }
+                        } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
+            Set-OmpModelRoles 'llama-cpp-tiny/LFM3-1.7B' $null
+            $script:saved['modelRoles']['memory'] | Should -Be 'other/memory'
+            @($script:saved['retry.fallbackChains']['memory']) | Should -Be @('other/fallback')
         }
     }
     Context 'requirements and warnings' {
@@ -703,7 +749,7 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
             Mock Resolve-LlamaRelease { throw 'MUTATION: release resolve' }
             Mock Install-LlamaRelease { throw 'MUTATION: llama.cpp install' }
             Mock Write-ModelsYaml { throw 'MUTATION: models.yml write' }
-            Mock Set-OmpJudge { throw 'MUTATION: omp settings write' }
+            Mock Set-OmpModelRoles { throw 'MUTATION: omp settings write' }
             Mock Backup-File { throw 'MUTATION: backup' }
 
             { Invoke-Setup } | Should -Throw $AbortToken
@@ -712,7 +758,7 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
             Should -Invoke Resolve-LlamaRelease -Times 0
             Should -Invoke Install-LlamaRelease -Times 0
             Should -Invoke Write-ModelsYaml -Times 0
-            Should -Invoke Set-OmpJudge -Times 0
+            Should -Invoke Set-OmpModelRoles -Times 0
             Should -Invoke Backup-File -Times 0
             [IO.File]::ReadAllBytes($modelsPath) | Should -Be $before
         }
