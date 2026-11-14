@@ -109,10 +109,10 @@ $script:FileReadme = 'README.txt'
 $script:MsDownloadPage = 'https://www.microsoft.com/en-US/software-download/Windows11'
 $script:ThirdPartyTip = 'TIP: visit https://massgrave.dev/ for third party downloads'
 $script:WinIsoNaming = 'Win11_*.iso or en-us_windows_11_*.iso'
-# Shared manual-retry hint for the scripted Tiny11 build (used in failure text
-# and the orchestration label). {0} is the ISO the user mounts.
-$script:MakerHintAdmin = 'mount the official Windows ISO, and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> as admin.'
-$script:MakerHintElevated = 'Mount {0} and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell.'
+$script:RufusUrl = 'https://rufus.ie/'
+$script:RufusReleasesHint = 'Download portable Rufus from https://rufus.ie/ into tools\ by hand.'
+$script:VentoyReleasesUrl = 'https://github.com/ventoy/Ventoy/releases/latest'
+$script:Tiny11BuilderReleasesUrl = 'https://github.com/ntdevlabs/tiny11builder/releases/latest'
 $script:Failures = @()
 $script:Results = @()
 $script:UseSudo = $false
@@ -707,33 +707,28 @@ function Save-CatalogIsos {
 function Install-Ventoy {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [switch]$CleanDownloads)
-    $ventoyDir = Join-Path $Root 'ventoy'
+    $ventoyDir = Join-Path $Root $script:DirVentoy
     Ensure-Directory -Path $ventoyDir
+    $ventoyManual = @(
+        'Download the Windows zip by hand from ' + $script:VentoyReleasesUrl + ',',
+        "verify it against sha256.txt, and extract it into $ventoyDir."
+    )
     $release = Get-GitHubLatestAsset -Repo 'ventoy/Ventoy' -AssetPattern '^ventoy-.*-windows\.zip$' -HashAssetName 'sha256.txt'
     if (-not $release) { return $false }
     if (-not $release.HashUrl) {
-        Write-Failure -Name 'Ventoy' -Detail 'Release has no sha256.txt asset.' -Manual @(
-            'Download the Windows zip by hand from https://github.com/ventoy/Ventoy/releases/latest,',
-            "verify it against sha256.txt, and extract it into $ventoyDir."
-        )
+        Write-Failure -Name 'Ventoy' -Detail 'Release has no sha256.txt asset.' -Manual $ventoyManual
         return $false
     }
     try {
         $hashText = Invoke-WebText -Uri $release.HashUrl
     } catch {
         $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
-        Write-Failure -Name 'Ventoy' -Detail "sha256.txt download failed: $detail" -Manual @(
-            'Download the Windows zip by hand from https://github.com/ventoy/Ventoy/releases/latest,',
-            "verify it against sha256.txt, and extract it into $ventoyDir."
-        )
+        Write-Failure -Name 'Ventoy' -Detail "sha256.txt download failed: $detail" -Manual $ventoyManual
         return $false
     }
     $expected = Find-HashInChecksumText -Text "$hashText" -FileName $release.Name
     if (-not $expected) {
-        Write-Failure -Name 'Ventoy' -Detail "No checksum entry for $($release.Name)." -Manual @(
-            'Download the Windows zip by hand from https://github.com/ventoy/Ventoy/releases/latest,',
-            "verify it against sha256.txt, and extract it into $ventoyDir."
-        )
+        Write-Failure -Name 'Ventoy' -Detail "No checksum entry for $($release.Name)." -Manual $ventoyManual
         return $false
     }
     Write-Detail "Ventoy hash for $($release.Name): $expected"
@@ -901,29 +896,24 @@ function Invoke-Tiny11Build {
     Ensure-Directory -Path $builderDir
     $release = Get-GitHubLatestAsset -Repo 'ntdevlabs/tiny11builder' -AssetPattern '^Tiny11Builder-.*-win-x64\.zip$' -HashSuffix '.sha256'
     if (-not $release) { return $false }
+    $builderManual = @(
+        'Download the builder by hand from ' + $script:Tiny11BuilderReleasesUrl + ',',
+        $script:MakerHintAdmin
+    )
     if (-not $release.HashUrl) {
-        Write-Failure -Name 'Tiny11 builder' -Detail 'Release has no published .sha256 sidecar.' -Manual @(
-            'Download the builder by hand from https://github.com/ntdevlabs/tiny11builder/releases/latest,',
-            $script:MakerHintAdmin
-        )
+        Write-Failure -Name 'Tiny11 builder' -Detail 'Release has no published .sha256 sidecar.' -Manual $builderManual
         return $false
     }
     try {
         $hashText = Invoke-WebText -Uri $release.HashUrl
     } catch {
         $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
-        Write-Failure -Name 'Tiny11 builder' -Detail "Hash download failed: $detail" -Manual @(
-            'Download the builder by hand from https://github.com/ntdevlabs/tiny11builder/releases/latest,',
-            $script:MakerHintAdmin
-        )
+        Write-Failure -Name 'Tiny11 builder' -Detail "Hash download failed: $detail" -Manual $builderManual
         return $false
     }
     $expected = Find-HashInChecksumText -Text "$hashText" -FileName $release.Name
     if (-not $expected) {
-        Write-Failure -Name 'Tiny11 builder' -Detail "No checksum entry for $($release.Name)." -Manual @(
-            'Download the builder by hand from https://github.com/ntdevlabs/tiny11builder/releases/latest,',
-            $script:MakerHintAdmin
-        )
+        Write-Failure -Name 'Tiny11 builder' -Detail "No checksum entry for $($release.Name)." -Manual $builderManual
         return $false
     }
     $zipPath = Join-Path $builderDir $release.Name
@@ -1148,7 +1138,7 @@ function Invoke-PreparePcRecovery {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null
         }
         Write-Step 'Rufus portable + Fido'
-        Invoke-SafeStep -Name 'Rufus + Fido' -Manual @('Download portable Rufus from https://rufus.ie/ into tools\ by hand.') -Body {
+        Invoke-SafeStep -Name 'Rufus + Fido' -Manual @($script:RufusReleasesHint) -Body {
             Save-RufusTools -Root $Root | Out-Null
         }
         Write-Step 'Catalog ISOs (netboot first)'
