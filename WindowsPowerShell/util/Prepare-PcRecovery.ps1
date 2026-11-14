@@ -43,10 +43,27 @@
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Prepare-PcRecovery.ps1 -Destination D:\pc-recovery-test -Elevate -WhatIf
 .NOTES
     Per-entry maintenance lives in the catalog rows (Get-RecoveryCatalog):
-    each row carries a Check note with the one-line re-verify instruction.
-    After any upstream release, update the Pinned URL plus hash together;
-    Rolling rows resolve live every run and need no edits; Manual rows are
-    handled by dedicated functions, never by raw URLs in the catalog.
+    each row carries About (one-line project blurb), Released (publisher
+    date), SizeNote, the pinned Hash, and Check (one-line re-verify
+    instruction). After any upstream release, update the Pinned URL plus
+    hash together; Rolling rows resolve live every run and need no edits;
+    Manual rows are handled by dedicated functions, never by raw URLs.
+    Release dates come from upstream checksum-file Last-Modified headers,
+    SourceForge file dates, or the project download page -- never guess.
+    HWE Mint rows share the kernel.org tree; both HWE ISOs ship from the
+    same host as regular Mint, so one AlternateUrl pattern covers all three.
+    Microsoft's Sentinel service rate-limits Fido's download-links endpoint
+    per IP: a rejected run ("Sentinel marked this request as rejected") is
+    transient -- the script retries 3x with pauses, but a persistent block
+    means placing the ISO by hand (Win11_*.iso or en-us_windows_11_*.iso).
+    The Tiny11 step needs the 95 MB WinUI zip only for hash context; the
+    scripted build uses the 28 KB tiny11maker.ps1 plus 140 KB oscdimg.exe
+    and 2 KB autounattend.xml, all staged beside the maker and deleted by
+    it on completion (so re-staged every run). The elevated child must use
+    'Continue' (the maker relies on non-terminating errors), a shadowed
+    Read-Host for its two prompts, and pre-unloaded HKLM\z* hives.
+    Download rule: keep the .partial on transport failures (curl 18/28/33/
+    52/55/56), delete only on server rejection (22/36), so -C - resumes.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
