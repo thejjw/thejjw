@@ -15128,8 +15128,8 @@ function Get-CodexUsage {
                     $parsed = $body | ConvertFrom-Json
                     $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'detail'))
                     if (-not $detail) {
-                        $error = $_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'error')
-                        $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($error, 'message'))
+                        $apiError = $_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'error')
+                        $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($apiError, 'message'))
                     }
                 } catch {
                     $detail = $body
@@ -15429,8 +15429,8 @@ function Get-ClaudeUsage {
                 $detail = ''
                 try {
                     $parsed = $body | ConvertFrom-Json
-                    $error = $_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'error')
-                    $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($error, 'message'))
+                    $apiError = $_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'error')
+                    $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($apiError, 'message'))
                     if (-not $detail) { $detail = [string]($_ProfileHelpers.GetAiUsageJsonProperty($parsed, 'message')) }
                 } catch {
                     $detail = $body
