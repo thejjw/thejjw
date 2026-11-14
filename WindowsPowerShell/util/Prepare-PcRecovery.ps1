@@ -42,18 +42,24 @@
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Prepare-PcRecovery.ps1 -Destination D:\pc-recovery-test -Elevate -WhatIf
 .NOTES
-    Catalog: per-ISO About / Released / SizeNote / Hash / Check rows in
-    Get-RecoveryCatalog. Update Hash + Released + SizeNote together on a
-    re-pin (never Hash alone); take dates from checksum Last-Modified,
-    SourceForge file dates, or the project page.
-    Network: Sentinel may reject Fido (retried 3x, then manual placement);
-    kernel.org stalls large ISOs on some networks (Princeton AlternateUrl).
-    Partial rule: keep on transport failure, delete only on server reject.
-    Tiny11: scripted build is maker + oscdimg + answer file (~170 KB),
-    staged per run; child needs 'Continue', shadowed Read-Host, clean hives.
-    Suite: Invoke-Pester .\tests\Prepare-PcRecovery.Tests.ps1 (offline).
     Copyright (c) 2026 @thejjw. All rights reserved.
     Last Updated: November 14, 2026
+
+    Catalog: per-ISO About / Released / SizeNote / Hash / Check rows in
+    Get-RecoveryCatalog. Update Hash + Released + SizeNote together on
+    a re-pin; Rolling rows need no edits. Take dates from checksum
+    Last-Modified, SourceForge file dates, or the project page.
+    HWE Mint rows share the kernel.org tree; one AlternateUrl pattern
+    covers all three. Manual rows use functions, never raw URLs.
+    Sentinel may reject Fido per IP (transient; retried 3x with pauses,
+    then place Win11_*.iso or en-us_windows_11_*.iso by hand).
+    kernel.org stalls large ISOs on some networks (Princeton fallback).
+    Partials: keep on transport failure (curl 18/28/33/52/55/56), delete
+    only on server reject (22/36), so -C - resumes.
+    Tiny11: 95 MB WinUI zip is hash context only; the build is maker
+    (28 KB) + oscdimg (140 KB) + answer file (2 KB), staged per run.
+    Child uses 'Continue', shadowed Read-Host, unloaded HKLM\z* hives.
+    Suite: Invoke-Pester .\tests\Prepare-PcRecovery.Tests.ps1 (offline).
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
