@@ -126,6 +126,7 @@ $script:CyberduckUrlBase = 'https://update.cyberduck.io/windows/'
 $script:CyberduckGitHubUrlBase = 'https://github.com/iterate-ch/cyberduck/releases/download/release-9-6-0/'
 $script:FileCyberduckInstaller = 'Cyberduck-Installer-' + $script:CyberduckVersion + '.exe'
 $script:FileCyberduckDuck = 'duck_' + $script:CyberduckVersion + '_amd64.deb'
+$script:FileCyberduckDuckRpm = 'duck-' + $script:CyberduckVersion + '-1.x86_64.rpm'
 $script:CyberduckDownloadPage = 'https://cyberduck.io/download/'
 $script:FileVentoyExe = 'Ventoy2Disk.exe'
 $script:FileFido = 'Fido.ps1'
@@ -556,8 +557,8 @@ NOTES
 }
 
 # Offline Cyberduck sheet for isos\04-etc\cyberduck\. Windows needs an installer
-# (no portable build); macOS builds and the duck CLI exist upstream but are not
-# stored here.
+# (no portable build); macOS builds and the Windows/macOS duck CLI exist
+# upstream but are not stored here; the Linux x86_64 deb/rpm packages are.
 function Get-CyberduckReadmeText {
     $text = @'
 CYBERDUCK AND DUCK (offline)
@@ -566,7 +567,8 @@ This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs
 
 FILES
   CYBERINSTALLER   Windows x64 GUI installer, about 88 MB.
-  CYBERDEB        Linux x86_64 duck CLI package, about 106 MB.
+  CYBERDEB         Linux x86_64 Debian/Ubuntu package, about 106 MB.
+  CYBERRPM         Linux x86_64 Fedora/Rocky package, about 108 MB.
 
 INSTALL
   Double-click CYBERINSTALLER and follow the wizard. For an unattended
@@ -574,22 +576,26 @@ INSTALL
     .\CYBERINSTALLER /s
   Windows 10 64-bit or later. Uninstall from Settings > Apps.
   Cyberduck publishes no portable Windows build: this is an installer, not an
-  extract-and-run tool. A macOS build and the duck command-line tool
-  (Windows/macOS/Linux) are on the download page.
+  extract-and-run tool. A macOS build and the Windows/macOS duck CLI are on
+  the download page; Linux uses the packages below.
 
 LINUX CLI
-  CYBERDEB is a Debian/Ubuntu amd64 package; it bundles its own Java runtime
-  and declares no dependencies. On Debian or Ubuntu:
+  Both packages bundle their own Java runtime and need only glibc. Install on
+  Debian or Ubuntu:
     sudo apt install ./CYBERDEB
     duck --version
-  On any x86_64 Linux, or to run it from the stick without installing:
-    ar x CYBERDEB
-    tar -xf data.tar.xz
+  Install on Fedora or Rocky:
+    sudo dnf install ./CYBERRPM
+    duck --version
+  To run the deb without installing on any x86_64 Linux (binutils provides
+  ar; tar needs zstd only when the member is data.tar.zst):
+    d=$(mktemp -d); cd "$d"
+    ar x /path/to/CYBERDEB
+    tar -xf data.tar.*
     ./opt/duck/bin/duck --version
-  Fedora and Rocky use the ar/tar form too (install binutils when ar is
-  missing); dpkg is not needed. The launcher finds its libraries relative to
-  bin/duck, so the extracted opt\duck tree is relocatable. The package is
-  x86_64 only; arm64 builds are on the GitHub release page.
+  The launcher finds its libraries relative to bin/duck, so the extracted
+  opt/duck tree is relocatable. These packages are x86_64 only; arm64 builds
+  are on the GitHub release page.
 
 PROTOCOLS
   SFTP, FTP/FTPS, WebDAV, S3, Azure Blob, Backblaze B2, Google Drive, Dropbox,
@@ -603,22 +609,25 @@ COMPARED WITH WINSCP
   transfer; use Cyberduck when you need the cloud services.
 
 INTEGRITY
-  SHA-256 is pinned from the official cyberduck.io download page and matches
-  the GitHub release asset digest. The installer is Authenticode-valid with
-  iterate GmbH as signer. Check by hand with
+  The Windows installer's SHA-256 is pinned from the official cyberduck.io
+  download page and matches the GitHub release asset digest; the installer is
+  Authenticode-valid with iterate GmbH as signer. Check it with
     Get-FileHash .\CYBERINSTALLER -Algorithm SHA256
     Get-AuthenticodeSignature .\CYBERINSTALLER
   and compare with CYBERPAGE.
+  The two duck packages are pinned from the GitHub release asset digests,
+  which are also recorded in isos\README.txt. Check them on Linux with
+    sha256sum CYBERDEB CYBERRPM
 
 NOTES
   - GPLv3. The app shows a donation prompt; a contributor key or a store
     purchase disables it.
   - The Microsoft Store build is not an offline file; this installer is.
-  - After a version bump the old Cyberduck-* installer stays in place; delete
-    the previous one.
+  - After a version bump the old Cyberduck-* installer and duck_*.deb or
+    duck-*.rpm stay in place; delete the previous ones.
 
 '@
-    return $text.Replace('CYBERINSTALLER', $script:FileCyberduckInstaller).Replace('CYBERDEB', $script:FileCyberduckDuck).Replace('CYBERPAGE', $script:CyberduckDownloadPage)
+    return $text.Replace('CYBERINSTALLER', $script:FileCyberduckInstaller).Replace('CYBERDEB', $script:FileCyberduckDuck).Replace('CYBERRPM', $script:FileCyberduckDuckRpm).Replace('CYBERPAGE', $script:CyberduckDownloadPage)
 }
 
 # -----------------------------------------------------------------------------
@@ -1004,6 +1013,7 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'WinSCP 6.7.1 portable'; Category = '04-etc\winscp'; FileName = $script:FileWinScpPortable; Url = ($script:WinScpUrlBase + $script:FileWinScpPortable + '/download'); AlternateUrl = ''; Hash = 'e6d2f8e1249e41f3bf8638319bb9bd15a541a64720df0805cb0bebdedb5eda83'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'GUI SFTP/SCP/FTP/FTPS/WebDAV/S3 client with synchronize, a resumable transfer queue, remote editing, and WinSCP.com scripting.'; Released = 'Version 6.7.1, November 2026 (8,833,106 bytes; WinSCP.exe and WinSCP.com signed by Martin Prikryl).'; SizeNote = 'About 8.4 MB (extracts to about 20 MB).'; Check = 'SHA-256 matches WinSCP-6.7.1-ReadMe.txt (winscp.net); the zip is unsigned, and the executables inside are Authenticode-valid with Martin Prikryl as signer. Download ' + $script:WinScpUrlBase + $script:FileWinScpPortable + '/download' + ' into isos\04-etc\winscp\ by hand; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = 'Cyberduck 9.6.0 Windows installer'; Category = '04-etc\cyberduck'; FileName = $script:FileCyberduckInstaller; Url = ($script:CyberduckUrlBase + $script:FileCyberduckInstaller); AlternateUrl = ($script:CyberduckGitHubUrlBase + $script:FileCyberduckInstaller); Hash = '9a66f8fb400feaa5f7f390f9e4100e873f6be06cbf7c61f1651fca8b1f31c930'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'GUI browser for SFTP, FTP/FTPS, WebDAV, S3, Azure, Backblaze B2, Google Drive, Dropbox, OneDrive, and SharePoint; Windows installer, no portable build.'; Released = 'Version 9.6.0 (build 46406), November 2026 (92,009,848 bytes; Authenticode-valid, signed by iterate GmbH).'; SizeNote = 'About 88 MB.'; Check = 'SHA-256 matches the official cyberduck.io download page and the GitHub asset digest; the installer is Authenticode-valid with iterate GmbH as signer. Download ' + $script:CyberduckUrlBase + $script:FileCyberduckInstaller + ' into isos\04-etc\cyberduck\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Cyberduck CLI (duck) 9.6.0 Linux x64'; Category = '04-etc\cyberduck'; FileName = $script:FileCyberduckDuck; Url = ($script:CyberduckGitHubUrlBase + $script:FileCyberduckDuck); AlternateUrl = ''; Hash = 'b76f3fefdd0756b08e7e3015f46273a73f5cf78bc9f0d83c7d0d6e7e90ea6ca6'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'duck command-line client for the same protocols; Debian/Ubuntu amd64 package that bundles its own Java runtime and declares no dependencies. Extracts and runs without installation.'; Released = 'Version 9.6.0 (build 46406), November 2026 (110,921,096 bytes; installs to about 226 MB).'; SizeNote = 'About 106 MB.'; Check = 'SHA-256 matches the GitHub release asset digest. Download ' + $script:CyberduckGitHubUrlBase + $script:FileCyberduckDuck + ' into isos\04-etc\cyberduck\ by hand; the next run verifies it against the pinned hash and skips it.' }
+        [pscustomobject]@{ Name = 'Cyberduck CLI (duck) 9.6.0 Linux x64 RPM'; Category = '04-etc\cyberduck'; FileName = $script:FileCyberduckDuckRpm; Url = ($script:CyberduckGitHubUrlBase + $script:FileCyberduckDuckRpm); AlternateUrl = ''; Hash = '7731551675755846ec1a502ca2a2cf2a697e30026afe80c29f43ec9e8e090c6d'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'duck command-line client for Fedora/RHEL/Rocky; x86_64 RPM that bundles its own Java runtime and requires only glibc.'; Released = 'Version 9.6.0 (build 46406), November 2026 (113,352,754 bytes; installs to about 230 MB).'; SizeNote = 'About 108 MB.'; Check = 'SHA-256 matches the GitHub release asset digest. Download ' + $script:CyberduckGitHubUrlBase + $script:FileCyberduckDuckRpm + ' into isos\04-etc\cyberduck\ by hand; the next run verifies it against the pinned hash and skips it.' }
     )
 }
 

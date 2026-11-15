@@ -49,7 +49,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 DirSevenZip = '7zip'; SevenZipVersion = '26.06'; FileSevenZipInstaller = '7z2606-x64.exe'; FileSevenZipExtra = '7z2606-extra.7z'; FileSevenZipBootstrap = '7zr-2606.exe'
                 DirPutty = 'putty'; PuttyVersion = '0.85'; FilePuttyZip = 'putty-0.85.zip'; FilePuttySums = 'putty-0.85-sha256sums.txt'
                 DirWinScp = 'winscp'; WinScpVersion = '6.7.1'; FileWinScpPortable = 'WinSCP-6.7.1-Portable.zip'
-                DirCyberduck = 'cyberduck'; CyberduckVersion = '9.6.0.46406'; FileCyberduckInstaller = 'Cyberduck-Installer-9.6.0.46406.exe'; FileCyberduckDuck = 'duck_9.6.0.46406_amd64.deb'
+                DirCyberduck = 'cyberduck'; CyberduckVersion = '9.6.0.46406'; FileCyberduckInstaller = 'Cyberduck-Installer-9.6.0.46406.exe'; FileCyberduckDuck = 'duck_9.6.0.46406_amd64.deb'; FileCyberduckDuckRpm = 'duck-9.6.0.46406-1.x86_64.rpm'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -702,6 +702,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $putty = [array]::IndexOf($script:order, $script:FilePuttyZip)
             $cyberduck = [array]::IndexOf($script:order, $script:FileCyberduckInstaller)
             $duck = [array]::IndexOf($script:order, $script:FileCyberduckDuck)
+            $duckRpm = [array]::IndexOf($script:order, $script:FileCyberduckDuckRpm)
             $sevenZip | Should -BeGreaterThan $fedora
             $sevenZip | Should -BeLessThan $pythonEmbed
             $putty | Should -BeGreaterThan $fedora
@@ -710,6 +711,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $cyberduck | Should -BeLessThan $pythonEmbed
             $duck | Should -BeGreaterThan $cyberduck
             $duck | Should -BeLessThan $pythonEmbed
+            $duckRpm | Should -BeGreaterThan $duck
+            $duckRpm | Should -BeLessThan $pythonEmbed
             $pythonEmbed | Should -BeGreaterThan $fedora
             $pythonInstaller | Should -BeGreaterThan $pythonEmbed
             $winScp | Should -BeGreaterThan $pythonInstaller
@@ -827,20 +830,24 @@ Describe 'Prepare-PcRecovery.ps1' {
     }
 
     Context 'cyberduck tools' {
-        It 'pins the Windows installer and the Linux CLI package' {
+        It 'pins the Windows installer and both Linux CLI packages' {
             $rows = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\cyberduck' })
-            $rows.Count | Should -Be 2
+            $rows.Count | Should -Be 3
             $win = @($rows | Where-Object { $_.FileName -eq $script:FileCyberduckInstaller })[0]
-            $linux = @($rows | Where-Object { $_.FileName -eq $script:FileCyberduckDuck })[0]
+            $deb = @($rows | Where-Object { $_.FileName -eq $script:FileCyberduckDuck })[0]
+            $rpm = @($rows | Where-Object { $_.FileName -eq $script:FileCyberduckDuckRpm })[0]
             $win.HashKind | Should -Be 'Pinned'
             $win.Hash | Should -Be '9a66f8fb400feaa5f7f390f9e4100e873f6be06cbf7c61f1651fca8b1f31c930'
             $win.Url | Should -Be ('https://update.cyberduck.io/windows/' + $script:FileCyberduckInstaller)
             $win.AlternateUrl | Should -Match 'github\.com/iterate-ch/cyberduck/releases/download/release-9-6-0/'
             $win.Released | Should -Match 'iterate GmbH'
-            $linux.HashKind | Should -Be 'Pinned'
-            $linux.Hash | Should -Be 'b76f3fefdd0756b08e7e3015f46273a73f5cf78bc9f0d83c7d0d6e7e90ea6ca6'
-            $linux.Url | Should -Be ('https://github.com/iterate-ch/cyberduck/releases/download/release-9-6-0/' + $script:FileCyberduckDuck)
-            $linux.Url | Should -Not -Be $win.Url
+            $deb.HashKind | Should -Be 'Pinned'
+            $deb.Hash | Should -Be 'b76f3fefdd0756b08e7e3015f46273a73f5cf78bc9f0d83c7d0d6e7e90ea6ca6'
+            $deb.Url | Should -Be ('https://github.com/iterate-ch/cyberduck/releases/download/release-9-6-0/' + $script:FileCyberduckDuck)
+            $rpm.HashKind | Should -Be 'Pinned'
+            $rpm.Hash | Should -Be '7731551675755846ec1a502ca2a2cf2a697e30026afe80c29f43ec9e8e090c6d'
+            $rpm.Url | Should -Be ('https://github.com/iterate-ch/cyberduck/releases/download/release-9-6-0/' + $script:FileCyberduckDuckRpm)
+            $rpm.Url | Should -Not -Be $deb.Url
         }
 
         It 'builds the topic readme with the install and integrity steps' {
@@ -852,12 +859,15 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'iterate GmbH'
             $text | Should -Match 'no portable Windows build'
             $text.Contains($script:FileCyberduckDuck) | Should -BeTrue
+            $text.Contains($script:FileCyberduckDuckRpm) | Should -BeTrue
             $text | Should -Match 'LINUX CLI'
             $text | Should -Match 'apt install'
-            $text | Should -Match 'ar x'
+            $text | Should -Match 'dnf install'
+            $text | Should -Match 'data\.tar\.\*'
+            $text | Should -Match 'sha256sum'
             $text | Should -Match 'opt/duck/bin/duck'
             $text | Should -Match 'own Java runtime'
-            $text | Should -Not -Match 'CYBER(INSTALLER|DEB|PAGE)'
+            $text | Should -Not -Match 'CYBER(INSTALLER|DEB|RPM|PAGE)'
             $text.Contains($script:CyberduckDownloadPage) | Should -BeTrue
             $text | Should -Not -Match 'runs on macOS and Linux'
             $text | Should -Match 'GPLv3'
@@ -1056,6 +1066,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match '04-etc\\winscp\\WinSCP-6\.7\.1-Portable\.zip'
             $isosText | Should -Match '04-etc\\cyberduck\\Cyberduck-Installer-9\.6\.0\.46406\.exe'
             $isosText | Should -Match '04-etc\\cyberduck\\duck_9\.6\.0\.46406_amd64\.deb'
+            $isosText | Should -Match '04-etc\\cyberduck\\duck-9\.6\.0\.46406-1\.x86_64\.rpm'
             $isosText | Should -Match 'v1\.20\.26'
             $isosText | Should -Match 'copyparty \(copyparty-sfx\.py, not verified this run\)'
             $isosText | Should -Match 'SHA-256 \(on disk at write time\)'
