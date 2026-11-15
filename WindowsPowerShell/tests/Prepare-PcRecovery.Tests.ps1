@@ -835,6 +835,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $topicText.Contains('--hist "%TEMP%\copyparty"') | Should -BeTrue
             $topicText.Contains($script:FilePythonEmbed) | Should -BeTrue
             $topicText.Contains('$env:TEMP\pyembed\python.exe') | Should -BeTrue
+            $topicText.Contains('-i 192.168.1.10') | Should -BeTrue
+            $topicText.Contains('--hist "$env:TEMP\copyparty"') | Should -BeTrue
             $pythonDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'python'
             $pythonText = [IO.File]::ReadAllText((Join-Path $pythonDir 'README.txt'))
             $pythonText.Contains($script:FilePythonInstaller) | Should -BeTrue

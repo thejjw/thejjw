@@ -254,8 +254,11 @@ SAFE START (replace the address, paths, and password)
   Then browse to http://192.168.1.10:3923/data/ or /incoming/ and log in.
 
   Windows without Python: extract PYEMBED from ..\python\ into a writable
-  folder such as $env:TEMP\pyembed, then run from this folder:
-    & "$env:TEMP\pyembed\python.exe" .\copyparty-sfx.py -a admin:change-me
+  folder such as $env:TEMP\pyembed, then run from this folder with the same
+  safe arguments as above, only the interpreter differs:
+    & "$env:TEMP\pyembed\python.exe" .\copyparty-sfx.py -p 3923 -i 192.168.1.10 `
+      -a admin:change-me -v 'C:\data:data:r,admin' `
+      -v 'C:\incoming:incoming:w,admin' --hist "$env:TEMP\copyparty"
   That runtime is a PSF-signed binary, unlike this unsigned copyparty.exe, so
   SmartScreen may treat it better. The embeddable build has no pip, venv, or
   tkinter.
