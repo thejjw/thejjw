@@ -911,7 +911,7 @@ function Get-WindowsIsoViaFido {
 # Downloads the tiny11builder release zip (verified) plus the legacy
 # tiny11maker.ps1 build script, then runs the privileged build: mount the
 # official ISO, run the maker, move tiny11.iso into isos\03-Installers\tiny11.
-# Retry hints come from $script:MakerHintAdmin (builder download) and
+# Retry hints come from $script:MakerHintAdmin (tiny11maker.ps1 download) and
 # $script:MakerHintElevated (ISO build, formatted with the ISO name). Never throws.
 function Invoke-Tiny11Build {
     [CmdletBinding(SupportsShouldProcess = $true)]
@@ -922,7 +922,7 @@ function Invoke-Tiny11Build {
     if (-not $release) { return $false }
     $builderManual = @(
         'Download the builder by hand from ' + $script:Tiny11BuilderReleasesUrl + '.',
-        "For the scripted build, save $($script:FileMaker) from $($script:Tiny11MakerUrl) into $builderDir."
+        "Otherwise save $($script:FileMaker) from $($script:Tiny11MakerUrl), mount the official ISO, and run it with -ISO <letter> -SCRATCH <letter> from an elevated shell."
     )
     if (-not $release.HashUrl) {
         Write-Failure -Name 'Tiny11 builder' -Detail 'Release has no published .sha256 sidecar.' -Manual $builderManual

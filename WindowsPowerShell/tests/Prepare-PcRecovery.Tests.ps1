@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint)' }, $true)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl)' }, $true)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -428,6 +428,16 @@ Describe 'Prepare-PcRecovery.ps1' {
             { Invoke-Tiny11Build -Root $root } | Should -Not -Throw
             Test-Path -LiteralPath (Join-Path (Join-Path $root 'tools') 'tiny11builder') | Should -BeTrue
             Test-Path -LiteralPath (Join-Path $root 'tiny11builder') | Should -BeFalse
+        }
+
+        It 'keeps manual build steps when the builder hash sidecar is missing' {
+            Reset-State
+            $root = Join-Path $TestDrive 'nohash'
+            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = '' } }
+            Invoke-Tiny11Build -Root $root | Should -BeFalse
+            $script:Failures.Name | Should -Contain 'Tiny11 builder'
+            $script:Failures[-1].Manual | Should -Match 'tiny11maker\.ps1'
+            $script:Failures[-1].Manual | Should -Match 'elevated shell'
         }
 
         It 'routes a missing official ISO to a Tiny11 skip-failure' {
