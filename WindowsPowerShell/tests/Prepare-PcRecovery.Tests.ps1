@@ -540,6 +540,55 @@ Describe 'Prepare-PcRecovery.ps1' {
             (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'old-build'
         }
 
+        It 'continues with the other asset when the existing file cannot be hashed' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cphashfail'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath $exe -Value 'old-build' -NoNewline
+            $sample = Join-Path $TestDrive 'cphashfail-sample.bin'
+            Set-Content -LiteralPath $sample -Value 'x' -NoNewline
+            $sha = (Get-FileHash -LiteralPath $sample -Algorithm SHA256).Hash.ToLowerInvariant()
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = "sha256:$sha"; browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = "sha256:$sha"; browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Test-LocalFileHash { return ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -eq $ExpectedHash.ToLowerInvariant()) }
+            Mock Test-LocalFileHash { throw 'locked' } -ParameterFilter { $Path -like '*copyparty.exe' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'x' -NoNewline; return $true }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            $script:Failures.Name | Should -Contain 'copyparty.exe'
+            @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty-sfx.py' }).Count | Should -Be 1
+            (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'old-build'
+        }
+
+        It 'replaces a stale build and clears its .prev' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpupdateok'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath $exe -Value 'old-build' -NoNewline
+            $sample = Join-Path $TestDrive 'cpupdateok-sample.bin'
+            Set-Content -LiteralPath $sample -Value 'x' -NoNewline
+            $sha = (Get-FileHash -LiteralPath $sample -Algorithm SHA256).Hash.ToLowerInvariant()
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = "sha256:$sha"; browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = "sha256:$sha"; browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Save-VerifiedFile {
+                if (Test-Path -LiteralPath $OutFile) { throw "expected backup before $OutFile" }
+                Set-Content -LiteralPath $OutFile -Value 'x' -NoNewline
+                return $true
+            }
+            Save-CopypartyTools -Root $root | Should -BeTrue
+            (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'x'
+            Test-Path -LiteralPath "$exe.prev" | Should -BeFalse
+            @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 1
+            $script:VerifiedHashes[$exe] | Should -Be $sha
+        }
+
         It 'records a failure when an asset is missing from the release' {
             Reset-State
             $root = Join-Path $TestDrive 'cpnoasset'

@@ -950,16 +950,23 @@ function Save-CopypartyTools {
     # Clear it when the tag changes and remember the tag for the next run.
     if ($PSCmdlet.ShouldProcess($dir, "Record release $tag")) {
         $markerPath = Join-Path $dir $script:FileCopypartyTag
-        $oldTag = ''
-        if (Test-Path -LiteralPath $markerPath) {
-            $oldTag = ([IO.File]::ReadAllText($markerPath)).Trim()
-        }
-        if ($oldTag -ne $tag) {
-            Get-ChildItem -LiteralPath $dir -Filter '*.partial' -File -ErrorAction SilentlyContinue | ForEach-Object {
-                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+        try {
+            $oldTag = ''
+            if (Test-Path -LiteralPath $markerPath) {
+                $oldTag = ([IO.File]::ReadAllText($markerPath)).Trim()
             }
+            if ($oldTag -ne $tag) {
+                Get-ChildItem -LiteralPath $dir -Filter '*.partial' -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+                }
+            }
+            [IO.File]::WriteAllText($markerPath, $tag, [Text.UTF8Encoding]::new($false))
+        } catch {
+            $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
+            Write-Failure -Name 'copyparty release marker' -Detail "Could not record ${tag}: $detail" -Manual @(
+                "Check write access to $dir, then re-run."
+            )
         }
-        [IO.File]::WriteAllText($markerPath, $tag, [Text.UTF8Encoding]::new($false))
     }
     $ok = $true
     foreach ($name in @($script:FileCopypartySfx, $script:FileCopypartyExe)) {
@@ -978,13 +985,27 @@ function Save-CopypartyTools {
         }
         $hash = $Matches[1].ToLowerInvariant()
         $outFile = Join-Path $dir $name
+        $exists = Test-Path -LiteralPath $outFile
+        $isStale = $false
+        if ($exists) {
+            try {
+                $isStale = -not (Test-LocalFileHash -Path $outFile -ExpectedHash $hash)
+            } catch {
+                $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
+                Write-Failure -Name $name -Detail "Could not hash the existing ${name}: $detail" -Manual @(
+                    "Close anything using $outFile, then re-run."
+                )
+                $ok = $false
+                continue
+            }
+        }
         # Save-VerifiedFile deletes a stale versionless file before downloading.
         # Keep it as .prev so a failed update cannot destroy the only working
         # copy, and restore it when the download fails.
         $prevFile = "$outFile.prev"
         $backedUp = $false
         if ($PSCmdlet.ShouldProcess($outFile, 'Back up the existing file')) {
-            if ((Test-Path -LiteralPath $outFile) -and -not (Test-LocalFileHash -Path $outFile -ExpectedHash $hash)) {
+            if ($exists -and $isStale) {
                 try {
                     Move-Item -LiteralPath $outFile -Destination $prevFile -Force -ErrorAction Stop
                     $backedUp = $true
@@ -1002,7 +1023,7 @@ function Save-CopypartyTools {
                     $backedUp = $true
                 }
             }
-        } elseif ((Test-Path -LiteralPath $outFile) -and -not (Test-LocalFileHash -Path $outFile -ExpectedHash $hash)) {
+        } elseif ($exists -and $isStale) {
             # A declined backup must not let Save-VerifiedFile delete the only
             # working copy before the download starts.
             Write-Detail "Kept the existing $name; backup declined, so the update is skipped."
