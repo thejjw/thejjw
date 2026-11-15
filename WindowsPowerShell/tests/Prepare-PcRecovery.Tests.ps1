@@ -798,6 +798,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match '\[Configuration\\Interface\]'
             $text | Should -Match 'RandomSeedFile=%WINSCP_PATH%\\winscp\.rnd'
             $text | Should -Match 'DDTemporaryDirectory=%WINSCP_PATH%\\temp\\'
+            $text | Should -Match '%TEMP%\\winscp\.log'
+            $text | Should -Match 'delete it after'
             $text | Should -Match 'Tools > Clean Up'
             $text | Should -Match '%WINSCP_PATH%\\\.\.\\\.\.\\putty\\bin\\PUTTY\.EXE'
             $text | Should -Match 'GPLv3'

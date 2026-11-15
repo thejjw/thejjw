@@ -519,7 +519,10 @@ STORAGE AND CLEANUP
   writable copy instead. Saved sessions, including passwords if you save them,
   live in .\bin\WinSCP.ini on the stick: do not save passwords on shared media,
   and delete bin before handing the stick over. With the settings above, the
-  seed and temp files also live under bin. On the host, Tools > Clean Up
+  GUI's seed and temp files also live under bin. WinSCP.com runs with
+  /ini=nul ignore those settings, and /log=%TEMP%\winscp.log writes a session
+  log (host names, user names, remote paths) to the host: delete it after
+  scripted runs. On the host, Tools > Clean Up
   on the Login dialog removes selected data (INI, registry configuration,
   sites, caches, seed file, temp folders); if WinSCP was already installed on
   this PC, untick the registry entries.
