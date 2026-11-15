@@ -922,7 +922,7 @@ function Invoke-Tiny11Build {
     if (-not $release) { return $false }
     $builderManual = @(
         'Download the builder by hand from ' + $script:Tiny11BuilderReleasesUrl + '.',
-        $script:MakerHintAdmin
+        "For the scripted build, save $($script:FileMaker) from $($script:Tiny11MakerUrl) into $builderDir."
     )
     if (-not $release.HashUrl) {
         Write-Failure -Name 'Tiny11 builder' -Detail 'Release has no published .sha256 sidecar.' -Manual $builderManual
