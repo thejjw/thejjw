@@ -428,10 +428,12 @@ USE (no install, no admin)
     .\bin\PLINK.EXE -V
   No install, PATH, or Start-menu changes. PuTTY still writes host keys and
   saved sessions to HKCU\Software\SimonTatham\PuTTY and a seed file to
-  %LOCALAPPDATA%\PUTTY.RND by default. Before deleting bin, run:
+  %LOCALAPPDATA%\PUTTY.RND by default. If PuTTY was never installed or used on
+  this machine, run this before deleting bin:
     .\bin\PUTTY.EXE -cleanup
-  That removes the current user's PuTTY settings and seed file (after a
-  confirmation prompt).
+  It removes ALL of the current user's PuTTY settings, including saved
+  sessions and known host keys from any installed copy (after a confirmation
+  prompt). Skip it if PuTTY was already in use here.
 
 TOOLS
   PUTTY.EXE    SSH, telnet, and serial GUI client (saved sessions).

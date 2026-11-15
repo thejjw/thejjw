@@ -766,6 +766,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'Get-FileHash'
             $text | Should -Match 'w64/putty\.zip'
             $text | Should -Match '%LOCALAPPDATA%\\PUTTY\.RND'
+            $text | Should -Match 'Skip it if PuTTY was already in use'
             $text | Should -Match 'not staged'
         }
     }
