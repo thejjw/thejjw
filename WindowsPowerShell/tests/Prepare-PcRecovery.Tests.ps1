@@ -863,6 +863,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'LINUX CLI'
             $text | Should -Match 'apt install'
             $text | Should -Match "dnf install --disablerepo='\*'"
+            $text | Should -Match 'If dnf is unavailable or fails'
             $text | Should -Match 'rpm -ivh'
             $text | Should -Match 'mktemp -d "\$HOME/duck\.XXXXXX"'
             $text | Should -Match 'data\.tar\.\*'
