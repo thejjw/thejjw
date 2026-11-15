@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip)' }, $true)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty)' }, $true)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -47,6 +47,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 FileCopypartySfx = 'copyparty-sfx.py'; FileCopypartyExe = 'copyparty.exe'; FileCopypartyTag = '.release'
                 PyVersion = '3.15.2'; FilePythonInstaller = 'python-3.15.2-amd64.exe'; FilePythonEmbed = 'python-3.15.2-embed-amd64.zip'
                 DirSevenZip = '7zip'; SevenZipVersion = '26.06'; FileSevenZipInstaller = '7z2606-x64.exe'; FileSevenZipExtra = '7z2606-extra.7z'; FileSevenZipBootstrap = '7zr-2606.exe'
+                DirPutty = 'putty'; PuttyVersion = '0.85'; FilePuttyZip = 'putty-0.85.zip'; FilePuttySums = 'putty-0.85-sha256sums.txt'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -692,8 +693,11 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:order[-1] | Should -Be $script:FilePythonInstaller
             $fedora = [array]::IndexOf($script:order, 'Fedora-Workstation-Live-45-1.4.x86_64.iso')
             $sevenZip = [array]::IndexOf($script:order, $script:FileSevenZipInstaller)
+            $putty = [array]::IndexOf($script:order, $script:FilePuttyZip)
             $sevenZip | Should -BeGreaterThan $fedora
             $sevenZip | Should -BeLessThan ([array]::IndexOf($script:order, $script:FilePythonEmbed))
+            $putty | Should -BeGreaterThan $fedora
+            $putty | Should -BeLessThan ([array]::IndexOf($script:order, $script:FilePythonEmbed))
         }
     }
 
@@ -733,6 +737,31 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text.Contains('$env:ProgramFiles\7-Zip\Uninstall.exe') | Should -BeTrue
             $text | Should -Match 'LGPL-2\.1-or-later'
             $text | Should -Match 'winget install --id 7zip\.7zip'
+        }
+    }
+
+    Context 'putty tools' {
+        It 'pins the portable bundle and its official checksum file' {
+            $row = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\putty' })
+            $row.Count | Should -Be 1
+            $row[0].HashKind | Should -Be 'Pinned'
+            $row[0].Hash | Should -Match '^[0-9a-f]{64}$'
+            $row[0].Url | Should -Match '^https://the\.earth\.li/~sgtatham/putty/0\.85/w64/putty\.zip$'
+            $row[0].FileName | Should -Be 'putty-0.85.zip'
+            $row[0].SidecarUrl | Should -Match '/0\.85/sha256sums$'
+            $row[0].SidecarName | Should -Be $script:FilePuttySums
+        }
+
+        It 'builds the topic readme from the catalog file names' {
+            $text = Get-PuttyReadmeText
+            $text.Contains($script:FilePuttyZip) | Should -BeTrue
+            $text.Contains($script:FilePuttySums) | Should -BeTrue
+            $text | Should -Match 'Expand-Archive'
+            $text | Should -Match 'PUTTY\.EXE'
+            $text | Should -Match 'PLINK\.EXE'
+            $text | Should -Match 'Authenticode-valid'
+            $text | Should -Match 'no install, no admin|no registry or PATH'
+            $text | Should -Match 'MIT licensed'
         }
     }
 
@@ -887,12 +916,18 @@ Describe 'Prepare-PcRecovery.ps1' {
             $pythonText.Contains($script:FilePythonEmbed) | Should -BeTrue
             $pythonText | Should -Match 'start "" /wait'
             $rootText | Should -Match '7zip'
+            $rootText | Should -Match 'putty'
             $sevenDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') '7zip'
             $sevenText = [IO.File]::ReadAllText((Join-Path $sevenDir 'README.txt'))
             $sevenText.Contains($script:FileSevenZipInstaller) | Should -BeTrue
             $sevenText.Contains($script:FileSevenZipExtra) | Should -BeTrue
             $sevenText.Contains($script:FileSevenZipBootstrap) | Should -BeTrue
             $sevenText | Should -Match '/S'
+            $puttyDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'putty'
+            $puttyText = [IO.File]::ReadAllText((Join-Path $puttyDir 'README.txt'))
+            $puttyText.Contains($script:FilePuttyZip) | Should -BeTrue
+            $puttyText.Contains($script:FilePuttySums) | Should -BeTrue
+            $puttyText | Should -Match 'Expand-Archive'
             $isosText = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'isos') 'README.txt'))
             $isosText | Should -Match 'HBCD_PE_x64.iso'
             $isosText | Should -Match 'Windows PE rescue environment'
@@ -906,6 +941,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match '04-etc\\7zip\\7z2606-x64\.exe'
             $isosText | Should -Match '04-etc\\7zip\\7z2606-extra\.7z'
             $isosText | Should -Match '04-etc\\7zip\\7zr-2606\.exe'
+            $isosText | Should -Match '04-etc\\putty\\putty-0\.85\.zip'
             $isosText | Should -Match 'v1\.20\.26'
             $isosText | Should -Match 'copyparty \(copyparty-sfx\.py, not verified this run\)'
             $isosText | Should -Match 'SHA-256 \(on disk at write time\)'

@@ -102,6 +102,7 @@ $script:DirBuilder = 'tiny11builder'
 $script:DirCopyparty = 'copyparty'
 $script:DirPython = 'python'
 $script:DirSevenZip = '7zip'
+$script:DirPutty = 'putty'
 $script:PyVersion = '3.15.2'
 $script:PyUrlBase = 'https://www.python.org/ftp/python/' + $script:PyVersion + '/'
 $script:FilePythonInstaller = 'python-' + $script:PyVersion + '-amd64.exe'
@@ -111,6 +112,10 @@ $script:SevenZipUrlBase = 'https://github.com/ip7z/7zip/releases/download/' + $s
 $script:FileSevenZipInstaller = '7z' + $script:SevenZipVersion.Replace('.', '') + '-x64.exe'
 $script:FileSevenZipExtra = '7z' + $script:SevenZipVersion.Replace('.', '') + '-extra.7z'
 $script:FileSevenZipBootstrap = '7zr-' + $script:SevenZipVersion.Replace('.', '') + '.exe'
+$script:PuttyVersion = '0.85'
+$script:PuttyUrlBase = 'https://the.earth.li/~sgtatham/putty/' + $script:PuttyVersion + '/w64/'
+$script:FilePuttyZip = 'putty-' + $script:PuttyVersion + '.zip'
+$script:FilePuttySums = 'putty-' + $script:PuttyVersion + '-sha256sums.txt'
 $script:FileVentoyExe = 'Ventoy2Disk.exe'
 $script:FileFido = 'Fido.ps1'
 $script:FileRufusPatternNote = 'rufus-.*p\.exe'
@@ -174,7 +179,7 @@ STRUCTURE
                      Fedora, the Windows 11 ISO (Fido's Win11_*.iso name or
                      the official en-us_windows_11_*.iso name), tiny11\.
   isos\04-etc\       Post-boot utilities by topic: copyparty\ (portable file
-                     server), python\ (Windows x64), 7zip\ (extractor).
+                     server), python\ (Windows x64), 7zip\ (extractor), putty\.
   isos\README.txt    Per-folder contents, sizes, and re-verify notes.
 
 WINDOWS 11 ISO
@@ -219,7 +224,7 @@ FOLDERS
   01-Network\    Small network-boot images and bootloaders.
   02-Rescue\     Offline-capable rescue and imaging environments.
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
-  04-etc\        Post-boot utilities by topic: copyparty\, python\, 7zip\.
+  04-etc\        Post-boot utilities by topic: copyparty\, python\, 7zip\, putty\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
@@ -399,6 +404,54 @@ NOTES
     winget install --id 7zip.7zip -e --accept-package-agreements --accept-source-agreements
 '@
     return $text.Replace('7ZINST', $script:FileSevenZipInstaller).Replace('7ZEXTRA', $script:FileSevenZipExtra).Replace('7ZR', $script:FileSevenZipBootstrap).Replace('7ZVER', $script:SevenZipVersion)
+}
+
+# Offline PuTTY sheet for isos\04-etc\putty\. One portable zip keeps the tools
+# together without install, registry, or PATH changes; the sums file sits next
+# to it for a manual re-check.
+function Get-PuttyReadmeText {
+    $text = @'
+PUTTY FOR WINDOWS (offline)
+===========================
+This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+
+FILES
+  PUTTYZIP   portable bundle, about 3.9 MB; all tools, no installer.
+  PUTTYSUMS  official checksums; GPG-signed upstream.
+
+USE (no install, no admin)
+  Extract beside this file:
+    PowerShell:  Expand-Archive .\PUTTYZIP -DestinationPath .\bin
+    Explorer:    right-click PUTTYZIP, choose Extract All, target .\bin
+  Then run:
+    .\bin\PUTTY.EXE
+    .\bin\PLINK.EXE -V
+  Nothing is registered: no PATH, Start-menu, or registry changes. Delete the
+  bin folder to remove every trace.
+
+TOOLS
+  PUTTY.EXE    SSH, telnet, and serial GUI client (saved sessions).
+  PLINK.EXE    Scripted SSH, suitable for batch files.
+  PSCP.EXE     SCP file copy; PSFTP.EXE is the SFTP counterpart.
+  PUTTYGEN.EXE Key generation; PAGEANT.EXE holds keys for the session.
+  PUTTY.CHM    Built-in help.
+
+INTEGRITY
+  SHA-256 is pinned from the official sha256sums. The executables are
+  Authenticode-valid with Simon Tatham as signer, and the sums file is
+  GPG-signed upstream (verify with gpg when available). On the first
+  connection, compare the host-key fingerprint through a second channel.
+
+NOTES
+  - Telnet is plaintext; prefer SSH when the peer supports it.
+  - Serial mode needs the COM port number (Device Manager, or the adapter's
+    documentation); 115200 8N1 is a common default.
+  - x64 runs on Windows 11 ARM through emulation; WinPE is untested.
+  - MIT licensed. After a version bump the old putty-* zip stays in place;
+    delete the previous one.
+
+'@
+    return $text.Replace('PUTTYSUMS', $script:FilePuttySums).Replace('PUTTYZIP', $script:FilePuttyZip)
 }
 
 # -----------------------------------------------------------------------------
@@ -779,7 +832,8 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'Python 3.15 Windows embeddable'; Category = '04-etc\python'; FileName = $script:FilePythonEmbed; Url = ($script:PyUrlBase + $script:FilePythonEmbed); AlternateUrl = ''; Hash = 'd012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Extract-and-run CPython for Windows 10/11 x64: sqlite3 and ssl, no pip/venv/tkinter; runs copyparty-sfx.py without installation.'; Released = 'Version 3.15.2, October 2026.'; SizeNote = 'About 13 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash; python.exe inside the zip is signed by the Python Software Foundation. Download ' + $script:PyUrlBase + $script:FilePythonEmbed + ' into isos\04-etc\python\ by hand; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = '7-Zip 26.06 Windows installer'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipInstaller; Url = ($script:SevenZipUrlBase + $script:FileSevenZipInstaller); AlternateUrl = ('https://www.7-zip.org/a/' + $script:FileSevenZipInstaller); Hash = '9b697f65ecc2d9b0152f5ee96d72dde522a7827690349d9307935dacf40f42ec'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'x64 Windows installer for the 7z/zip/iso extractor; installs to Program Files and elevates itself.'; Released = 'Version 26.06, November 2026 (1,659,704 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 1.6 MB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06) equals the winget 7zip.7zip InstallerSha256 and the 7-zip.org copy; unsigned, so NotSigned is expected. Download ' + $script:SevenZipUrlBase + $script:FileSevenZipInstaller + ' into isos\04-etc\7zip\ by hand; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = '7-Zip 26.06 portable extras'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipExtra; Url = ($script:SevenZipUrlBase + $script:FileSevenZipExtra); AlternateUrl = ''; Hash = '396c180f12d2247c24b0b1fcd482c6fc2a2700f61211ffede1061dd971f5e104'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = ('Portable archive with a standalone 7za.exe (zip/gz/tar/xz/bz2) that needs no admin install; unpack with ' + $script:FileSevenZipBootstrap + '.'); Released = 'Version 26.06, November 2026 (1,758,340 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 1.7 MB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06); unsigned, so NotSigned is expected; GitHub-only (7-zip.org has no copy). Download ' + $script:SevenZipUrlBase + $script:FileSevenZipExtra + ' into isos\04-etc\7zip\ by hand; the next run verifies it against the pinned hash and skips it.' },
-        [pscustomobject]@{ Name = '7-Zip 26.06 bootstrap extractor'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipBootstrap; Url = ($script:SevenZipUrlBase + '7zr.exe'); AlternateUrl = ''; Hash = 'e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = '7zr.exe: .7z-only extractor used to unpack the extra package without installing 7-Zip.'; Released = 'Version 26.06, November 2026 (600,064 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 600 KB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06); unsigned, so NotSigned is expected; GitHub-only (the 7-zip.org 7zr.exe is a different build). Download ' + $script:SevenZipUrlBase + '7zr.exe' + ' into isos\04-etc\7zip\ by hand and save it as ' + $script:FileSevenZipBootstrap + '; the next run verifies it against the pinned hash and skips it.' }
+        [pscustomobject]@{ Name = '7-Zip 26.06 bootstrap extractor'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipBootstrap; Url = ($script:SevenZipUrlBase + '7zr.exe'); AlternateUrl = ''; Hash = 'e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = '7zr.exe: .7z-only extractor used to unpack the extra package without installing 7-Zip.'; Released = 'Version 26.06, November 2026 (600,064 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 600 KB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06); unsigned, so NotSigned is expected; GitHub-only (the 7-zip.org 7zr.exe is a different build). Download ' + $script:SevenZipUrlBase + '7zr.exe' + ' into isos\04-etc\7zip\ by hand and save it as ' + $script:FileSevenZipBootstrap + '; the next run verifies it against the pinned hash and skips it.' },
+        [pscustomobject]@{ Name = 'PuTTY 0.85 portable bundle'; Category = '04-etc\putty'; FileName = $script:FilePuttyZip; Url = ($script:PuttyUrlBase + 'putty.zip'); AlternateUrl = ''; Hash = 'e0b36e5381ecc78dd06a291bab25fb9d95bc991d0d864cf2741a5bde82816668'; SidecarUrl = ('https://the.earth.li/~sgtatham/putty/' + $script:PuttyVersion + '/sha256sums'); SidecarName = $script:FilePuttySums; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable SSH/telnet/serial bundle: putty, plink, pscp, psftp, puttygen, pageant.'; Released = 'Version 0.85, August 2026 (4,096,601 bytes; binaries signed by Simon Tatham).'; SizeNote = 'About 3.9 MB.'; Check = 'Official sha256sums (GPG-signed) matches; binaries Authenticode-valid, signer Simon Tatham. Download ' + $script:PuttyUrlBase + 'putty.zip' + ' into isos\04-etc\putty\ by hand and save it as ' + $script:FilePuttyZip + '; the next run verifies it against the pinned hash and skips it.' }
     )
 }
 
@@ -1587,10 +1641,12 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirSevenZip)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPutty)
         Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython) $script:FileReadme) -Text (Get-PythonReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirSevenZip) $script:FileReadme) -Text (Get-SevenZipReadmeText)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPutty) $script:FileReadme) -Text (Get-PuttyReadmeText)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null
