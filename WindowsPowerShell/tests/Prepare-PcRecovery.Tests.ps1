@@ -56,6 +56,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:MakerHintSudo | Should -Match 'Enable-WindowsSudo'
             ($script:MakerHintManual -f 'X.iso') | Should -Match 'Mount X\.iso'
             $script:MakerHintManual | Should -Match 'winui-preview/autounattend\.xml'
+            $script:MakerHintManual | Should -Match 'winui-preview/tiny11maker\.ps1'
             $script:MakerHintManual | Should -Match '03-Installers\\tiny11'
         }
     }
@@ -454,6 +455,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Save-VerifiedFile { return $true }
             Mock Expand-Archive { }
             Mock Invoke-FileDownload { return $false }
+            Mock Test-IsAdministrator { $false }
             Invoke-Tiny11Build -Root $root | Should -BeFalse
             $script:Failures.Name | Should -Contain 'Tiny11 builder'
             $script:Failures[-1].Manual | Should -Match 'Enable-WindowsSudo'
@@ -473,6 +475,21 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'm' -NoNewline; return $true }
             Invoke-Tiny11Build -Root $root -Elevate | Should -BeFalse
             $script:Failures[-1].Manual | Should -Match 'tiny11maker'
+            $script:Failures[-1].Manual | Should -Not -Match 'Enable-WindowsSudo'
+        }
+
+        It 'drops the admin hint when the maker download fails in an elevated shell' {
+            Reset-State
+            $root = Join-Path $TestDrive 'nomakeradmin'
+            Mock Test-IsAdministrator { $true }
+            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = 'https://example.invalid/b.zip.sha256' } }
+            Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
+            Mock Save-VerifiedFile { return $true }
+            Mock Expand-Archive { }
+            Mock Invoke-FileDownload { return $false }
+            Invoke-Tiny11Build -Root $root -Elevate | Should -BeFalse
+            $script:Failures.Name | Should -Contain 'Tiny11 builder'
+            $script:Failures[-1].Manual | Should -Match 're-run this script'
             $script:Failures[-1].Manual | Should -Not -Match 'Enable-WindowsSudo'
         }
 
