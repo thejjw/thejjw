@@ -1,7 +1,7 @@
 Describe 'Prepare-PcRecovery.ps1' {
     BeforeAll {
         # Load only the function definitions from the util script (no execution, no side effects).
-        $scriptPath = Join-Path $PSScriptRoot '..\util\Prepare-PcRecovery.ps1'
+        $scriptPath = Join-Path $PSScriptRoot '..\util\Prepare-PcRecovery\Prepare-PcRecovery.ps1'
         $tokens = $null
         $errors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)

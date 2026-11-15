@@ -144,7 +144,7 @@ function Get-RootReadmeText {
 PC RECOVERY USB - download tree
 ================================
 This file was written $WrittenUtc.
-Built by util/Prepare-PcRecovery.ps1. Re-running the script is safe: files
+Built by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1. Re-running the script is safe: files
 that already match their expected hash are skipped, interrupted downloads
 resume from their .partial file.
 
@@ -221,7 +221,7 @@ function Get-CopypartyReadmeText {
     @'
 COPYPARTY - portable file server
 ================================
-This file was written by util/Prepare-PcRecovery.ps1; re-runs replace it.
+This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
 
 FILES
   copyparty-sfx.py  Linux / macOS. Needs Python 2 or 3 (live images usually
