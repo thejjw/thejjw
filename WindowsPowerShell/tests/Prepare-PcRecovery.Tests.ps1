@@ -801,6 +801,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match '%TEMP%\\winscp\.log'
             $text | Should -Match 'delete it after'
             $text | Should -Match 'Tools > Clean Up'
+            $text | Should -Match 'Tools > Import Sites'
+            $text | Should -Match 'Integration > Applications > PuTTY/Terminal Client Path'
             $text | Should -Match '%WINSCP_PATH%\\\.\.\\\.\.\\putty\\bin\\PUTTY\.EXE'
             $text | Should -Match 'GPLv3'
         }

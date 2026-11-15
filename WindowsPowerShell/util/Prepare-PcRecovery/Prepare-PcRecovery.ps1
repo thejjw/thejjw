@@ -503,7 +503,7 @@ PROTOCOLS
 
 PUTTY INTEGRATION
   Import existing PuTTY sessions with Tools > Import Sites. For "Open in PuTTY",
-  set Preferences > Integration > Applications > PuTTY path to
+  set Preferences > Integration > Applications > PuTTY/Terminal Client Path to
   %WINSCP_PATH%\..\..\putty\bin\PUTTY.EXE.
   PuTTY remains the terminal/serial/key tool; WinSCP is the file manager.
 
