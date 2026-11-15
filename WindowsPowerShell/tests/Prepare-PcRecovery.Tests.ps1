@@ -415,6 +415,51 @@ Describe 'Prepare-PcRecovery.ps1' {
             @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 1
         }
 
+        It 'leaves the old build untouched when it cannot be moved aside' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpmovefail'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath $exe -Value 'old-build' -NoNewline
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Move-Item { throw 'locked' } -ParameterFilter { $Destination -like '*.prev' }
+            $script:svCalls = @()
+            Mock Save-VerifiedFile { $script:svCalls += $Name; Set-Content -LiteralPath $OutFile -Value 'x' -NoNewline; return $true }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'old-build'
+            $script:svCalls | Should -Not -Contain 'copyparty.exe'
+            $script:Failures.Name | Should -Contain 'copyparty.exe'
+            @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 0
+        }
+
+        It 'keeps .prev when the restore move fails' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cprestorefail'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath $exe -Value 'old-build' -NoNewline
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Invoke-Cli { [pscustomobject]@{ ExitCode = 22; StdOut = ''; StdErr = 'HTTP 404' } }
+            $script:moves = 0
+            Mock Move-Item {
+                $script:moves++
+                if ($script:moves -ge 2) { throw 'locked' }
+                [IO.File]::Move($LiteralPath, $Destination)
+            }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            Test-Path -LiteralPath $exe | Should -BeFalse
+            (Get-Content -LiteralPath "$exe.prev" -Raw).Trim() | Should -Be 'old-build'
+            @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 0
+        }
+
         It 'records a failure when an asset is missing from the release' {
             Reset-State
             $root = Join-Path $TestDrive 'cpnoasset'
