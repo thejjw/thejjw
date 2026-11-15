@@ -104,6 +104,7 @@ $script:DirPython = 'python'
 $script:DirSevenZip = '7zip'
 $script:DirPutty = 'putty'
 $script:DirWinScp = 'winscp'
+$script:DirCyberduck = 'cyberduck'
 $script:PyVersion = '3.15.2'
 $script:PyUrlBase = 'https://www.python.org/ftp/python/' + $script:PyVersion + '/'
 $script:FilePythonInstaller = 'python-' + $script:PyVersion + '-amd64.exe'
@@ -120,6 +121,11 @@ $script:FilePuttySums = 'putty-' + $script:PuttyVersion + '-sha256sums.txt'
 $script:WinScpVersion = '6.7.1'
 $script:WinScpUrlBase = 'https://sourceforge.net/projects/winscp/files/WinSCP/' + $script:WinScpVersion + '/'
 $script:FileWinScpPortable = 'WinSCP-' + $script:WinScpVersion + '-Portable.zip'
+$script:CyberduckVersion = '9.6.0.46406'
+$script:CyberduckUrlBase = 'https://update.cyberduck.io/release/'
+$script:CyberduckGitHubUrlBase = 'https://github.com/iterate-ch/cyberduck/releases/download/release-9-6-0/'
+$script:FileCyberduckInstaller = 'Cyberduck-Installer-' + $script:CyberduckVersion + '.exe'
+$script:CyberduckDownloadPage = 'https://cyberduck.io/download/'
 $script:FileVentoyExe = 'Ventoy2Disk.exe'
 $script:FileFido = 'Fido.ps1'
 $script:FileRufusPatternNote = 'rufus-.*p\.exe'
@@ -183,8 +189,9 @@ STRUCTURE
                      Fedora, the Windows 11 ISO (Fido's Win11_*.iso name or
                      the official en-us_windows_11_*.iso name), tiny11\.
   isos\04-etc\       Post-boot utilities by topic: copyparty\ (portable file
-                     server), python\ (Windows x64), 7zip\ (extractor),
-                     putty\, winscp\ (transfer clients).
+                     server), cyberduck\ (cloud/SFTP client installer),
+                     python\ (Windows x64), 7zip\ (extractor), putty\,
+                     winscp\ (transfer clients).
   isos\README.txt    Per-folder contents, sizes, and re-verify notes.
 
 WINDOWS 11 ISO
@@ -229,8 +236,8 @@ FOLDERS
   01-Network\    Small network-boot images and bootloaders.
   02-Rescue\     Offline-capable rescue and imaging environments.
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
-  04-etc\        Post-boot utilities by topic: copyparty\, python\, 7zip\,
-                 putty\, winscp\.
+  04-etc\        Post-boot utilities by topic: copyparty\, cyberduck\,
+                 python\, 7zip\, putty\, winscp\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
@@ -545,6 +552,55 @@ NOTES
 
 '@
     return $text.Replace('WINSZIP', $script:FileWinScpPortable).Replace('WINSVER', $script:WinScpVersion)
+}
+
+# Offline Cyberduck sheet for isos\04-etc\cyberduck\. Windows needs an installer
+# (no portable build); macOS/Linux builds exist upstream but are not stored here.
+function Get-CyberduckReadmeText {
+    $text = @'
+CYBERDUCK FOR WINDOWS (offline installer)
+=========================================
+This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+
+FILES
+  CYBERINSTALLER   Windows x64 installer, about 88 MB.
+
+INSTALL
+  Double-click CYBERINSTALLER and follow the wizard. For an unattended
+  install, run:
+    .\CYBERINSTALLER /s
+  Windows 10 64-bit or later. Uninstall from Settings > Apps.
+  Cyberduck publishes no portable Windows build: this is an installer, not an
+  extract-and-run tool. macOS and Linux builds are on the download page.
+
+PROTOCOLS
+  SFTP, FTP/FTPS, WebDAV, S3, Azure Blob, Backblaze B2, Google Drive, Dropbox,
+  OneDrive, SharePoint, and OpenStack Swift; bookmarks, synchronize, and a
+  transfer queue.
+
+COMPARED WITH WINSCP
+  WinSCP in ..\winscp\ is portable and Windows-only, with WinSCP.com scripting.
+  Cyberduck needs an install but adds cloud backends and runs on macOS and
+  Linux. Use WinSCP for a no-install transfer; use Cyberduck when you need the
+  cloud services or a client on another OS.
+
+INTEGRITY
+  SHA-256 is pinned from the official cyberduck.io download page and matches
+  the GitHub release asset digest. The installer is Authenticode-valid with
+  iterate GmbH as signer. Check by hand with
+    Get-FileHash .\CYBERINSTALLER -Algorithm SHA256
+    Get-AuthenticodeSignature .\CYBERINSTALLER
+  and compare with https://cyberduck.io/download/.
+
+NOTES
+  - GPLv3. The app shows a donation prompt; a contributor key or a store
+    purchase disables it.
+  - The Microsoft Store build is not an offline file; this installer is.
+  - After a version bump the old Cyberduck-* installer stays in place; delete
+    the previous one.
+
+'@
+    return $text.Replace('CYBERINSTALLER', $script:FileCyberduckInstaller)
 }
 
 # -----------------------------------------------------------------------------
@@ -928,6 +984,7 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = '7-Zip 26.06 bootstrap extractor'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipBootstrap; Url = ($script:SevenZipUrlBase + '7zr.exe'); AlternateUrl = ''; Hash = 'e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = '7zr.exe: .7z-only extractor used to unpack the extra package without installing 7-Zip.'; Released = 'Version 26.06, November 2026 (600,064 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 600 KB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06); unsigned, so NotSigned is expected; GitHub-only (the 7-zip.org 7zr.exe is a different build). Download ' + $script:SevenZipUrlBase + '7zr.exe' + ' into isos\04-etc\7zip\ by hand and save it as ' + $script:FileSevenZipBootstrap + '; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = 'PuTTY 0.85 portable bundle'; Category = '04-etc\putty'; FileName = $script:FilePuttyZip; Url = ($script:PuttyUrlBase + 'putty.zip'); AlternateUrl = ''; Hash = 'e0b36e5381ecc78dd06a291bab25fb9d95bc991d0d864cf2741a5bde82816668'; SidecarUrl = ('https://the.earth.li/~sgtatham/putty/' + $script:PuttyVersion + '/sha256sums'); SidecarName = $script:FilePuttySums; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable SSH/telnet/serial bundle: putty, plink, pscp, psftp, puttygen, pageant.'; Released = 'Version 0.85, August 2026 (4,096,601 bytes; binaries signed by Simon Tatham).'; SizeNote = 'About 3.9 MB.'; Check = 'Official sha256sums (GPG-signed) matches; binaries Authenticode-valid, signer Simon Tatham. Download ' + $script:PuttyUrlBase + 'putty.zip' + ' into isos\04-etc\putty\ by hand and save it as ' + $script:FilePuttyZip + '; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = 'WinSCP 6.7.1 portable'; Category = '04-etc\winscp'; FileName = $script:FileWinScpPortable; Url = ($script:WinScpUrlBase + $script:FileWinScpPortable + '/download'); AlternateUrl = ''; Hash = 'e6d2f8e1249e41f3bf8638319bb9bd15a541a64720df0805cb0bebdedb5eda83'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'GUI SFTP/SCP/FTP/FTPS/WebDAV/S3 client with synchronize, a resumable transfer queue, remote editing, and WinSCP.com scripting.'; Released = 'Version 6.7.1, November 2026 (8,833,106 bytes; WinSCP.exe and WinSCP.com signed by Martin Prikryl).'; SizeNote = 'About 8.4 MB (extracts to about 20 MB).'; Check = 'SHA-256 matches WinSCP-6.7.1-ReadMe.txt (winscp.net); the zip is unsigned, and the executables inside are Authenticode-valid with Martin Prikryl as signer. Download ' + $script:WinScpUrlBase + $script:FileWinScpPortable + '/download' + ' into isos\04-etc\winscp\ by hand; the next run verifies it against the pinned hash and skips it.' }
+        [pscustomobject]@{ Name = 'Cyberduck 9.6.0 Windows installer'; Category = '04-etc\cyberduck'; FileName = $script:FileCyberduckInstaller; Url = ($script:CyberduckUrlBase + $script:FileCyberduckInstaller); AlternateUrl = ($script:CyberduckGitHubUrlBase + $script:FileCyberduckInstaller); Hash = '9a66f8fb400feaa5f7f390f9e4100e873f6be06cbf7c61f1651fca8b1f31c930'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'GUI browser for SFTP, FTP/FTPS, WebDAV, S3, Azure, Backblaze B2, Google Drive, Dropbox, OneDrive, and SharePoint; Windows installer, no portable build.'; Released = 'Version 9.6.0 (build 46406), November 2026 (92,009,848 bytes; Authenticode-valid, signed by iterate GmbH).'; SizeNote = 'About 88 MB.'; Check = 'SHA-256 matches the official cyberduck.io download page and the GitHub asset digest; the installer is Authenticode-valid with iterate GmbH as signer. Download ' + $script:CyberduckUrlBase + $script:FileCyberduckInstaller + ' into isos\04-etc\cyberduck\ by hand; the next run verifies it against the pinned hash and skips it.' }
     )
 }
 
@@ -1737,12 +1794,14 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirSevenZip)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPutty)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirWinScp)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck)
         Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython) $script:FileReadme) -Text (Get-PythonReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirSevenZip) $script:FileReadme) -Text (Get-SevenZipReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPutty) $script:FileReadme) -Text (Get-PuttyReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirWinScp) $script:FileReadme) -Text (Get-WinScpReadmeText)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck) $script:FileReadme) -Text (Get-CyberduckReadmeText)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null

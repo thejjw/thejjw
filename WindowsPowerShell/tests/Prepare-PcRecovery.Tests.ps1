@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp)' }, $true)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck)' }, $true)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -49,6 +49,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 DirSevenZip = '7zip'; SevenZipVersion = '26.06'; FileSevenZipInstaller = '7z2606-x64.exe'; FileSevenZipExtra = '7z2606-extra.7z'; FileSevenZipBootstrap = '7zr-2606.exe'
                 DirPutty = 'putty'; PuttyVersion = '0.85'; FilePuttyZip = 'putty-0.85.zip'; FilePuttySums = 'putty-0.85-sha256sums.txt'
                 DirWinScp = 'winscp'; WinScpVersion = '6.7.1'; FileWinScpPortable = 'WinSCP-6.7.1-Portable.zip'
+                DirCyberduck = 'cyberduck'; CyberduckVersion = '9.6.0.46406'; FileCyberduckInstaller = 'Cyberduck-Installer-9.6.0.46406.exe'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -57,6 +58,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:MsDownloadPage | Should -Match '^https://'
             $script:CopypartyApiUrl | Should -Match '^https://api\.github\.com/'
             $script:CopypartyReleasesUrl | Should -Match '^https://github\.com/'
+            $script:CyberduckDownloadPage | Should -Match '^https://cyberduck\.io/'
             $script:ThirdPartyTip | Should -Not -BeNullOrEmpty
             $script:WinIsoNaming | Should -Match 'Win11_'
             $script:MakerHintAdmin | Should -Match 'Enable-WindowsSudo'
@@ -91,6 +93,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $names | Should -Contain '02-Rescue'
             $names | Should -Contain '03-Installers'
             $names | Should -Contain '04-etc\python'
+            $names | Should -Contain '04-etc\cyberduck'
             foreach ($name in $names) { $name | Should -Match '^\d\d-[A-Za-z]+(\\[a-z0-9-]+)?$' }
         }
 
@@ -697,10 +700,13 @@ Describe 'Prepare-PcRecovery.ps1' {
             $winScp = [array]::IndexOf($script:order, $script:FileWinScpPortable)
             $sevenZip = [array]::IndexOf($script:order, $script:FileSevenZipInstaller)
             $putty = [array]::IndexOf($script:order, $script:FilePuttyZip)
+            $cyberduck = [array]::IndexOf($script:order, $script:FileCyberduckInstaller)
             $sevenZip | Should -BeGreaterThan $fedora
             $sevenZip | Should -BeLessThan $pythonEmbed
             $putty | Should -BeGreaterThan $fedora
             $putty | Should -BeLessThan $pythonEmbed
+            $cyberduck | Should -BeGreaterThan $fedora
+            $cyberduck | Should -BeLessThan $pythonEmbed
             $pythonEmbed | Should -BeGreaterThan $fedora
             $pythonInstaller | Should -BeGreaterThan $pythonEmbed
             $winScp | Should -BeGreaterThan $pythonInstaller
@@ -814,6 +820,30 @@ Describe 'Prepare-PcRecovery.ps1' {
             $settings | Should -BeGreaterThan -1
             $launch | Should -BeGreaterThan -1
             $settings | Should -BeLessThan $launch
+        }
+    }
+
+    Context 'cyberduck tools' {
+        It 'pins the Windows installer and records the signed upstream' {
+            $row = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\cyberduck' })
+            $row.Count | Should -Be 1
+            $row[0].HashKind | Should -Be 'Pinned'
+            $row[0].Hash | Should -Be '9a66f8fb400feaa5f7f390f9e4100e873f6be06cbf7c61f1651fca8b1f31c930'
+            $row[0].FileName | Should -Be $script:FileCyberduckInstaller
+            $row[0].Url | Should -Be ('https://update.cyberduck.io/release/' + $script:FileCyberduckInstaller)
+            $row[0].AlternateUrl | Should -Match 'github\.com/iterate-ch/cyberduck/releases/download/release-9-6-0/'
+            $row[0].Released | Should -Match 'iterate GmbH'
+        }
+
+        It 'builds the topic readme with the install and integrity steps' {
+            $text = Get-CyberduckReadmeText
+            $text.Contains($script:FileCyberduckInstaller) | Should -BeTrue
+            $text | Should -Match '\.exe /s'
+            $text | Should -Match 'Get-FileHash'
+            $text | Should -Match 'Get-AuthenticodeSignature'
+            $text | Should -Match 'iterate GmbH'
+            $text | Should -Match 'no portable Windows build'
+            $text | Should -Match 'GPLv3'
         }
     }
 
@@ -981,6 +1011,12 @@ Describe 'Prepare-PcRecovery.ps1' {
             $puttyText.Contains($script:FilePuttySums) | Should -BeTrue
             $puttyText | Should -Match 'Expand-Archive'
             $rootText | Should -Match 'winscp'
+            $rootText | Should -Match 'cyberduck'
+            $cyberduckDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'cyberduck'
+            $cyberduckText = [IO.File]::ReadAllText((Join-Path $cyberduckDir 'README.txt'))
+            $cyberduckText.Contains($script:FileCyberduckInstaller) | Should -BeTrue
+            $cyberduckText | Should -Match 'no portable Windows build'
+            $cyberduckText | Should -Match 'Get-AuthenticodeSignature'
             $winScpDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'winscp'
             $winScpText = [IO.File]::ReadAllText((Join-Path $winScpDir 'README.txt'))
             $winScpText.Contains($script:FileWinScpPortable) | Should -BeTrue
@@ -1001,6 +1037,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match '04-etc\\7zip\\7zr-2606\.exe'
             $isosText | Should -Match '04-etc\\putty\\putty-0\.85\.zip'
             $isosText | Should -Match '04-etc\\winscp\\WinSCP-6\.7\.1-Portable\.zip'
+            $isosText | Should -Match '04-etc\\cyberduck\\Cyberduck-Installer-9\.6\.0\.46406\.exe'
             $isosText | Should -Match 'v1\.20\.26'
             $isosText | Should -Match 'copyparty \(copyparty-sfx\.py, not verified this run\)'
             $isosText | Should -Match 'SHA-256 \(on disk at write time\)'
