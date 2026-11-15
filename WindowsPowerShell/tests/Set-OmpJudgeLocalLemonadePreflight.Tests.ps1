@@ -16,7 +16,7 @@ Describe 'Lemonade prerequisite handling' {
     }
     It 'stops before probing Lemonade when omp is missing' {
         Mock Initialize-Lemonade { throw 'Unexpected probe' }
-        { Invoke-Setup } | Should -Throw $AbortToken
+        { Invoke-Setup } | Should -Throw $script:AbortToken
         Should -Invoke Initialize-Lemonade -Times 0
     }
     It 'stops before probing Lemonade when omp fails' {
@@ -40,7 +40,7 @@ Describe 'Lemonade prerequisite handling' {
     It 'does not reinstall a damaged registered installation' {
         Mock Get-LemonadeInstallRoots { 'C:\missing-install' }
         Mock Test-Path { $false }
-        { Find-Lemonade } | Should -Throw $AbortToken
+        { Find-Lemonade } | Should -Throw $script:AbortToken
     }
     It 'suppresses prompting in noninteractive mode' {
         $script:NonInteractive = $true
@@ -51,20 +51,20 @@ Describe 'Lemonade prerequisite handling' {
         Mock Find-Lemonade { $null }
         Mock Get-LemonadeEligibility { [pscustomobject]@{Eligible=$false;Reason='No AMD GPU'} }
         Mock Confirm-LemonadeInstall { throw 'Unexpected prompt' }
-        { Initialize-Lemonade } | Should -Throw $AbortToken
+        { Initialize-Lemonade } | Should -Throw $script:AbortToken
         Should -Invoke Confirm-LemonadeInstall -Times 0
     }
     It 'stops when winget is missing' {
         Mock Find-Lemonade { $null }
         Mock Confirm-LemonadeInstall { throw 'Unexpected prompt' }
-        { Initialize-Lemonade } | Should -Throw $AbortToken
+        { Initialize-Lemonade } | Should -Throw $script:AbortToken
         Should -Invoke Confirm-LemonadeInstall -Times 0
     }
     It 'stops on refusal without starting an installer' {
         Mock Find-Lemonade { $null }
         Mock Get-Command { [pscustomobject]@{Source='installer-must-not-run.exe'} }
         Mock Confirm-LemonadeInstall { $false }
-        { Initialize-Lemonade } | Should -Throw $AbortToken
+        { Initialize-Lemonade } | Should -Throw $script:AbortToken
         Should -Invoke Start-Process -Times 0
     }
     It 'continues with valid status from an existing installation' {
@@ -76,7 +76,7 @@ Describe 'Lemonade prerequisite handling' {
     It 'stops on unreachable existing server without launching it' {
         Mock Find-Lemonade { 'C:\custom\lemonade.exe' }
         Mock Invoke-LemonadeStatus { [pscustomobject]@{ExitCode=1;StdOut='';StdErr='offline'} }
-        { Initialize-Lemonade } | Should -Throw $AbortToken
+        { Initialize-Lemonade } | Should -Throw $script:AbortToken
         Should -Invoke Start-Process -Times 0
     }
     It 'stops after installer failure' {
@@ -84,7 +84,7 @@ Describe 'Lemonade prerequisite handling' {
         Mock Get-Command { [pscustomobject]@{Source='winget.exe'} }
         Mock Confirm-LemonadeInstall { $true }
         Mock Install-Lemonade { 3010 }
-        { Initialize-Lemonade } | Should -Throw $AbortToken
+        { Initialize-Lemonade } | Should -Throw $script:AbortToken
         Should -Invoke Install-Lemonade -Times 1
     }
     It 'rediscovers and continues after installation' {
@@ -103,7 +103,7 @@ Describe 'Lemonade prerequisite handling' {
         Mock Get-Command { [pscustomobject]@{Source='winget.exe'} }
         Mock Confirm-LemonadeInstall { $true }
         Mock Install-Lemonade { 0 }
-        { Initialize-Lemonade } | Should -Throw $AbortToken
+        { Initialize-Lemonade } | Should -Throw $script:AbortToken
     }
     It 'classifies graphics health (<Name>)' -TestCases @(
         @{Name='AMD integrated';Vendor='PCI\VEN_1002';Code=0;Driver='1';Expected=$true}
@@ -143,7 +143,7 @@ Describe 'Lemonade prerequisite handling' {
         Mock Start-Process { }
         Mock Start-Sleep { }
         $clock=[Diagnostics.Stopwatch]::StartNew()
-        { Initialize-Lemonade -StartupTimeoutSeconds 0.1 } | Should -Throw $AbortToken
+        { Initialize-Lemonade -StartupTimeoutSeconds 0.1 } | Should -Throw $script:AbortToken
         $clock.Elapsed.TotalSeconds | Should -BeLessThan 3
         Should -Invoke Start-Process -Times 1
         Should -Invoke Invoke-LemonadeStatus -ParameterFilter { $TimeoutMilliseconds -le 100 } -Times 1
