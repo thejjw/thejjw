@@ -502,8 +502,8 @@ PROTOCOLS
   remote file editing, and drag-and-drop.
 
 PUTTY INTEGRATION
-  Import existing PuTTY sessions with Tools > Import. For "Open in PuTTY", set
-  Preferences > Integration > PuTTY path to
+  Import existing PuTTY sessions with Tools > Import Sites. For "Open in PuTTY",
+  set Preferences > Integration > Applications > PuTTY path to
   %WINSCP_PATH%\..\..\putty\bin\PUTTY.EXE.
   PuTTY remains the terminal/serial/key tool; WinSCP is the file manager.
 
