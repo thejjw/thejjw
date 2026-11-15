@@ -915,10 +915,11 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text.Contains('New-Item .\bin\data -ItemType Directory') | Should -BeTrue
             $text | Should -Match 'Windows Credential Manager'
             $text | Should -Match 'delete data before handing'
-            $text | Should -Match 'apt install'
-            $text | Should -Match "dnf install --disablerepo='\*'"
-            $text | Should -Match 'rpm -ivh'
+            $text.Contains('sudo apt install ./' + $script:FileTabbyDeb) | Should -BeTrue
+            $text.Contains('sudo dnf install --disablerepo=''*'' ./' + $script:FileTabbyRpm) | Should -BeTrue
+            $text.Contains('sudo rpm -ivh ./' + $script:FileTabbyRpm) | Should -BeTrue
             $text | Should -Match '--no-sandbox'
+            $text | Should -Match 'Zmodem'
             $text | Should -Match 'libgbm1'
             $text | Should -Match 'libasound2t64'
             $text | Should -Match 'libgtk-3-0t64'
@@ -927,9 +928,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'sha256sum'
             $text | Should -Match 'Get-AuthenticodeSignature'
             $text | Should -Match 'Eugen Pankov Softwareentwicklung'
-            $text | Should -Match 'unsigned'
+            $text | Should -Match 'Linux packages are\s+unsigned'
             $text | Should -Match 'setup \.exe is not stored'
-            $text | Should -Match 'MIT'
+            $text | Should -MatchExactly '\bMIT licensed\b'
             $text | Should -Match 'tar\.gz and AppImage builds are not stored'
             $text | Should -Not -Match 'TABBY(ZIP|DEB|RPM)'
         }
