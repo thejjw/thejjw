@@ -488,8 +488,14 @@ USE (no install, no admin)
   Extract beside this file:
     PowerShell:  Expand-Archive .\WINSZIP -DestinationPath .\bin
     Explorer:    right-click WINSZIP, choose Extract All, target .\bin
-  Force configuration into the portable folder before the first run:
-    New-Item .\bin\WinSCP.ini -ItemType File
+  Write the portable settings before the first run (edit the INI only while
+  WinSCP is closed):
+    $ini = @(
+      '[Configuration\Interface]'
+      'RandomSeedFile=%WINSCP_PATH%\winscp.rnd'
+      'DDTemporaryDirectory=%WINSCP_PATH%\temp\'
+    )
+    Set-Content .\bin\WinSCP.ini $ini
   Then start the GUI or the scriptable console:
     .\bin\WinSCP.exe
     .\bin\WinSCP.com /ini=nul /log=%TEMP%\winscp.log /script=job.txt
@@ -508,18 +514,15 @@ PUTTY INTEGRATION
   PuTTY remains the terminal/serial/key tool; WinSCP is the file manager.
 
 STORAGE AND CLEANUP
-  By default WinSCP also writes winscp.rnd to %USERPROFILE% and temporary files
-  to %TEMP%. Relative paths resolve against the startup folder, so use
-  %WINSCP_PATH% (the folder holding WinSCP.exe) for a self-contained setup;
-  add this to .\bin\WinSCP.ini:
-    [Configuration\Interface]
-    RandomSeedFile=%WINSCP_PATH%\winscp.rnd
-    DDTemporaryDirectory=%WINSCP_PATH%\temp\
+  The INI written in USE keeps the seed and temp files under bin, so the setup
+  stays on the stick. Without those settings WinSCP writes winscp.rnd to
+  %USERPROFILE% and temporary files to %TEMP%. Relative paths resolve against
+  the startup folder, while %WINSCP_PATH% always means the folder holding
+  WinSCP.exe.
   If bin is read-only, WinSCP falls back to the registry; create the INI on a
   writable copy instead. Saved sessions, including passwords if you save them,
   live in .\bin\WinSCP.ini on the stick: do not save passwords on shared media,
-  and delete bin before handing the stick over. With the settings above, the
-  GUI's seed and temp files also live under bin. WinSCP.com runs with
+  and delete bin before handing the stick over. WinSCP.com runs with
   /ini=nul ignore those settings, and /log=%TEMP%\winscp.log writes a session
   log (host names, user names, remote paths) to the host: delete it after
   scripted runs. On the host, Tools > Clean Up

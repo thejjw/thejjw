@@ -792,7 +792,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text = Get-WinScpReadmeText
             $text.Contains($script:FileWinScpPortable) | Should -BeTrue
             $text | Should -Match 'Expand-Archive'
-            $text | Should -Match 'New-Item \.\\bin\\WinSCP\.ini'
+            $text | Should -Match 'Set-Content \.\\bin\\WinSCP\.ini'
             $text | Should -Match '/script=job\.txt'
             $text | Should -Match '/ini=nul'
             $text | Should -Match '\[Configuration\\Interface\]'
@@ -805,6 +805,15 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'Integration > Applications > PuTTY/Terminal Client Path'
             $text | Should -Match '%WINSCP_PATH%\\\.\.\\\.\.\\putty\\bin\\PUTTY\.EXE'
             $text | Should -Match 'GPLv3'
+        }
+
+        It 'writes the portable settings before the first launch' {
+            $text = Get-WinScpReadmeText
+            $settings = $text.IndexOf('RandomSeedFile=%WINSCP_PATH%')
+            $launch = $text.IndexOf('.\bin\WinSCP.exe')
+            $settings | Should -BeGreaterThan -1
+            $launch | Should -BeGreaterThan -1
+            $settings | Should -BeLessThan $launch
         }
     }
 
