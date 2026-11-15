@@ -441,6 +441,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'm' -NoNewline; return $true }
             { Invoke-Tiny11Build -Root $root -Elevate } | Should -Not -Throw
             $script:Failures.Name | Should -Contain 'Tiny11 ISO'
+            $script:Failures[-1].Manual | Should -Not -BeNullOrEmpty
             $script:UseSudo | Should -BeFalse
         }
     }
