@@ -96,6 +96,11 @@ $script:DirInstallers = '03-Installers'
 $script:DirTiny11 = 'tiny11'
 $script:DirBuilder = 'tiny11builder'
 $script:DirCopyparty = 'copyparty'
+$script:DirPython = 'python'
+$script:PyVersion = '3.15.2'
+$script:PyUrlBase = 'https://www.python.org/ftp/python/' + $script:PyVersion + '/'
+$script:FilePythonInstaller = 'python-' + $script:PyVersion + '-amd64.exe'
+$script:FilePythonEmbed = 'python-' + $script:PyVersion + '-embed-amd64.zip'
 $script:FileVentoyExe = 'Ventoy2Disk.exe'
 $script:FileFido = 'Fido.ps1'
 $script:FileRufusPatternNote = 'rufus-.*p\.exe'
@@ -158,8 +163,8 @@ STRUCTURE
   isos\03-Installers\ Ubuntu Server, Rocky, Debian netinst, Mint, antiX,
                      Fedora, the Windows 11 ISO (Fido's Win11_*.iso name or
                      the official en-us_windows_11_*.iso name), tiny11\.
-  isos\04-etc\       Post-boot utilities by topic, e.g. copyparty\ (portable
-                     file server: copyparty-sfx.py and copyparty.exe).
+  isos\04-etc\       Post-boot utilities by topic: copyparty\ (portable file
+                     server) and python\ (Windows x64 installer + embeddable).
   isos\README.txt    Per-folder contents, sizes, and re-verify notes.
 
 WINDOWS 11 ISO
@@ -204,7 +209,7 @@ FOLDERS
   01-Network\    Small network-boot images and bootloaders.
   02-Rescue\     Offline-capable rescue and imaging environments.
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
-  04-etc\        Post-boot utilities by topic, e.g. copyparty\.
+  04-etc\        Post-boot utilities by topic: copyparty\, python\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
@@ -218,7 +223,7 @@ NOTES
 # explicit bind address, read-only source, separate writable folder, and the
 # index moved off read-only media.
 function Get-CopypartyReadmeText {
-    @'
+    $text = @'
 COPYPARTY - portable file server
 ================================
 This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
@@ -244,6 +249,11 @@ SAFE START (replace the address, paths, and password)
 
   Then browse to http://192.168.1.10:3923/data/ or /incoming/ and log in.
 
+  Windows without Python: extract PYEMBED from
+  ..\python\ and run "python.exe copyparty-sfx.py ...". That runtime is a
+  PSF-signed binary, unlike this unsigned copyparty.exe, so SmartScreen may
+  treat it better. The embeddable build has no pip, venv, or tkinter.
+
 WARNING
   Starting it with no arguments shares the current folder read/write with
   everyone on every interface, port 3923. Always pass -a, -v, and -i.
@@ -256,6 +266,65 @@ NOTES
   - .hist holds the index and thumbnails; --hist keeps it off the USB.
   - Keep the USB mount read-only in -v unless you intend to write to it.
 '@
+    return $text.Replace('PYEMBED', $script:FilePythonEmbed)
+}
+
+# Offline Python sheet for isos\04-etc\python\. Filenames come from the shared
+# constants so a version bump is one edit point; the commands are the safe
+# per-user form (no Store alias, no file associations, no shortcuts).
+function Get-PythonReadmeText {
+    $text = @'
+PYTHON FOR WINDOWS (offline)
+============================
+This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+
+FILES
+  PYINST          Full installer for Windows 10/11 x64.
+  PYEMBED         Extract-and-run runtime, no installation.
+  Linux live images normally ship python3; nothing here is needed there.
+
+INSTALL (per-user, no admin; explicit target keeps the path predictable)
+  cmd.exe:
+    start "" /wait PYINST /quiet /log "%TEMP%\py-install.log" ^
+      InstallAllUsers=0 TargetDir="%LOCALAPPDATA%\Programs\Python\Python315" ^
+      Include_launcher=0 PrependPath=0 Include_test=0 AssociateFiles=0 Shortcuts=0
+    echo %ERRORLEVEL%
+  PowerShell:
+    $p = Start-Process -Wait -PassThru -FilePath .\PYINST -ArgumentList @(
+      '/quiet','/log',"$env:TEMP\py-install.log",'InstallAllUsers=0',
+      "TargetDir=$env:LOCALAPPDATA\Programs\Python\Python315",
+      'Include_launcher=0','PrependPath=0','Include_test=0','AssociateFiles=0','Shortcuts=0')
+    $p.ExitCode
+  Run the result as %LOCALAPPDATA%\Programs\Python\Python315\python.exe, or add
+  that folder to PATH yourself. With PrependPath=0 and Include_launcher=0, a
+  bare "python" still opens the Microsoft Store alias.
+  All-users install: from an elevated shell, InstallAllUsers=1 and a TargetDir
+  under Program Files. Uninstall the same scope with PYINST /quiet /uninstall.
+
+EMBEDDABLE (no installer)
+  Extract PYEMBED next to your scripts (or run it in place on the stick), then:
+    python.exe yourscript.py
+  It includes sqlite3 and ssl but no pip, venv, or tkinter. Its ._pth file keeps
+  the script's own folder off sys.path, so use the full installer for anything
+  that imports modules stored beside it. It does run copyparty-sfx.py from
+  ..\copyparty\, which is a PSF-signed-binary alternative to the unsigned
+  copyparty.exe.
+
+INTEGRITY
+  The prep script pins SHA-256 for both files. python.org publishes SPDX
+  sidecars (PYINST.spdx.json and PYEMBED.spdx.json); their CPython package
+  entry carries the same hash. The independent check is Authenticode:
+  Get-AuthenticodeSignature on the installer, and on python.exe inside the zip,
+  should report Valid with the Python Software Foundation as signer. Sigstore
+  bundles are published next to each artifact. After a version bump, old
+  python-* files stay in the folder; delete the previous pair.
+
+NOTES
+  - x64 builds run on Windows 11 ARM through emulation; 32-bit Windows is out
+    of scope. Python 3.15 supports Windows 10 and newer; use 3.12 for 8.1.
+  - WinPE is not supported (untested).
+'@
+    return $text.Replace('PYINST', $script:FilePythonInstaller).Replace('PYEMBED', $script:FilePythonEmbed).Replace('PYVER', $script:PyVersion)
 }
 
 # -----------------------------------------------------------------------------
@@ -631,7 +700,9 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 6.17'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; Hash = '8c8eb200642bca2f34b7f22e812e4ac3d97483b06b188355cdff8ff98f03f550'; SidecarUrl = 'https://mirrors.kernel.org/linuxmint/hwe/sha256sum.txt'; SidecarName = 'sha256sum-mint-hwe.txt'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '6.17'; About = 'Mint Xfce with the newer HWE 6.17 kernel for hardware the regular ISO does not support.'; Released = 'Version 22.3 with HWE kernel 6.17 (hwe sha256sum.txt dated 2026-08-08).'; SizeNote = 'Fetch only with -MintHwe 6.17 (HWE kernel 6.17 for newer hardware).'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
         [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 7.0'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Hash = '17475774172776978f24677a847a62d7595c5bee34cb1f96ee3d26eedeca33c8'; SidecarUrl = 'https://mirrors.kernel.org/linuxmint/hwe/sha256sum.txt'; SidecarName = 'sha256sum-mint-hwe.txt'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '7.0'; About = 'Mint Xfce with the newer HWE 7.0 kernel for hardware the regular ISO does not support.'; Released = 'Version 22.3 with HWE kernel 7.0 (hwe sha256sum.txt dated 2026-08-08).'; SizeNote = 'Fetch only with -MintHwe 7.0 (HWE kernel 7.0 for newer hardware).'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
         [pscustomobject]@{ Name = 'antiX full'; Category = '03-Installers'; FileName = 'antiX-26.1_x64-full.iso'; Url = 'https://sourceforge.net/projects/antix-linux/files/Final/antiX-26.1/antiX-26.1_x64-full.iso/download'; AlternateUrl = ''; Hash = '293381af0b7c48399abe015da8f67d41fd34372b73c4aafcf53747fbaed22371'; SidecarUrl = 'https://sourceforge.net/projects/antix-linux/files/Final/antiX-26.1/antiX-26.1_x64-full.iso.sha256/download'; SidecarName = 'antiX-26.1_x64-full.iso.sha256'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Debian 13-based, systemd-free live/installer with a desktop; suits modern and older PCs alike.'; Released = 'Version 26.1, September 2026 (SourceForge files dated 2026-09-28).'; SizeNote = 'About 2.5 GB.'; Check = 'SourceForge Final/antiX-26.1 file list plus the .sha256 sidecar.' },
-        [pscustomobject]@{ Name = 'Fedora Workstation Live'; Category = '03-Installers'; FileName = 'Fedora-Workstation-Live-45-1.4.x86_64.iso'; Url = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso'; AlternateUrl = ''; Hash = '68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb'; SidecarUrl = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; SidecarName = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Live desktop installer with GNOME.'; Released = 'Version 45-1.4, October 2026.'; SizeNote = 'About 2.72 GB.'; Check = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM in the same directory.' }
+        [pscustomobject]@{ Name = 'Fedora Workstation Live'; Category = '03-Installers'; FileName = 'Fedora-Workstation-Live-45-1.4.x86_64.iso'; Url = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso'; AlternateUrl = ''; Hash = '68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb'; SidecarUrl = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; SidecarName = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Live desktop installer with GNOME.'; Released = 'Version 45-1.4, October 2026.'; SizeNote = 'About 2.72 GB.'; Check = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM in the same directory.' },
+        [pscustomobject]@{ Name = 'Python 3.15 Windows installer'; Category = '04-etc\python'; FileName = $script:FilePythonInstaller; Url = ($script:PyUrlBase + $script:FilePythonInstaller); AlternateUrl = ''; Hash = '06e225a228191b0f4d1dcf6905fbb21bf9f6970d13a2ec63137ab9bee76f15aa'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Full offline CPython for Windows 10/11 x64: pip, venv, tkinter, and a normal per-user or all-users install.'; Released = 'Version 3.15.2, October 2026 (last line to ship the traditional Windows installer; 3.16+ use the Python install manager).'; SizeNote = 'About 36 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash and Authenticode shows the Python Software Foundation; for a new patch, download ' + $script:PyUrlBase + $script:FilePythonInstaller + ' into isos\04-etc\python\ and re-pin hash+date+size.' },
+        [pscustomobject]@{ Name = 'Python 3.15 Windows embeddable'; Category = '04-etc\python'; FileName = $script:FilePythonEmbed; Url = ($script:PyUrlBase + $script:FilePythonEmbed); AlternateUrl = ''; Hash = 'd012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Extract-and-run CPython for Windows 10/11 x64: sqlite3 and ssl, no pip/venv/tkinter; runs copyparty-sfx.py without installation.'; Released = 'Version 3.15.2, October 2026.'; SizeNote = 'About 13 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash and python.exe inside the zip is signed by the Python Software Foundation; for a new patch, download ' + $script:PyUrlBase + $script:FilePythonEmbed + ' into isos\04-etc\python\ and re-pin hash+date+size.' }
     )
 }
 
@@ -762,7 +833,7 @@ function Save-CatalogRow {
 function Save-CatalogIsos {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [string]$NetbootArch = 'x64', [string]$MintHwe = 'None')
-    $order = @{ '01-Network' = 0; '02-Rescue' = 1; '03-Installers' = 2 }
+    $order = @{ '01-Network' = 0; '02-Rescue' = 1; '03-Installers' = 2; '04-etc' = 3; '04-etc\python' = 3 }
     $rows = Get-RecoveryCatalog | Where-Object {
         (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
         (($_.MintHwe -eq '') -or ($_.MintHwe -eq $MintHwe))
@@ -1437,8 +1508,10 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '03-Installers')
         Initialize-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc')
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython)
         Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython) $script:FileReadme) -Text (Get-PythonReadmeText)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null

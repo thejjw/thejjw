@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty)' }, $true)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py)' }, $true)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -40,11 +40,12 @@ Describe 'Prepare-PcRecovery.ps1' {
         It 'defines every shared name with a real value (no self-assignment)' {
             $expected = @{
                 DirTools = 'tools'; DirVentoy = 'ventoy'; DirIsos = 'isos'
-                DirInstallers = '03-Installers'; DirTiny11 = 'tiny11'; DirBuilder = 'tiny11builder'; DirCopyparty = 'copyparty'
+                DirInstallers = '03-Installers'; DirTiny11 = 'tiny11'; DirBuilder = 'tiny11builder'; DirCopyparty = 'copyparty'; DirPython = 'python'
                 FileVentoyExe = 'Ventoy2Disk.exe'; FileFido = 'Fido.ps1'; FileTiny11Iso = 'tiny11.iso'
                 FileMaker = 'tiny11maker.ps1'; FileAnswer = 'autounattend.xml'; FileOscdimg = 'oscdimg.exe'
                 FileFacts = 'filefacts.json'; FileReadme = 'README.txt'
                 FileCopypartySfx = 'copyparty-sfx.py'; FileCopypartyExe = 'copyparty.exe'; FileCopypartyTag = '.release'
+                PyVersion = '3.15.2'; FilePythonInstaller = 'python-3.15.2-amd64.exe'; FilePythonEmbed = 'python-3.15.2-embed-amd64.zip'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -86,7 +87,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $names | Should -Contain '01-Network'
             $names | Should -Contain '02-Rescue'
             $names | Should -Contain '03-Installers'
-            foreach ($name in $names) { $name | Should -Match '^\d\d-[A-Za-z]+$' }
+            $names | Should -Contain '04-etc\python'
+            foreach ($name in $names) { $name | Should -Match '^\d\d-[A-Za-z]+(\\[a-z0-9-]+)?$' }
         }
 
         It 'selects the requested netboot variant and Mint HWE rows only' {
@@ -648,6 +650,44 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
     }
 
+    Context 'python tools' {
+        It 'pins both Python artifacts under 04-etc\python' {
+            $rows = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\python' })
+            $rows.Count | Should -Be 2
+            foreach ($row in $rows) {
+                $row.HashKind | Should -Be 'Pinned'
+                $row.Hash | Should -Match '^[0-9a-f]{64}$'
+                $row.Url | Should -Match '^https://www\.python\.org/ftp/python/3\.15\.2/'
+                $row.FileName | Should -Match '^python-3\.15\.2-(amd64\.exe|embed-amd64\.zip)$'
+                $row.SidecarName | Should -BeNullOrEmpty
+            }
+            $rows.FileName | Should -Contain $script:FilePythonInstaller
+            $rows.FileName | Should -Contain $script:FilePythonEmbed
+        }
+
+        It 'builds the topic readme from the catalog file names' {
+            $text = Get-PythonReadmeText
+            foreach ($row in (Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\python' })) {
+                $text.Contains($row.FileName) | Should -BeTrue
+            }
+            $text | Should -Match 'start "" /wait'
+            $text | Should -Match 'Get-AuthenticodeSignature'
+            $text | Should -Match 'no pip, venv, or tkinter'
+            $text | Should -Match 'Windows 10/11 x64'
+            $text | Should -Match 'WinPE is not supported'
+        }
+
+        It 'downloads netboot first and the 04-etc topics last' {
+            Reset-State
+            $script:order = @()
+            Mock Save-CatalogRow { $script:order += $Row.FileName }
+            Save-CatalogIsos -Root (Join-Path $TestDrive 'pyorder') -NetbootArch 'x64' -MintHwe 'None'
+            $script:order[0] | Should -Be 'netboot.xyz.iso'
+            $script:order[-2] | Should -Be $script:FilePythonEmbed
+            $script:order[-1] | Should -Be $script:FilePythonInstaller
+        }
+    }
+
     Context 'elevation' {
         It 'never invokes sudo.exe without -Elevate' {
             Reset-State
@@ -774,11 +814,13 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Save-CatalogIsos { $script:VerifiedHashes[(Join-Path (Join-Path (Join-Path $root 'isos') '02-Rescue') 'HBCD_PE_x64.iso')] = ('ab' * 32) }
             Mock Get-WindowsIsoViaFido { return $true }
             Mock Invoke-Tiny11Build { return $true }
-            Invoke-PreparePcRecovery -Root $root | Out-Null
+            Invoke-PreparePcRecovery -Root $root | Should -Be 0
+            $script:Failures.Count | Should -Be 0
             $rootText = [IO.File]::ReadAllText((Join-Path $root 'README.txt'))
             $rootText | Should -Match 'tiny11builder'
             $rootText | Should -Match 'en-US'
             $rootText | Should -Match 'copyparty'
+            $rootText | Should -Match 'python\\'
             $topicDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
             $topicText = [IO.File]::ReadAllText((Join-Path $topicDir 'README.txt'))
             $topicText | Should -Match 'copyparty-sfx\.py'
@@ -787,6 +829,12 @@ Describe 'Prepare-PcRecovery.ps1' {
             $topicText.Contains("-v 'C:\data:data:r,admin'") | Should -BeTrue
             $topicText.Contains('.\copyparty.exe -p 3923') | Should -BeTrue
             $topicText.Contains('--hist "%TEMP%\copyparty"') | Should -BeTrue
+            $topicText.Contains($script:FilePythonEmbed) | Should -BeTrue
+            $pythonDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'python'
+            $pythonText = [IO.File]::ReadAllText((Join-Path $pythonDir 'README.txt'))
+            $pythonText.Contains($script:FilePythonInstaller) | Should -BeTrue
+            $pythonText.Contains($script:FilePythonEmbed) | Should -BeTrue
+            $pythonText | Should -Match 'start "" /wait'
             $isosText = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'isos') 'README.txt'))
             $isosText | Should -Match 'HBCD_PE_x64.iso'
             $isosText | Should -Match 'Windows PE rescue environment'
@@ -795,6 +843,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match 'Official Windows 11 ISO \(not present\)'
             $isosText | Should -Match 'Tiny11 ISO \(not present\)'
             $isosText | Should -Match '04-etc\\copyparty\\copyparty\.exe'
+            $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-amd64\.exe'
+            $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-embed-amd64\.zip'
             $isosText | Should -Match 'v1\.20\.26'
             $isosText | Should -Match 'copyparty \(copyparty-sfx\.py, not verified this run\)'
             $isosText | Should -Match 'SHA-256 \(on disk at write time\)'
