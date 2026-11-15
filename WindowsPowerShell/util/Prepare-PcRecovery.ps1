@@ -237,7 +237,7 @@ SAFE START (replace the address, paths, and password)
       -v /mnt/data:data:r,admin -v /mnt/incoming:incoming:w,admin --hist /tmp/copyparty
   Windows (cmd.exe):
     copyparty.exe -p 3923 -i 192.168.1.10 -a admin:change-me ^
-      -v C:\data:data:r,admin -v C:\incoming:incoming:w,admin --hist %TEMP%\copyparty
+      -v C:\data:data:r,admin -v C:\incoming:incoming:w,admin --hist "%TEMP%\copyparty"
   Windows (PowerShell):
     .\copyparty.exe -p 3923 -i 192.168.1.10 -a admin:change-me `
       -v 'C:\data:data:r,admin' -v 'C:\incoming:incoming:w,admin' --hist "$env:TEMP\copyparty"
@@ -1031,6 +1031,7 @@ function Save-CopypartyTools {
             continue
         }
         $saved = $false
+        $resultsBefore = $script:Results.Count
         try {
             $saved = Save-VerifiedFile -Url $asset.browser_download_url -OutFile $outFile -ExpectedHash $hash -Name $name
         } catch {
@@ -1063,7 +1064,16 @@ function Save-CopypartyTools {
         }
         if (-not $verified) {
             if ($backedUp) {
-                Restore-PreviousCopyparty -PrevFile $prevFile -Target $outFile | Out-Null
+                if (Restore-PreviousCopyparty -PrevFile $prevFile -Target $outFile) {
+                    Write-Detail "Downloaded file failed verification; restored the previous $name."
+                }
+            }
+            if ($script:Results.Count -gt $resultsBefore) {
+                Write-Failure -Name $name -Detail 'File failed verification after download.' -Manual @(
+                    "Download $($asset.browser_download_url) by hand into $dir."
+                )
+            } else {
+                Write-Detail "No verified file was produced for $name."
             }
             $ok = $false
             continue
