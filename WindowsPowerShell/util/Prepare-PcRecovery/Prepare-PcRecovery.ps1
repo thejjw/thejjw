@@ -586,6 +586,7 @@ LINUX CLI
     duck --version
   Install on Fedora or Rocky (repos off so it works offline):
     sudo dnf install --disablerepo='*' ./CYBERRPM
+    duck --version
   If dnf is unavailable or fails, use rpm directly:
     sudo rpm -ivh ./CYBERRPM
     duck --version
