@@ -428,7 +428,7 @@ USE (no install, no admin)
     .\bin\PLINK.EXE -V
   No install, PATH, or Start-menu changes. PuTTY still writes host keys and
   saved sessions to HKCU\Software\SimonTatham\PuTTY and a seed file to
-  %APPDATA%\putty.rnd. Before deleting bin, run:
+  %LOCALAPPDATA%\PUTTY.RND by default. Before deleting bin, run:
     .\bin\PUTTY.EXE -cleanup
   That removes the current user's PuTTY settings and seed file (after a
   confirmation prompt).
@@ -441,13 +441,14 @@ TOOLS
   PUTTY.CHM    Built-in help.
 
 INTEGRITY
-  SHA-256 is pinned from the official sha256sums. Compare a manual check with
-  the w64/putty.zip line in PUTTYSUMS (the file is stored as PUTTYZIP, so the
-  saved name will not match the line). The executables are Authenticode-valid
-  with Simon Tatham as signer. The sums file's GPG signature and the release
-  key are not staged; fetch both from the release page online if you need that
-  check. On the first connection, compare the host-key fingerprint through a
-  second channel.
+  SHA-256 is pinned from the official sha256sums. Check by hand with
+    Get-FileHash .\PUTTYZIP -Algorithm SHA256
+  and compare with the w64/putty.zip line in PUTTYSUMS (the file is stored as
+  PUTTYZIP, so the saved name will not match the line). The executables are
+  Authenticode-valid with Simon Tatham as signer. The sums file's GPG signature
+  and the release key are not staged; fetch both from the release page online
+  if you need that check. On the first connection, compare the host-key
+  fingerprint through a second channel.
 
 NOTES
   - Telnet is plaintext; prefer SSH when the peer supports it.

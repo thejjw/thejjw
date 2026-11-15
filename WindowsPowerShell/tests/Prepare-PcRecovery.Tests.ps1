@@ -763,7 +763,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'No install, PATH, or Start-menu changes'
             $text | Should -Match 'MIT licensed'
             $text | Should -Match '-cleanup'
+            $text | Should -Match 'Get-FileHash'
             $text | Should -Match 'w64/putty\.zip'
+            $text | Should -Match '%LOCALAPPDATA%\\PUTTY\.RND'
             $text | Should -Match 'not staged'
         }
     }
