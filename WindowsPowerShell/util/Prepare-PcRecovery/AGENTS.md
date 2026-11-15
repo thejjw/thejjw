@@ -42,6 +42,11 @@ at `WindowsPowerShell/tests/Prepare-PcRecovery.Tests.ps1`.
   not a publisher-signed checksum.
 - `isos\04-etc` is organized by topic folder (`copyparty\`, ...); root and isos
   readmes name the topic folder.
+- Linux artifacts, in preference order: an official static binary when the
+  project publishes one; otherwise both RPM (EL/Fedora) and DEB
+  (Debian/Ubuntu) for the target architecture; otherwise whichever single
+  package is published. Never substitute a distro repackage for an official
+  release asset.
 - Manual-retry text must be traceable: after the user follows it, the very next
   run must actually change the outcome.
 
