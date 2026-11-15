@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py)' }, $true)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip)' }, $true)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -46,6 +46,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 FileFacts = 'filefacts.json'; FileReadme = 'README.txt'
                 FileCopypartySfx = 'copyparty-sfx.py'; FileCopypartyExe = 'copyparty.exe'; FileCopypartyTag = '.release'
                 PyVersion = '3.15.2'; FilePythonInstaller = 'python-3.15.2-amd64.exe'; FilePythonEmbed = 'python-3.15.2-embed-amd64.zip'
+                DirSevenZip = '7zip'; SevenZipVersion = '26.06'; FileSevenZipInstaller = '7z2606-x64.exe'; FileSevenZipExtra = '7z2606-extra.7z'; FileSevenZipBootstrap = '7zr.exe'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -689,6 +690,42 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:order[0] | Should -Be 'netboot.xyz.iso'
             $script:order[-2] | Should -Be $script:FilePythonEmbed
             $script:order[-1] | Should -Be $script:FilePythonInstaller
+            $fedora = [array]::IndexOf($script:order, 'Fedora-Workstation-Live-45-1.4.x86_64.iso')
+            $sevenZip = [array]::IndexOf($script:order, $script:FileSevenZipInstaller)
+            $sevenZip | Should -BeGreaterThan $fedora
+            $sevenZip | Should -BeLessThan ([array]::IndexOf($script:order, $script:FilePythonEmbed))
+        }
+    }
+
+    Context '7zip tools' {
+        It 'pins the installer and both portable artifacts' {
+            $rows = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\7zip' })
+            $rows.Count | Should -Be 3
+            foreach ($row in $rows) {
+                $row.HashKind | Should -Be 'Pinned'
+                $row.Hash | Should -Match '^[0-9a-f]{64}$'
+                $row.Url | Should -Match '^https://github\.com/ip7z/7zip/releases/download/26\.06/'
+                $row.SidecarName | Should -BeNullOrEmpty
+            }
+            $rows.FileName | Should -Contain $script:FileSevenZipInstaller
+            $rows.FileName | Should -Contain $script:FileSevenZipExtra
+            $rows.FileName | Should -Contain $script:FileSevenZipBootstrap
+            $installer = @($rows | Where-Object { $_.FileName -eq $script:FileSevenZipInstaller })
+            $installer[0].AlternateUrl | Should -BeLike 'https://www.7-zip.org/*'
+            @($rows | Where-Object { $_.FileName -ne $script:FileSevenZipInstaller } | Where-Object { $_.AlternateUrl }) | Should -HaveCount 0
+        }
+
+        It 'builds the topic readme from the catalog file names' {
+            $text = Get-SevenZipReadmeText
+            foreach ($row in (Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\7zip' })) {
+                $text.Contains($row.FileName) | Should -BeTrue
+            }
+            $text | Should -Match 'start "" /wait'
+            $text | Should -Match 'NotSigned, which is expected'
+            $text | Should -Match '7zr'
+            $text | Should -Match 'no RAR, no ISO'
+            $text | Should -Match 'LGPL-2\.1-or-later'
+            $text | Should -Match 'winget install --id 7zip\.7zip'
         }
     }
 
@@ -842,6 +879,13 @@ Describe 'Prepare-PcRecovery.ps1' {
             $pythonText.Contains($script:FilePythonInstaller) | Should -BeTrue
             $pythonText.Contains($script:FilePythonEmbed) | Should -BeTrue
             $pythonText | Should -Match 'start "" /wait'
+            $rootText | Should -Match '7zip'
+            $sevenDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') '7zip'
+            $sevenText = [IO.File]::ReadAllText((Join-Path $sevenDir 'README.txt'))
+            $sevenText.Contains($script:FileSevenZipInstaller) | Should -BeTrue
+            $sevenText.Contains($script:FileSevenZipExtra) | Should -BeTrue
+            $sevenText.Contains($script:FileSevenZipBootstrap) | Should -BeTrue
+            $sevenText | Should -Match '/S'
             $isosText = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'isos') 'README.txt'))
             $isosText | Should -Match 'HBCD_PE_x64.iso'
             $isosText | Should -Match 'Windows PE rescue environment'
@@ -852,6 +896,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match '04-etc\\copyparty\\copyparty\.exe'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-amd64\.exe'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-embed-amd64\.zip'
+            $isosText | Should -Match '04-etc\\7zip\\7z2606-x64\.exe'
+            $isosText | Should -Match '04-etc\\7zip\\7z2606-extra\.7z'
+            $isosText | Should -Match '04-etc\\7zip\\7zr\.exe'
             $isosText | Should -Match 'v1\.20\.26'
             $isosText | Should -Match 'copyparty \(copyparty-sfx\.py, not verified this run\)'
             $isosText | Should -Match 'SHA-256 \(on disk at write time\)'

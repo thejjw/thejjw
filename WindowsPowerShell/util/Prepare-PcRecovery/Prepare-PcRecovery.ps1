@@ -101,10 +101,16 @@ $script:DirTiny11 = 'tiny11'
 $script:DirBuilder = 'tiny11builder'
 $script:DirCopyparty = 'copyparty'
 $script:DirPython = 'python'
+$script:DirSevenZip = '7zip'
 $script:PyVersion = '3.15.2'
 $script:PyUrlBase = 'https://www.python.org/ftp/python/' + $script:PyVersion + '/'
 $script:FilePythonInstaller = 'python-' + $script:PyVersion + '-amd64.exe'
 $script:FilePythonEmbed = 'python-' + $script:PyVersion + '-embed-amd64.zip'
+$script:SevenZipVersion = '26.06'
+$script:SevenZipUrlBase = 'https://github.com/ip7z/7zip/releases/download/' + $script:SevenZipVersion + '/'
+$script:FileSevenZipInstaller = '7z' + $script:SevenZipVersion.Replace('.', '') + '-x64.exe'
+$script:FileSevenZipExtra = '7z' + $script:SevenZipVersion.Replace('.', '') + '-extra.7z'
+$script:FileSevenZipBootstrap = '7zr.exe'
 $script:FileVentoyExe = 'Ventoy2Disk.exe'
 $script:FileFido = 'Fido.ps1'
 $script:FileRufusPatternNote = 'rufus-.*p\.exe'
@@ -168,7 +174,7 @@ STRUCTURE
                      Fedora, the Windows 11 ISO (Fido's Win11_*.iso name or
                      the official en-us_windows_11_*.iso name), tiny11\.
   isos\04-etc\       Post-boot utilities by topic: copyparty\ (portable file
-                     server) and python\ (Windows x64 installer + embeddable).
+                     server), python\ (Windows x64), 7zip\ (extractor).
   isos\README.txt    Per-folder contents, sizes, and re-verify notes.
 
 WINDOWS 11 ISO
@@ -213,7 +219,7 @@ FOLDERS
   01-Network\    Small network-boot images and bootloaders.
   02-Rescue\     Offline-capable rescue and imaging environments.
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
-  04-etc\        Post-boot utilities by topic: copyparty\, python\.
+  04-etc\        Post-boot utilities by topic: copyparty\, python\, 7zip\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
@@ -335,6 +341,58 @@ NOTES
   - WinPE is not supported (untested).
 '@
     return $text.Replace('PYINST', $script:FilePythonInstaller).Replace('PYEMBED', $script:FilePythonEmbed).Replace('PYVER', $script:PyVersion)
+}
+
+# Offline 7-Zip sheet for isos\04-etc\7zip\. Filenames come from the shared
+# constants so a version bump is one edit point; the install form needs admin,
+# so the portable 7za path is documented next to it.
+function Get-SevenZipReadmeText {
+    $text = @'
+7-ZIP FOR WINDOWS (offline)
+===========================
+This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+
+FILES
+  7ZINST    x64 installer, about 1.6 MB. Installs and elevates itself.
+  7ZEXTRA   portable extras archive, about 1.7 MB; contains 7za.exe.
+  7ZR       bootstrap extractor, about 600 KB; reads .7z only.
+
+INSTALL (needs admin; /S does not suppress UAC)
+  cmd.exe:
+    start "" /wait 7ZINST /S
+    echo %ERRORLEVEL%
+  PowerShell:
+    (Start-Process -Wait -PassThru .\7ZINST '/S').ExitCode
+  Default target is C:\Program Files\7-Zip. From a normal shell the installer
+  raises a UAC prompt, and a standard user needs admin credentials. To change
+  the target, append /D=<dir> as the last parameter (see the 7-Zip FAQ).
+  Uninstall from an elevated shell: "%ProgramFiles%\7-Zip\Uninstall.exe" /S
+
+PORTABLE (no admin)
+  7ZR x 7ZEXTRA -o%TEMP%\7za
+  %TEMP%\7za\7za.exe x archive.zip
+  7za handles 7z, xz, bzip2, gzip, tar, and zip; no RAR, no ISO, and no
+  Explorer context menu.
+
+INTEGRITY
+  SHA-256 is pinned in the prep script from the GitHub release digest. For the
+  installer, that digest also equals the winget 7zip.7zip InstallerSha256 and
+  the bytes served by 7-zip.org. The installer and the portables are unsigned:
+  Authenticode reports NotSigned, which is expected; the hash is the check.
+  7ZEXTRA and 7ZR are GitHub-only. Verify by hand with Get-FileHash.
+
+NOTES
+  - Check 7-zip.org for a newer build before installing on a networked PC; the
+    hash is pinned to 7ZVER. Re-pinning leaves old 7z* files behind, so delete
+    the previous set.
+  - x64 runs on Windows 11 ARM through emulation, but the Explorer context menu
+    may not appear in ARM64 Explorer.
+  - License: LGPL-2.1-or-later with the unRAR restriction, plus BSD 3-clause
+    parts. The installer carries the license text.
+  - winget alternative (needs App Installer and network):
+    winget install --id 7zip.7zip -e --accept-package-agreements --accept-source-agreements
+'@
+    return $text.Replace('7ZINST', $script:FileSevenZipInstaller).Replace('7ZEXTRA', $script:FileSevenZipExtra).Replace('7ZR', $script:FileSevenZipBootstrap).Replace('7ZVER', $script:SevenZipVersion)
 }
 
 # -----------------------------------------------------------------------------
@@ -712,7 +770,10 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'antiX full'; Category = '03-Installers'; FileName = 'antiX-26.1_x64-full.iso'; Url = 'https://sourceforge.net/projects/antix-linux/files/Final/antiX-26.1/antiX-26.1_x64-full.iso/download'; AlternateUrl = ''; Hash = '293381af0b7c48399abe015da8f67d41fd34372b73c4aafcf53747fbaed22371'; SidecarUrl = 'https://sourceforge.net/projects/antix-linux/files/Final/antiX-26.1/antiX-26.1_x64-full.iso.sha256/download'; SidecarName = 'antiX-26.1_x64-full.iso.sha256'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Debian 13-based, systemd-free live/installer with a desktop; suits modern and older PCs alike.'; Released = 'Version 26.1, September 2026 (SourceForge files dated 2026-09-28).'; SizeNote = 'About 2.5 GB.'; Check = 'SourceForge Final/antiX-26.1 file list plus the .sha256 sidecar.' },
         [pscustomobject]@{ Name = 'Fedora Workstation Live'; Category = '03-Installers'; FileName = 'Fedora-Workstation-Live-45-1.4.x86_64.iso'; Url = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso'; AlternateUrl = ''; Hash = '68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb'; SidecarUrl = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; SidecarName = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Live desktop installer with GNOME.'; Released = 'Version 45-1.4, October 2026.'; SizeNote = 'About 2.72 GB.'; Check = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM in the same directory.' },
         [pscustomobject]@{ Name = 'Python 3.15 Windows installer'; Category = '04-etc\python'; FileName = $script:FilePythonInstaller; Url = ($script:PyUrlBase + $script:FilePythonInstaller); AlternateUrl = ''; Hash = '06e225a228191b0f4d1dcf6905fbb21bf9f6970d13a2ec63137ab9bee76f15aa'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Full offline CPython for Windows 10/11 x64: pip, venv, tkinter, and a normal per-user or all-users install.'; Released = 'Version 3.15.2, October 2026 (last line to ship the traditional Windows installer; 3.16+ use the Python install manager).'; SizeNote = 'About 36 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash; Authenticode signer is the Python Software Foundation. Download ' + $script:PyUrlBase + $script:FilePythonInstaller + ' into isos\04-etc\python\ by hand; the next run verifies it against the pinned hash and skips it.' },
-        [pscustomobject]@{ Name = 'Python 3.15 Windows embeddable'; Category = '04-etc\python'; FileName = $script:FilePythonEmbed; Url = ($script:PyUrlBase + $script:FilePythonEmbed); AlternateUrl = ''; Hash = 'd012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Extract-and-run CPython for Windows 10/11 x64: sqlite3 and ssl, no pip/venv/tkinter; runs copyparty-sfx.py without installation.'; Released = 'Version 3.15.2, October 2026.'; SizeNote = 'About 13 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash; python.exe inside the zip is signed by the Python Software Foundation. Download ' + $script:PyUrlBase + $script:FilePythonEmbed + ' into isos\04-etc\python\ by hand; the next run verifies it against the pinned hash and skips it.' }
+        [pscustomobject]@{ Name = 'Python 3.15 Windows embeddable'; Category = '04-etc\python'; FileName = $script:FilePythonEmbed; Url = ($script:PyUrlBase + $script:FilePythonEmbed); AlternateUrl = ''; Hash = 'd012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Extract-and-run CPython for Windows 10/11 x64: sqlite3 and ssl, no pip/venv/tkinter; runs copyparty-sfx.py without installation.'; Released = 'Version 3.15.2, October 2026.'; SizeNote = 'About 13 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash; python.exe inside the zip is signed by the Python Software Foundation. Download ' + $script:PyUrlBase + $script:FilePythonEmbed + ' into isos\04-etc\python\ by hand; the next run verifies it against the pinned hash and skips it.' },
+        [pscustomobject]@{ Name = '7-Zip 26.06 Windows installer'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipInstaller; Url = ($script:SevenZipUrlBase + $script:FileSevenZipInstaller); AlternateUrl = 'https://www.7-zip.org/a/7z2606-x64.exe'; Hash = '9b697f65ecc2d9b0152f5ee96d72dde522a7827690349d9307935dacf40f42ec'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'x64 Windows installer for the 7z/zip/iso extractor; installs to Program Files and elevates itself.'; Released = 'Version 26.06, November 2026 (1,659,704 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 1.6 MB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06) equals the winget 7zip.7zip InstallerSha256 and the 7-zip.org copy; unsigned, so NotSigned is expected. Download ' + $script:SevenZipUrlBase + $script:FileSevenZipInstaller + ' into isos\04-etc\7zip\ by hand; the next run verifies it against the pinned hash and skips it.' },
+        [pscustomobject]@{ Name = '7-Zip 26.06 portable extras'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipExtra; Url = ($script:SevenZipUrlBase + $script:FileSevenZipExtra); AlternateUrl = ''; Hash = '396c180f12d2247c24b0b1fcd482c6fc2a2700f61211ffede1061dd971f5e104'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable archive with a standalone 7za.exe (zip/gz/tar/xz/bz2) that needs no admin install; unpack with 7zr.exe.'; Released = 'Version 26.06, November 2026 (1,758,340 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 1.7 MB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06); unsigned, so NotSigned is expected; GitHub-only (7-zip.org has no copy). Download ' + $script:SevenZipUrlBase + $script:FileSevenZipExtra + ' into isos\04-etc\7zip\ by hand; the next run verifies it against the pinned hash and skips it.' },
+        [pscustomobject]@{ Name = '7-Zip 26.06 bootstrap extractor'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipBootstrap; Url = ($script:SevenZipUrlBase + $script:FileSevenZipBootstrap); AlternateUrl = ''; Hash = 'e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = '7zr.exe: .7z-only extractor used to unpack the extra package without installing 7-Zip.'; Released = 'Version 26.06, November 2026 (600,064 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 600 KB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06); unsigned, so NotSigned is expected; GitHub-only (the 7-zip.org 7zr.exe is a different build). Download ' + $script:SevenZipUrlBase + $script:FileSevenZipBootstrap + ' into isos\04-etc\7zip\ by hand; the next run verifies it against the pinned hash and skips it.' }
     )
 }
 
@@ -843,11 +904,11 @@ function Save-CatalogRow {
 function Save-CatalogIsos {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [string]$NetbootArch = 'x64', [string]$MintHwe = 'None')
-    $order = @{ '01-Network' = 0; '02-Rescue' = 1; '03-Installers' = 2; '04-etc' = 3; '04-etc\python' = 3 }
+    $order = @{ '01-Network' = 0; '02-Rescue' = 1; '03-Installers' = 2; '04-etc' = 3 }
     $rows = Get-RecoveryCatalog | Where-Object {
         (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
         (($_.MintHwe -eq '') -or ($_.MintHwe -eq $MintHwe))
-    } | Sort-Object { $order[$_.Category] }, Name
+    } | Sort-Object { $order[($_.Category -split '\\')[0]] }, Name
     foreach ($row in $rows) {
         $entry = $row
         Invoke-SafeStep -Name $entry.Name -Manual @($entry.Check) -Body {
@@ -1519,9 +1580,11 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc')
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirSevenZip)
         Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython) $script:FileReadme) -Text (Get-PythonReadmeText)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirSevenZip) $script:FileReadme) -Text (Get-SevenZipReadmeText)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null
