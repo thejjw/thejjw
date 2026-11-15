@@ -115,7 +115,7 @@ $script:VentoyReleasesUrl = 'https://github.com/ventoy/Ventoy/releases/latest'
 $script:Tiny11BuilderReleasesUrl = 'https://github.com/ntdevlabs/tiny11builder/releases/latest'
 # Manual-retry hints for the Tiny11 build. The elevated variant takes the
 # official ISO file name (or a placeholder) through -f.
-$script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, re-run with -Elevate, or run tiny11maker.ps1 by hand from an elevated shell.'
+$script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, then re-run with -Elevate; or run tiny11maker.ps1 by hand from an elevated shell.'
 $script:MakerHintElevated = 'Re-run with -Elevate after running Enable-WindowsSudo, or mount {0} and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell.'
 $script:Failures = @()
 $script:Results = @()
@@ -911,8 +911,8 @@ function Get-WindowsIsoViaFido {
 # Downloads the tiny11builder release zip (verified) plus the legacy
 # tiny11maker.ps1 build script, then runs the privileged build: mount the
 # official ISO, run the maker, move tiny11.iso into isos\03-Installers\tiny11.
-# The manual-retry text comes from $script:MakerHintAdmin / MakerHintElevated
-# so every failure path prints the same directions. Never throws.
+# Retry hints come from $script:MakerHintAdmin (builder download) and
+# $script:MakerHintElevated (ISO build, formatted with the ISO name). Never throws.
 function Invoke-Tiny11Build {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [switch]$Elevate, [switch]$CleanDownloads)
