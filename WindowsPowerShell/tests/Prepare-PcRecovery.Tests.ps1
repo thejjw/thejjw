@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck)' }, $true)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby)' }, $true)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -50,6 +50,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 DirPutty = 'putty'; PuttyVersion = '0.85'; FilePuttyZip = 'putty-0.85.zip'; FilePuttySums = 'putty-0.85-sha256sums.txt'
                 DirWinScp = 'winscp'; WinScpVersion = '6.7.1'; FileWinScpPortable = 'WinSCP-6.7.1-Portable.zip'
                 DirCyberduck = 'cyberduck'; CyberduckVersion = '9.6.0.46406'; FileCyberduckInstaller = 'Cyberduck-Installer-9.6.0.46406.exe'; FileCyberduckDuck = 'duck_9.6.0.46406_amd64.deb'; FileCyberduckDuckRpm = 'duck-9.6.0.46406-1.x86_64.rpm'
+                DirTabby = 'tabby'; TabbyVersion = '1.0.238'; FileTabbyZip = 'tabby-1.0.238-portable-x64.zip'; FileTabbyDeb = 'tabby-1.0.238-linux-x64.deb'; FileTabbyRpm = 'tabby-1.0.238-linux-x64.rpm'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -94,6 +95,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $names | Should -Contain '03-Installers'
             $names | Should -Contain '04-etc\python'
             $names | Should -Contain '04-etc\cyberduck'
+            $names | Should -Contain '04-etc\tabby'
             foreach ($name in $names) { $name | Should -Match '^\d\d-[A-Za-z]+(\\[a-z0-9-]+)?$' }
         }
 
@@ -703,6 +705,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             $cyberduck = [array]::IndexOf($script:order, $script:FileCyberduckInstaller)
             $duck = [array]::IndexOf($script:order, $script:FileCyberduckDuck)
             $duckRpm = [array]::IndexOf($script:order, $script:FileCyberduckDuckRpm)
+            $tabbyDeb = [array]::IndexOf($script:order, $script:FileTabbyDeb)
+            $tabbyRpm = [array]::IndexOf($script:order, $script:FileTabbyRpm)
+            $tabbyZip = [array]::IndexOf($script:order, $script:FileTabbyZip)
             $sevenZip | Should -BeGreaterThan $fedora
             $sevenZip | Should -BeLessThan $pythonEmbed
             $putty | Should -BeGreaterThan $fedora
@@ -715,6 +720,10 @@ Describe 'Prepare-PcRecovery.ps1' {
             $duckRpm | Should -BeLessThan $pythonEmbed
             $pythonEmbed | Should -BeGreaterThan $fedora
             $pythonInstaller | Should -BeGreaterThan $pythonEmbed
+            $tabbyDeb | Should -BeGreaterThan $pythonInstaller
+            $tabbyRpm | Should -BeGreaterThan $tabbyDeb
+            $tabbyZip | Should -BeGreaterThan $tabbyRpm
+            $tabbyZip | Should -BeLessThan $winScp
             $winScp | Should -BeGreaterThan $pythonInstaller
         }
     }
@@ -874,6 +883,61 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text.Contains($script:CyberduckDownloadPage) | Should -BeTrue
             $text | Should -Not -Match 'runs on macOS and Linux'
             $text | Should -Match 'GPLv3'
+        }
+    }
+
+    Context 'tabby tools' {
+        It 'pins the portable zip and both Linux packages' {
+            $rows = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\tabby' })
+            $rows.Count | Should -Be 3
+            $zip = @($rows | Where-Object { $_.FileName -eq $script:FileTabbyZip })[0]
+            $deb = @($rows | Where-Object { $_.FileName -eq $script:FileTabbyDeb })[0]
+            $rpm = @($rows | Where-Object { $_.FileName -eq $script:FileTabbyRpm })[0]
+            $zip.HashKind | Should -Be 'Pinned'
+            $zip.Hash | Should -Be '56de045fbb5a74d586903367d3f7227276d538281b0068d8132de3318cdd5019'
+            $zip.Url | Should -Be ('https://github.com/Eugeny/tabby/releases/download/v1.0.238/' + $script:FileTabbyZip)
+            $zip.Released | Should -Match 'Eugen Pankov Softwareentwicklung'
+            $deb.HashKind | Should -Be 'Pinned'
+            $deb.Hash | Should -Be '5ea2b9aa84f2b5cdcb98cb7e94bd3d92de48c96254a98b52bf2d1f30a52d1d1c'
+            $deb.Url | Should -Be ('https://github.com/Eugeny/tabby/releases/download/v1.0.238/' + $script:FileTabbyDeb)
+            $rpm.HashKind | Should -Be 'Pinned'
+            $rpm.Hash | Should -Be 'd5027a5f905edf40aaf1fd42ef5015abfaffbd96f5825b3622ef352dfc3136b3'
+            $rpm.Url | Should -Be ('https://github.com/Eugeny/tabby/releases/download/v1.0.238/' + $script:FileTabbyRpm)
+            foreach ($row in $rows) { $row.Check | Should -Match 'GitHub release asset digest' }
+        }
+
+        It 'builds the topic readme with portable and Linux steps' {
+            $text = Get-TabbyReadmeText
+            $text.Contains($script:FileTabbyZip) | Should -BeTrue
+            $text.Contains($script:FileTabbyDeb) | Should -BeTrue
+            $text.Contains($script:FileTabbyRpm) | Should -BeTrue
+            $text | Should -Match 'Expand-Archive'
+            $text.Contains('New-Item .\bin\data -ItemType Directory') | Should -BeTrue
+            $text | Should -Match 'Windows Credential Manager'
+            $text | Should -Match 'delete data before handing'
+            $text | Should -Match 'apt install'
+            $text | Should -Match "dnf install --disablerepo='\*'"
+            $text | Should -Match 'rpm -ivh'
+            $text | Should -Match '--no-sandbox'
+            $text | Should -Match 'libgbm1'
+            $text | Should -Match 'mesa-libgbm'
+            $text | Should -Match 'sha256sum'
+            $text | Should -Match 'Get-AuthenticodeSignature'
+            $text | Should -Match 'Eugen Pankov Softwareentwicklung'
+            $text | Should -Match 'unsigned'
+            $text | Should -Match 'setup \.exe is not stored'
+            $text | Should -Match 'MIT'
+            $text | Should -Match 'tar\.gz and AppImage builds are not stored'
+            $text | Should -Not -Match 'TABBY(ZIP|DEB|RPM)'
+        }
+
+        It 'creates the portable data folder before the first launch' {
+            $text = Get-TabbyReadmeText
+            $data = $text.IndexOf('New-Item .\bin\data -ItemType Directory')
+            $launch = $text.IndexOf('.\bin\Tabby.exe')
+            $data | Should -BeGreaterThan -1
+            $launch | Should -BeGreaterThan -1
+            $data | Should -BeLessThan $launch
         }
     }
 
@@ -1042,6 +1106,14 @@ Describe 'Prepare-PcRecovery.ps1' {
             $puttyText | Should -Match 'Expand-Archive'
             $rootText | Should -Match 'winscp'
             $rootText | Should -Match 'cyberduck'
+            $rootText | Should -Match 'tabby'
+            $tabbyDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'tabby'
+            $tabbyText = [IO.File]::ReadAllText((Join-Path $tabbyDir 'README.txt'))
+            $tabbyText.Contains($script:FileTabbyZip) | Should -BeTrue
+            $tabbyText.Contains($script:FileTabbyDeb) | Should -BeTrue
+            $tabbyText.Contains($script:FileTabbyRpm) | Should -BeTrue
+            $tabbyText | Should -Match 'New-Item \.\\bin\\data -ItemType Directory'
+            $tabbyText | Should -Match '--no-sandbox'
             $cyberduckDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'cyberduck'
             $cyberduckText = [IO.File]::ReadAllText((Join-Path $cyberduckDir 'README.txt'))
             $cyberduckText.Contains($script:FileCyberduckInstaller) | Should -BeTrue
@@ -1070,6 +1142,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match '04-etc\\cyberduck\\Cyberduck-Installer-9\.6\.0\.46406\.exe'
             $isosText | Should -Match '04-etc\\cyberduck\\duck_9\.6\.0\.46406_amd64\.deb'
             $isosText | Should -Match '04-etc\\cyberduck\\duck-9\.6\.0\.46406-1\.x86_64\.rpm'
+            $isosText | Should -Match '04-etc\\tabby\\tabby-1\.0\.238-portable-x64\.zip'
+            $isosText | Should -Match '04-etc\\tabby\\tabby-1\.0\.238-linux-x64\.deb'
+            $isosText | Should -Match '04-etc\\tabby\\tabby-1\.0\.238-linux-x64\.rpm'
             $isosText | Should -Match 'v1\.20\.26'
             $isosText | Should -Match 'copyparty \(copyparty-sfx\.py, not verified this run\)'
             $isosText | Should -Match 'SHA-256 \(on disk at write time\)'

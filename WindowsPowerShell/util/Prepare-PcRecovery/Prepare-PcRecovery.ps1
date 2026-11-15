@@ -105,6 +105,7 @@ $script:DirSevenZip = '7zip'
 $script:DirPutty = 'putty'
 $script:DirWinScp = 'winscp'
 $script:DirCyberduck = 'cyberduck'
+$script:DirTabby = 'tabby'
 $script:PyVersion = '3.15.2'
 $script:PyUrlBase = 'https://www.python.org/ftp/python/' + $script:PyVersion + '/'
 $script:FilePythonInstaller = 'python-' + $script:PyVersion + '-amd64.exe'
@@ -128,6 +129,11 @@ $script:FileCyberduckInstaller = 'Cyberduck-Installer-' + $script:CyberduckVersi
 $script:FileCyberduckDuck = 'duck_' + $script:CyberduckVersion + '_amd64.deb'
 $script:FileCyberduckDuckRpm = 'duck-' + $script:CyberduckVersion + '-1.x86_64.rpm'
 $script:CyberduckDownloadPage = 'https://cyberduck.io/download/'
+$script:TabbyVersion = '1.0.238'
+$script:TabbyUrlBase = 'https://github.com/Eugeny/tabby/releases/download/v' + $script:TabbyVersion + '/'
+$script:FileTabbyZip = 'tabby-' + $script:TabbyVersion + '-portable-x64.zip'
+$script:FileTabbyDeb = 'tabby-' + $script:TabbyVersion + '-linux-x64.deb'
+$script:FileTabbyRpm = 'tabby-' + $script:TabbyVersion + '-linux-x64.rpm'
 $script:FileVentoyExe = 'Ventoy2Disk.exe'
 $script:FileFido = 'Fido.ps1'
 $script:FileRufusPatternNote = 'rufus-.*p\.exe'
@@ -193,7 +199,7 @@ STRUCTURE
   isos\04-etc\       Post-boot utilities by topic: copyparty\ (portable file
                      server), cyberduck\ (cloud/SFTP GUI and duck CLI),
                      python\ (Windows x64), 7zip\ (extractor), putty\,
-                     winscp\ (transfer clients).
+                     tabby\, winscp\ (terminals and transfer clients).
   isos\README.txt    Per-folder contents, sizes, and re-verify notes.
 
 WINDOWS 11 ISO
@@ -239,7 +245,7 @@ FOLDERS
   02-Rescue\     Offline-capable rescue and imaging environments.
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
   04-etc\        Post-boot utilities by topic: copyparty\, cyberduck\,
-                 python\, 7zip\, putty\, winscp\.
+                 python\, 7zip\, putty\, tabby\, winscp\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
@@ -633,6 +639,84 @@ NOTES
     return $text.Replace('CYBERINSTALLER', $script:FileCyberduckInstaller).Replace('CYBERDEB', $script:FileCyberduckDuck).Replace('CYBERRPM', $script:FileCyberduckDuckRpm).Replace('CYBERPAGE', $script:CyberduckDownloadPage)
 }
 
+# Offline Tabby sheet for isos\04-etc\tabby\. Windows portable zip plus Linux
+# deb/rpm; the Linux tarball and AppImage are deliberately not stored.
+function Get-TabbyReadmeText {
+    $text = @'
+TABBY TERMINAL (offline)
+========================
+This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+
+FILES
+  TABBYZIP   Windows x64 portable zip, about 177 MB; extracts to about 481 MB.
+  TABBYDEB   Debian/Ubuntu x64 package, about 124 MB.
+  TABBYRPM   Fedora/RHEL/Rocky x64 package, about 108 MB.
+
+WINDOWS PORTABLE
+  Extract into .\bin:
+    PowerShell:  Expand-Archive .\TABBYZIP -DestinationPath .\bin
+    Explorer:    right-click TABBYZIP, choose Extract All, target .\bin
+  Create the portable data folder before the first run:
+    New-Item .\bin\data -ItemType Directory
+  Then start:
+    .\bin\Tabby.exe
+  Without data, Tabby writes configuration under %APPDATA%. With it,
+  configuration and host lists stay on the stick. Remembered passwords go to
+  Windows Credential Manager unless Tabby's encrypted vault is enabled: do
+  not save passwords on shared media, and delete data before handing the
+  stick over. The setup .exe is not stored here; this zip is the portable
+  build.
+
+LINUX
+  Debian/Ubuntu:
+    sudo apt install ./TABBYDEB
+    tabby --no-sandbox
+  Fedora/Rocky (repos off so a local install works offline):
+    sudo dnf install --disablerepo='*' ./TABBYRPM
+    tabby --no-sandbox
+  If dnf is unavailable and gnome-keyring is already installed:
+    sudo rpm -ivh ./TABBYRPM
+  With no offline gnome-keyring, rpm -ivh --nodeps installs anyway, but
+  Tabby's encrypted secret storage may not work. Do not treat rpm as a
+  generic rescue for missing dependencies.
+  The deb writes /usr/bin/tabby as a wrapper that adds --no-sandbox; the RPM
+  links /usr/bin/tabby straight to /opt/Tabby/tabby, so pass --no-sandbox
+  yourself on a live root session. The desktop entry already uses the flag.
+  Runtime needs GTK3, NSS/NSPR, GBM, ALSA, ATK, CUPS, D-Bus, and xkbcommon.
+  On Debian/Ubuntu the declared dependencies omit libgbm1 and libasound2;
+  install them (and libgtk-3-0 if absent) when Tabby reports a missing
+  library. Fedora/Rocky equivalents are mesa-libgbm, alsa-lib, and gtk3.
+  A minimal live system may install the package but still need these from
+  the distro media before Tabby starts.
+
+SCOPE
+  SSH, telnet, serial, and local shells, with split panes and saved sessions.
+  Not a replacement for PuTTY's pscp, psftp, puttygen, or Pageant; use
+  ..\putty\ and ..\winscp\ for file transfer and keys.
+
+INTEGRITY
+  SHA-256 values come from the GitHub release asset digests and are also
+  recorded in isos\README.txt. Check on Windows:
+    Get-FileHash .\TABBYZIP -Algorithm SHA256
+    Get-AuthenticodeSignature .\bin\Tabby.exe
+  and on Linux:
+    sha256sum TABBYDEB TABBYRPM
+  The zip itself is unsigned; Tabby.exe inside is Authenticode-valid with
+  Eugen Pankov Softwareentwicklung as signer. The Linux packages are
+  unsigned.
+
+NOTES
+  - MIT licensed. Electron app: needs a desktop session, not WinPE or a
+    text-only console.
+  - The Linux .tar.gz and AppImage builds are not stored here; the deb and
+    rpm cover the intended package managers.
+  - After a version bump the old tabby-* files stay in place; delete the
+    previous ones.
+
+'@
+    return $text.Replace('TABBYZIP', $script:FileTabbyZip).Replace('TABBYDEB', $script:FileTabbyDeb).Replace('TABBYRPM', $script:FileTabbyRpm)
+}
+
 # -----------------------------------------------------------------------------
 # Messaging helpers. All routine output goes through these two cmdlets only.
 # -----------------------------------------------------------------------------
@@ -1017,6 +1101,9 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'Cyberduck 9.6.0 Windows installer'; Category = '04-etc\cyberduck'; FileName = $script:FileCyberduckInstaller; Url = ($script:CyberduckUrlBase + $script:FileCyberduckInstaller); AlternateUrl = ($script:CyberduckGitHubUrlBase + $script:FileCyberduckInstaller); Hash = '9a66f8fb400feaa5f7f390f9e4100e873f6be06cbf7c61f1651fca8b1f31c930'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'GUI browser for SFTP, FTP/FTPS, WebDAV, S3, Azure, Backblaze B2, Google Drive, Dropbox, OneDrive, and SharePoint; Windows installer, no portable build.'; Released = 'Version 9.6.0 (build 46406), November 2026 (92,009,848 bytes; Authenticode-valid, signed by iterate GmbH).'; SizeNote = 'About 88 MB.'; Check = 'SHA-256 matches the official cyberduck.io download page and the GitHub asset digest; the installer is Authenticode-valid with iterate GmbH as signer. Download ' + $script:CyberduckUrlBase + $script:FileCyberduckInstaller + ' into isos\04-etc\cyberduck\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Cyberduck CLI (duck) 9.6.0 Linux x64'; Category = '04-etc\cyberduck'; FileName = $script:FileCyberduckDuck; Url = ($script:CyberduckGitHubUrlBase + $script:FileCyberduckDuck); AlternateUrl = ''; Hash = 'b76f3fefdd0756b08e7e3015f46273a73f5cf78bc9f0d83c7d0d6e7e90ea6ca6'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'duck command-line client for the same protocols; Debian/Ubuntu amd64 package that bundles its own Java runtime and declares no dependencies. Extracts and runs without installation.'; Released = 'Version 9.6.0 (build 46406), November 2026 (110,921,096 bytes; installs to about 226 MB).'; SizeNote = 'About 106 MB.'; Check = 'SHA-256 matches the GitHub release asset digest. Download ' + $script:CyberduckGitHubUrlBase + $script:FileCyberduckDuck + ' into isos\04-etc\cyberduck\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Cyberduck CLI (duck) 9.6.0 Linux x64 RPM'; Category = '04-etc\cyberduck'; FileName = $script:FileCyberduckDuckRpm; Url = ($script:CyberduckGitHubUrlBase + $script:FileCyberduckDuckRpm); AlternateUrl = ''; Hash = '7731551675755846ec1a502ca2a2cf2a697e30026afe80c29f43ec9e8e090c6d'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'duck command-line client for Fedora/RHEL/Rocky; x86_64 RPM that bundles its own Java runtime and requires only glibc.'; Released = 'Version 9.6.0 (build 46406), November 2026 (113,352,754 bytes; installs to about 230 MB).'; SizeNote = 'About 108 MB.'; Check = 'SHA-256 matches the GitHub release asset digest. Download ' + $script:CyberduckGitHubUrlBase + $script:FileCyberduckDuckRpm + ' into isos\04-etc\cyberduck\ by hand; the next run verifies it against the pinned hash and skips it.' }
+        [pscustomobject]@{ Name = 'Tabby 1.0.238 Windows portable'; Category = '04-etc\tabby'; FileName = $script:FileTabbyZip; Url = ($script:TabbyUrlBase + $script:FileTabbyZip); AlternateUrl = ''; Hash = '56de045fbb5a74d586903367d3f7227276d538281b0068d8132de3318cdd5019'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Electron terminal with built-in SSH, telnet, serial, and local shells; portable-mode zip that keeps configuration and host lists in a data folder beside Tabby.exe.'; Released = 'Version 1.0.238, October 2026 (185,884,613 bytes; Tabby.exe signed by Eugen Pankov Softwareentwicklung).'; SizeNote = 'About 177 MB (extracts to about 481 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the zip is unsigned, and Tabby.exe inside is Authenticode-valid with Eugen Pankov Softwareentwicklung as signer. Download ' + $script:TabbyUrlBase + $script:FileTabbyZip + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
+        [pscustomobject]@{ Name = 'Tabby 1.0.238 Linux x64 deb'; Category = '04-etc\tabby'; FileName = $script:FileTabbyDeb; Url = ($script:TabbyUrlBase + $script:FileTabbyDeb); AlternateUrl = ''; Hash = '5ea2b9aa84f2b5cdcb98cb7e94bd3d92de48c96254a98b52bf2d1f30a52d1d1c'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Debian/Ubuntu x64 package for the same terminal; installs /opt/Tabby and a /usr/bin/tabby wrapper that adds --no-sandbox.'; Released = 'Version 1.0.238, October 2026 (130,349,456 bytes; unsigned; needs gnome-keyring and GUI libraries).'; SizeNote = 'About 124 MB (installs to about 431 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the package is unsigned. Download ' + $script:TabbyUrlBase + $script:FileTabbyDeb + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
+        [pscustomobject]@{ Name = 'Tabby 1.0.238 Linux x64 rpm'; Category = '04-etc\tabby'; FileName = $script:FileTabbyRpm; Url = ($script:TabbyUrlBase + $script:FileTabbyRpm); AlternateUrl = ''; Hash = 'd5027a5f905edf40aaf1fd42ef5015abfaffbd96f5825b3622ef352dfc3136b3'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Fedora/RHEL/Rocky x64 package for the same terminal; requires gnome-keyring and links /usr/bin/tabby to /opt/Tabby/tabby.'; Released = 'Version 1.0.238, October 2026 (113,337,069 bytes; unsigned; requires gnome-keyring).'; SizeNote = 'About 108 MB (installs to about 431 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the package is unsigned. Download ' + $script:TabbyUrlBase + $script:FileTabbyRpm + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
     )
 }
 
@@ -1827,6 +1914,7 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPutty)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirWinScp)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby)
         Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython) $script:FileReadme) -Text (Get-PythonReadmeText)
@@ -1834,6 +1922,7 @@ function Invoke-PreparePcRecovery {
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPutty) $script:FileReadme) -Text (Get-PuttyReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirWinScp) $script:FileReadme) -Text (Get-WinScpReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck) $script:FileReadme) -Text (Get-CyberduckReadmeText)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby) $script:FileReadme) -Text (Get-TabbyReadmeText)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null
