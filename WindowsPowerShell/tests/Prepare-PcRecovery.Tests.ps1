@@ -46,7 +46,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 FileFacts = 'filefacts.json'; FileReadme = 'README.txt'
                 FileCopypartySfx = 'copyparty-sfx.py'; FileCopypartyExe = 'copyparty.exe'; FileCopypartyTag = '.release'
                 PyVersion = '3.15.2'; FilePythonInstaller = 'python-3.15.2-amd64.exe'; FilePythonEmbed = 'python-3.15.2-embed-amd64.zip'
-                DirSevenZip = '7zip'; SevenZipVersion = '26.06'; FileSevenZipInstaller = '7z2606-x64.exe'; FileSevenZipExtra = '7z2606-extra.7z'; FileSevenZipBootstrap = '7zr.exe'
+                DirSevenZip = '7zip'; SevenZipVersion = '26.06'; FileSevenZipInstaller = '7z2606-x64.exe'; FileSevenZipExtra = '7z2606-extra.7z'; FileSevenZipBootstrap = '7zr-2606.exe'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -711,7 +711,10 @@ Describe 'Prepare-PcRecovery.ps1' {
             $rows.FileName | Should -Contain $script:FileSevenZipExtra
             $rows.FileName | Should -Contain $script:FileSevenZipBootstrap
             $installer = @($rows | Where-Object { $_.FileName -eq $script:FileSevenZipInstaller })
-            $installer[0].AlternateUrl | Should -BeLike 'https://www.7-zip.org/*'
+            $installer[0].AlternateUrl | Should -Be ('https://www.7-zip.org/a/' + $script:FileSevenZipInstaller)
+            $bootstrap = @($rows | Where-Object { $_.FileName -eq $script:FileSevenZipBootstrap })
+            $bootstrap[0].Url.Split('/')[-1] | Should -Be '7zr.exe'
+            $bootstrap[0].FileName | Should -Match '^7zr-2606\.exe$'
             @($rows | Where-Object { $_.FileName -ne $script:FileSevenZipInstaller } | Where-Object { $_.AlternateUrl }) | Should -HaveCount 0
         }
 
@@ -898,7 +901,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-embed-amd64\.zip'
             $isosText | Should -Match '04-etc\\7zip\\7z2606-x64\.exe'
             $isosText | Should -Match '04-etc\\7zip\\7z2606-extra\.7z'
-            $isosText | Should -Match '04-etc\\7zip\\7zr\.exe'
+            $isosText | Should -Match '04-etc\\7zip\\7zr-2606\.exe'
             $isosText | Should -Match 'v1\.20\.26'
             $isosText | Should -Match 'copyparty \(copyparty-sfx\.py, not verified this run\)'
             $isosText | Should -Match 'SHA-256 \(on disk at write time\)'
