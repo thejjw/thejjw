@@ -5014,9 +5014,9 @@ https://docs.microsoft.com/en-us/dotnet/api/system.net.security.sslstream
         $serverChainElements = [System.Collections.ArrayList]::new()
         $ssl = [System.Net.Security.SslStream]::new(
             $tcp.GetStream(), $false,
-            { param($sslSender, $cert, $chain, $errors) 
+            { param($sslSender, $cert, $chain, $errors)
                 if ($chain) { foreach ($e in $chain.ChainElements) { [void]$serverChainElements.Add($e.Certificate) } }
-                return $true 
+                return $true
             }.GetNewClosure()
         )
         $ssl.AuthenticateAsClient($SNIHost)
