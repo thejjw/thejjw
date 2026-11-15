@@ -52,8 +52,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:MsDownloadPage | Should -Match '^https://'
             $script:ThirdPartyTip | Should -Not -BeNullOrEmpty
             $script:WinIsoNaming | Should -Match 'Win11_'
-            $script:MakerHintAdmin | Should -Not -BeNullOrEmpty
-            $script:MakerHintElevated | Should -Match '\{0\}'
+            $script:MakerHintAdmin | Should -Match 'Enable-WindowsSudo'
+            ($script:MakerHintElevated -f 'X.iso') | Should -Match 'mount X\.iso'
         }
     }
 
@@ -300,6 +300,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'm' -NoNewline; return $true }
             Invoke-Tiny11Build -Root $root | Should -BeFalse
             $script:Failures.Name | Should -Contain 'Tiny11 ISO'
+            $script:Failures[-1].Manual | Should -Match 'tiny11maker'
         }
     }
 

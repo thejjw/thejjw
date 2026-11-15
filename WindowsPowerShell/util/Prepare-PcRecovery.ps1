@@ -116,7 +116,7 @@ $script:Tiny11BuilderReleasesUrl = 'https://github.com/ntdevlabs/tiny11builder/r
 # Manual-retry hints for the Tiny11 build. The elevated variant takes the
 # official ISO file name (or a placeholder) through -f.
 $script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, re-run with -Elevate, or run tiny11maker.ps1 by hand from an elevated shell.'
-$script:MakerHintElevated = 'Re-run with -Elevate after enabling inline sudo, or mount {0} and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell.'
+$script:MakerHintElevated = 'Re-run with -Elevate after running Enable-WindowsSudo, or mount {0} and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell.'
 $script:Failures = @()
 $script:Results = @()
 $script:UseSudo = $false
@@ -911,8 +911,8 @@ function Get-WindowsIsoViaFido {
 # Downloads the tiny11builder release zip (verified) plus the legacy
 # tiny11maker.ps1 build script, then runs the privileged build: mount the
 # official ISO, run the maker, move tiny11.iso into isos\03-Installers\tiny11.
-# The manual-retry hint ($script:MakerHint) is shared so its wording and the
-# child text above cannot drift apart. Never throws.
+# The manual-retry text comes from $script:MakerHintAdmin / MakerHintElevated
+# so every failure path prints the same directions. Never throws.
 function Invoke-Tiny11Build {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [switch]$Elevate, [switch]$CleanDownloads)
@@ -921,7 +921,7 @@ function Invoke-Tiny11Build {
     $release = Get-GitHubLatestAsset -Repo 'ntdevlabs/tiny11builder' -AssetPattern '^Tiny11Builder-.*-win-x64\.zip$' -HashSuffix '.sha256'
     if (-not $release) { return $false }
     $builderManual = @(
-        'Download the builder by hand from ' + $script:Tiny11BuilderReleasesUrl + ',',
+        'Download the builder by hand from ' + $script:Tiny11BuilderReleasesUrl + '.',
         $script:MakerHintAdmin
     )
     if (-not $release.HashUrl) {
@@ -956,7 +956,7 @@ function Invoke-Tiny11Build {
         Write-Warning 'tiny11maker.ps1 has no published hash; review it before the elevated build runs.'
         if (-not (Invoke-FileDownload -Url $script:Tiny11MakerUrl -OutFile $makerPath)) {
             Write-Failure -Name 'Tiny11 builder' -Detail "tiny11maker.ps1 download failed." -Manual @(
-                "Save $($script:Tiny11MakerUrl) into $makerPath by hand,",
+                "Save $($script:Tiny11MakerUrl) into $makerPath by hand.",
                 $script:MakerHintAdmin
             )
             return $false
@@ -980,8 +980,7 @@ function Invoke-Tiny11Build {
     }
     if (-not ($Elevate -and $script:UseSudo)) {
         Write-Failure -Name 'Tiny11 ISO' -Detail 'Privileged build skipped: no elevation.' -Manual @(
-            'Re-run with -Elevate after enabling inline sudo,',
-            "or mount $($official[0].Name) and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell,"
+            ($script:MakerHintElevated -f $official[0].Name)
         )
         return $false
     }
