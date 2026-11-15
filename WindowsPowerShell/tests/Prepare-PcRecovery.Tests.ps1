@@ -922,6 +922,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'libgbm1'
             $text | Should -Match 'libasound2t64'
             $text | Should -Match 'libgtk-3-0t64'
+            $text | Should -Match 'Debian 12 / Ubuntu 22\.04 and older use libasound2 and libgtk-3-0\.'
             $text | Should -Match 'mesa-libgbm'
             $text | Should -Match 'sha256sum'
             $text | Should -Match 'Get-AuthenticodeSignature'
