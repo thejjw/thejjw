@@ -715,6 +715,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $bootstrap = @($rows | Where-Object { $_.FileName -eq $script:FileSevenZipBootstrap })
             $bootstrap[0].Url.Split('/')[-1] | Should -Be '7zr.exe'
             $bootstrap[0].FileName | Should -Match '^7zr-2606\.exe$'
+            $bootstrap[0].Check.Contains($script:FileSevenZipBootstrap) | Should -BeTrue
             @($rows | Where-Object { $_.FileName -ne $script:FileSevenZipInstaller } | Where-Object { $_.AlternateUrl }) | Should -HaveCount 0
         }
 
