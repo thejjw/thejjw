@@ -270,22 +270,25 @@ Describe 'Prepare-PcRecovery.ps1' {
         It 'downloads both assets from the resolved tag with their GitHub digests' {
             Reset-State
             $root = Join-Path $TestDrive 'cpok'
+            $sample = Join-Path $TestDrive 'cp-sample.bin'
+            Set-Content -LiteralPath $sample -Value 'x' -NoNewline
+            $sha = (Get-FileHash -LiteralPath $sample -Algorithm SHA256).Hash.ToLowerInvariant()
             Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
-                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1206486; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://github.com/9001/copyparty/releases/download/v1.20.26/copyparty-sfx.py' }
-                [pscustomobject]@{ name = 'copyparty.exe'; size = 13207240; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://github.com/9001/copyparty/releases/download/v1.20.26/copyparty.exe' }
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1206486; digest = "sha256:$sha"; browser_download_url = 'https://github.com/9001/copyparty/releases/download/v1.20.26/copyparty-sfx.py' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 13207240; digest = "sha256:$sha"; browser_download_url = 'https://github.com/9001/copyparty/releases/download/v1.20.26/copyparty.exe' }
             ) } }
             $script:sawDownloads = @()
             Mock Save-VerifiedFile { $script:sawDownloads += [pscustomobject]@{ Url = $Url; OutFile = $OutFile; Hash = $ExpectedHash }; Set-Content -LiteralPath $OutFile -Value 'x' -NoNewline; return $true }
             Save-CopypartyTools -Root $root | Should -BeTrue
             $script:sawDownloads.Count | Should -Be 2
             $script:sawDownloads[0].Url | Should -Match '/download/v1\.20\.26/copyparty-sfx\.py$'
-            $script:sawDownloads[0].Hash | Should -Be ('a' * 64)
+            $script:sawDownloads[0].Hash | Should -Be $sha
             $script:sawDownloads[0].OutFile | Should -Match 'isos\\04-etc\\copyparty\\copyparty-sfx\.py$'
             $script:sawDownloads[1].OutFile | Should -Match 'isos\\04-etc\\copyparty\\copyparty\.exe$'
             $script:CopypartyRows.Count | Should -Be 2
             $block = Format-IsoReadmeEntry -Row ($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }) -Root $root
             $block | Should -Match 'v1\.20\.26'
-            $block | Should -Match ('b' * 64)
+            $block | Should -Match $sha
         }
 
         It 'records one failure per asset when a digest is unusable' {
@@ -332,11 +335,14 @@ Describe 'Prepare-PcRecovery.ps1' {
             Set-Content -LiteralPath (Join-Path $dir '.release') -Value 'v1.20.25' -NoNewline
             $partial = Join-Path $dir 'copyparty.exe.partial'
             Set-Content -LiteralPath $partial -Value 'old' -NoNewline
+            $sample = Join-Path $TestDrive 'cppart-sample.bin'
+            Set-Content -LiteralPath $sample -Value 'x' -NoNewline
+            $sha = (Get-FileHash -LiteralPath $sample -Algorithm SHA256).Hash.ToLowerInvariant()
             Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
-                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
-                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = "sha256:$sha"; browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = "sha256:$sha"; browser_download_url = 'https://example.invalid/exe' }
             ) } }
-            Mock Save-VerifiedFile { return $true }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'x' -NoNewline; return $true }
             Save-CopypartyTools -Root $root | Should -BeTrue
             Test-Path -LiteralPath $partial | Should -BeFalse
             ([IO.File]::ReadAllText((Join-Path $dir '.release'))).Trim() | Should -Be 'v1.20.26'
@@ -349,11 +355,14 @@ Describe 'Prepare-PcRecovery.ps1' {
             Set-Content -LiteralPath (Join-Path $dir '.release') -Value 'v1.20.26' -NoNewline
             $partial = Join-Path $dir 'copyparty.exe.partial'
             Set-Content -LiteralPath $partial -Value 'old' -NoNewline
+            $sample = Join-Path $TestDrive 'cpsame-sample.bin'
+            Set-Content -LiteralPath $sample -Value 'x' -NoNewline
+            $sha = (Get-FileHash -LiteralPath $sample -Algorithm SHA256).Hash.ToLowerInvariant()
             Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
-                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
-                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = "sha256:$sha"; browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = "sha256:$sha"; browser_download_url = 'https://example.invalid/exe' }
             ) } }
-            Mock Save-VerifiedFile { return $true }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'x' -NoNewline; return $true }
             Save-CopypartyTools -Root $root | Should -BeTrue
             Test-Path -LiteralPath $partial | Should -BeTrue
         }
@@ -475,6 +484,42 @@ Describe 'Prepare-PcRecovery.ps1' {
             $target = Join-Path $TestDrive 'missing.exe'
             Restore-PreviousCopyparty -PrevFile $missing -Target $target | Should -BeFalse
             Test-Path -LiteralPath $target | Should -BeFalse
+        }
+
+        It 'restores the previous build when the download throws' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpthrow'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath $exe -Value 'old-build' -NoNewline
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Save-VerifiedFile { throw 'locked by scanner' }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'old-build'
+            Test-Path -LiteralPath "$exe.prev" | Should -BeFalse
+            $script:Failures.Name | Should -Contain 'copyparty.exe'
+        }
+
+        It 'does not document a file that did not verify' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpunverified'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath $exe -Value 'old-build' -NoNewline
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Save-VerifiedFile { return $true }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'old-build'
+            Test-Path -LiteralPath "$exe.prev" | Should -BeFalse
+            @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 0
         }
 
         It 'records a failure when an asset is missing from the release' {

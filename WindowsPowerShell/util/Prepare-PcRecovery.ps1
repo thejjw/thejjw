@@ -1003,7 +1003,21 @@ function Save-CopypartyTools {
                 }
             }
         }
-        if (-not (Save-VerifiedFile -Url $asset.browser_download_url -OutFile $outFile -ExpectedHash $hash -Name $name)) {
+        $saved = $false
+        try {
+            $saved = Save-VerifiedFile -Url $asset.browser_download_url -OutFile $outFile -ExpectedHash $hash -Name $name
+        } catch {
+            $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
+            Write-Failure -Name $name -Detail "Download failed: $detail" -Manual @(
+                "Download $($asset.browser_download_url) by hand into $dir."
+            )
+            if ($backedUp) {
+                Restore-PreviousCopyparty -PrevFile $prevFile -Target $outFile | Out-Null
+            }
+            $ok = $false
+            continue
+        }
+        if (-not $saved) {
             if ($backedUp) {
                 if (Restore-PreviousCopyparty -PrevFile $prevFile -Target $outFile) {
                     Write-Detail "Download failed; restored the previous $name."
@@ -1012,11 +1026,26 @@ function Save-CopypartyTools {
             $ok = $false
             continue
         }
+        # A confirmed No can make Save-VerifiedFile return true without a file;
+        # document only bytes that are on disk and match the digest.
+        $verified = $false
+        try {
+            $verified = (Test-Path -LiteralPath $outFile) -and (Test-LocalFileHash -Path $outFile -ExpectedHash $hash)
+        } catch {
+            $verified = $false
+        }
+        if (-not $verified) {
+            if ($backedUp) {
+                Restore-PreviousCopyparty -PrevFile $prevFile -Target $outFile | Out-Null
+            }
+            $ok = $false
+            continue
+        }
         if ($backedUp) { Remove-Item -LiteralPath $prevFile -Force -ErrorAction SilentlyContinue }
-        if (Test-Path -LiteralPath $outFile) { $script:VerifiedHashes[$outFile] = $hash }
         # The row drives the isos readme, so it must describe only a file that
         # verified this run; a restored old build gets the fallback entry.
         if (-not $WhatIfPreference) {
+            $script:VerifiedHashes[$outFile] = $hash
             $title = if ($name -eq $script:FileCopypartySfx) { 'copyparty sfx (Linux/macOS)' } else { 'copyparty exe (Windows)' }
             $about = if ($name -eq $script:FileCopypartySfx) { 'Portable file server for Linux/macOS live sessions; runs with python3.' } else { 'Portable file server for Windows 8+ x64; no Python needed.' }
             $sizeMb = [math]::Round($asset.size / 1MB, 1).ToString([Globalization.CultureInfo]::InvariantCulture)
