@@ -357,6 +357,36 @@ Describe 'Prepare-PcRecovery.ps1' {
             Save-CopypartyTools -Root $root | Should -BeTrue
             Test-Path -LiteralPath $partial | Should -BeTrue
         }
+        It 'restores the previous file when an update download fails' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpupdate'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath $exe -Value 'old-build' -NoNewline
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Invoke-Cli { [pscustomobject]@{ ExitCode = 22; StdOut = ''; StdErr = 'HTTP 404' } }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'old-build'
+            Test-Path -LiteralPath "$exe.prev" | Should -BeFalse
+        }
+
+        It 'records a failure when an asset is missing from the release' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpnoasset'
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            $script:calls = 0
+            Mock Save-VerifiedFile { $script:calls++; Set-Content -LiteralPath $OutFile -Value 'x' -NoNewline; return $true }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            $script:calls | Should -Be 1
+            $script:Failures | Should -HaveCount 1
+            $script:Failures[0].Name | Should -Be 'copyparty-sfx.py'
+        }
     }
 
     Context 'elevation' {
@@ -467,6 +497,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 New-Item -ItemType Directory -Path $cpDir -Force | Out-Null
                 $cpFile = Join-Path $cpDir 'copyparty.exe'
                 Set-Content -LiteralPath $cpFile -Value 'x' -NoNewline
+                Set-Content -LiteralPath (Join-Path $cpDir 'copyparty-sfx.py') -Value 'y' -NoNewline
                 $script:CopypartyRows = @([pscustomobject]@{
                     Name = 'copyparty exe (Windows)'
                     Category = '04-etc\copyparty'
@@ -503,6 +534,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match 'Tiny11 ISO \(not present\)'
             $isosText | Should -Match '04-etc\\copyparty\\copyparty\.exe'
             $isosText | Should -Match 'v1\.20\.26'
+            $isosText | Should -Match 'copyparty \(copyparty-sfx\.py, not verified this run\)'
+            $isosText | Should -Match 'SHA-256 \(on disk at write time\)'
         }
 
         It 'fetches the checksum sidecar next to the ISO and lists it' {

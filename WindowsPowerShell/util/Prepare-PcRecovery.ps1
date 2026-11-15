@@ -972,10 +972,40 @@ function Save-CopypartyTools {
                 Check = "GitHub API releases/tags/$tag digest field, or the release page."
             }
         }
+        # Save-VerifiedFile deletes a stale versionless file before downloading.
+        # Keep it as .prev so a failed update cannot destroy the only working
+        # copy, and restore it when the download fails.
+        $prevFile = "$outFile.prev"
+        $backedUp = $false
+        if ($PSCmdlet.ShouldProcess($outFile, 'Back up the existing file')) {
+            if ((Test-Path -LiteralPath $outFile) -and -not (Test-LocalFileHash -Path $outFile -ExpectedHash $hash)) {
+                try {
+                    Move-Item -LiteralPath $outFile -Destination $prevFile -Force -ErrorAction Stop
+                    $backedUp = $true
+                } catch {
+                    Write-Failure -Name $name -Detail "Could not move the old $name aside." -Manual @(
+                        "Close anything using $outFile, then re-run."
+                    )
+                    $ok = $false
+                    continue
+                }
+            } elseif (Test-Path -LiteralPath $prevFile) {
+                if (Test-Path -LiteralPath $outFile) {
+                    Remove-Item -LiteralPath $prevFile -Force -ErrorAction SilentlyContinue
+                } else {
+                    $backedUp = $true
+                }
+            }
+        }
         if (-not (Save-VerifiedFile -Url $asset.browser_download_url -OutFile $outFile -ExpectedHash $hash -Name $name)) {
+            if ($backedUp) {
+                Move-Item -LiteralPath $prevFile -Destination $outFile -Force -ErrorAction SilentlyContinue
+                Write-Detail "Download failed; restored the previous $name."
+            }
             $ok = $false
             continue
         }
+        if ($backedUp) { Remove-Item -LiteralPath $prevFile -Force -ErrorAction SilentlyContinue }
         if (Test-Path -LiteralPath $outFile) { $script:VerifiedHashes[$outFile] = $hash }
     }
     return $ok
