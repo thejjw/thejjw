@@ -912,8 +912,9 @@ function Get-WindowsIsoViaFido {
 # Downloads the tiny11builder release zip (verified) plus the legacy
 # tiny11maker.ps1 build script, then runs the privileged build: mount the
 # official ISO, run the maker, move tiny11.iso into isos\03-Installers\tiny11.
-# Retry hints: MakerHintAdmin (maker download), MakerHintSudo (no elevation),
-# MakerHintManual (build failures, ISO name via -f). Never throws.
+# Retry hints: MakerHintAdmin (maker download, normal shell), MakerHintSudo
+# (no elevation, normal shell), MakerHintManual (full manual build steps, also
+# the Invoke-SafeStep fallback; ISO name via -f). Never throws.
 function Invoke-Tiny11Build {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [switch]$Elevate, [switch]$CleanDownloads)
@@ -955,19 +956,23 @@ function Invoke-Tiny11Build {
         if (-not $PSCmdlet.ShouldProcess($makerPath, "Download $($script:Tiny11MakerUrl)")) { return $true }
         Write-Warning 'tiny11maker.ps1 has no published hash; review it before the elevated build runs.'
         if (-not (Invoke-FileDownload -Url $script:Tiny11MakerUrl -OutFile $makerPath)) {
-            $makerHint = if ($Elevate -and $script:UseSudo) {
-                @('Then re-run with -Elevate.')
+            $makerManual = if ($Elevate -and $script:UseSudo) {
+                @(
+                    "Save $($script:Tiny11MakerUrl) into $makerPath by hand.",
+                    'Then re-run with -Elevate.'
+                )
             } elseif (Test-IsAdministrator) {
                 @(
-                    'Then re-run this script (sudo is not used from an elevated shell).',
+                    'This shell is already elevated; run the manual steps below.',
                     ($script:MakerHintManual -f 'the official ISO')
                 )
             } else {
-                @($script:MakerHintAdmin)
+                @(
+                    "Save $($script:Tiny11MakerUrl) into $makerPath by hand.",
+                    $script:MakerHintAdmin
+                )
             }
-            Write-Failure -Name 'Tiny11 builder' -Detail "tiny11maker.ps1 download failed." -Manual (@(
-                "Save $($script:Tiny11MakerUrl) into $makerPath by hand."
-            ) + $makerHint)
+            Write-Failure -Name 'Tiny11 builder' -Detail "tiny11maker.ps1 download failed." -Manual $makerManual
             return $false
         }
     }

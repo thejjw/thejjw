@@ -489,7 +489,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Invoke-FileDownload { return $false }
             Invoke-Tiny11Build -Root $root -Elevate | Should -BeFalse
             $script:Failures.Name | Should -Contain 'Tiny11 builder'
-            $script:Failures[-1].Manual | Should -Match 're-run this script'
+            $script:Failures[-1].Manual | Should -Match 'already elevated'
+            $script:Failures[-1].Manual | Should -Not -Match 're-run'
             $script:Failures[-1].Manual | Should -Not -Match 'Enable-WindowsSudo'
         }
 
