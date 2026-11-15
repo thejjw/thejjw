@@ -113,10 +113,11 @@ $script:RufusUrl = 'https://rufus.ie/'
 $script:RufusReleasesHint = 'Download portable Rufus from https://rufus.ie/ into tools\ by hand.'
 $script:VentoyReleasesUrl = 'https://github.com/ventoy/Ventoy/releases/latest'
 $script:Tiny11BuilderReleasesUrl = 'https://github.com/ntdevlabs/tiny11builder/releases/latest'
-# Manual-retry hints for the Tiny11 build. The elevated variant takes the
-# official ISO file name (or a placeholder) through -f.
-$script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, then re-run with -Elevate; or run tiny11maker.ps1 by hand from an elevated shell.'
-$script:MakerHintElevated = 'Re-run with -Elevate after running Enable-WindowsSudo, or mount {0} and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell.'
+# Manual-retry text for the Tiny11 build. MakerHintManual takes the official
+# ISO file name (or a placeholder) through -f.
+$script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, then re-run with -Elevate; or mount the official ISO, place autounattend.xml next to tiny11maker.ps1, and run it with -ISO <letter> -SCRATCH <letter> from an elevated shell.'
+$script:MakerHintSudo = 'Re-run with -Elevate after running Enable-WindowsSudo.'
+$script:MakerHintManual = 'Mount {0}, place autounattend.xml next to tiny11maker.ps1, and run it with -ISO <letter> -SCRATCH <letter> from an elevated shell.'
 $script:Failures = @()
 $script:Results = @()
 $script:UseSudo = $false
@@ -911,8 +912,8 @@ function Get-WindowsIsoViaFido {
 # Downloads the tiny11builder release zip (verified) plus the legacy
 # tiny11maker.ps1 build script, then runs the privileged build: mount the
 # official ISO, run the maker, move tiny11.iso into isos\03-Installers\tiny11.
-# Retry hints come from $script:MakerHintAdmin (tiny11maker.ps1 download) and
-# $script:MakerHintElevated (ISO build, formatted with the ISO name). Never throws.
+# Retry hints: MakerHintAdmin (maker download), MakerHintSudo (no elevation),
+# MakerHintManual (build failures, ISO name via -f). Never throws.
 function Invoke-Tiny11Build {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$Root, [switch]$Elevate, [switch]$CleanDownloads)
@@ -921,8 +922,7 @@ function Invoke-Tiny11Build {
     $release = Get-GitHubLatestAsset -Repo 'ntdevlabs/tiny11builder' -AssetPattern '^Tiny11Builder-.*-win-x64\.zip$' -HashSuffix '.sha256'
     if (-not $release) { return $false }
     $builderManual = @(
-        'Download the builder by hand from ' + $script:Tiny11BuilderReleasesUrl + '.',
-        "Otherwise save $($script:FileMaker) from $($script:Tiny11MakerUrl), mount the official ISO, and run it with -ISO <letter> -SCRATCH <letter> from an elevated shell."
+        'Download the builder by hand from ' + $script:Tiny11BuilderReleasesUrl + ' and run its app from an elevated shell.'
     )
     if (-not $release.HashUrl) {
         Write-Failure -Name 'Tiny11 builder' -Detail 'Release has no published .sha256 sidecar.' -Manual $builderManual
@@ -980,7 +980,8 @@ function Invoke-Tiny11Build {
     }
     if (-not ($Elevate -and $script:UseSudo)) {
         Write-Failure -Name 'Tiny11 ISO' -Detail 'Privileged build skipped: no elevation.' -Manual @(
-            ($script:MakerHintElevated -f $official[0].Name)
+            $script:MakerHintSudo,
+            ($script:MakerHintManual -f $official[0].Name)
         )
         return $false
     }
@@ -1051,13 +1052,13 @@ Move-Item -LiteralPath (Join-Path (Split-Path -LiteralPath '$escapedMaker') 'tin
     } catch {
         $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
         Write-Failure -Name 'Tiny11 ISO' -Detail "Elevated build failed: $detail" -Manual @(
-            ($script:MakerHintElevated -f $official[0].Name)
+            ($script:MakerHintManual -f $official[0].Name)
         )
         return $false
     }
     if (-not (Test-Path -LiteralPath $finalIso)) {
         Write-Failure -Name 'Tiny11 ISO' -Detail 'Build finished without producing tiny11.iso.' -Manual @(
-            ($script:MakerHintElevated -f $official[0].Name)
+            ($script:MakerHintManual -f $official[0].Name)
         )
         return $false
     }
@@ -1173,7 +1174,7 @@ function Invoke-PreparePcRecovery {
         }
         if (-not $SkipTiny11) {
             Write-Step 'Tiny11 build'
-            Invoke-SafeStep -Name 'Tiny11 ISO' -Manual @(($script:MakerHintElevated -f 'the official ISO')) -Body {
+            Invoke-SafeStep -Name 'Tiny11 ISO' -Manual @(($script:MakerHintManual -f 'the official ISO')) -Body {
                 Invoke-Tiny11Build -Root $Root -Elevate:$Elevate -CleanDownloads:$CleanDownloads | Out-Null
             }
         } else {

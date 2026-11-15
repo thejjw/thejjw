@@ -53,7 +53,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:ThirdPartyTip | Should -Not -BeNullOrEmpty
             $script:WinIsoNaming | Should -Match 'Win11_'
             $script:MakerHintAdmin | Should -Match 'Enable-WindowsSudo'
-            ($script:MakerHintElevated -f 'X.iso') | Should -Match 'mount X\.iso'
+            $script:MakerHintSudo | Should -Match 'Enable-WindowsSudo'
+            ($script:MakerHintManual -f 'X.iso') | Should -Match 'Mount X\.iso'
         }
     }
 
@@ -436,8 +437,39 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = '' } }
             Invoke-Tiny11Build -Root $root | Should -BeFalse
             $script:Failures.Name | Should -Contain 'Tiny11 builder'
-            $script:Failures[-1].Manual | Should -Match 'tiny11maker\.ps1'
+            $script:Failures[-1].Manual | Should -Match 'releases/latest'
             $script:Failures[-1].Manual | Should -Match 'elevated shell'
+        }
+
+        It 'keeps the admin hint when the maker download fails' {
+            Reset-State
+            $root = Join-Path $TestDrive 'nomaker'
+            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = 'https://example.invalid/b.zip.sha256' } }
+            Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
+            Mock Save-VerifiedFile { return $true }
+            Mock Expand-Archive { }
+            Mock Invoke-FileDownload { return $false }
+            Invoke-Tiny11Build -Root $root | Should -BeFalse
+            $script:Failures.Name | Should -Contain 'Tiny11 builder'
+            $script:Failures[-1].Manual | Should -Match 'Enable-WindowsSudo'
+        }
+
+        It 'drops the sudo advice when the elevated build fails' {
+            Reset-State
+            $root = Join-Path $TestDrive 'builtfail'
+            $installers = Join-Path (Join-Path $root 'isos') '03-Installers'
+            New-Item -ItemType Directory -Path $installers -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $installers 'Win11.iso') -Value 'x' -NoNewline
+            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = 'https://example.invalid/b.zip.sha256' } }
+            Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
+            Mock Save-VerifiedFile { return $true }
+            Mock Expand-Archive { }
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'm' -NoNewline; return $true }
+            Mock Invoke-Elevated { }
+            $script:UseSudo = $true
+            Invoke-Tiny11Build -Root $root -Elevate | Should -BeFalse
+            $script:Failures[-1].Manual | Should -Match 'tiny11maker'
+            $script:Failures[-1].Manual | Should -Not -Match 'Enable-WindowsSudo'
         }
 
         It 'routes a missing official ISO to a Tiny11 skip-failure' {
