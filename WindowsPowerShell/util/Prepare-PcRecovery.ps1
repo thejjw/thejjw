@@ -115,9 +115,9 @@ $script:VentoyReleasesUrl = 'https://github.com/ventoy/Ventoy/releases/latest'
 $script:Tiny11BuilderReleasesUrl = 'https://github.com/ntdevlabs/tiny11builder/releases/latest'
 # Manual-retry text for the Tiny11 build. MakerHintManual takes the official
 # ISO file name (or a placeholder) through -f.
-$script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, then re-run with -Elevate; or mount the official ISO, place autounattend.xml next to tiny11maker.ps1, and run it with -ISO <letter> -SCRATCH <letter> from an elevated shell.'
+$script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, then re-run with -Elevate; or mount the official ISO, save ' + $script:Tiny11AnswerUrl + ' as autounattend.xml next to tiny11maker.ps1, run it with -ISO <letter> -SCRATCH <letter> from an elevated shell, then move tiny11.iso into isos\03-Installers\tiny11\.'
 $script:MakerHintSudo = 'Re-run with -Elevate after running Enable-WindowsSudo.'
-$script:MakerHintManual = 'Mount {0}, place autounattend.xml next to tiny11maker.ps1, and run it with -ISO <letter> -SCRATCH <letter> from an elevated shell.'
+$script:MakerHintManual = 'Mount {0}, save ' + $script:Tiny11AnswerUrl + ' as autounattend.xml next to tiny11maker.ps1, run it with -ISO <letter> -SCRATCH <letter> from an elevated shell, then move tiny11.iso into isos\03-Installers\tiny11\.'
 $script:Failures = @()
 $script:Results = @()
 $script:UseSudo = $false
