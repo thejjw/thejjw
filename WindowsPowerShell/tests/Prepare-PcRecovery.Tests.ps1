@@ -919,7 +919,11 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text.Contains('sudo dnf install --disablerepo=''*'' ./' + $script:FileTabbyRpm) | Should -BeTrue
             $text.Contains('sudo rpm -ivh ./' + $script:FileTabbyRpm) | Should -BeTrue
             $text | Should -Match '--no-sandbox'
-            $text | Should -Match 'Zmodem'
+            $text | Should -Match 'SFTP panel'
+            $text | Should -Match 'Zmodem works in SSH, telnet,\s+and serial tabs'
+            $text | Should -Match 'scripted\s+transfer \(PuTTY''s pscp/psftp, WinSCP\.com\)'
+            $text | Should -Match 'puttygen and\s+Pageant'
+            $text | Should -Not -Match 'for file transfer and keys'
             $text | Should -Match 'libgbm1'
             $text | Should -Match 'libasound2t64'
             $text | Should -Match 'libgtk-3-0t64'
