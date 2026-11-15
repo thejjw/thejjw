@@ -113,6 +113,10 @@ $script:RufusUrl = 'https://rufus.ie/'
 $script:RufusReleasesHint = 'Download portable Rufus from https://rufus.ie/ into tools\ by hand.'
 $script:VentoyReleasesUrl = 'https://github.com/ventoy/Ventoy/releases/latest'
 $script:Tiny11BuilderReleasesUrl = 'https://github.com/ntdevlabs/tiny11builder/releases/latest'
+# Manual-retry hints for the Tiny11 build. The elevated variant takes the
+# official ISO file name (or a placeholder) through -f.
+$script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, re-run with -Elevate, or run tiny11maker.ps1 by hand from an elevated shell.'
+$script:MakerHintElevated = 'Re-run with -Elevate after enabling inline sudo, or mount {0} and run tiny11maker.ps1 -ISO <letter> -SCRATCH <letter> from an elevated shell.'
 $script:Failures = @()
 $script:Results = @()
 $script:UseSudo = $false
