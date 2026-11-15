@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty)' }, $true)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp)' }, $true)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -48,6 +48,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 PyVersion = '3.15.2'; FilePythonInstaller = 'python-3.15.2-amd64.exe'; FilePythonEmbed = 'python-3.15.2-embed-amd64.zip'
                 DirSevenZip = '7zip'; SevenZipVersion = '26.06'; FileSevenZipInstaller = '7z2606-x64.exe'; FileSevenZipExtra = '7z2606-extra.7z'; FileSevenZipBootstrap = '7zr-2606.exe'
                 DirPutty = 'putty'; PuttyVersion = '0.85'; FilePuttyZip = 'putty-0.85.zip'; FilePuttySums = 'putty-0.85-sha256sums.txt'
+                DirWinScp = 'winscp'; WinScpVersion = '6.7.1'; FileWinScpPortable = 'WinSCP-6.7.1-Portable.zip'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -689,15 +690,20 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Save-CatalogRow { $script:order += $Row.FileName }
             Save-CatalogIsos -Root (Join-Path $TestDrive 'pyorder') -NetbootArch 'x64' -MintHwe 'None'
             $script:order[0] | Should -Be 'netboot.xyz.iso'
-            $script:order[-2] | Should -Be $script:FilePythonEmbed
-            $script:order[-1] | Should -Be $script:FilePythonInstaller
+            $script:order[-1] | Should -Be $script:FileWinScpPortable
             $fedora = [array]::IndexOf($script:order, 'Fedora-Workstation-Live-45-1.4.x86_64.iso')
+            $pythonEmbed = [array]::IndexOf($script:order, $script:FilePythonEmbed)
+            $pythonInstaller = [array]::IndexOf($script:order, $script:FilePythonInstaller)
+            $winScp = [array]::IndexOf($script:order, $script:FileWinScpPortable)
             $sevenZip = [array]::IndexOf($script:order, $script:FileSevenZipInstaller)
             $putty = [array]::IndexOf($script:order, $script:FilePuttyZip)
             $sevenZip | Should -BeGreaterThan $fedora
-            $sevenZip | Should -BeLessThan ([array]::IndexOf($script:order, $script:FilePythonEmbed))
+            $sevenZip | Should -BeLessThan $pythonEmbed
             $putty | Should -BeGreaterThan $fedora
-            $putty | Should -BeLessThan ([array]::IndexOf($script:order, $script:FilePythonEmbed))
+            $putty | Should -BeLessThan $pythonEmbed
+            $pythonEmbed | Should -BeGreaterThan $fedora
+            $pythonInstaller | Should -BeGreaterThan $pythonEmbed
+            $winScp | Should -BeGreaterThan $pythonInstaller
         }
     }
 
@@ -768,6 +774,31 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match '%LOCALAPPDATA%\\PUTTY\.RND'
             $text | Should -Match 'Skip it if PuTTY was already in use'
             $text | Should -Match 'not staged'
+        }
+    }
+
+    Context 'winscp tools' {
+        It 'pins the SourceForge portable package' {
+            $row = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\winscp' })
+            $row.Count | Should -Be 1
+            $row[0].HashKind | Should -Be 'Pinned'
+            $row[0].Hash | Should -Match '^[0-9a-f]{64}$'
+            $row[0].Url | Should -Be ('https://sourceforge.net/projects/winscp/files/WinSCP/6.7.1/WinSCP-6.7.1-Portable.zip/download')
+            $row[0].FileName | Should -Be 'WinSCP-6.7.1-Portable.zip'
+            $row[0].SidecarName | Should -BeNullOrEmpty
+        }
+
+        It 'builds the topic readme with the portable and scripting steps' {
+            $text = Get-WinScpReadmeText
+            $text.Contains($script:FileWinScpPortable) | Should -BeTrue
+            $text | Should -Match 'Expand-Archive'
+            $text | Should -Match 'New-Item \.\\bin\\WinSCP\.ini'
+            $text | Should -Match '/script=job\.txt'
+            $text | Should -Match '/ini=nul'
+            $text | Should -Match '\[Configuration\\Interface\]'
+            $text | Should -Match 'Tools > Clean Up'
+            $text | Should -Match '\.\.\\\.\.\\putty\\bin\\PUTTY\.EXE'
+            $text | Should -Match 'GPLv3'
         }
     }
 
@@ -934,6 +965,12 @@ Describe 'Prepare-PcRecovery.ps1' {
             $puttyText.Contains($script:FilePuttyZip) | Should -BeTrue
             $puttyText.Contains($script:FilePuttySums) | Should -BeTrue
             $puttyText | Should -Match 'Expand-Archive'
+            $rootText | Should -Match 'winscp'
+            $winScpDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'winscp'
+            $winScpText = [IO.File]::ReadAllText((Join-Path $winScpDir 'README.txt'))
+            $winScpText.Contains($script:FileWinScpPortable) | Should -BeTrue
+            $winScpText | Should -Match '/script=job\.txt'
+            $winScpText | Should -Match 'Tools > Clean Up'
             $isosText = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'isos') 'README.txt'))
             $isosText | Should -Match 'HBCD_PE_x64.iso'
             $isosText | Should -Match 'Windows PE rescue environment'
@@ -948,6 +985,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match '04-etc\\7zip\\7z2606-extra\.7z'
             $isosText | Should -Match '04-etc\\7zip\\7zr-2606\.exe'
             $isosText | Should -Match '04-etc\\putty\\putty-0\.85\.zip'
+            $isosText | Should -Match '04-etc\\winscp\\WinSCP-6\.7\.1-Portable\.zip'
             $isosText | Should -Match 'v1\.20\.26'
             $isosText | Should -Match 'copyparty \(copyparty-sfx\.py, not verified this run\)'
             $isosText | Should -Match 'SHA-256 \(on disk at write time\)'
