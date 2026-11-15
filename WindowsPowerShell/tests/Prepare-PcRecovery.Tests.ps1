@@ -304,6 +304,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Invoke-Tiny11Build -Root $root | Should -BeFalse
             $script:Failures.Name | Should -Contain 'Tiny11 ISO'
             $script:Failures[-1].Manual | Should -Match 'tiny11maker'
+            $script:Failures[-1].Manual | Should -Match 'Enable-WindowsSudo'
         }
     }
 
@@ -441,6 +442,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:Failures.Name | Should -Contain 'Tiny11 builder'
             $script:Failures[-1].Manual | Should -Match 'releases/latest'
             $script:Failures[-1].Manual | Should -Match 'elevated shell'
+            $script:Failures[-1].Manual | Should -Match '03-Installers\\tiny11'
         }
 
         It 'keeps the admin hint when the maker download fails' {

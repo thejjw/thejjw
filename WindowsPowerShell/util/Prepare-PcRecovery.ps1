@@ -922,7 +922,7 @@ function Invoke-Tiny11Build {
     $release = Get-GitHubLatestAsset -Repo 'ntdevlabs/tiny11builder' -AssetPattern '^Tiny11Builder-.*-win-x64\.zip$' -HashSuffix '.sha256'
     if (-not $release) { return $false }
     $builderManual = @(
-        'Download the builder by hand from ' + $script:Tiny11BuilderReleasesUrl + ' and run its app from an elevated shell.'
+        'Download the builder by hand from ' + $script:Tiny11BuilderReleasesUrl + ', run its app from an elevated shell, and save the resulting ISO as isos\03-Installers\tiny11\tiny11.iso.'
     )
     if (-not $release.HashUrl) {
         Write-Failure -Name 'Tiny11 builder' -Detail 'Release has no published .sha256 sidecar.' -Manual $builderManual
