@@ -760,8 +760,11 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'PUTTY\.EXE'
             $text | Should -Match 'PLINK\.EXE'
             $text | Should -Match 'Authenticode-valid'
-            $text | Should -Match 'no install, no admin|no registry or PATH'
+            $text | Should -Match 'No install, PATH, or Start-menu changes'
             $text | Should -Match 'MIT licensed'
+            $text | Should -Match '-cleanup'
+            $text | Should -Match 'w64/putty\.zip'
+            $text | Should -Match 'not staged'
         }
     }
 

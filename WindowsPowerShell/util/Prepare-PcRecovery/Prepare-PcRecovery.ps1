@@ -407,8 +407,8 @@ NOTES
 }
 
 # Offline PuTTY sheet for isos\04-etc\putty\. One portable zip keeps the tools
-# together without install, registry, or PATH changes; the sums file sits next
-# to it for a manual re-check.
+# together with no install, PATH, or Start-menu changes; PuTTY still writes its
+# own HKCU settings and seed file, and -cleanup removes them.
 function Get-PuttyReadmeText {
     $text = @'
 PUTTY FOR WINDOWS (offline)
@@ -426,8 +426,12 @@ USE (no install, no admin)
   Then run:
     .\bin\PUTTY.EXE
     .\bin\PLINK.EXE -V
-  Nothing is registered: no PATH, Start-menu, or registry changes. Delete the
-  bin folder to remove every trace.
+  No install, PATH, or Start-menu changes. PuTTY still writes host keys and
+  saved sessions to HKCU\Software\SimonTatham\PuTTY and a seed file to
+  %APPDATA%\putty.rnd. Before deleting bin, run:
+    .\bin\PUTTY.EXE -cleanup
+  That removes the current user's PuTTY settings and seed file (after a
+  confirmation prompt).
 
 TOOLS
   PUTTY.EXE    SSH, telnet, and serial GUI client (saved sessions).
@@ -437,10 +441,13 @@ TOOLS
   PUTTY.CHM    Built-in help.
 
 INTEGRITY
-  SHA-256 is pinned from the official sha256sums. The executables are
-  Authenticode-valid with Simon Tatham as signer, and the sums file is
-  GPG-signed upstream (verify with gpg when available). On the first
-  connection, compare the host-key fingerprint through a second channel.
+  SHA-256 is pinned from the official sha256sums. Compare a manual check with
+  the w64/putty.zip line in PUTTYSUMS (the file is stored as PUTTYZIP, so the
+  saved name will not match the line). The executables are Authenticode-valid
+  with Simon Tatham as signer. The sums file's GPG signature and the release
+  key are not staged; fetch both from the release page online if you need that
+  check. On the first connection, compare the host-key fingerprint through a
+  second channel.
 
 NOTES
   - Telnet is plaintext; prefer SSH when the peer supports it.
