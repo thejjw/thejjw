@@ -503,19 +503,23 @@ PROTOCOLS
 
 PUTTY INTEGRATION
   Import existing PuTTY sessions with Tools > Import. For "Open in PuTTY", set
-  Preferences > Integration > PuTTY path to ..\..\putty\bin\PUTTY.EXE.
+  Preferences > Integration > PuTTY path to
+  %WINSCP_PATH%\..\..\putty\bin\PUTTY.EXE.
   PuTTY remains the terminal/serial/key tool; WinSCP is the file manager.
 
 STORAGE AND CLEANUP
   By default WinSCP also writes winscp.rnd to %USERPROFILE% and temporary files
-  to %TEMP%. For one-folder portability, add this to .\bin\WinSCP.ini:
+  to %TEMP%. Relative paths resolve against the startup folder, so use
+  %WINSCP_PATH% (the folder holding WinSCP.exe) for a self-contained setup;
+  add this to .\bin\WinSCP.ini:
     [Configuration\Interface]
-    RandomSeedFile=.\winscp.rnd
-    DDTemporaryDirectory=.\temp\
+    RandomSeedFile=%WINSCP_PATH%\winscp.rnd
+    DDTemporaryDirectory=%WINSCP_PATH%\temp\
   If bin is read-only, WinSCP falls back to the registry; create the INI on a
   writable copy instead. Saved sessions, including passwords if you save them,
   live in .\bin\WinSCP.ini on the stick: do not save passwords on shared media,
-  and delete bin before handing the stick over. On the host, Tools > Clean Up
+  and delete bin before handing the stick over. With the settings above, the
+  seed and temp files also live under bin. On the host, Tools > Clean Up
   on the Login dialog removes selected data (INI, registry configuration,
   sites, caches, seed file, temp folders); if WinSCP was already installed on
   this PC, untick the registry entries.
