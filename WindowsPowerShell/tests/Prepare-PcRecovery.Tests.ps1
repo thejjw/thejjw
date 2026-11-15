@@ -522,6 +522,24 @@ Describe 'Prepare-PcRecovery.ps1' {
             @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 0
         }
 
+        It 'skips the update when the backup is declined' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpnobackup'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath $exe -Value 'old-build' -NoNewline
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            $script:svNames = @()
+            Mock Save-VerifiedFile { $script:svNames += $Name; return $true }
+            Save-CopypartyTools -Root $root -WhatIf | Should -BeFalse
+            $script:svNames | Should -Not -Contain 'copyparty.exe'
+            (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'old-build'
+        }
+
         It 'records a failure when an asset is missing from the release' {
             Reset-State
             $root = Join-Path $TestDrive 'cpnoasset'

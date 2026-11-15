@@ -1002,6 +1002,12 @@ function Save-CopypartyTools {
                     $backedUp = $true
                 }
             }
+        } elseif ((Test-Path -LiteralPath $outFile) -and -not (Test-LocalFileHash -Path $outFile -ExpectedHash $hash)) {
+            # A declined backup must not let Save-VerifiedFile delete the only
+            # working copy before the download starts.
+            Write-Detail "Kept the existing $name; backup declined, so the update is skipped."
+            $ok = $false
+            continue
         }
         $saved = $false
         try {
