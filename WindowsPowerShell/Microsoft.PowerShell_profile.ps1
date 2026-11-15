@@ -3042,7 +3042,7 @@ function Get-NewPassword {
         return $set[(Get-Random -Minimum 0 -Maximum $set.Length)]
     }
 
-    function IsValidPassword($candidate) {
+    function Test-PasswordCandidate($candidate) {
         $lastChar = ''
         $count = 1
         foreach ($char in $candidate.ToCharArray()) {
@@ -3089,7 +3089,7 @@ function Get-NewPassword {
             $passwordChars = $passwordChars | Sort-Object { Get-Random }
         }
         $password = -join $passwordChars
-    } while (-not (IsValidPassword $password))
+    } while (-not (Test-PasswordCandidate $password))
 
     return $password
 }
