@@ -366,12 +366,14 @@ INSTALL (needs admin; /S does not suppress UAC)
   Default target is C:\Program Files\7-Zip. From a normal shell the installer
   raises a UAC prompt, and a standard user needs admin credentials. To change
   the target, append /D=<dir> as the last parameter (see the 7-Zip FAQ).
-  Uninstall from an elevated shell: "%ProgramFiles%\7-Zip\Uninstall.exe" /S
+  Uninstall from an elevated shell:
+    cmd.exe:    "%ProgramFiles%\7-Zip\Uninstall.exe" /S
+    PowerShell: & "$env:ProgramFiles\7-Zip\Uninstall.exe" /S
 
 PORTABLE (no admin; no install)
   cmd.exe:
-    7ZR x 7ZEXTRA -o%TEMP%\7za
-    %TEMP%\7za\7za.exe x archive.zip
+    7ZR x 7ZEXTRA "-o%TEMP%\7za"
+    "%TEMP%\7za\7za.exe" x archive.zip
   PowerShell:
     .\7ZR x .\7ZEXTRA "-o$env:TEMP\7za"
     & "$env:TEMP\7za\7za.exe" x archive.zip

@@ -729,6 +729,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match '7zr'
             $text | Should -Match 'no RAR, no ISO'
             $text.Contains('"-o$env:TEMP\7za"') | Should -BeTrue
+            $text.Contains('"-o%TEMP%\7za"') | Should -BeTrue
+            $text.Contains('$env:ProgramFiles\7-Zip\Uninstall.exe') | Should -BeTrue
             $text | Should -Match 'LGPL-2\.1-or-later'
             $text | Should -Match 'winget install --id 7zip\.7zip'
         }
