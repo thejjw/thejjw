@@ -7,9 +7,9 @@ at `WindowsPowerShell/tests/Prepare-PcRecovery.Tests.ps1`.
 
 - `Prepare-PcRecovery.ps1` - the whole tool: catalog, download engine, tool
   flows, readme generators, orchestration. Single file, dot-sourceable.
-- `tests/Prepare-PcRecovery.Tests.ps1` (repo level) - loads only functions and
-  shared constants from the script with the PowerShell AST parser; no execution,
-  no network, no writes outside `TestDrive`.
+- `WindowsPowerShell/tests/Prepare-PcRecovery.Tests.ps1` - loads only functions
+  and shared constants from the script with the PowerShell AST parser; no
+  execution, no network, no writes outside `TestDrive`.
 - Generated tree: `README.txt`, `isos\README.txt`,
   `isos\04-etc\<topic>\README.txt`. Edit the text generators in the script,
   never the generated tree.
@@ -17,7 +17,8 @@ at `WindowsPowerShell/tests/Prepare-PcRecovery.Tests.ps1`.
 ## Environment
 
 - Windows PowerShell 5.1 is the floor. Do not use `-AdditionalChildPath`,
-  ternary, `??`, `-notin`, or other pwsh-only syntax.
+  ternary, `??`, or other pwsh-only syntax. `-in`/`-notin` are fine (PowerShell
+  3.0+).
 - `$ErrorActionPreference = 'Stop'` applies: any real IO call can throw. A
   helper that claims "never throws" must wrap `Get-FileHash`, `Move-Item`,
   `[IO.File]`, and `Invoke-*` in `try`/`catch`.
@@ -48,12 +49,15 @@ at `WindowsPowerShell/tests/Prepare-PcRecovery.Tests.ps1`.
 
 ```powershell
 cd WindowsPowerShell
+Import-Module Pester -MinimumVersion 6.0 -Force
 Invoke-Pester .\tests\Prepare-PcRecovery.Tests.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\util\Prepare-PcRecovery\Prepare-PcRecovery.ps1 -Root "$env:TEMP\pcr-whatif" -WhatIf
 ```
 
-Run the suite once after the change; the `-WhatIf` smoke prints the plan table
-and must not touch the network or disk.
+The suite needs Pester 6 (the inbox 3.4.0 cannot run `Should -Be`); see
+`WindowsPowerShell/tests/README.md` for installation. Run the suite once after
+the change; the `-WhatIf` smoke prints the plan table and must not touch the
+network or disk.
 
 ## Recurring review patterns
 
@@ -75,23 +79,41 @@ a change done.
 
 ## Polishing with claude -p (opus)
 
-After a change is green locally, run one external review round before calling
-it done. Run it from the repo root and feed the cumulative local diff so the
-reviewer sees the whole change, not one commit:
+After a change is green locally, run the external review loop below. Run it from
+the repo root and feed the cumulative local diff so the reviewer sees the whole
+change, not one commit:
 
-```bash
-{ git log --format='--- %h %s%n%b' "$BASE"..HEAD; git diff "$BASE"..HEAD; } \
-  | claude -p "Review the local commits on stdin (PowerShell 5.1 util/Prepare-PcRecovery/Prepare-PcRecovery.ps1 + offline Pester suite). Review for actionable defects only: correctness bugs, regressions, broken tests, security or data-loss issues, misleading user-facing text, or missing coverage. Ignore style and anything pre-existing outside these commits. If nothing actionable remains, answer exactly 'NO ACTIONABLE FINDINGS'. Otherwise list findings with file:line, severity, and a concrete fix. Do not modify files." \
-    --model opus --disallowedTools Edit Write Bash
+```powershell
+$base = 'origin/main'   # or the commit before the change under review
+$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+$diff = @(git diff "$base...HEAD")
+if ($diff.Count -eq 0) { throw "No changes in $base...HEAD; set `$base" }
+$prompt = @'
+Review the local commits on stdin (PowerShell 5.1 util/Prepare-PcRecovery/Prepare-PcRecovery.ps1 + offline Pester suite). Review for actionable defects only: correctness bugs, regressions, broken tests, security or data-loss issues, misleading user-facing text, or missing coverage. Ignore style and anything pre-existing outside these commits. If nothing actionable remains, answer exactly 'NO ACTIONABLE FINDINGS'. Otherwise list findings with file:line, severity, and a concrete fix. Do not modify files.
+'@
+((@(git log --format='--- %h %s%n%b' "$base..HEAD") + $diff) -join "`r`n") |
+    claude -p $prompt --model opus --tools Read Grep Glob --strict-mcp-config
 ```
 
-- `BASE` is `origin/main` or the commit before the change under review.
-- `--disallowedTools Edit Write Bash` keeps the reviewer read-only. It can still
-  read the repo, so it may inspect the working tree as well as the piped diff.
+- `$base` is `origin/main` or the commit before the change under review. The
+  empty-diff guard prevents an unset base from producing a false clean review.
+  The diff uses three dots (`base...HEAD`) so upstream commits that landed after
+  the branch point do not appear as changes; the log keeps two dots because it
+  should list only the commits under review.
+- The UTF-8 line keeps non-ASCII diff text intact through the 5.1 pipe; the
+  default `$OutputEncoding` is ASCII and would replace those characters.
+- The reviewer gets only `Read`, `Grep`, and `Glob`, with all MCP servers
+  disabled (`--strict-mcp-config`). That is an allowlist, so tools added to the
+  CLI later stay unavailable without editing this file. If the installed CLI
+  lacks `--tools`, fall back to a blocklist:
+  `--disallowedTools Edit Write NotebookEdit Bash PowerShell EnterWorktree CronCreate RemoteTrigger --strict-mcp-config`,
+  and re-check the list when new tools appear.
 - Treat every claim as a hypothesis and reproduce it before editing: argv
   probes for language behavior, a Pester run, `git ls-files --eol`, the GitHub
   API for asset facts. Stale, duplicated, and wrong findings are normal; reject
   them with evidence and keep the code.
+- Record each rejection and its evidence in the commit body (or the round
+  summary), so the next round's `git log` shows why a claim was refused.
 - Each accepted finding gets a regression test that fails when the branch is
   removed. Batch the fixes, run Pester once, then commit as one logical change.
 - Loop shape: fix -> test -> commit -> re-review the cumulative diff. Keep the
@@ -103,15 +125,8 @@ reviewer sees the whole change, not one commit:
   Pester run, file/tree check, upstream data). "Only low severity left" is not
   a stop condition while any claim is still valid, and a false claim is never
   a reason to weaken the code.
-- Keep the loop bounded: batch fixes into one round, re-run once, and remember
-  that every fix can add branches the next round will probe.
-
-## Review loop stop rule
-
-One clean review round after a fix round. Each fix legitimately adds branches,
-so "repeat until nothing is reported" can chase newly created edges forever.
-When a finding is wrong (language behavior, upstream asset contents), reject it
-with evidence instead of changing code.
+- Keep each round bounded: batch all accepted fixes, run Pester once, commit,
+  then re-review. Each fix can add branches the next round will probe.
 
 ## Known false leads
 
