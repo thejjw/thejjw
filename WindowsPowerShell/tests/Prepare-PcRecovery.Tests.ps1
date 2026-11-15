@@ -341,6 +341,22 @@ Describe 'Prepare-PcRecovery.ps1' {
             Test-Path -LiteralPath $partial | Should -BeFalse
             ([IO.File]::ReadAllText((Join-Path $dir '.release'))).Trim() | Should -Be 'v1.20.26'
         }
+        It 'keeps the partial when the release tag is unchanged' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpsame'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $dir '.release') -Value 'v1.20.26' -NoNewline
+            $partial = Join-Path $dir 'copyparty.exe.partial'
+            Set-Content -LiteralPath $partial -Value 'old' -NoNewline
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Save-VerifiedFile { return $true }
+            Save-CopypartyTools -Root $root | Should -BeTrue
+            Test-Path -LiteralPath $partial | Should -BeTrue
+        }
     }
 
     Context 'elevation' {
@@ -446,7 +462,25 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
             Mock Install-Ventoy { return $true }
             Mock Save-RufusTools { return $true }
-            Mock Save-CopypartyTools { return $true }
+            Mock Save-CopypartyTools {
+                $cpDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+                New-Item -ItemType Directory -Path $cpDir -Force | Out-Null
+                $cpFile = Join-Path $cpDir 'copyparty.exe'
+                Set-Content -LiteralPath $cpFile -Value 'x' -NoNewline
+                $script:CopypartyRows = @([pscustomobject]@{
+                    Name = 'copyparty exe (Windows)'
+                    Category = '04-etc\copyparty'
+                    FileName = 'copyparty.exe'
+                    Url = 'https://example.invalid/copyparty.exe'
+                    Hash = ('ab' * 32)
+                    HashKind = 'GitHub digest'
+                    Released = 'v1.20.26 (GitHub asset digest, sha256)'
+                    SizeNote = 'About 13 MB.'
+                    About = 'Portable file server for Windows.'
+                    Check = 'GitHub API digest.'
+                })
+                return $true
+            }
             Mock Save-CatalogIsos { $script:VerifiedHashes[(Join-Path (Join-Path (Join-Path $root 'isos') '02-Rescue') 'HBCD_PE_x64.iso')] = ('ab' * 32) }
             Mock Get-WindowsIsoViaFido { return $true }
             Mock Invoke-Tiny11Build { return $true }
@@ -467,6 +501,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match 'SHA-256 \(verified this run\)'
             $isosText | Should -Match 'Official Windows 11 ISO \(not present\)'
             $isosText | Should -Match 'Tiny11 ISO \(not present\)'
+            $isosText | Should -Match '04-etc\\copyparty\\copyparty\.exe'
+            $isosText | Should -Match 'v1\.20\.26'
         }
 
         It 'fetches the checksum sidecar next to the ISO and lists it' {

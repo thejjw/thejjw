@@ -218,7 +218,7 @@ NOTES
 # explicit bind address, read-only source, separate writable folder, and the
 # index moved off read-only media.
 function Get-CopypartyReadmeText {
-    @"
+    @'
 COPYPARTY - portable file server
 ================================
 This file was written by util/Prepare-PcRecovery.ps1; re-runs replace it.
@@ -228,17 +228,21 @@ FILES
                     have python3).
   copyparty.exe     Windows 8+ x64. Unsigned; Windows 8 also needs the Visual
                     C++ 2015 redistributable, Windows 10/11 do not.
-  .release          Release tag the two files above came from.
+  .release          Tag of the last release lookup; used to discard stale
+                    .partial files when the release changes.
 
 SAFE START (replace the address, paths, and password)
-  Linux:
-    python3 copyparty-sfx.py -p 3923 -i 192.168.1.10 -a admin:change-me ^
-      -v /mnt/data::r,admin -v /mnt/incoming::w,admin --hist /tmp/copyparty
-  Windows:
+  Linux/macOS (sh/bash):
+    python3 copyparty-sfx.py -p 3923 -i 192.168.1.10 -a admin:change-me \
+      -v /mnt/data:data:r,admin -v /mnt/incoming:incoming:w,admin --hist /tmp/copyparty
+  Windows (cmd.exe):
     copyparty.exe -p 3923 -i 192.168.1.10 -a admin:change-me ^
-      -v C:\data::r,admin -v C:\incoming::w,admin --hist %TEMP%\copyparty
+      -v C:\data:data:r,admin -v C:\incoming:incoming:w,admin --hist %TEMP%\copyparty
+  Windows (PowerShell):
+    copyparty.exe -p 3923 -i 192.168.1.10 -a admin:change-me `
+      -v C:\data:data:r,admin -v C:\incoming:incoming:w,admin --hist $env:TEMP\copyparty
 
-  Then browse to http://192.168.1.10:3923/ and log in as admin.
+  Then browse to http://192.168.1.10:3923/data/ or /incoming/ and log in.
 
 WARNING
   Starting it with no arguments shares the current folder read/write with
@@ -247,11 +251,11 @@ WARNING
   Firewall prompts. Windows PE (Hiren's BootCD PE) is not supported.
 
 NOTES
-  - Volume syntax is -v SRC:DST:PERMS; r=read, w=write, m=move, d=delete.
-    Add a user name to restrict a permission, for example r,admin.
+  - Volume syntax is -v SRC:DST:PERMS; each folder needs a distinct DST.
+    r=read, w=write, m=move, d=delete; add a user to restrict, e.g. r,admin.
   - .hist holds the index and thumbnails; --hist keeps it off the USB.
   - Keep the USB mount read-only in -v unless you intend to write to it.
-"@
+'@
 }
 
 # -----------------------------------------------------------------------------
@@ -1348,14 +1352,13 @@ function Invoke-PreparePcRecovery {
             (($_.MintHwe -eq '') -or ($_.MintHwe -eq $MintHwe))
         } | ForEach-Object { Format-IsoReadmeEntry -Row $_ -Root $Root }
         $copypartyDir = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty
-        if ($script:CopypartyRows.Count -gt 0) {
-            foreach ($row in $script:CopypartyRows) { $isoBlocks += (Format-IsoReadmeEntry -Row $row -Root $Root) }
-        } else {
-            foreach ($name in @($script:FileCopypartySfx, $script:FileCopypartyExe)) {
-                $path = Join-Path $copypartyDir $name
-                if (Test-Path -LiteralPath $path) {
-                    $isoBlocks += (Format-ManualIsoReadmeEntry -Title "copyparty ($name, release unknown this run)" -Path $path -Folder (Join-Path '04-etc' $script:DirCopyparty) -Note 'GitHub release lookup failed this run; on-disk hash only.' -Root $Root)
-                }
+        foreach ($cpName in @($script:FileCopypartySfx, $script:FileCopypartyExe)) {
+            $cpRow = @($script:CopypartyRows | Where-Object { $_.FileName -eq $cpName }) | Select-Object -First 1
+            $cpPath = Join-Path $copypartyDir $cpName
+            if ($cpRow) {
+                $isoBlocks += (Format-IsoReadmeEntry -Row $cpRow -Root $Root)
+            } elseif (Test-Path -LiteralPath $cpPath) {
+                $isoBlocks += (Format-ManualIsoReadmeEntry -Title "copyparty ($cpName, not verified this run)" -Path $cpPath -Folder (Join-Path '04-etc' $script:DirCopyparty) -Note 'Not verified against a GitHub asset digest this run; on-disk hash only.' -Root $Root)
             }
         }
         $installersDir = Join-Path (Join-Path $Root $script:DirIsos) '03-Installers'
