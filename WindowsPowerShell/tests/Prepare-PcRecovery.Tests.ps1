@@ -375,6 +375,46 @@ Describe 'Prepare-PcRecovery.ps1' {
             @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 0
         }
 
+        It 'restores a leftover .prev when its target is missing' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpprevonly'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath "$exe.prev" -Value 'old-build' -NoNewline
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Invoke-Cli { [pscustomobject]@{ ExitCode = 22; StdOut = ''; StdErr = 'HTTP 404' } }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'old-build'
+            Test-Path -LiteralPath "$exe.prev" | Should -BeFalse
+            @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 0
+        }
+
+        It 'drops a stale .prev once the target verifies' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpprevstale'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath $exe -Value 'current-build' -NoNewline
+            Set-Content -LiteralPath "$exe.prev" -Value 'older-build' -NoNewline
+            $sha = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = "sha256:$sha"; browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Save-VerifiedFile {
+                if (Test-Path -LiteralPath $OutFile) { return (Test-LocalFileHash -Path $OutFile -ExpectedHash $ExpectedHash) }
+                return $false
+            }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            Test-Path -LiteralPath "$exe.prev" | Should -BeFalse
+            @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 1
+        }
+
         It 'records a failure when an asset is missing from the release' {
             Reset-State
             $root = Join-Path $TestDrive 'cpnoasset'
@@ -527,6 +567,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $topicText | Should -Match 'no arguments'
             $topicText | Should -Match '\-v SRC:DST:PERMS'
             $topicText.Contains("-v 'C:\data:data:r,admin'") | Should -BeTrue
+            $topicText.Contains('.\copyparty.exe -p 3923') | Should -BeTrue
             $isosText = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'isos') 'README.txt'))
             $isosText | Should -Match 'HBCD_PE_x64.iso'
             $isosText | Should -Match 'Windows PE rescue environment'

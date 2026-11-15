@@ -239,7 +239,7 @@ SAFE START (replace the address, paths, and password)
     copyparty.exe -p 3923 -i 192.168.1.10 -a admin:change-me ^
       -v C:\data:data:r,admin -v C:\incoming:incoming:w,admin --hist %TEMP%\copyparty
   Windows (PowerShell):
-    copyparty.exe -p 3923 -i 192.168.1.10 -a admin:change-me `
+    .\copyparty.exe -p 3923 -i 192.168.1.10 -a admin:change-me `
       -v 'C:\data:data:r,admin' -v 'C:\incoming:incoming:w,admin' --hist "$env:TEMP\copyparty"
 
   Then browse to http://192.168.1.10:3923/data/ or /incoming/ and log in.
@@ -982,8 +982,12 @@ function Save-CopypartyTools {
         }
         if (-not (Save-VerifiedFile -Url $asset.browser_download_url -OutFile $outFile -ExpectedHash $hash -Name $name)) {
             if ($backedUp) {
-                Move-Item -LiteralPath $prevFile -Destination $outFile -Force -ErrorAction SilentlyContinue
-                Write-Detail "Download failed; restored the previous $name."
+                try {
+                    Move-Item -LiteralPath $prevFile -Destination $outFile -Force -ErrorAction Stop
+                    Write-Detail "Download failed; restored the previous $name."
+                } catch {
+                    Write-Detail "Could not restore $name; the previous build is at $prevFile."
+                }
             }
             $ok = $false
             continue
