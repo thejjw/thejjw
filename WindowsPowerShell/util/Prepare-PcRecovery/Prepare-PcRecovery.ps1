@@ -122,7 +122,7 @@ $script:WinScpVersion = '6.7.1'
 $script:WinScpUrlBase = 'https://sourceforge.net/projects/winscp/files/WinSCP/' + $script:WinScpVersion + '/'
 $script:FileWinScpPortable = 'WinSCP-' + $script:WinScpVersion + '-Portable.zip'
 $script:CyberduckVersion = '9.6.0.46406'
-$script:CyberduckUrlBase = 'https://update.cyberduck.io/release/'
+$script:CyberduckUrlBase = 'https://update.cyberduck.io/windows/'
 $script:CyberduckGitHubUrlBase = 'https://github.com/iterate-ch/cyberduck/releases/download/release-9-6-0/'
 $script:FileCyberduckInstaller = 'Cyberduck-Installer-' + $script:CyberduckVersion + '.exe'
 $script:CyberduckDownloadPage = 'https://cyberduck.io/download/'
@@ -555,7 +555,8 @@ NOTES
 }
 
 # Offline Cyberduck sheet for isos\04-etc\cyberduck\. Windows needs an installer
-# (no portable build); macOS/Linux builds exist upstream but are not stored here.
+# (no portable build); macOS builds and the duck CLI exist upstream but are not
+# stored here.
 function Get-CyberduckReadmeText {
     $text = @'
 CYBERDUCK FOR WINDOWS (offline installer)
@@ -571,7 +572,8 @@ INSTALL
     .\CYBERINSTALLER /s
   Windows 10 64-bit or later. Uninstall from Settings > Apps.
   Cyberduck publishes no portable Windows build: this is an installer, not an
-  extract-and-run tool. macOS and Linux builds are on the download page.
+  extract-and-run tool. A macOS build and the duck command-line tool
+  (Windows/macOS/Linux) are on the download page.
 
 PROTOCOLS
   SFTP, FTP/FTPS, WebDAV, S3, Azure Blob, Backblaze B2, Google Drive, Dropbox,
@@ -580,9 +582,9 @@ PROTOCOLS
 
 COMPARED WITH WINSCP
   WinSCP in ..\winscp\ is portable and Windows-only, with WinSCP.com scripting.
-  Cyberduck needs an install but adds cloud backends and runs on macOS and
-  Linux. Use WinSCP for a no-install transfer; use Cyberduck when you need the
-  cloud services or a client on another OS.
+  Cyberduck needs an install but adds cloud backends and runs on macOS; the
+  separate duck CLI covers Linux. Use WinSCP for a no-install transfer; use
+  Cyberduck when you need the cloud services or a client on a Mac.
 
 INTEGRITY
   SHA-256 is pinned from the official cyberduck.io download page and matches
@@ -590,7 +592,7 @@ INTEGRITY
   iterate GmbH as signer. Check by hand with
     Get-FileHash .\CYBERINSTALLER -Algorithm SHA256
     Get-AuthenticodeSignature .\CYBERINSTALLER
-  and compare with https://cyberduck.io/download/.
+  and compare with CYBERPAGE.
 
 NOTES
   - GPLv3. The app shows a donation prompt; a contributor key or a store
@@ -600,7 +602,7 @@ NOTES
     the previous one.
 
 '@
-    return $text.Replace('CYBERINSTALLER', $script:FileCyberduckInstaller)
+    return $text.Replace('CYBERINSTALLER', $script:FileCyberduckInstaller).Replace('CYBERPAGE', $script:CyberduckDownloadPage)
 }
 
 # -----------------------------------------------------------------------------
@@ -983,7 +985,7 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = '7-Zip 26.06 portable extras'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipExtra; Url = ($script:SevenZipUrlBase + $script:FileSevenZipExtra); AlternateUrl = ''; Hash = '396c180f12d2247c24b0b1fcd482c6fc2a2700f61211ffede1061dd971f5e104'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = ('Portable archive with a standalone 7za.exe (zip/gz/tar/xz/bz2) that needs no admin install; unpack with ' + $script:FileSevenZipBootstrap + '.'); Released = 'Version 26.06, November 2026 (1,758,340 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 1.7 MB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06); unsigned, so NotSigned is expected; GitHub-only (7-zip.org has no copy). Download ' + $script:SevenZipUrlBase + $script:FileSevenZipExtra + ' into isos\04-etc\7zip\ by hand; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = '7-Zip 26.06 bootstrap extractor'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipBootstrap; Url = ($script:SevenZipUrlBase + '7zr.exe'); AlternateUrl = ''; Hash = 'e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = '7zr.exe: .7z-only extractor used to unpack the extra package without installing 7-Zip.'; Released = 'Version 26.06, November 2026 (600,064 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 600 KB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06); unsigned, so NotSigned is expected; GitHub-only (the 7-zip.org 7zr.exe is a different build). Download ' + $script:SevenZipUrlBase + '7zr.exe' + ' into isos\04-etc\7zip\ by hand and save it as ' + $script:FileSevenZipBootstrap + '; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = 'PuTTY 0.85 portable bundle'; Category = '04-etc\putty'; FileName = $script:FilePuttyZip; Url = ($script:PuttyUrlBase + 'putty.zip'); AlternateUrl = ''; Hash = 'e0b36e5381ecc78dd06a291bab25fb9d95bc991d0d864cf2741a5bde82816668'; SidecarUrl = ('https://the.earth.li/~sgtatham/putty/' + $script:PuttyVersion + '/sha256sums'); SidecarName = $script:FilePuttySums; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable SSH/telnet/serial bundle: putty, plink, pscp, psftp, puttygen, pageant.'; Released = 'Version 0.85, August 2026 (4,096,601 bytes; binaries signed by Simon Tatham).'; SizeNote = 'About 3.9 MB.'; Check = 'Official sha256sums (GPG-signed) matches; binaries Authenticode-valid, signer Simon Tatham. Download ' + $script:PuttyUrlBase + 'putty.zip' + ' into isos\04-etc\putty\ by hand and save it as ' + $script:FilePuttyZip + '; the next run verifies it against the pinned hash and skips it.' },
-        [pscustomobject]@{ Name = 'WinSCP 6.7.1 portable'; Category = '04-etc\winscp'; FileName = $script:FileWinScpPortable; Url = ($script:WinScpUrlBase + $script:FileWinScpPortable + '/download'); AlternateUrl = ''; Hash = 'e6d2f8e1249e41f3bf8638319bb9bd15a541a64720df0805cb0bebdedb5eda83'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'GUI SFTP/SCP/FTP/FTPS/WebDAV/S3 client with synchronize, a resumable transfer queue, remote editing, and WinSCP.com scripting.'; Released = 'Version 6.7.1, November 2026 (8,833,106 bytes; WinSCP.exe and WinSCP.com signed by Martin Prikryl).'; SizeNote = 'About 8.4 MB (extracts to about 20 MB).'; Check = 'SHA-256 matches WinSCP-6.7.1-ReadMe.txt (winscp.net); the zip is unsigned, and the executables inside are Authenticode-valid with Martin Prikryl as signer. Download ' + $script:WinScpUrlBase + $script:FileWinScpPortable + '/download' + ' into isos\04-etc\winscp\ by hand; the next run verifies it against the pinned hash and skips it.' }
+        [pscustomobject]@{ Name = 'WinSCP 6.7.1 portable'; Category = '04-etc\winscp'; FileName = $script:FileWinScpPortable; Url = ($script:WinScpUrlBase + $script:FileWinScpPortable + '/download'); AlternateUrl = ''; Hash = 'e6d2f8e1249e41f3bf8638319bb9bd15a541a64720df0805cb0bebdedb5eda83'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'GUI SFTP/SCP/FTP/FTPS/WebDAV/S3 client with synchronize, a resumable transfer queue, remote editing, and WinSCP.com scripting.'; Released = 'Version 6.7.1, November 2026 (8,833,106 bytes; WinSCP.exe and WinSCP.com signed by Martin Prikryl).'; SizeNote = 'About 8.4 MB (extracts to about 20 MB).'; Check = 'SHA-256 matches WinSCP-6.7.1-ReadMe.txt (winscp.net); the zip is unsigned, and the executables inside are Authenticode-valid with Martin Prikryl as signer. Download ' + $script:WinScpUrlBase + $script:FileWinScpPortable + '/download' + ' into isos\04-etc\winscp\ by hand; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = 'Cyberduck 9.6.0 Windows installer'; Category = '04-etc\cyberduck'; FileName = $script:FileCyberduckInstaller; Url = ($script:CyberduckUrlBase + $script:FileCyberduckInstaller); AlternateUrl = ($script:CyberduckGitHubUrlBase + $script:FileCyberduckInstaller); Hash = '9a66f8fb400feaa5f7f390f9e4100e873f6be06cbf7c61f1651fca8b1f31c930'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'GUI browser for SFTP, FTP/FTPS, WebDAV, S3, Azure, Backblaze B2, Google Drive, Dropbox, OneDrive, and SharePoint; Windows installer, no portable build.'; Released = 'Version 9.6.0 (build 46406), November 2026 (92,009,848 bytes; Authenticode-valid, signed by iterate GmbH).'; SizeNote = 'About 88 MB.'; Check = 'SHA-256 matches the official cyberduck.io download page and the GitHub asset digest; the installer is Authenticode-valid with iterate GmbH as signer. Download ' + $script:CyberduckUrlBase + $script:FileCyberduckInstaller + ' into isos\04-etc\cyberduck\ by hand; the next run verifies it against the pinned hash and skips it.' }
     )
 }

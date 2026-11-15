@@ -830,7 +830,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $row[0].HashKind | Should -Be 'Pinned'
             $row[0].Hash | Should -Be '9a66f8fb400feaa5f7f390f9e4100e873f6be06cbf7c61f1651fca8b1f31c930'
             $row[0].FileName | Should -Be $script:FileCyberduckInstaller
-            $row[0].Url | Should -Be ('https://update.cyberduck.io/release/' + $script:FileCyberduckInstaller)
+            $row[0].Url | Should -Be ('https://update.cyberduck.io/windows/' + $script:FileCyberduckInstaller)
             $row[0].AlternateUrl | Should -Match 'github\.com/iterate-ch/cyberduck/releases/download/release-9-6-0/'
             $row[0].Released | Should -Match 'iterate GmbH'
         }
@@ -843,6 +843,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'Get-AuthenticodeSignature'
             $text | Should -Match 'iterate GmbH'
             $text | Should -Match 'no portable Windows build'
+            $text.Contains($script:CyberduckDownloadPage) | Should -BeTrue
+            $text | Should -Not -Match 'runs on macOS and Linux'
             $text | Should -Match 'GPLv3'
         }
     }
