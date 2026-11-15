@@ -448,16 +448,33 @@ Describe 'Prepare-PcRecovery.ps1' {
                 [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
             ) } }
             Mock Invoke-Cli { [pscustomobject]@{ ExitCode = 22; StdOut = ''; StdErr = 'HTTP 404' } }
-            $script:moves = 0
-            Mock Move-Item {
-                $script:moves++
-                if ($script:moves -ge 2) { throw 'locked' }
-                [IO.File]::Move($LiteralPath, $Destination)
-            }
+            Mock Restore-PreviousCopyparty { return $false }
             Save-CopypartyTools -Root $root | Should -BeFalse
             Test-Path -LiteralPath $exe | Should -BeFalse
             (Get-Content -LiteralPath "$exe.prev" -Raw).Trim() | Should -Be 'old-build'
             @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 0
+        }
+
+        It 'restores an orphaned .prev before the release lookup' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cporphan'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $exe = Join-Path $dir 'copyparty.exe'
+            Set-Content -LiteralPath "$exe.prev" -Value 'old-build' -NoNewline
+            Mock Invoke-GitHubApiJson { throw 'rate limited' }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'old-build'
+            Test-Path -LiteralPath "$exe.prev" | Should -BeFalse
+            $script:Failures | Should -HaveCount 1
+        }
+
+        It 'reports a restore it cannot perform' {
+            Reset-State
+            $missing = Join-Path $TestDrive 'missing.exe.prev'
+            $target = Join-Path $TestDrive 'missing.exe'
+            Restore-PreviousCopyparty -PrevFile $missing -Target $target | Should -BeFalse
+            Test-Path -LiteralPath $target | Should -BeFalse
         }
 
         It 'records a failure when an asset is missing from the release' {

@@ -898,6 +898,18 @@ function Save-RufusTools {
     return $ok
 }
 
+# Restores a copyparty build moved aside by an interrupted or failed update.
+# Returns $true when the move happened; names the .prev path on failure.
+function Restore-PreviousCopyparty([string]$PrevFile, [string]$Target) {
+    try {
+        Move-Item -LiteralPath $PrevFile -Destination $Target -Force -ErrorAction Stop
+        return $true
+    } catch {
+        Write-Detail "Could not restore $(Split-Path -Leaf $Target); the previous build is at $PrevFile."
+        return $false
+    }
+}
+
 # Downloads the copyparty sfx and Windows exe from ONE GitHub release into
 # isos\04-etc\copyparty, verified against GitHub's per-asset sha256 digest.
 # Records the resolved rows for the isos readme. Never throws.
@@ -907,6 +919,17 @@ function Save-CopypartyTools {
     $script:CopypartyRows = @()
     $dir = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty
     Initialize-Directory -Path $dir
+    # An interrupted update can leave only <name>.prev. Put it back before the
+    # release lookup so a failing API never leaves no runnable file.
+    if ($PSCmdlet.ShouldProcess($dir, 'Restore an interrupted update')) {
+        foreach ($orphanName in @($script:FileCopypartySfx, $script:FileCopypartyExe)) {
+            $orphanTarget = Join-Path $dir $orphanName
+            $orphanPrev = "$orphanTarget.prev"
+            if ((Test-Path -LiteralPath $orphanPrev) -and -not (Test-Path -LiteralPath $orphanTarget)) {
+                Restore-PreviousCopyparty -PrevFile $orphanPrev -Target $orphanTarget | Out-Null
+            }
+        }
+    }
     $manual = @(
         "Open $($script:CopypartyReleasesUrl) and download $($script:FileCopypartySfx) and $($script:FileCopypartyExe) into $dir."
     )
@@ -982,11 +1005,8 @@ function Save-CopypartyTools {
         }
         if (-not (Save-VerifiedFile -Url $asset.browser_download_url -OutFile $outFile -ExpectedHash $hash -Name $name)) {
             if ($backedUp) {
-                try {
-                    Move-Item -LiteralPath $prevFile -Destination $outFile -Force -ErrorAction Stop
+                if (Restore-PreviousCopyparty -PrevFile $prevFile -Target $outFile) {
                     Write-Detail "Download failed; restored the previous $name."
-                } catch {
-                    Write-Detail "Could not restore $name; the previous build is at $prevFile."
                 }
             }
             $ok = $false
