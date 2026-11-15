@@ -683,9 +683,11 @@ LINUX
   links /usr/bin/tabby straight to /opt/Tabby/tabby, so pass --no-sandbox
   yourself on a live root session. The desktop entry already uses the flag.
   Runtime needs GTK3, NSS/NSPR, GBM, ALSA, ATK, CUPS, D-Bus, and xkbcommon.
-  On Debian/Ubuntu the declared dependencies omit libgbm1 and libasound2;
-  install them (and libgtk-3-0 if absent) when Tabby reports a missing
-  library. Fedora/Rocky equivalents are mesa-libgbm, alsa-lib, and gtk3.
+  On Debian/Ubuntu the declared dependencies omit libgbm1 and the ALSA
+  library; when Tabby reports a missing library, install:
+    sudo apt install libgbm1 libasound2t64 libgtk-3-0t64
+  (Debian 12 / Ubuntu 22.04 and older use libasound2 and libgtk-3-0.)
+  Fedora/Rocky equivalents are mesa-libgbm, alsa-lib, and gtk3.
   A minimal live system may install the package but still need these from
   the distro media before Tabby starts.
 
