@@ -63,6 +63,10 @@
     file (2 KB), staged per run; the 95 MB WinUI zip is hash context
     only and never runs. Child uses 'Continue', shadowed Read-Host,
     unloaded HKLM\z* hives.
+    Python rows: pinned to python.org 3.15.2 (Oct 2026). 3.16+ stop shipping
+    the traditional Windows installer (PEP 773 / Python install manager), so
+    drop the installer row then; the embeddable zip stays. Re-pin Hash +
+    Released + SizeNote together.
     Suite: Invoke-Pester .\tests\Prepare-PcRecovery.Tests.ps1 (offline).
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -249,10 +253,12 @@ SAFE START (replace the address, paths, and password)
 
   Then browse to http://192.168.1.10:3923/data/ or /incoming/ and log in.
 
-  Windows without Python: extract PYEMBED from
-  ..\python\ and run "python.exe copyparty-sfx.py ...". That runtime is a
-  PSF-signed binary, unlike this unsigned copyparty.exe, so SmartScreen may
-  treat it better. The embeddable build has no pip, venv, or tkinter.
+  Windows without Python: extract PYEMBED from ..\python\ into a writable
+  folder such as $env:TEMP\pyembed, then run from this folder:
+    & "$env:TEMP\pyembed\python.exe" .\copyparty-sfx.py -a admin:change-me
+  That runtime is a PSF-signed binary, unlike this unsigned copyparty.exe, so
+  SmartScreen may treat it better. The embeddable build has no pip, venv, or
+  tkinter.
 
 WARNING
   Starting it with no arguments shares the current folder read/write with
@@ -290,11 +296,10 @@ INSTALL (per-user, no admin; explicit target keeps the path predictable)
       Include_launcher=0 PrependPath=0 Include_test=0 AssociateFiles=0 Shortcuts=0
     echo %ERRORLEVEL%
   PowerShell:
-    $p = Start-Process -Wait -PassThru -FilePath .\PYINST -ArgumentList @(
-      '/quiet','/log',"$env:TEMP\py-install.log",'InstallAllUsers=0',
-      "TargetDir=$env:LOCALAPPDATA\Programs\Python\Python315",
-      'Include_launcher=0','PrependPath=0','Include_test=0','AssociateFiles=0','Shortcuts=0')
-    $p.ExitCode
+    $installArgs = "/quiet /log `"$env:TEMP\py-install.log`" InstallAllUsers=0 " +
+      "TargetDir=`"$env:LOCALAPPDATA\Programs\Python\Python315`" " +
+      "Include_launcher=0 PrependPath=0 Include_test=0 AssociateFiles=0 Shortcuts=0"
+    (Start-Process -Wait -PassThru -FilePath .\PYINST -ArgumentList $installArgs).ExitCode
   Run the result as %LOCALAPPDATA%\Programs\Python\Python315\python.exe, or add
   that folder to PATH yourself. With PrependPath=0 and Include_launcher=0, a
   bare "python" still opens the Microsoft Store alias.
@@ -302,13 +307,15 @@ INSTALL (per-user, no admin; explicit target keeps the path predictable)
   under Program Files. Uninstall the same scope with PYINST /quiet /uninstall.
 
 EMBEDDABLE (no installer)
-  Extract PYEMBED next to your scripts (or run it in place on the stick), then:
-    python.exe yourscript.py
-  It includes sqlite3 and ssl but no pip, venv, or tkinter. Its ._pth file keeps
-  the script's own folder off sys.path, so use the full installer for anything
-  that imports modules stored beside it. It does run copyparty-sfx.py from
-  ..\copyparty\, which is a PSF-signed-binary alternative to the unsigned
-  copyparty.exe.
+  The zip cannot run in place. Extract PYEMBED into a writable folder (for
+  example %TEMP%\pyembed, or a folder on the stick), then from that folder run:
+    .\python.exe C:\path\to\yourscript.py
+  PowerShell does not look in the current folder for python.exe, and a bare
+  "python" still opens the Store alias. The build includes sqlite3 and ssl but
+  no pip, venv, or tkinter. Its ._pth file keeps the script's own folder off
+  sys.path, so use the full installer for anything that imports modules stored
+  beside it. It does run copyparty-sfx.py from ..\copyparty\, which is a
+  PSF-signed-binary alternative to the unsigned copyparty.exe.
 
 INTEGRITY
   The prep script pins SHA-256 for both files. python.org publishes SPDX
@@ -701,8 +708,8 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 7.0'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Hash = '17475774172776978f24677a847a62d7595c5bee34cb1f96ee3d26eedeca33c8'; SidecarUrl = 'https://mirrors.kernel.org/linuxmint/hwe/sha256sum.txt'; SidecarName = 'sha256sum-mint-hwe.txt'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '7.0'; About = 'Mint Xfce with the newer HWE 7.0 kernel for hardware the regular ISO does not support.'; Released = 'Version 22.3 with HWE kernel 7.0 (hwe sha256sum.txt dated 2026-08-08).'; SizeNote = 'Fetch only with -MintHwe 7.0 (HWE kernel 7.0 for newer hardware).'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
         [pscustomobject]@{ Name = 'antiX full'; Category = '03-Installers'; FileName = 'antiX-26.1_x64-full.iso'; Url = 'https://sourceforge.net/projects/antix-linux/files/Final/antiX-26.1/antiX-26.1_x64-full.iso/download'; AlternateUrl = ''; Hash = '293381af0b7c48399abe015da8f67d41fd34372b73c4aafcf53747fbaed22371'; SidecarUrl = 'https://sourceforge.net/projects/antix-linux/files/Final/antiX-26.1/antiX-26.1_x64-full.iso.sha256/download'; SidecarName = 'antiX-26.1_x64-full.iso.sha256'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Debian 13-based, systemd-free live/installer with a desktop; suits modern and older PCs alike.'; Released = 'Version 26.1, September 2026 (SourceForge files dated 2026-09-28).'; SizeNote = 'About 2.5 GB.'; Check = 'SourceForge Final/antiX-26.1 file list plus the .sha256 sidecar.' },
         [pscustomobject]@{ Name = 'Fedora Workstation Live'; Category = '03-Installers'; FileName = 'Fedora-Workstation-Live-45-1.4.x86_64.iso'; Url = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso'; AlternateUrl = ''; Hash = '68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb'; SidecarUrl = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; SidecarName = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Live desktop installer with GNOME.'; Released = 'Version 45-1.4, October 2026.'; SizeNote = 'About 2.72 GB.'; Check = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM in the same directory.' },
-        [pscustomobject]@{ Name = 'Python 3.15 Windows installer'; Category = '04-etc\python'; FileName = $script:FilePythonInstaller; Url = ($script:PyUrlBase + $script:FilePythonInstaller); AlternateUrl = ''; Hash = '06e225a228191b0f4d1dcf6905fbb21bf9f6970d13a2ec63137ab9bee76f15aa'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Full offline CPython for Windows 10/11 x64: pip, venv, tkinter, and a normal per-user or all-users install.'; Released = 'Version 3.15.2, October 2026 (last line to ship the traditional Windows installer; 3.16+ use the Python install manager).'; SizeNote = 'About 36 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash and Authenticode shows the Python Software Foundation; for a new patch, download ' + $script:PyUrlBase + $script:FilePythonInstaller + ' into isos\04-etc\python\ and re-pin hash+date+size.' },
-        [pscustomobject]@{ Name = 'Python 3.15 Windows embeddable'; Category = '04-etc\python'; FileName = $script:FilePythonEmbed; Url = ($script:PyUrlBase + $script:FilePythonEmbed); AlternateUrl = ''; Hash = 'd012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Extract-and-run CPython for Windows 10/11 x64: sqlite3 and ssl, no pip/venv/tkinter; runs copyparty-sfx.py without installation.'; Released = 'Version 3.15.2, October 2026.'; SizeNote = 'About 13 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash and python.exe inside the zip is signed by the Python Software Foundation; for a new patch, download ' + $script:PyUrlBase + $script:FilePythonEmbed + ' into isos\04-etc\python\ and re-pin hash+date+size.' }
+        [pscustomobject]@{ Name = 'Python 3.15 Windows installer'; Category = '04-etc\python'; FileName = $script:FilePythonInstaller; Url = ($script:PyUrlBase + $script:FilePythonInstaller); AlternateUrl = ''; Hash = '06e225a228191b0f4d1dcf6905fbb21bf9f6970d13a2ec63137ab9bee76f15aa'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Full offline CPython for Windows 10/11 x64: pip, venv, tkinter, and a normal per-user or all-users install.'; Released = 'Version 3.15.2, October 2026 (last line to ship the traditional Windows installer; 3.16+ use the Python install manager).'; SizeNote = 'About 36 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash; Authenticode signer is the Python Software Foundation. Download ' + $script:PyUrlBase + $script:FilePythonInstaller + ' into isos\04-etc\python\ by hand; the next run verifies it against the pinned hash and skips it.' },
+        [pscustomobject]@{ Name = 'Python 3.15 Windows embeddable'; Category = '04-etc\python'; FileName = $script:FilePythonEmbed; Url = ($script:PyUrlBase + $script:FilePythonEmbed); AlternateUrl = ''; Hash = 'd012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Extract-and-run CPython for Windows 10/11 x64: sqlite3 and ssl, no pip/venv/tkinter; runs copyparty-sfx.py without installation.'; Released = 'Version 3.15.2, October 2026.'; SizeNote = 'About 13 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash; python.exe inside the zip is signed by the Python Software Foundation. Download ' + $script:PyUrlBase + $script:FilePythonEmbed + ' into isos\04-etc\python\ by hand; the next run verifies it against the pinned hash and skips it.' }
     )
 }
 

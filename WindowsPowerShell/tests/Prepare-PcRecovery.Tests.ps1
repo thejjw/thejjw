@@ -675,6 +675,10 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'no pip, venv, or tkinter'
             $text | Should -Match 'Windows 10/11 x64'
             $text | Should -Match 'WinPE is not supported'
+            $text.Contains('TargetDir=`"$env:LOCALAPPDATA') | Should -BeTrue
+            $text.Contains('/log `"$env:TEMP') | Should -BeTrue
+            $text.Contains('.\python.exe') | Should -BeTrue
+            $text | Should -Match 'cannot run in place'
         }
 
         It 'downloads netboot first and the 04-etc topics last' {
@@ -830,6 +834,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $topicText.Contains('.\copyparty.exe -p 3923') | Should -BeTrue
             $topicText.Contains('--hist "%TEMP%\copyparty"') | Should -BeTrue
             $topicText.Contains($script:FilePythonEmbed) | Should -BeTrue
+            $topicText.Contains('$env:TEMP\pyembed\python.exe') | Should -BeTrue
             $pythonDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'python'
             $pythonText = [IO.File]::ReadAllText((Join-Path $pythonDir 'README.txt'))
             $pythonText.Contains($script:FilePythonInstaller) | Should -BeTrue
