@@ -145,7 +145,7 @@ $script:UseSudo = $false
 
 # -----------------------------------------------------------------------------
 # Maintained text blocks. These readmes are written into the download tree
-# (root README.txt, isos\README.txt, isos\04-etc\copyparty\README.txt) on every
+# (root README.txt, isos\README.txt, isos\04-etc\<topic>\README.txt) on every
 # run; edit the text inside these functions, not in the tree, so a re-run never
 # loses the update. Functions are the loadable unit (tests dot-source functions
 # only), so the text lives here instead of in top-level assignments. Keep ASCII,
@@ -368,9 +368,13 @@ INSTALL (needs admin; /S does not suppress UAC)
   the target, append /D=<dir> as the last parameter (see the 7-Zip FAQ).
   Uninstall from an elevated shell: "%ProgramFiles%\7-Zip\Uninstall.exe" /S
 
-PORTABLE (no admin)
-  7ZR x 7ZEXTRA -o%TEMP%\7za
-  %TEMP%\7za\7za.exe x archive.zip
+PORTABLE (no admin; no install)
+  cmd.exe:
+    7ZR x 7ZEXTRA -o%TEMP%\7za
+    %TEMP%\7za\7za.exe x archive.zip
+  PowerShell:
+    .\7ZR x .\7ZEXTRA "-o$env:TEMP\7za"
+    & "$env:TEMP\7za\7za.exe" x archive.zip
   7za handles 7z, xz, bzip2, gzip, tar, and zip; no RAR, no ISO, and no
   Explorer context menu.
 
