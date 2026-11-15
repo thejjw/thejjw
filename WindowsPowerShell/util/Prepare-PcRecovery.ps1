@@ -240,7 +240,7 @@ SAFE START (replace the address, paths, and password)
       -v C:\data:data:r,admin -v C:\incoming:incoming:w,admin --hist %TEMP%\copyparty
   Windows (PowerShell):
     copyparty.exe -p 3923 -i 192.168.1.10 -a admin:change-me `
-      -v C:\data:data:r,admin -v C:\incoming:incoming:w,admin --hist $env:TEMP\copyparty
+      -v 'C:\data:data:r,admin' -v 'C:\incoming:incoming:w,admin' --hist "$env:TEMP\copyparty"
 
   Then browse to http://192.168.1.10:3923/data/ or /incoming/ and log in.
 
@@ -955,23 +955,6 @@ function Save-CopypartyTools {
         }
         $hash = $Matches[1].ToLowerInvariant()
         $outFile = Join-Path $dir $name
-        $title = if ($name -eq $script:FileCopypartySfx) { 'copyparty sfx (Linux/macOS)' } else { 'copyparty exe (Windows)' }
-        $about = if ($name -eq $script:FileCopypartySfx) { 'Portable file server for Linux/macOS live sessions; runs with python3.' } else { 'Portable file server for Windows 8+ x64; no Python needed.' }
-        $sizeMb = [math]::Round($asset.size / 1MB, 1).ToString([Globalization.CultureInfo]::InvariantCulture)
-        if (-not $WhatIfPreference) {
-            $script:CopypartyRows += [pscustomobject]@{
-                Name = $title
-                Category = (Join-Path '04-etc' $script:DirCopyparty)
-                FileName = $name
-                Url = $asset.browser_download_url
-                Hash = $hash
-                HashKind = 'GitHub digest'
-                Released = "$tag (GitHub asset digest, sha256)"
-                SizeNote = "About $sizeMb MB."
-                About = $about
-                Check = "GitHub API releases/tags/$tag digest field, or the release page."
-            }
-        }
         # Save-VerifiedFile deletes a stale versionless file before downloading.
         # Keep it as .prev so a failed update cannot destroy the only working
         # copy, and restore it when the download fails.
@@ -1007,6 +990,25 @@ function Save-CopypartyTools {
         }
         if ($backedUp) { Remove-Item -LiteralPath $prevFile -Force -ErrorAction SilentlyContinue }
         if (Test-Path -LiteralPath $outFile) { $script:VerifiedHashes[$outFile] = $hash }
+        # The row drives the isos readme, so it must describe only a file that
+        # verified this run; a restored old build gets the fallback entry.
+        if (-not $WhatIfPreference) {
+            $title = if ($name -eq $script:FileCopypartySfx) { 'copyparty sfx (Linux/macOS)' } else { 'copyparty exe (Windows)' }
+            $about = if ($name -eq $script:FileCopypartySfx) { 'Portable file server for Linux/macOS live sessions; runs with python3.' } else { 'Portable file server for Windows 8+ x64; no Python needed.' }
+            $sizeMb = [math]::Round($asset.size / 1MB, 1).ToString([Globalization.CultureInfo]::InvariantCulture)
+            $script:CopypartyRows += [pscustomobject]@{
+                Name = $title
+                Category = (Join-Path '04-etc' $script:DirCopyparty)
+                FileName = $name
+                Url = $asset.browser_download_url
+                Hash = $hash
+                HashKind = 'GitHub digest'
+                Released = "$tag (GitHub asset digest, sha256)"
+                SizeNote = "About $sizeMb MB."
+                About = $about
+                Check = "GitHub API releases/tags/$tag digest field, or the release page."
+            }
+        }
     }
     return $ok
 }

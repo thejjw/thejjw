@@ -372,6 +372,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Save-CopypartyTools -Root $root | Should -BeFalse
             (Get-Content -LiteralPath $exe -Raw).Trim() | Should -Be 'old-build'
             Test-Path -LiteralPath "$exe.prev" | Should -BeFalse
+            @($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }).Count | Should -Be 0
         }
 
         It 'records a failure when an asset is missing from the release' {
@@ -525,6 +526,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $topicText | Should -Match 'copyparty-sfx\.py'
             $topicText | Should -Match 'no arguments'
             $topicText | Should -Match '\-v SRC:DST:PERMS'
+            $topicText.Contains("-v 'C:\data:data:r,admin'") | Should -BeTrue
             $isosText = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'isos') 'README.txt'))
             $isosText | Should -Match 'HBCD_PE_x64.iso'
             $isosText | Should -Match 'Windows PE rescue environment'
