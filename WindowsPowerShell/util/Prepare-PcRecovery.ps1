@@ -116,7 +116,7 @@ $script:Tiny11BuilderReleasesUrl = 'https://github.com/ntdevlabs/tiny11builder/r
 # Manual-retry text for the Tiny11 build. MakerHintManual takes the official
 # ISO file name (or a placeholder) through -f.
 $script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, then re-run with -Elevate; or mount the official ISO, save ' + $script:Tiny11AnswerUrl + ' as autounattend.xml next to tiny11maker.ps1, run it with -ISO <letter> -SCRATCH <letter> from an elevated shell, then move tiny11.iso into isos\03-Installers\tiny11\.'
-$script:MakerHintSudo = 'Re-run with -Elevate after running Enable-WindowsSudo.'
+$script:MakerHintSudo = 'Re-run with -Elevate from a normal shell after running Enable-WindowsSudo in an elevated one.'
 $script:MakerHintManual = 'Mount {0}, save ' + $script:Tiny11AnswerUrl + ' as autounattend.xml next to tiny11maker.ps1, run it with -ISO <letter> -SCRATCH <letter> from an elevated shell, then move tiny11.iso into isos\03-Installers\tiny11\.'
 $script:Failures = @()
 $script:Results = @()
@@ -955,9 +955,10 @@ function Invoke-Tiny11Build {
         if (-not $PSCmdlet.ShouldProcess($makerPath, "Download $($script:Tiny11MakerUrl)")) { return $true }
         Write-Warning 'tiny11maker.ps1 has no published hash; review it before the elevated build runs.'
         if (-not (Invoke-FileDownload -Url $script:Tiny11MakerUrl -OutFile $makerPath)) {
+            $makerHint = if ($Elevate -and $script:UseSudo) { 'Then re-run with -Elevate.' } else { $script:MakerHintAdmin }
             Write-Failure -Name 'Tiny11 builder' -Detail "tiny11maker.ps1 download failed." -Manual @(
                 "Save $($script:Tiny11MakerUrl) into $makerPath by hand.",
-                $script:MakerHintAdmin
+                $makerHint
             )
             return $false
         }
@@ -979,10 +980,16 @@ function Invoke-Tiny11Build {
         return $false
     }
     if (-not ($Elevate -and $script:UseSudo)) {
-        Write-Failure -Name 'Tiny11 ISO' -Detail 'Privileged build skipped: no elevation.' -Manual @(
-            $script:MakerHintSudo,
-            ($script:MakerHintManual -f $official[0].Name)
-        )
+        $skipDetail = 'Privileged build skipped: no elevation.'
+        $skipManual = @($script:MakerHintSudo, ($script:MakerHintManual -f $official[0].Name))
+        if (Test-IsAdministrator) {
+            $skipDetail = 'Scripted build skipped: sudo is not used from an elevated shell.'
+            $skipManual = @(
+                'This shell is already elevated; run the manual steps below.',
+                ($script:MakerHintManual -f $official[0].Name)
+            )
+        }
+        Write-Failure -Name 'Tiny11 ISO' -Detail $skipDetail -Manual $skipManual
         return $false
     }
     if (-not $PSCmdlet.ShouldProcess($finalIso, 'Mount official ISO and run tiny11maker.ps1 elevated')) { return $true }

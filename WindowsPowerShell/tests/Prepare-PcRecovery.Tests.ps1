@@ -301,6 +301,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Save-VerifiedFile { return $true }
             Mock Expand-Archive { }
             Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'm' -NoNewline; return $true }
+            Mock Test-IsAdministrator { $false }
             Invoke-Tiny11Build -Root $root | Should -BeFalse
             $script:Failures.Name | Should -Contain 'Tiny11 ISO'
             $script:Failures[-1].Manual | Should -Match 'tiny11maker'
@@ -456,6 +457,37 @@ Describe 'Prepare-PcRecovery.ps1' {
             Invoke-Tiny11Build -Root $root | Should -BeFalse
             $script:Failures.Name | Should -Contain 'Tiny11 builder'
             $script:Failures[-1].Manual | Should -Match 'Enable-WindowsSudo'
+        }
+
+        It 'skips the sudo advice when the shell is already elevated' {
+            Reset-State
+            $root = Join-Path $TestDrive 'adminnoelev'
+            $installers = Join-Path (Join-Path $root 'isos') '03-Installers'
+            New-Item -ItemType Directory -Path $installers -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $installers 'Win11.iso') -Value 'x' -NoNewline
+            Mock Test-IsAdministrator { $true }
+            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = 'https://example.invalid/b.zip.sha256' } }
+            Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
+            Mock Save-VerifiedFile { return $true }
+            Mock Expand-Archive { }
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'm' -NoNewline; return $true }
+            Invoke-Tiny11Build -Root $root -Elevate | Should -BeFalse
+            $script:Failures[-1].Manual | Should -Match 'tiny11maker'
+            $script:Failures[-1].Manual | Should -Not -Match 'Enable-WindowsSudo'
+        }
+
+        It 'drops the admin hint when the maker download fails under sudo' {
+            Reset-State
+            $root = Join-Path $TestDrive 'nomakersudo'
+            Mock Get-GitHubLatestAsset { [pscustomobject]@{ Tag = 'v9'; Name = 'b.zip'; ZipUrl = 'https://example.invalid/b.zip'; HashUrl = 'https://example.invalid/b.zip.sha256' } }
+            Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
+            Mock Save-VerifiedFile { return $true }
+            Mock Expand-Archive { }
+            Mock Invoke-FileDownload { return $false }
+            $script:UseSudo = $true
+            Invoke-Tiny11Build -Root $root -Elevate | Should -BeFalse
+            $script:Failures[-1].Manual | Should -Match 'Then re-run with -Elevate'
+            $script:Failures[-1].Manual | Should -Not -Match 'Enable-WindowsSudo'
         }
 
         It 'drops the sudo advice when the elevated build fails' {
