@@ -94,9 +94,15 @@ reviewer sees the whole change, not one commit:
   them with evidence and keep the code.
 - Each accepted finding gets a regression test that fails when the branch is
   removed. Batch the fixes, run Pester once, then commit as one logical change.
-- Stop when a round prints exactly `NO ACTIONABLE FINDINGS`, or when every
-  remaining claim has been rechecked and disproved. "Only low severity left" is
-  not a stop condition while a claim is still valid.
+- Loop shape: fix -> test -> commit -> re-review the cumulative diff. Keep the
+  scope to the commits under review; do not re-litigate unrelated code.
+- Termination rule: the polish loop ends in exactly one of two states.
+  (a) No actionable claim remains: the round prints only
+  `NO ACTIONABLE FINDINGS`. (b) Every remaining review claim has been
+  rechecked and shown to be invalid, with the evidence recorded (argv probe,
+  Pester run, file/tree check, upstream data). "Only low severity left" is not
+  a stop condition while any claim is still valid, and a false claim is never
+  a reason to weaken the code.
 - Keep the loop bounded: batch fixes into one round, re-run once, and remember
   that every fix can add branches the next round will probe.
 
