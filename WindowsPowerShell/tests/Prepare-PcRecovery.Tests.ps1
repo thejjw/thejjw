@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl)' }, $true)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty)' }, $true)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -33,23 +33,26 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         # Resets recorded failures/results between tests.
-        function Reset-State { $script:Failures = @(); $script:Results = @(); $script:UseSudo = $false; $script:VerifiedHashes = @{}; $script:Sidecars = @{} }
+        function Reset-State { $script:Failures = @(); $script:Results = @(); $script:UseSudo = $false; $script:VerifiedHashes = @{}; $script:Sidecars = @{}; $script:CopypartyRows = @() }
     }
 
     Context 'shared constants' {
         It 'defines every shared name with a real value (no self-assignment)' {
             $expected = @{
                 DirTools = 'tools'; DirVentoy = 'ventoy'; DirIsos = 'isos'
-                DirInstallers = '03-Installers'; DirTiny11 = 'tiny11'; DirBuilder = 'tiny11builder'
+                DirInstallers = '03-Installers'; DirTiny11 = 'tiny11'; DirBuilder = 'tiny11builder'; DirCopyparty = 'copyparty'
                 FileVentoyExe = 'Ventoy2Disk.exe'; FileFido = 'Fido.ps1'; FileTiny11Iso = 'tiny11.iso'
                 FileMaker = 'tiny11maker.ps1'; FileAnswer = 'autounattend.xml'; FileOscdimg = 'oscdimg.exe'
                 FileFacts = 'filefacts.json'; FileReadme = 'README.txt'
+                FileCopypartySfx = 'copyparty-sfx.py'; FileCopypartyExe = 'copyparty.exe'; FileCopypartyTag = '.release'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
                 $actual | Should -Be $expected[$name]
             }
             $script:MsDownloadPage | Should -Match '^https://'
+            $script:CopypartyApiUrl | Should -Match '^https://api\.github\.com/'
+            $script:CopypartyReleasesUrl | Should -Match '^https://github\.com/'
             $script:ThirdPartyTip | Should -Not -BeNullOrEmpty
             $script:WinIsoNaming | Should -Match 'Win11_'
             $script:MakerHintAdmin | Should -Match 'Enable-WindowsSudo'
@@ -263,6 +266,83 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
     }
 
+    Context 'copyparty tools' {
+        It 'downloads both assets from the resolved tag with their GitHub digests' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpok'
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1206486; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://github.com/9001/copyparty/releases/download/v1.20.26/copyparty-sfx.py' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 13207240; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://github.com/9001/copyparty/releases/download/v1.20.26/copyparty.exe' }
+            ) } }
+            $script:sawDownloads = @()
+            Mock Save-VerifiedFile { $script:sawDownloads += [pscustomobject]@{ Url = $Url; OutFile = $OutFile; Hash = $ExpectedHash }; Set-Content -LiteralPath $OutFile -Value 'x' -NoNewline; return $true }
+            Save-CopypartyTools -Root $root | Should -BeTrue
+            $script:sawDownloads.Count | Should -Be 2
+            $script:sawDownloads[0].Url | Should -Match '/download/v1\.20\.26/copyparty-sfx\.py$'
+            $script:sawDownloads[0].Hash | Should -Be ('a' * 64)
+            $script:sawDownloads[0].OutFile | Should -Match 'isos\\04-etc\\copyparty\\copyparty-sfx\.py$'
+            $script:sawDownloads[1].OutFile | Should -Match 'isos\\04-etc\\copyparty\\copyparty\.exe$'
+            $script:CopypartyRows.Count | Should -Be 2
+            $block = Format-IsoReadmeEntry -Row ($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }) -Root $root
+            $block | Should -Match 'v1\.20\.26'
+            $block | Should -Match ('b' * 64)
+        }
+
+        It 'records one failure per asset when a digest is unusable' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpnodigest'
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha512:abc'; browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('c' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            $script:calls = 0
+            Mock Save-VerifiedFile { $script:calls++; Set-Content -LiteralPath $OutFile -Value 'x' -NoNewline; return $true }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            $script:calls | Should -Be 1
+            $script:Failures | Should -HaveCount 1
+            $script:Failures[0].Name | Should -Be 'copyparty-sfx.py'
+        }
+
+        It 'does not double-record a failed download' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpfail'
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Invoke-Cli { [pscustomobject]@{ ExitCode = 22; StdOut = ''; StdErr = 'HTTP 404' } }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            $script:Failures | Should -HaveCount 2
+        }
+
+        It 'records one failure when the release lookup fails' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cpapi'
+            Mock Invoke-GitHubApiJson { throw 'rate limited' }
+            Save-CopypartyTools -Root $root | Should -BeFalse
+            $script:Failures | Should -HaveCount 1
+            $script:CopypartyRows.Count | Should -Be 0
+        }
+
+        It 'clears stale partials when the release tag changes' {
+            Reset-State
+            $root = Join-Path $TestDrive 'cppart'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $dir '.release') -Value 'v1.20.25' -NoNewline
+            $partial = Join-Path $dir 'copyparty.exe.partial'
+            Set-Content -LiteralPath $partial -Value 'old' -NoNewline
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+                [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1; digest = 'sha256:' + ('a' * 64); browser_download_url = 'https://example.invalid/sfx' }
+                [pscustomobject]@{ name = 'copyparty.exe'; size = 2; digest = 'sha256:' + ('b' * 64); browser_download_url = 'https://example.invalid/exe' }
+            ) } }
+            Mock Save-VerifiedFile { return $true }
+            Save-CopypartyTools -Root $root | Should -BeTrue
+            Test-Path -LiteralPath $partial | Should -BeFalse
+            ([IO.File]::ReadAllText((Join-Path $dir '.release'))).Trim() | Should -Be 'v1.20.26'
+        }
+    }
+
     Context 'elevation' {
         It 'never invokes sudo.exe without -Elevate' {
             Reset-State
@@ -366,6 +446,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Invoke-WebText { 'ab' * 32 + '  b.zip' }
             Mock Install-Ventoy { return $true }
             Mock Save-RufusTools { return $true }
+            Mock Save-CopypartyTools { return $true }
             Mock Save-CatalogIsos { $script:VerifiedHashes[(Join-Path (Join-Path (Join-Path $root 'isos') '02-Rescue') 'HBCD_PE_x64.iso')] = ('ab' * 32) }
             Mock Get-WindowsIsoViaFido { return $true }
             Mock Invoke-Tiny11Build { return $true }
@@ -373,6 +454,12 @@ Describe 'Prepare-PcRecovery.ps1' {
             $rootText = [IO.File]::ReadAllText((Join-Path $root 'README.txt'))
             $rootText | Should -Match 'tiny11builder'
             $rootText | Should -Match 'en-US'
+            $rootText | Should -Match 'copyparty'
+            $topicDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            $topicText = [IO.File]::ReadAllText((Join-Path $topicDir 'README.txt'))
+            $topicText | Should -Match 'copyparty-sfx\.py'
+            $topicText | Should -Match 'no arguments'
+            $topicText | Should -Match '\-v SRC:DST:PERMS'
             $isosText = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'isos') 'README.txt'))
             $isosText | Should -Match 'HBCD_PE_x64.iso'
             $isosText | Should -Match 'Windows PE rescue environment'

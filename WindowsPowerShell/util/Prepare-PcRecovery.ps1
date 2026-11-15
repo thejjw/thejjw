@@ -95,6 +95,7 @@ $script:DirIsos = 'isos'
 $script:DirInstallers = '03-Installers'
 $script:DirTiny11 = 'tiny11'
 $script:DirBuilder = 'tiny11builder'
+$script:DirCopyparty = 'copyparty'
 $script:FileVentoyExe = 'Ventoy2Disk.exe'
 $script:FileFido = 'Fido.ps1'
 $script:FileRufusPatternNote = 'rufus-.*p\.exe'
@@ -104,6 +105,9 @@ $script:FileAnswer = 'autounattend.xml'
 $script:FileOscdimg = 'oscdimg.exe'
 $script:FileFacts = 'filefacts.json'
 $script:FileReadme = 'README.txt'
+$script:FileCopypartySfx = 'copyparty-sfx.py'
+$script:FileCopypartyExe = 'copyparty.exe'
+$script:FileCopypartyTag = '.release'
 # User-facing pointers: the official download page, the third-party fallback,
 # and the accepted Windows ISO naming, shared by readmes and failure text.
 $script:MsDownloadPage = 'https://www.microsoft.com/en-US/software-download/Windows11'
@@ -113,6 +117,8 @@ $script:RufusUrl = 'https://rufus.ie/'
 $script:RufusReleasesHint = 'Download portable Rufus from https://rufus.ie/ into tools\ by hand.'
 $script:VentoyReleasesUrl = 'https://github.com/ventoy/Ventoy/releases/latest'
 $script:Tiny11BuilderReleasesUrl = 'https://github.com/ntdevlabs/tiny11builder/releases/latest'
+$script:CopypartyApiUrl = 'https://api.github.com/repos/9001/copyparty/releases/latest'
+$script:CopypartyReleasesUrl = 'https://github.com/9001/copyparty/releases/latest'
 # Manual-retry text for the Tiny11 build. MakerHintManual takes the official
 # ISO file name (or a placeholder) through -f.
 $script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, then re-run with -Elevate; or mount the official ISO, save ' + $script:Tiny11AnswerUrl + ' as autounattend.xml next to tiny11maker.ps1, run it with -ISO <letter> -SCRATCH <letter> from an elevated shell, then move tiny11.iso into isos\03-Installers\tiny11\.'
@@ -123,11 +129,12 @@ $script:Results = @()
 $script:UseSudo = $false
 
 # -----------------------------------------------------------------------------
-# Maintained text blocks. These two readmes are written into the download tree
-# (root README.txt, isos\README.txt) on every run; edit the text inside these
-# two functions, not in the tree, so a re-run never loses the update.
-# Functions are the loadable unit (tests dot-source functions only), so the
-# text lives here instead of in top-level assignments. Keep ASCII, no BOM.
+# Maintained text blocks. These readmes are written into the download tree
+# (root README.txt, isos\README.txt, isos\04-etc\copyparty\README.txt) on every
+# run; edit the text inside these functions, not in the tree, so a re-run never
+# loses the update. Functions are the loadable unit (tests dot-source functions
+# only), so the text lives here instead of in top-level assignments. Keep ASCII,
+# no BOM.
 # -----------------------------------------------------------------------------
 
 # What the destination root is and how to use it.
@@ -151,7 +158,8 @@ STRUCTURE
   isos\03-Installers\ Ubuntu Server, Rocky, Debian netinst, Mint, antiX,
                      Fedora, the Windows 11 ISO (Fido's Win11_*.iso name or
                      the official en-us_windows_11_*.iso name), tiny11\.
-  isos\04-etc\       Spare room for drivers, notes, one-off utilities.
+  isos\04-etc\       Post-boot utilities by topic, e.g. copyparty\ (portable
+                     file server: copyparty-sfx.py and copyparty.exe).
   isos\README.txt    Per-folder contents, sizes, and re-verify notes.
 
 WINDOWS 11 ISO
@@ -196,13 +204,53 @@ FOLDERS
   01-Network\    Small network-boot images and bootloaders.
   02-Rescue\     Offline-capable rescue and imaging environments.
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
-  04-etc\        Misc files that do not fit the other categories.
+  04-etc\        Post-boot utilities by topic, e.g. copyparty\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
   - Windows and Tiny11 ISOs usually need Secure Boot off (or Ventoy's key
     enrolled); test before relying on them.
   - netboot.xyz needs a working network connection to be useful.
+"@
+}
+
+# Usage sheet for isos\04-etc\copyparty\. Commands show the safe form: account,
+# explicit bind address, read-only source, separate writable folder, and the
+# index moved off read-only media.
+function Get-CopypartyReadmeText {
+    @"
+COPYPARTY - portable file server
+================================
+This file was written by util/Prepare-PcRecovery.ps1; re-runs replace it.
+
+FILES
+  copyparty-sfx.py  Linux / macOS. Needs Python 2 or 3 (live images usually
+                    have python3).
+  copyparty.exe     Windows 8+ x64. Unsigned; Windows 8 also needs the Visual
+                    C++ 2015 redistributable, Windows 10/11 do not.
+  .release          Release tag the two files above came from.
+
+SAFE START (replace the address, paths, and password)
+  Linux:
+    python3 copyparty-sfx.py -p 3923 -i 192.168.1.10 -a admin:change-me ^
+      -v /mnt/data::r,admin -v /mnt/incoming::w,admin --hist /tmp/copyparty
+  Windows:
+    copyparty.exe -p 3923 -i 192.168.1.10 -a admin:change-me ^
+      -v C:\data::r,admin -v C:\incoming::w,admin --hist %TEMP%\copyparty
+
+  Then browse to http://192.168.1.10:3923/ and log in as admin.
+
+WARNING
+  Starting it with no arguments shares the current folder read/write with
+  everyone on every interface, port 3923. Always pass -a, -v, and -i.
+  copyparty.exe has no code signature; expect SmartScreen and Windows
+  Firewall prompts. Windows PE (Hiren's BootCD PE) is not supported.
+
+NOTES
+  - Volume syntax is -v SRC:DST:PERMS; r=read, w=write, m=move, d=delete.
+    Add a user name to restrict a permission, for example r,admin.
+  - .hist holds the index and thumbnails; --hist keeps it off the USB.
+  - Keep the USB mount read-only in -v unless you intend to write to it.
 "@
 }
 
@@ -846,6 +894,89 @@ function Save-RufusTools {
     return $ok
 }
 
+# Downloads the copyparty sfx and Windows exe from ONE GitHub release into
+# isos\04-etc\copyparty, verified against GitHub's per-asset sha256 digest.
+# Records the resolved rows for the isos readme. Never throws.
+function Save-CopypartyTools {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param([string]$Root)
+    $script:CopypartyRows = @()
+    $dir = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty
+    Initialize-Directory -Path $dir
+    $manual = @(
+        "Open $($script:CopypartyReleasesUrl) and download $($script:FileCopypartySfx) and $($script:FileCopypartyExe) into $dir."
+    )
+    try {
+        $release = Invoke-GitHubApiJson -Uri $script:CopypartyApiUrl
+    } catch {
+        $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
+        $lookupManual = @('GitHub API may be rate-limited (403 without a token); re-run later.') + $manual
+        Write-Failure -Name 'copyparty release lookup' -Detail $detail -Manual $lookupManual
+        return $false
+    }
+    $tag = [string]$release.tag_name
+    if (-not $tag) {
+        Write-Failure -Name 'copyparty release lookup' -Detail 'Release has no tag name.' -Manual $manual
+        return $false
+    }
+    # A .partial from another release cannot be resumed against this one.
+    # Clear it when the tag changes and remember the tag for the next run.
+    if ($PSCmdlet.ShouldProcess($dir, "Record release $tag")) {
+        $markerPath = Join-Path $dir $script:FileCopypartyTag
+        $oldTag = ''
+        if (Test-Path -LiteralPath $markerPath) {
+            $oldTag = ([IO.File]::ReadAllText($markerPath)).Trim()
+        }
+        if ($oldTag -ne $tag) {
+            Get-ChildItem -LiteralPath $dir -Filter '*.partial' -File -ErrorAction SilentlyContinue | ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+        [IO.File]::WriteAllText($markerPath, $tag, [Text.UTF8Encoding]::new($false))
+    }
+    $ok = $true
+    foreach ($name in @($script:FileCopypartySfx, $script:FileCopypartyExe)) {
+        $asset = @($release.assets | Where-Object { $_.name -eq $name }) | Select-Object -First 1
+        if (-not $asset) {
+            Write-Failure -Name $name -Detail "No $name asset in ${tag}." -Manual $manual
+            $ok = $false
+            continue
+        }
+        if ("$($asset.digest)" -notmatch '^sha256:([0-9a-fA-F]{64})$') {
+            Write-Failure -Name $name -Detail "No usable sha256 digest on the $tag asset." -Manual @(
+                "Download $($asset.browser_download_url) by hand into $dir."
+            )
+            $ok = $false
+            continue
+        }
+        $hash = $Matches[1].ToLowerInvariant()
+        $outFile = Join-Path $dir $name
+        $title = if ($name -eq $script:FileCopypartySfx) { 'copyparty sfx (Linux/macOS)' } else { 'copyparty exe (Windows)' }
+        $about = if ($name -eq $script:FileCopypartySfx) { 'Portable file server for Linux/macOS live sessions; runs with python3.' } else { 'Portable file server for Windows 8+ x64; no Python needed.' }
+        $sizeMb = [math]::Round($asset.size / 1MB, 1).ToString([Globalization.CultureInfo]::InvariantCulture)
+        if (-not $WhatIfPreference) {
+            $script:CopypartyRows += [pscustomobject]@{
+                Name = $title
+                Category = (Join-Path '04-etc' $script:DirCopyparty)
+                FileName = $name
+                Url = $asset.browser_download_url
+                Hash = $hash
+                HashKind = 'GitHub digest'
+                Released = "$tag (GitHub asset digest, sha256)"
+                SizeNote = "About $sizeMb MB."
+                About = $about
+                Check = "GitHub API releases/tags/$tag digest field, or the release page."
+            }
+        }
+        if (-not (Save-VerifiedFile -Url $asset.browser_download_url -OutFile $outFile -ExpectedHash $hash -Name $name)) {
+            $ok = $false
+            continue
+        }
+        if (Test-Path -LiteralPath $outFile) { $script:VerifiedHashes[$outFile] = $hash }
+    }
+    return $ok
+}
+
 # Finds official Windows ISOs in the installers folder, newest first.
 # Matches Fido-style names (Win11_*.iso) and official Microsoft names
 # (en-us_windows_11_*.iso). Never matches the tiny11\ build output.
@@ -1096,6 +1227,7 @@ function Write-PlanTable {
     param([string]$NetbootArch = 'x64', [string]$MintHwe = 'None')
     Write-Section 'Planned recovery file set (WhatIf: nothing downloaded)'
     Write-Detail 'Tools: latest Ventoy Windows zip, latest Rufus portable, Fido.ps1, tiny11builder x64 zip + tiny11maker.ps1'
+    Write-Detail 'copyparty: latest GitHub release, sfx.py + exe under isos\04-etc\copyparty\.'
     Write-Detail 'Windows 11 ISO resolved live through Fido; Tiny11 built from it with -Elevate.'
     $rows = Get-RecoveryCatalog | Where-Object {
         (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
@@ -1169,6 +1301,7 @@ function Invoke-PreparePcRecovery {
         Write-Section "Preparing recovery files in $Root"
         $script:VerifiedHashes = @{}
         $script:Sidecars = @{}
+        $script:CopypartyRows = @()
         Initialize-ElevationState -Elevate:$Elevate
         Initialize-Directory -Path $Root
         Initialize-Directory -Path (Join-Path $Root $script:DirTools)
@@ -1177,7 +1310,9 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '02-Rescue')
         Initialize-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '03-Installers')
         Initialize-Directory -Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc')
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty)
         Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null
@@ -1185,6 +1320,10 @@ function Invoke-PreparePcRecovery {
         Write-Step 'Rufus portable + Fido'
         Invoke-SafeStep -Name 'Rufus + Fido' -Manual @($script:RufusReleasesHint) -Body {
             Save-RufusTools -Root $Root | Out-Null
+        }
+        Write-Step 'copyparty tools (04-etc)'
+        Invoke-SafeStep -Name 'copyparty' -Manual @("Open $($script:CopypartyReleasesUrl) and place $($script:FileCopypartySfx) and $($script:FileCopypartyExe) into isos\04-etc\copyparty\.") -Body {
+            Save-CopypartyTools -Root $Root | Out-Null
         }
         Write-Step 'Catalog ISOs (netboot first)'
         Save-CatalogIsos -Root $Root -NetbootArch $NetbootArch -MintHwe $MintHwe
@@ -1208,6 +1347,17 @@ function Invoke-PreparePcRecovery {
             (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
             (($_.MintHwe -eq '') -or ($_.MintHwe -eq $MintHwe))
         } | ForEach-Object { Format-IsoReadmeEntry -Row $_ -Root $Root }
+        $copypartyDir = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty
+        if ($script:CopypartyRows.Count -gt 0) {
+            foreach ($row in $script:CopypartyRows) { $isoBlocks += (Format-IsoReadmeEntry -Row $row -Root $Root) }
+        } else {
+            foreach ($name in @($script:FileCopypartySfx, $script:FileCopypartyExe)) {
+                $path = Join-Path $copypartyDir $name
+                if (Test-Path -LiteralPath $path) {
+                    $isoBlocks += (Format-ManualIsoReadmeEntry -Title "copyparty ($name, release unknown this run)" -Path $path -Folder (Join-Path '04-etc' $script:DirCopyparty) -Note 'GitHub release lookup failed this run; on-disk hash only.' -Root $Root)
+                }
+            }
+        }
         $installersDir = Join-Path (Join-Path $Root $script:DirIsos) '03-Installers'
         $winIso = Find-WindowsIso -InstallersDir $installersDir | Select-Object -First 1
         if ($winIso) {
