@@ -862,7 +862,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text.Contains($script:FileCyberduckDuckRpm) | Should -BeTrue
             $text | Should -Match 'LINUX CLI'
             $text | Should -Match 'apt install'
-            $text | Should -Match 'dnf install'
+            $text | Should -Match "dnf install --disablerepo='\*'"
+            $text | Should -Match 'rpm -ivh'
+            $text | Should -Match 'mktemp -d "\$HOME/duck\.XXXXXX"'
             $text | Should -Match 'data\.tar\.\*'
             $text | Should -Match 'sha256sum'
             $text | Should -Match 'opt/duck/bin/duck'

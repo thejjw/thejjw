@@ -584,12 +584,13 @@ LINUX CLI
   Debian or Ubuntu:
     sudo apt install ./CYBERDEB
     duck --version
-  Install on Fedora or Rocky:
-    sudo dnf install ./CYBERRPM
+  Install on Fedora or Rocky (repos off so it works offline):
+    sudo dnf install --disablerepo='*' ./CYBERRPM
+    sudo rpm -ivh ./CYBERRPM
     duck --version
   To run the deb without installing on any x86_64 Linux (binutils provides
   ar; tar needs zstd only when the member is data.tar.zst):
-    d=$(mktemp -d); cd "$d"
+    d=$(mktemp -d "$HOME/duck.XXXXXX"); cd "$d"
     ar x /path/to/CYBERDEB
     tar -xf data.tar.*
     ./opt/duck/bin/duck --version
