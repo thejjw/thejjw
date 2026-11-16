@@ -1641,6 +1641,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 $t | Should -Match 'Trust:'
                 $t | Should -Match 'Hashes:'
                 $t | Should -Not -Match '\{HEADER\}'
+                if ($t -match 'see INTEGRITY') { $t | Should -Match '(?m)^INTEGRITY$' }
             }
         }
     }

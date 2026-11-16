@@ -531,6 +531,13 @@ SAFE START (replace the address, paths, and password)
   SmartScreen may treat it better. The embeddable build has no pip, venv, or
   tkinter.
 
+INTEGRITY
+  SHA-256 comes from the GitHub release asset digest; the isos README records
+  the verified hash. Check a file with:
+    Get-FileHash .\copyparty.exe -Algorithm SHA256
+    Get-FileHash .\copyparty-sfx.py -Algorithm SHA256
+  and compare with ..\..\README.txt or the GitHub release digest.
+
 WARNING
   Starting it with no arguments shares the current folder read/write with
   everyone on every interface, port 3923. Always pass -a, -v, and -i.
