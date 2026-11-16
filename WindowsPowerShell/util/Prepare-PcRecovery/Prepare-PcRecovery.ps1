@@ -142,6 +142,19 @@ $script:TabbyUrlBase = 'https://github.com/Eugeny/tabby/releases/download/v' + $
 $script:FileTabbyZip = 'tabby-' + $script:TabbyVersion + '-portable-x64.zip'
 $script:FileTabbyDeb = 'tabby-' + $script:TabbyVersion + '-linux-x64.deb'
 $script:FileTabbyRpm = 'tabby-' + $script:TabbyVersion + '-linux-x64.rpm'
+# CJK display font: one Regular OTF for Linux and Windows; the KR variant is
+# the user-selected face. Pinned to a commit because upstream has no checksum.
+$script:DirFonts = 'fonts'
+$script:FileFont = 'NotoSansMonoCJKkr-Regular.otf'
+$script:FileFontLicense = 'OFL.txt'
+$script:FontCommit = '165c01b46ea533872e002e0785ff17e44f6d97d8'
+$script:FontVersion = '2.004'
+$script:FontReleased = '2021-04-30'
+$script:FontSha256 = 'd5afed9988a28ae96afb0f4791754d3c9f4f08d08477eb1a7d6e2d905679a472'
+$script:FontLicenseSha256 = '6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2'
+$script:FontRawUrl = 'https://raw.githubusercontent.com/notofonts/noto-cjk/' + $script:FontCommit + '/Sans/Mono/' + $script:FileFont
+$script:FontLicenseUrl = 'https://raw.githubusercontent.com/notofonts/noto-cjk/' + $script:FontCommit + '/LICENSE'
+$script:FontSourceUrl = 'https://github.com/notofonts/noto-cjk/blob/' + $script:FontCommit + '/Sans/Mono/' + $script:FileFont
 # ImgBurn: the official host is the only first-party source; its installer
 # carries OpenCandy, so it is extracted with 7-Zip and never executed or
 # shipped. Hashes are pinned locally; the installer also matches the
@@ -295,6 +308,9 @@ function Get-TopicReadmeMeta([string]$Topic) {
             if (-not $released) { $released = 'see catalog' }
             [pscustomobject]@{ Package = 'Tabby'; Version = $script:TabbyVersion; Released = $released; Source = ('https://github.com/Eugeny/tabby/releases/tag/v' + $script:TabbyVersion); Trust = 'GitHub asset SHA-256; see INTEGRITY'; Note = '' }
         }
+        'fonts' {
+            [pscustomobject]@{ Package = 'Noto Sans Mono CJK KR'; Version = $script:FontVersion; Released = $script:FontReleased; Source = $script:FontSourceUrl; Trust = ('pinned SHA-256 at noto-cjk commit ' + $script:FontCommit.Substring(0, 7) + ' (no upstream checksum); see INTEGRITY'); Note = '' }
+        }
         'imgburn' {
             [pscustomobject]@{ Package = 'ImgBurn'; Version = $script:ImgBurnVersion; Released = $script:ImgBurnReleased; Source = $script:ImgBurnUrl; Trust = 'payload SHA-256 pin; see INTEGRITY'; Note = '' }
         }
@@ -418,6 +434,7 @@ STRUCTURE
   isos\04-etc\       Post-boot utilities by topic: copyparty\ (portable file
                      server), imgburn\ (portable optical media burner and
                      imager), firefox\ (offline ESR browser for Tiny11),
+                     fonts\ (one CJK display font for Linux/Windows),
                      cyberduck\ (cloud/SFTP GUI and duck CLI),
                      python\ (Windows x64), 7zip\ (extractor), putty\,
                      tabby\, winscp\ (terminals and transfer clients).
@@ -480,7 +497,8 @@ FOLDERS
   02-Rescue\     Offline-capable rescue and imaging environments.
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
   04-etc\        Post-boot utilities by topic: copyparty\, cyberduck\,
-                 firefox\, imgburn\, python\, 7zip\, putty\, tabby\, winscp\.
+                 firefox\, fonts\, imgburn\, python\, 7zip\, putty\, tabby\,
+                 winscp\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
@@ -968,6 +986,67 @@ NOTES
 
 '@
     return Add-TopicReadmeHeader -Text $text.Replace('TABBYZIP', $script:FileTabbyZip).Replace('TABBYDEB', $script:FileTabbyDeb).Replace('TABBYRPM', $script:FileTabbyRpm) -Meta (Get-TopicReadmeMeta -Topic 'tabby') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
+}
+
+# CJK display font sheet for isos\04-etc\fonts\. One Regular OTF plus its
+# OFL license; install steps stay general and display-only.
+function Get-FontsReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
+    $text = @'
+CJK DISPLAY FONT
+================
+{HEADER}
+
+FILES
+  FONTFILE  Noto Sans Mono CJK KR Regular, version 2.004; one
+                       Regular weight, monospaced, about 15.6 MB.
+  FONTLICENSE        Upstream SIL OFL 1.1 license, byte-for-byte.
+
+INSTALL - LINUX (no admin)
+  mkdir -p ~/.local/share/fonts
+  cp FONTFILE ~/.local/share/fonts/
+  fc-cache -fv
+  fc-list :lang=ko | grep -i "Noto Sans Mono CJK"
+  fc-match "Noto Sans Mono CJK KR"
+  Select "Noto Sans Mono CJK KR" in the terminal or editor and restart the app.
+  System-wide: copy to /usr/local/share/fonts/ and run fc-cache -fv.
+  A live session loses the install at reboot. Many desktop ISOs already ship
+  Noto CJK; check fc-list first. If the Ventoy partition is busy, copy the
+  file with copyparty or from a second stick.
+
+INSTALL - WINDOWS (usually not needed)
+  Full Windows already has CJK fonts (Malgun Gothic, Yu Gothic, Microsoft
+  YaHei, JhengHei). Install this only if text shows boxes.
+  Right-click the OTF > Install for all users (needs admin; may be under
+  Show more options), or Settings > Personalization > Fonts.
+  A command-line copy to %WINDIR%\Fonts does not register the font.
+  Select "Noto Sans Mono CJK KR" explicitly in Windows Terminal: Settings >
+  profile > Appearance > Font face. Classic conhost does not offer this
+  CFF-based OTF. An added font is not used by automatic fallback.
+  Optional fallback list: Cascadia Mono, Noto Sans Mono CJK KR.
+  In WinPE, use the Install button if offered; otherwise prefer SSH or Linux.
+
+USE
+  Display only; no IME. Linux fontconfig usually falls back to the family;
+  Windows requires selecting it. A bare Linux text console needs a GUI
+  terminal or fbterm/kmscon; SSH from Tabby/PuTTY is simpler and renders CJK
+  with the client font. Keep a UTF-8 locale.
+
+INTEGRITY
+  SHA-256:
+    sha256sum FONTFILE
+    Get-FileHash .\FONTFILE -Algorithm SHA256
+  Pinned value: FONTHASH
+  Source commit: FONTCOMMIT
+  FONTLICENSE is the upstream LICENSE renamed byte-for-byte; the font is
+  unmodified, so the Reserved Font Name "Source" does not apply. If an editor
+  rewrites FONTLICENSE line endings, the next run re-downloads it.
+
+LICENSE
+  SIL Open Font License 1.1; see FONTLICENSE.
+'@
+    $body = $text.Replace('FONTFILE', $script:FileFont).Replace('FONTLICENSE', $script:FileFontLicense).Replace('FONTHASH', $script:FontSha256).Replace('FONTCOMMIT', $script:FontCommit)
+    return Add-TopicReadmeHeader -Text $body -Meta (Get-TopicReadmeMeta -Topic 'fonts') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # Portable ImgBurn sheet for isos\04-etc\imgburn\. Placeholders keep the
@@ -1496,6 +1575,8 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Windows portable'; Category = '04-etc\tabby'; FileName = $script:FileTabbyZip; Url = ($script:TabbyUrlBase + $script:FileTabbyZip); AlternateUrl = ''; Hash = '56de045fbb5a74d586903367d3f7227276d538281b0068d8132de3318cdd5019'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Electron terminal with built-in SSH, telnet, serial, and local shells, an SSH SFTP panel, and Zmodem transfers; portable-mode zip that keeps configuration and host lists in a data folder beside Tabby.exe.'; Released = 'Version 1.0.238, October 2026 (185,884,613 bytes; Tabby.exe signed by Eugen Pankov Softwareentwicklung).'; SizeNote = 'About 177 MB (extracts to about 481 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the zip is unsigned, and Tabby.exe inside is Authenticode-valid with Eugen Pankov Softwareentwicklung as signer. Download ' + $script:TabbyUrlBase + $script:FileTabbyZip + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Linux x64 deb'; Category = '04-etc\tabby'; FileName = $script:FileTabbyDeb; Url = ($script:TabbyUrlBase + $script:FileTabbyDeb); AlternateUrl = ''; Hash = '5ea2b9aa84f2b5cdcb98cb7e94bd3d92de48c96254a98b52bf2d1f30a52d1d1c'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Debian/Ubuntu x64 package for the same terminal; installs /opt/Tabby and a /usr/bin/tabby wrapper that adds --no-sandbox.'; Released = 'Version 1.0.238, October 2026 (130,349,456 bytes; unsigned; needs gnome-keyring and GUI libraries).'; SizeNote = 'About 124 MB (installs to about 431 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the package is unsigned. Download ' + $script:TabbyUrlBase + $script:FileTabbyDeb + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Linux x64 rpm'; Category = '04-etc\tabby'; FileName = $script:FileTabbyRpm; Url = ($script:TabbyUrlBase + $script:FileTabbyRpm); AlternateUrl = ''; Hash = 'd5027a5f905edf40aaf1fd42ef5015abfaffbd96f5825b3622ef352dfc3136b3'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Fedora/RHEL/Rocky x64 package for the same terminal; requires gnome-keyring and links /usr/bin/tabby to /opt/Tabby/tabby.'; Released = 'Version 1.0.238, October 2026 (113,337,069 bytes; unsigned; requires gnome-keyring).'; SizeNote = 'About 108 MB (installs to about 431 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the package is unsigned. Download ' + $script:TabbyUrlBase + $script:FileTabbyRpm + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
+        [pscustomobject]@{ Name = 'Noto Sans Mono CJK KR'; Category = '04-etc\fonts'; FileName = $script:FileFont; Url = $script:FontRawUrl; AlternateUrl = ''; Hash = $script:FontSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Single Regular-weight OFL font for CJK display on Linux and Windows; covers Han, Kana, Hangul, and Bopomofo with KR-default glyph forms.'; Released = ('Version ' + $script:FontVersion + ', April 2021 (file date ' + $script:FontReleased + ' at commit ' + $script:FontCommit.Substring(0, 7) + '; 16,389,532 bytes).'); SizeNote = 'About 15.6 MB.'; Check = ('Download ' + $script:FontRawUrl + ' into isos\04-etc\fonts\ by hand (commit-pinned source; no upstream checksum); the next run verifies SHA-256 and skips it.') }
+        [pscustomobject]@{ Name = 'Noto CJK OFL license'; Category = '04-etc\fonts'; FileName = $script:FileFontLicense; Url = $script:FontLicenseUrl; AlternateUrl = ''; Hash = $script:FontLicenseSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'OFL 1.1 text for the bundled Noto CJK font; upstream LICENSE renamed byte-for-byte.'; Released = ('OFL 1.1, file date ' + $script:FontReleased + ' at commit ' + $script:FontCommit.Substring(0, 7) + '.'); SizeNote = 'About 4 KB.'; Check = ('Download ' + $script:FontLicenseUrl + ' into isos\04-etc\fonts\ by hand and save it as OFL.txt; the next run verifies it against the pinned hash and skips it.') }
     )
 }
 
@@ -2679,6 +2760,7 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) 'bin')
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFonts)
         Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc $writtenUtc -RunStartedUtc $runStartedUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython) $script:FileReadme) -Text (Get-PythonReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirSevenZip) $script:FileReadme) -Text (Get-SevenZipReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
@@ -2687,6 +2769,7 @@ function Invoke-PreparePcRecovery {
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck) $script:FileReadme) -Text (Get-CyberduckReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby) $script:FileReadme) -Text (Get-TabbyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) $script:FileReadme) -Text (Get-ImgBurnReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFonts) $script:FileReadme) -Text (Get-FontsReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         # Provisional sheets so live topics still have documentation if the
         # run is interrupted before their downloads. Never replace a sheet from
         # an earlier run; the post-step writes refresh them on success.

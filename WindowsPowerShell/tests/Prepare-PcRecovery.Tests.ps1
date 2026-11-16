@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby|ImgBurn|Firefox)' }, $false)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby|ImgBurn|Firefox|Font)' }, $false)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -53,6 +53,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 DirTabby = 'tabby'; TabbyVersion = '1.0.238'; FileTabbyZip = 'tabby-1.0.238-portable-x64.zip'; FileTabbyDeb = 'tabby-1.0.238-linux-x64.deb'; FileTabbyRpm = 'tabby-1.0.238-linux-x64.rpm'
                 DirImgBurn = 'imgburn'; ImgBurnVersion = '2.5.8.0'; FileImgBurnInstaller = 'SetupImgBurn_2.5.8.0.exe'; FileImgBurnExe = 'ImgBurn.exe'; FileImgBurnLauncher = 'ImgBurn Portable.cmd'; FileImgBurnIni = 'ImgBurn.ini'
                 DirFirefox = 'firefox'; FirefoxFallbackVersion = '153.7.0esr'; FirefoxFallbackReleased = '2026-11-10'; ImgBurnReleased = '2013-06-16'
+                DirFonts = 'fonts'; FileFont = 'NotoSansMonoCJKkr-Regular.otf'; FileFontLicense = 'OFL.txt'; FontCommit = '165c01b46ea533872e002e0785ff17e44f6d97d8'; FontVersion = '2.004'; FontReleased = '2021-04-30'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -67,6 +68,10 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:FirefoxReleasesUrl | Should -Be 'https://ftp.mozilla.org/pub/firefox/releases/'
             $script:FirefoxFallbackSha256 | Should -Match '^[0-9a-f]{64}$'
             $script:FirefoxJsonUrl | Should -Be 'https://product-details.mozilla.org/1.0/firefox.json'
+            $script:FontSha256 | Should -Match '^[0-9a-f]{64}$'
+            $script:FontLicenseSha256 | Should -Match '^[0-9a-f]{64}$'
+            $script:FontRawUrl | Should -Match ([regex]::Escape($script:FontCommit))
+            $script:FontSourceUrl | Should -Match ([regex]::Escape($script:FontCommit))
             $script:ThirdPartyTip | Should -Not -BeNullOrEmpty
             $script:WinIsoNaming | Should -Match 'Win11_'
             $script:MakerHintAdmin | Should -Match 'Enable-WindowsSudo'
@@ -103,6 +108,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $names | Should -Contain '04-etc\python'
             $names | Should -Contain '04-etc\cyberduck'
             $names | Should -Contain '04-etc\tabby'
+            $names | Should -Contain '04-etc\fonts'
             foreach ($name in $names) { $name | Should -Match '^\d\d-[A-Za-z]+(\\[a-z0-9-]+)?$' }
         }
 
@@ -1368,6 +1374,34 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:Failures.Count | Should -Be 0
         }
 
+        It 'pins the CJK font and license to the same commit' {
+            $rows = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\fonts' })
+            $rows.Count | Should -Be 2
+            foreach ($row in $rows) {
+                $row.HashKind | Should -Be 'Pinned'
+                $row.Hash | Should -Match '^[0-9a-f]{64}$'
+                $row.Url | Should -Match ([regex]::Escape($script:FontCommit))
+            }
+            ($rows | Where-Object { $_.FileName -eq $script:FileFont }).Hash | Should -Be $script:FontSha256
+            ($rows | Where-Object { $_.FileName -eq $script:FileFontLicense }).Hash | Should -Be $script:FontLicenseSha256
+        }
+
+        It 'documents the CJK font and general install steps' {
+            $text = Get-FontsReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
+            $text.Contains($script:FileFont) | Should -BeTrue
+            $text.Contains($script:FileFontLicense) | Should -BeTrue
+            $text | Should -Match 'fc-cache -fv'
+            $text | Should -Match 'fc-list :lang=ko'
+            $text | Should -Match 'Install for all users'
+            $text | Should -Match 'Windows Terminal'
+            $text | Should -Match 'Get-FileHash'
+            $text | Should -Match 'sha256sum'
+            $text | Should -Match 'Display only'
+            $text | Should -Match 'fbterm'
+            $text | Should -Match 'Noto Sans Mono CJK KR'
+            $text | Should -Not -Match 'FONTFILE|FONTLICENSE|FONTHASH|FONTCOMMIT'
+        }
+
         It 'documents install, uninstall, fallback, and integrity' {
             $text = Get-FirefoxReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             $text | Should -Match '/S'
@@ -1530,7 +1564,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'resolves pinned metadata for every 04-etc topic' {
-            foreach ($topic in @('python', '7zip', 'putty', 'winscp', 'cyberduck', 'tabby', 'imgburn')) {
+            foreach ($topic in @('python', '7zip', 'putty', 'winscp', 'cyberduck', 'tabby', 'imgburn', 'fonts')) {
                 $m = Get-TopicReadmeMeta -Topic $topic
                 $m.Package | Should -Not -BeNullOrEmpty
                 $m.Version | Should -Not -BeNullOrEmpty
@@ -1651,6 +1685,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 (Get-CyberduckReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-TabbyReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-ImgBurnReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-FontsReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-FirefoxReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp)
             )
             foreach ($t in $texts) {
@@ -1793,7 +1828,17 @@ Describe 'Prepare-PcRecovery.ps1' {
                 })
                 return $true
             }
-            Mock Save-CatalogIsos { $script:VerifiedHashes[(Join-Path (Join-Path (Join-Path $root 'isos') '02-Rescue') 'HBCD_PE_x64.iso')] = ('ab' * 32) }
+            Mock Save-CatalogIsos {
+                $script:VerifiedHashes[(Join-Path (Join-Path (Join-Path $root 'isos') '02-Rescue') 'HBCD_PE_x64.iso')] = ('ab' * 32)
+                $fontDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'fonts'
+                New-Item -ItemType Directory -Path $fontDir -Force | Out-Null
+                $fontFile = Join-Path $fontDir $script:FileFont
+                $licenseFile = Join-Path $fontDir $script:FileFontLicense
+                Set-Content -LiteralPath $fontFile -Value 'font' -NoNewline
+                Set-Content -LiteralPath $licenseFile -Value 'license' -NoNewline
+                $script:VerifiedHashes[$fontFile] = $script:FontSha256
+                $script:VerifiedHashes[$licenseFile] = $script:FontLicenseSha256
+            }
             Mock Install-ImgBurnPortable {
                 $ibDir = Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'imgburn') 'bin'
                 New-Item -ItemType Directory -Path $ibDir -Force | Out-Null
@@ -1832,6 +1877,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $rootText | Should -Match 'copyparty'
             $rootText | Should -Match 'imgburn'
             $rootText | Should -Match 'firefox'
+            $rootText | Should -Match 'fonts'
             $imgburnDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'imgburn'
             $imgburnText = [IO.File]::ReadAllText((Join-Path $imgburnDir 'README.txt'))
             $imgburnText | Should -Match '/PORTABLE /SETTINGS'
@@ -1903,6 +1949,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match '04-etc\\copyparty\\copyparty\.exe'
             $isosText | Should -Match '04-etc\\imgburn\\bin\\ImgBurn\.exe'
             $isosText | Should -Match '04-etc\\firefox\\Firefox Setup 153\.7\.0esr\.exe'
+            $isosText | Should -Match '04-etc\\fonts\\NotoSansMonoCJKkr-Regular\.otf'
+            $isosText | Should -Match '04-etc\\fonts\\OFL\.txt'
             $isosText | Should -Match 'pinned fallback; live lookup failed'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-amd64\.exe'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-embed-amd64\.zip'
