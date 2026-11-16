@@ -293,7 +293,7 @@ function Get-TopicReadmeMeta([string]$Topic) {
         'tabby' {
             $released = Find-CatalogReleasedDate '04-etc\tabby'
             if (-not $released) { $released = 'see catalog' }
-            [pscustomobject]@{ Package = 'Tabby'; Version = $script:TabbyVersion; Released = $released; Source = $script:TabbyUrlBase; Trust = 'GitHub asset SHA-256; see INTEGRITY'; Note = '' }
+            [pscustomobject]@{ Package = 'Tabby'; Version = $script:TabbyVersion; Released = $released; Source = ('https://github.com/Eugeny/tabby/releases/tag/v' + $script:TabbyVersion); Trust = 'GitHub asset SHA-256; see INTEGRITY'; Note = '' }
         }
         'imgburn' {
             [pscustomobject]@{ Package = 'ImgBurn'; Version = $script:ImgBurnVersion; Released = $script:ImgBurnReleased; Source = $script:ImgBurnUrl; Trust = 'payload SHA-256 pin; see INTEGRITY'; Note = '' }
@@ -2687,6 +2687,10 @@ function Invoke-PreparePcRecovery {
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck) $script:FileReadme) -Text (Get-CyberduckReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby) $script:FileReadme) -Text (Get-TabbyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) $script:FileReadme) -Text (Get-ImgBurnReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        # Provisional sheets so live topics still have documentation if the
+        # run is interrupted before their downloads; rewritten below on success.
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox) $script:FileReadme) -Text (Get-FirefoxReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null

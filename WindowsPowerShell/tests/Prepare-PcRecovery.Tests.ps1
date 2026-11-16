@@ -1533,6 +1533,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 $m.Trust | Should -Not -BeNullOrEmpty
                 $m.Released | Should -Not -Be 'see catalog'
                 $m.Released | Should -Match '^[A-Za-z]+ \d{4}$|^\d{4}-\d{2}-\d{2}$'
+                $m.Source | Should -Not -Match '/releases/download/'
             }
             { Get-TopicReadmeMeta -Topic 'nope' } | Should -Throw
         }
@@ -1939,6 +1940,22 @@ Describe 'Prepare-PcRecovery.ps1' {
             $ffText | Should -Match ('Version:\s+' + [regex]::Escape($script:FirefoxFallbackVersion))
             $ffText | Should -Match 'Note:\s+pinned fallback; live lookup failed'
             $ffText | Should -Not -Match 'unresolved this run'
+        }
+
+        It 'writes provisional live sheets before a catalog failure' {
+            Reset-State
+            $root = Join-Path $TestDrive 'interrupted-live'
+            Mock Install-Ventoy { return $true }
+            Mock Save-RufusTools { return $true }
+            Mock Save-CopypartyTools { return $true }
+            Mock Save-CatalogIsos { throw 'stop here' }
+            { Invoke-PreparePcRecovery -Root $root } | Should -Throw
+            $ffReadme = Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox') 'README.txt'
+            $cpReadme = Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty') 'README.txt'
+            Test-Path -LiteralPath $ffReadme | Should -BeTrue
+            Test-Path -LiteralPath $cpReadme | Should -BeTrue
+            ([IO.File]::ReadAllText($ffReadme)) | Should -Match 'Run started:'
+            ([IO.File]::ReadAllText($cpReadme)) | Should -Match 'Run started:'
         }
 
         It 'fetches the checksum sidecar next to the ISO and lists it' {
