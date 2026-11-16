@@ -69,6 +69,9 @@
     the traditional Windows installer (PEP 773 / Python install manager), so
     drop the installer row then; the embeddable zip stays. Re-pin Hash +
     Released + SizeNote together.
+    Go/Node rows: pinned Go 1.27.4 and Node.js LTS 26.13.1, Windows ZIP plus
+    Linux tar.gz. Node's tar.gz avoids an xz extractor; re-pin version and
+    hashes together.
     Firefox ESR: resolves FIREFOX_ESR live from product-details.mozilla.org
     and verifies the release SHA256SUMS (publisher checksum). The pinned
     153.7.0esr release is the fallback ONLY when the metadata or checksum
@@ -142,6 +145,28 @@ $script:TabbyUrlBase = 'https://github.com/Eugeny/tabby/releases/download/v' + $
 $script:FileTabbyZip = 'tabby-' + $script:TabbyVersion + '-portable-x64.zip'
 $script:FileTabbyDeb = 'tabby-' + $script:TabbyVersion + '-linux-x64.deb'
 $script:FileTabbyRpm = 'tabby-' + $script:TabbyVersion + '-linux-x64.rpm'
+# Go and Node.js LTS: portable x64 toolchains for Windows and Linux. Linux
+# artifacts are .tar.gz (Node also publishes .tar.xz) so extraction needs only
+# tar/gzip, not xz. Re-pin version and both hashes together.
+$script:DirGolang = 'golang'
+$script:GoVersion = '1.27.4'
+$script:GoReleased = '2026-11-10'
+$script:GoUrlBase = 'https://go.dev/dl/'
+$script:FileGoWindows = 'go' + $script:GoVersion + '.windows-amd64.zip'
+$script:FileGoLinux = 'go' + $script:GoVersion + '.linux-amd64.tar.gz'
+$script:GoWindowsSha256 = '178ab98950ac69ab25069307dc6ade79f3816e414cce95b4da166a115cde1e7e'
+$script:GoLinuxSha256 = '7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840'
+$script:DirNodeJs = 'nodejs'
+$script:NodeVersion = '26.13.1'
+$script:NodeLtsName = 'Lithium'
+$script:NodeReleased = '2026-11-10'
+$script:NodeUrlBase = 'https://nodejs.org/dist/v' + $script:NodeVersion + '/'
+$script:FileNodeWindows = 'node-v' + $script:NodeVersion + '-win-x64.zip'
+$script:FileNodeLinux = 'node-v' + $script:NodeVersion + '-linux-x64.tar.gz'
+$script:FileNodeSums = 'SHASUMS256-node-v' + $script:NodeVersion + '.txt'
+$script:NodeSumsUrl = $script:NodeUrlBase + 'SHASUMS256.txt'
+$script:NodeWindowsSha256 = 'e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f1f7'
+$script:NodeLinuxSha256 = '518674de2b621728a5e4486f5fb3b7d2900bb3cc4aa97969edaa463db99f9778'
 # CJK display font: one Regular OTF for Linux and Windows; the KR variant is
 # the user-selected face. Pinned to a commit because upstream has no checksum.
 $script:DirFonts = 'fonts'
@@ -308,6 +333,12 @@ function Get-TopicReadmeMeta([string]$Topic) {
             if (-not $released) { $released = 'see catalog' }
             [pscustomobject]@{ Package = 'Tabby'; Version = $script:TabbyVersion; Released = $released; Source = ('https://github.com/Eugeny/tabby/releases/tag/v' + $script:TabbyVersion); Trust = 'GitHub asset SHA-256; see INTEGRITY'; Note = '' }
         }
+        'golang' {
+            [pscustomobject]@{ Package = 'Go'; Version = $script:GoVersion; Released = $script:GoReleased; Source = $script:GoUrlBase; Trust = 'pinned SHA-256 from go.dev/dl; see INTEGRITY'; Note = '' }
+        }
+        'nodejs' {
+            [pscustomobject]@{ Package = 'Node.js LTS'; Version = ($script:NodeVersion + ' (' + $script:NodeLtsName + ')'); Released = $script:NodeReleased; Source = $script:NodeUrlBase; Trust = 'pinned SHA-256 from SHASUMS256.txt; see INTEGRITY'; Note = '' }
+        }
         'fonts' {
             [pscustomobject]@{ Package = 'Noto Sans Mono CJK KR'; Version = $script:FontVersion; Released = $script:FontReleased; Source = $script:FontSourceUrl; Trust = ('pinned SHA-256 at noto-cjk commit ' + $script:FontCommit.Substring(0, 7) + ' (no upstream checksum); see INTEGRITY'); Note = '' }
         }
@@ -436,8 +467,9 @@ STRUCTURE
                      imager), firefox\ (offline ESR browser for Tiny11),
                      fonts\ (one CJK display font for Linux/Windows),
                      cyberduck\ (cloud/SFTP GUI and duck CLI),
-                     python\ (Windows x64), 7zip\ (extractor), putty\,
-                     tabby\, winscp\ (terminals and transfer clients).
+                     python\ (Windows x64), golang\ (Go), nodejs\
+                     (Node.js LTS), 7zip\ (extractor), putty\, tabby\,
+                     winscp\ (terminals and transfer clients).
   isos\README.txt    Per-folder contents, sizes, and re-verify notes.
 
 WINDOWS 11 ISO
@@ -466,6 +498,11 @@ FIREFOX ESR (OFFLINE)
   browser (but not WebView2). The script resolves the current ESR live and
   verifies Mozilla's SHA256SUMS; a pinned ESR release is the fallback when
   that metadata or checksum lookup fails. Re-run online for a newer ESR.
+
+PROGRAMMING ENVIRONMENTS
+  isos\04-etc\golang\ and nodejs\ carry portable x64 Go and Node.js LTS
+  toolchains for Windows and Linux. Extract the archive and add its bin
+  folder to PATH; each README has the exact commands.
 "@
 }
 
@@ -497,8 +534,8 @@ FOLDERS
   02-Rescue\     Offline-capable rescue and imaging environments.
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
   04-etc\        Post-boot utilities by topic: copyparty\, cyberduck\,
-                 firefox\, fonts\, imgburn\, python\, 7zip\, putty\, tabby\,
-                 winscp\.
+                 firefox\, fonts\, golang\, imgburn\, nodejs\, python\,
+                 7zip\, putty\, tabby\, winscp\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
@@ -986,6 +1023,138 @@ NOTES
 
 '@
     return Add-TopicReadmeHeader -Text $text.Replace('TABBYZIP', $script:FileTabbyZip).Replace('TABBYDEB', $script:FileTabbyDeb).Replace('TABBYRPM', $script:FileTabbyRpm) -Meta (Get-TopicReadmeMeta -Topic 'tabby') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
+}
+
+# Offline Go sheet for isos\04-etc\golang\. Windows and Linux x64 archives;
+# extraction is user-local and the offline toolchain switches are explicit.
+function Get-GoReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
+    $text = @'
+GO FOR WINDOWS AND LINUX (offline)
+==================================
+{HEADER}
+
+FILES
+  GOZIP   Windows 10/11 x64 portable toolchain, about 75 MB.
+  GOTAR   Linux x64 portable toolchain, about 67 MB.
+
+WINDOWS (no admin)
+  Extract into a writable folder, for example C:\Tools (create it first):
+    tar -xf .\GOZIP -C C:\Tools
+  That creates C:\Tools\go. Add C:\Tools\go\bin to PATH (user), or call
+  C:\Tools\go\bin\go.exe directly. Then:
+    go version
+  Expand-Archive .\GOZIP -DestinationPath C:\Tools is a fallback, but it is
+  much slower for the many files in the toolchain. 7za.exe from ..\7zip\ can
+  also extract the zip. Remove an old go\ folder before extracting a new
+  version; extracting over an existing toolchain can leave a broken mix.
+
+LINUX (no admin for a user-local tree)
+    mkdir -p ~/.local
+    tar -xzf ./GOTAR -C ~/.local
+  That creates ~/.local/go. Add ~/.local/go/bin to PATH, then:
+    export PATH="$HOME/.local/go/bin:$PATH"
+    go version
+  For a system-wide tree, run as root:
+    sudo tar -xzf ./GOTAR -C /usr/local
+  and add /usr/local/go/bin to PATH.
+
+OFFLINE USE
+  The toolchain and standard library build without a network. Modules need
+  a proxy or a populated module cache; for vendored source use:
+    GOTOOLCHAIN=local GOPROXY=off go build -mod=vendor
+  GOTOOLCHAIN=local stops Go from trying to download a newer toolchain named
+  by a go.mod; GOPROXY=off makes a missing module fail instead of hanging.
+
+INTEGRITY
+  Go publishes SHA-256 for every file at https://go.dev/dl/.
+  Windows:
+    Get-FileHash .\GOZIP -Algorithm SHA256
+  Linux:
+    sha256sum ./GOTAR
+  Pinned values:
+    GOZIP  GOWINHASH
+    GOTAR  GOLINHASH
+  The archives include LICENSE (BSD-3-Clause).
+
+NOTES
+  - x64 only. Windows 11 ARM runs the x64 toolchain through emulation.
+  - A live Linux session keeps the extracted tree in RAM; Go needs a few
+    hundred MB.
+  - After a version bump, old go* archives stay in this folder; delete the
+    previous pair by hand.
+'@
+    return Add-TopicReadmeHeader -Text $text.Replace('GOZIP', $script:FileGoWindows).Replace('GOTAR', $script:FileGoLinux).Replace('GOWINHASH', $script:GoWindowsSha256).Replace('GOLINHASH', $script:GoLinuxSha256) -Meta (Get-TopicReadmeMeta -Topic 'golang') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
+}
+
+# Offline Node.js LTS sheet for isos\04-etc\nodejs\. Windows and Linux x64
+# archives; the Linux archive is tar.gz so no xz decompressor is needed.
+function Get-NodeReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
+    $text = @'
+NODE.JS LTS FOR WINDOWS AND LINUX (offline)
+===========================================
+{HEADER}
+
+FILES
+  NODEZIP   Windows 10/11 x64 runtime with npm, about 39 MB.
+  NODETAR   Linux x64 runtime with npm, about 60 MB.
+  NODESUMS  Publisher SHASUMS256.txt for the Linux and Windows files.
+
+The Linux file is .tar.gz on purpose: extraction needs only tar and gzip,
+with no separate decompressor.
+
+WINDOWS (no admin)
+  Extract into a writable folder, for example C:\Tools (create it first):
+    tar -xf .\NODEZIP -C C:\Tools
+  That creates C:\Tools\node-vNODEVER-win-x64. Add that folder to PATH, then:
+    node --version
+    npm --version
+  Expand-Archive .\NODEZIP -DestinationPath C:\Tools is a fallback, but it
+  is slower for npm's many files. Remove an old node-* folder before
+  extracting a new version.
+
+LINUX (no admin for a user-local tree)
+  Extract to a writable Linux filesystem, not onto the USB stick:
+    mkdir -p ~/.local
+    tar -xzf ./NODETAR -C ~/.local
+  The archive contains symlinks (bin/npm, bin/npx); extracting onto exFAT or
+  FAT can fail or break them. Add the resulting
+  ~/.local/node-vNODEVER-linux-x64/bin folder to PATH, then:
+    export PATH="$HOME/.local/node-vNODEVER-linux-x64/bin:$PATH"
+    node --version
+    npm --version
+  For a system-wide tree, use /usr/local as root and add its bin folder.
+  The official build needs glibc 2.28 or newer; it does not run on musl or
+  Alpine.
+
+OFFLINE USE
+  The runtime works without a network. npm install still needs a registry
+  unless the package cache is already populated:
+    npm install --offline
+  or carry npm pack tarballs and install from those files.
+
+INTEGRITY
+  Node publishes SHASUMS256.txt at https://nodejs.org/dist/vNODEVER/.
+  The publisher file is stored here as NODESUMS.
+  Windows:
+    Get-FileHash .\NODEZIP -Algorithm SHA256
+  Linux:
+    grep 'NODETAR' NODESUMS
+    sha256sum ./NODETAR
+  Pinned values:
+    NODEZIP  NODEWINHASH
+    NODETAR  NODELINHASH
+  The archives include LICENSE (MIT); npm is included.
+
+NOTES
+  - x64 only. Windows 11 ARM runs the x64 runtime through emulation.
+  - Node.js LTS NODELTS. A live Linux session keeps the extracted tree in
+    RAM; Node is modest but not zero.
+  - After a version bump, old node-* archives stay in this folder; delete the
+    previous set by hand.
+'@
+    return Add-TopicReadmeHeader -Text $text.Replace('NODEZIP', $script:FileNodeWindows).Replace('NODETAR', $script:FileNodeLinux).Replace('NODESUMS', $script:FileNodeSums).Replace('NODEVER', $script:NodeVersion).Replace('NODELTS', $script:NodeLtsName).Replace('NODEWINHASH', $script:NodeWindowsSha256).Replace('NODELINHASH', $script:NodeLinuxSha256) -Meta (Get-TopicReadmeMeta -Topic 'nodejs') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # CJK display font sheet for isos\04-etc\fonts\. One Regular OTF plus its
@@ -1564,6 +1733,10 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'Fedora Workstation Live'; Category = '03-Installers'; FileName = 'Fedora-Workstation-Live-45-1.4.x86_64.iso'; Url = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso'; AlternateUrl = ''; Hash = '68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb'; SidecarUrl = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; SidecarName = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Live desktop installer with GNOME.'; Released = 'Version 45-1.4, October 2026.'; SizeNote = 'About 2.72 GB.'; Check = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM in the same directory.' },
         [pscustomobject]@{ Name = 'Python 3.15 Windows installer'; Category = '04-etc\python'; FileName = $script:FilePythonInstaller; Url = ($script:PyUrlBase + $script:FilePythonInstaller); AlternateUrl = ''; Hash = '06e225a228191b0f4d1dcf6905fbb21bf9f6970d13a2ec63137ab9bee76f15aa'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Full offline CPython for Windows 10/11 x64: pip, venv, tkinter, and a normal per-user or all-users install.'; Released = 'Version 3.15.2, October 2026 (last line to ship the traditional Windows installer; 3.16+ use the Python install manager).'; SizeNote = 'About 36 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash; Authenticode signer is the Python Software Foundation. Download ' + $script:PyUrlBase + $script:FilePythonInstaller + ' into isos\04-etc\python\ by hand; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = 'Python 3.15 Windows embeddable'; Category = '04-etc\python'; FileName = $script:FilePythonEmbed; Url = ($script:PyUrlBase + $script:FilePythonEmbed); AlternateUrl = ''; Hash = 'd012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Extract-and-run CPython for Windows 10/11 x64: sqlite3 and ssl, no pip/venv/tkinter; runs copyparty-sfx.py without installation.'; Released = 'Version 3.15.2, October 2026.'; SizeNote = 'About 13 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash; python.exe inside the zip is signed by the Python Software Foundation. Download ' + $script:PyUrlBase + $script:FilePythonEmbed + ' into isos\04-etc\python\ by hand; the next run verifies it against the pinned hash and skips it.' },
+        [pscustomobject]@{ Name = 'Go 1.27.4 Windows x64'; Category = '04-etc\golang'; FileName = $script:FileGoWindows; Url = ($script:GoUrlBase + $script:FileGoWindows); AlternateUrl = ''; Hash = $script:GoWindowsSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable Go toolchain for Windows 10/11 x64; unzip and add go\bin to PATH, no installer or admin.'; Released = ('Version ' + $script:GoVersion + ', ' + $script:GoReleased + ' (go.dev/dl; 79,077,744 bytes).'); SizeNote = 'About 75 MB.'; Check = ('go.dev/dl SHA-256 for ' + $script:GoVersion + ' matches the pinned hash. Download ' + $script:GoUrlBase + $script:FileGoWindows + ' into isos\04-etc\golang\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'Go 1.27.4 Linux x64'; Category = '04-etc\golang'; FileName = $script:FileGoLinux; Url = ($script:GoUrlBase + $script:FileGoLinux); AlternateUrl = ''; Hash = $script:GoLinuxSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable Go toolchain for Linux x64; extract with tar/gzip, no package manager or admin for a user-local tree.'; Released = ('Version ' + $script:GoVersion + ', ' + $script:GoReleased + ' (go.dev/dl; 70,680,823 bytes).'); SizeNote = 'About 67 MB.'; Check = ('go.dev/dl SHA-256 for ' + $script:GoVersion + ' matches the pinned hash. Download ' + $script:GoUrlBase + $script:FileGoLinux + ' into isos\04-etc\golang\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'Node.js LTS 26.13.1 Windows x64'; Category = '04-etc\nodejs'; FileName = $script:FileNodeWindows; Url = ($script:NodeUrlBase + $script:FileNodeWindows); AlternateUrl = ''; Hash = $script:NodeWindowsSha256; SidecarUrl = $script:NodeSumsUrl; SidecarName = $script:FileNodeSums; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable Node.js LTS runtime with npm for Windows 10/11 x64; unzip and add the extracted folder to PATH, no installer or admin.'; Released = ('Version ' + $script:NodeVersion + ' (' + $script:NodeLtsName + '), ' + $script:NodeReleased + ' (nodejs.org; 41,166,246 bytes).'); SizeNote = 'About 39 MB.'; Check = ('nodejs.org SHASUMS256.txt matches the pinned hash; the sidecar is kept as ' + $script:FileNodeSums + '. Download ' + $script:NodeUrlBase + $script:FileNodeWindows + ' into isos\04-etc\nodejs\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'Node.js LTS 26.13.1 Linux x64'; Category = '04-etc\nodejs'; FileName = $script:FileNodeLinux; Url = ($script:NodeUrlBase + $script:FileNodeLinux); AlternateUrl = ''; Hash = $script:NodeLinuxSha256; SidecarUrl = $script:NodeSumsUrl; SidecarName = $script:FileNodeSums; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable Node.js LTS runtime with npm for Linux x64; tar.gz avoids an xz extractor, and the official build needs glibc 2.28 or newer.'; Released = ('Version ' + $script:NodeVersion + ' (' + $script:NodeLtsName + '), ' + $script:NodeReleased + ' (nodejs.org; 62,904,977 bytes).'); SizeNote = 'About 60 MB.'; Check = ('nodejs.org SHASUMS256.txt matches the pinned hash; the sidecar is kept as ' + $script:FileNodeSums + '. Download ' + $script:NodeUrlBase + $script:FileNodeLinux + ' into isos\04-etc\nodejs\ by hand; the next run verifies it and skips.') }
         [pscustomobject]@{ Name = '7-Zip 26.06 Windows installer'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipInstaller; Url = ($script:SevenZipUrlBase + $script:FileSevenZipInstaller); AlternateUrl = ('https://www.7-zip.org/a/' + $script:FileSevenZipInstaller); Hash = '9b697f65ecc2d9b0152f5ee96d72dde522a7827690349d9307935dacf40f42ec'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'x64 Windows installer for the 7z/zip/iso extractor; installs to Program Files and elevates itself.'; Released = 'Version 26.06, November 2026 (1,659,704 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 1.6 MB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06) equals the winget 7zip.7zip InstallerSha256 and the 7-zip.org copy; unsigned, so NotSigned is expected. Download ' + $script:SevenZipUrlBase + $script:FileSevenZipInstaller + ' into isos\04-etc\7zip\ by hand; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = '7-Zip 26.06 portable extras'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipExtra; Url = ($script:SevenZipUrlBase + $script:FileSevenZipExtra); AlternateUrl = ''; Hash = '396c180f12d2247c24b0b1fcd482c6fc2a2700f61211ffede1061dd971f5e104'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = ('Portable archive with a standalone 7za.exe (zip/gz/tar/xz/bz2) that needs no admin install; unpack with ' + $script:FileSevenZipBootstrap + '.'); Released = 'Version 26.06, November 2026 (1,758,340 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 1.7 MB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06); unsigned, so NotSigned is expected; GitHub-only (7-zip.org has no copy). Download ' + $script:SevenZipUrlBase + $script:FileSevenZipExtra + ' into isos\04-etc\7zip\ by hand; the next run verifies it against the pinned hash and skips it.' },
         [pscustomobject]@{ Name = '7-Zip 26.06 bootstrap extractor'; Category = '04-etc\7zip'; FileName = $script:FileSevenZipBootstrap; Url = ($script:SevenZipUrlBase + '7zr.exe'); AlternateUrl = ''; Hash = 'e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = '7zr.exe: .7z-only extractor used to unpack the extra package without installing 7-Zip.'; Released = 'Version 26.06, November 2026 (600,064 bytes; unsigned, NotSigned is expected).'; SizeNote = 'About 600 KB.'; Check = 'GitHub asset digest (ip7z/7zip 26.06); unsigned, so NotSigned is expected; GitHub-only (the 7-zip.org 7zr.exe is a different build). Download ' + $script:SevenZipUrlBase + '7zr.exe' + ' into isos\04-etc\7zip\ by hand and save it as ' + $script:FileSevenZipBootstrap + '; the next run verifies it against the pinned hash and skips it.' },
@@ -2663,6 +2836,7 @@ function Write-PlanTable {
     Write-Detail 'Tools: latest Ventoy Windows zip, latest Rufus portable, Fido.ps1, tiny11builder x64 zip + tiny11maker.ps1'
     Write-Detail 'copyparty: latest GitHub release, sfx.py + exe under isos\04-etc\copyparty\.'
     Write-Detail 'ImgBurn: official 2.5.8.0 installer, extracted into isos\04-etc\imgburn\bin\.'
+    Write-Detail 'Go 1.27.4 and Node.js LTS 26.13.1: Windows ZIP plus Linux tar.gz under 04-etc.'
     Write-Detail "Firefox ESR: latest en-US win64 resolved live; pinned $($script:FirefoxFallbackVersion) fallback if metadata/checksum lookup fails."
     Write-Detail 'Windows 11 ISO resolved live through Fido; Tiny11 built from it with -Elevate.'
     $rows = Get-RecoveryCatalog | Where-Object {
@@ -2757,6 +2931,8 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirWinScp)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirGolang)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirNodeJs)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) 'bin')
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox)
@@ -2768,6 +2944,8 @@ function Invoke-PreparePcRecovery {
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirWinScp) $script:FileReadme) -Text (Get-WinScpReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck) $script:FileReadme) -Text (Get-CyberduckReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby) $script:FileReadme) -Text (Get-TabbyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirGolang) $script:FileReadme) -Text (Get-GoReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirNodeJs) $script:FileReadme) -Text (Get-NodeReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) $script:FileReadme) -Text (Get-ImgBurnReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFonts) $script:FileReadme) -Text (Get-FontsReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         # Provisional sheets so live topics still have documentation if the

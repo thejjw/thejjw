@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby|ImgBurn|Firefox|Font)' }, $false)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby|ImgBurn|Firefox|Font|Go|Node)' }, $false)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -51,6 +51,8 @@ Describe 'Prepare-PcRecovery.ps1' {
                 DirWinScp = 'winscp'; WinScpVersion = '6.7.1'; FileWinScpPortable = 'WinSCP-6.7.1-Portable.zip'
                 DirCyberduck = 'cyberduck'; CyberduckVersion = '9.6.0.46406'; FileCyberduckInstaller = 'Cyberduck-Installer-9.6.0.46406.exe'; FileCyberduckDuck = 'duck_9.6.0.46406_amd64.deb'; FileCyberduckDuckRpm = 'duck-9.6.0.46406-1.x86_64.rpm'
                 DirTabby = 'tabby'; TabbyVersion = '1.0.238'; FileTabbyZip = 'tabby-1.0.238-portable-x64.zip'; FileTabbyDeb = 'tabby-1.0.238-linux-x64.deb'; FileTabbyRpm = 'tabby-1.0.238-linux-x64.rpm'
+                DirGolang = 'golang'; GoVersion = '1.27.4'; GoReleased = '2026-11-10'; GoUrlBase = 'https://go.dev/dl/'; FileGoWindows = 'go1.27.4.windows-amd64.zip'; FileGoLinux = 'go1.27.4.linux-amd64.tar.gz'; GoWindowsSha256 = '178ab98950ac69ab25069307dc6ade79f3816e414cce95b4da166a115cde1e7e'; GoLinuxSha256 = '7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840'
+                DirNodeJs = 'nodejs'; NodeVersion = '26.13.1'; NodeLtsName = 'Lithium'; NodeReleased = '2026-11-10'; NodeUrlBase = 'https://nodejs.org/dist/v26.13.1/'; NodeSumsUrl = 'https://nodejs.org/dist/v26.13.1/SHASUMS256.txt'; FileNodeWindows = 'node-v26.13.1-win-x64.zip'; FileNodeLinux = 'node-v26.13.1-linux-x64.tar.gz'; FileNodeSums = 'SHASUMS256-node-v26.13.1.txt'; NodeWindowsSha256 = 'e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f1f7'; NodeLinuxSha256 = '518674de2b621728a5e4486f5fb3b7d2900bb3cc4aa97969edaa463db99f9778'
                 DirImgBurn = 'imgburn'; ImgBurnVersion = '2.5.8.0'; FileImgBurnInstaller = 'SetupImgBurn_2.5.8.0.exe'; FileImgBurnExe = 'ImgBurn.exe'; FileImgBurnLauncher = 'ImgBurn Portable.cmd'; FileImgBurnIni = 'ImgBurn.ini'
                 DirFirefox = 'firefox'; FirefoxFallbackVersion = '153.7.0esr'; FirefoxFallbackReleased = '2026-11-10'; ImgBurnReleased = '2013-06-16'
                 DirFonts = 'fonts'; FileFont = 'NotoSansMonoCJKkr-Regular.otf'; FileFontLicense = 'OFL.txt'; FontCommit = '165c01b46ea533872e002e0785ff17e44f6d97d8'; FontVersion = '2.004'; FontReleased = '2021-04-30'
@@ -106,6 +108,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $names | Should -Contain '02-Rescue'
             $names | Should -Contain '03-Installers'
             $names | Should -Contain '04-etc\python'
+            $names | Should -Contain '04-etc\golang'
+            $names | Should -Contain '04-etc\nodejs'
             $names | Should -Contain '04-etc\cyberduck'
             $names | Should -Contain '04-etc\tabby'
             $names | Should -Contain '04-etc\fonts'
@@ -723,6 +727,10 @@ Describe 'Prepare-PcRecovery.ps1' {
             $tabbyDeb = [array]::IndexOf($script:order, $script:FileTabbyDeb)
             $tabbyRpm = [array]::IndexOf($script:order, $script:FileTabbyRpm)
             $tabbyZip = [array]::IndexOf($script:order, $script:FileTabbyZip)
+            $goWin = [array]::IndexOf($script:order, $script:FileGoWindows)
+            $goLinux = [array]::IndexOf($script:order, $script:FileGoLinux)
+            $nodeWin = [array]::IndexOf($script:order, $script:FileNodeWindows)
+            $nodeLinux = [array]::IndexOf($script:order, $script:FileNodeLinux)
             $sevenZip | Should -BeGreaterThan $fedora
             $sevenZip | Should -BeLessThan $pythonEmbed
             $putty | Should -BeGreaterThan $fedora
@@ -739,7 +747,74 @@ Describe 'Prepare-PcRecovery.ps1' {
             $tabbyRpm | Should -BeGreaterThan $tabbyDeb
             $tabbyZip | Should -BeGreaterThan $tabbyRpm
             $tabbyZip | Should -BeLessThan $winScp
+            $goLinux | Should -BeGreaterThan $fedora
+            $goWin | Should -BeGreaterThan $goLinux
+            $nodeLinux | Should -BeGreaterThan $goWin
+            $nodeWin | Should -BeGreaterThan $nodeLinux
+            $nodeWin | Should -BeLessThan $pythonEmbed
             $winScp | Should -BeGreaterThan $pythonInstaller
+        }
+    }
+
+    Context 'go and node tools' {
+        It 'pins Windows and Linux archives for Go and Node LTS' {
+            $go = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\golang' })
+            $go.Count | Should -Be 2
+            foreach ($row in $go) {
+                $row.HashKind | Should -Be 'Pinned'
+                $row.Hash | Should -Match '^[0-9a-f]{64}$'
+                $row.Url | Should -Match '^https://go\.dev/dl/go1\.27\.4\.(windows-amd64\.zip|linux-amd64\.tar\.gz)$'
+                $row.SidecarName | Should -BeNullOrEmpty
+            }
+            $go.FileName | Should -Contain $script:FileGoWindows
+            $go.FileName | Should -Contain $script:FileGoLinux
+            $node = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\nodejs' })
+            $node.Count | Should -Be 2
+            foreach ($row in $node) {
+                $row.HashKind | Should -Be 'Pinned'
+                $row.Hash | Should -Match '^[0-9a-f]{64}$'
+                $row.Url | Should -Match '^https://nodejs\.org/dist/v26\.13\.1/node-v26\.13\.1-(win-x64\.zip|linux-x64\.tar\.gz)$'
+                $row.SidecarUrl | Should -Be $script:NodeSumsUrl
+                $row.SidecarName | Should -Be $script:FileNodeSums
+            }
+            $node.FileName | Should -Contain $script:FileNodeWindows
+            $node.FileName | Should -Contain $script:FileNodeLinux
+        }
+
+        It 'builds the Go readme with tar.gz-only extraction guidance' {
+            $text = Get-GoReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
+            foreach ($row in (Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\golang' })) {
+                $text.Contains($row.FileName) | Should -BeTrue
+                $text.Contains($row.Hash) | Should -BeTrue
+            }
+            $text | Should -Match 'tar -xf'
+            $text | Should -Match 'tar -xzf'
+            $text | Should -Match 'Expand-Archive'
+            $text | Should -Match 'GOTOOLCHAIN=local'
+            $text | Should -Match 'GOPROXY=off'
+            $text | Should -Match 'go version'
+            $text | Should -Match 'Get-FileHash'
+            $text | Should -Match 'sha256sum'
+            $text | Should -Not -Match '\.tar\.xz'
+            $text | Should -Not -Match '\-xJf'
+        }
+
+        It 'builds the Node readme without an xz dependency' {
+            $text = Get-NodeReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
+            foreach ($row in (Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\nodejs' })) {
+                $text.Contains($row.FileName) | Should -BeTrue
+                $text.Contains($row.Hash) | Should -BeTrue
+            }
+            $text | Should -Match 'tar -xf'
+            $text | Should -Match 'tar -xzf'
+            $text | Should -Match 'node --version'
+            $text | Should -Match 'npm --version'
+            $text | Should -Match 'npm install --offline'
+            $text | Should -Match 'symlinks'
+            $text | Should -Match 'glibc 2\.28'
+            $text.Contains($script:FileNodeSums) | Should -BeTrue
+            $text | Should -Not -Match '\.tar\.xz'
+            $text | Should -Not -Match '\-xJf'
         }
     }
 
@@ -1564,7 +1639,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'resolves pinned metadata for every 04-etc topic' {
-            foreach ($topic in @('python', '7zip', 'putty', 'winscp', 'cyberduck', 'tabby', 'imgburn', 'fonts')) {
+            foreach ($topic in @('python', '7zip', 'putty', 'winscp', 'cyberduck', 'tabby', 'golang', 'nodejs', 'imgburn', 'fonts')) {
                 $m = Get-TopicReadmeMeta -Topic $topic
                 $m.Package | Should -Not -BeNullOrEmpty
                 $m.Version | Should -Not -BeNullOrEmpty
@@ -1581,6 +1656,8 @@ Describe 'Prepare-PcRecovery.ps1' {
         It 'derives pinned release dates from the catalog' {
             (Get-TopicReadmeMeta -Topic 'python').Released | Should -Be 'October 2026'
             (Get-TopicReadmeMeta -Topic '7zip').Released | Should -Be 'November 2026'
+            (Get-TopicReadmeMeta -Topic 'golang').Released | Should -Be '2026-11-10'
+            (Get-TopicReadmeMeta -Topic 'nodejs').Released | Should -Be '2026-11-10'
             (Get-TopicReadmeMeta -Topic 'imgburn').Released | Should -Be '2013-06-16'
         }
 
@@ -1684,6 +1761,8 @@ Describe 'Prepare-PcRecovery.ps1' {
                 (Get-WinScpReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-CyberduckReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-TabbyReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-GoReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-NodeReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-ImgBurnReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-FontsReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-FirefoxReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp)
@@ -1838,6 +1917,22 @@ Describe 'Prepare-PcRecovery.ps1' {
                 Set-Content -LiteralPath $licenseFile -Value 'license' -NoNewline
                 $script:VerifiedHashes[$fontFile] = $script:FontSha256
                 $script:VerifiedHashes[$licenseFile] = $script:FontLicenseSha256
+                foreach ($artifact in @(
+                    @{ Dir = $script:DirGolang; Name = $script:FileGoWindows; Hash = $script:GoWindowsSha256; Sidecar = '' },
+                    @{ Dir = $script:DirGolang; Name = $script:FileGoLinux; Hash = $script:GoLinuxSha256; Sidecar = '' },
+                    @{ Dir = $script:DirNodeJs; Name = $script:FileNodeWindows; Hash = $script:NodeWindowsSha256; Sidecar = $script:FileNodeSums },
+                    @{ Dir = $script:DirNodeJs; Name = $script:FileNodeLinux; Hash = $script:NodeLinuxSha256; Sidecar = $script:FileNodeSums }
+                )) {
+                    $artifactDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') $artifact.Dir
+                    New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+                    $artifactFile = Join-Path $artifactDir $artifact.Name
+                    Set-Content -LiteralPath $artifactFile -Value $artifact.Name -NoNewline
+                    $script:VerifiedHashes[$artifactFile] = $artifact.Hash
+                    if ($artifact.Sidecar) {
+                        Set-Content -LiteralPath (Join-Path $artifactDir $artifact.Sidecar) -Value 'sums' -NoNewline
+                        $script:Sidecars[$artifactFile] = $artifact.Sidecar
+                    }
+                }
             }
             Mock Install-ImgBurnPortable {
                 $ibDir = Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'imgburn') 'bin'
@@ -1929,6 +2024,28 @@ Describe 'Prepare-PcRecovery.ps1' {
             $tabbyText.Contains($script:FileTabbyRpm) | Should -BeTrue
             $tabbyText | Should -Match 'New-Item \.\\bin\\data -ItemType Directory'
             $tabbyText | Should -Match '--no-sandbox'
+            $rootText | Should -Match 'golang'
+            $rootText | Should -Match 'nodejs'
+            $rootText | Should -Match 'PROGRAMMING ENVIRONMENTS'
+            $goDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'golang'
+            $goText = [IO.File]::ReadAllText((Join-Path $goDir 'README.txt'))
+            $goText.Contains($script:FileGoWindows) | Should -BeTrue
+            $goText.Contains($script:FileGoLinux) | Should -BeTrue
+            $goText.Contains($script:GoWindowsSha256) | Should -BeTrue
+            $goText.Contains($script:GoLinuxSha256) | Should -BeTrue
+            $goText | Should -Match 'GOTOOLCHAIN=local'
+            $goText | Should -Match 'tar -xzf'
+            $nodeDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'nodejs'
+            $nodeText = [IO.File]::ReadAllText((Join-Path $nodeDir 'README.txt'))
+            $nodeText.Contains($script:FileNodeWindows) | Should -BeTrue
+            $nodeText.Contains($script:FileNodeLinux) | Should -BeTrue
+            $nodeText.Contains($script:FileNodeSums) | Should -BeTrue
+            $nodeText.Contains($script:NodeWindowsSha256) | Should -BeTrue
+            $nodeText.Contains($script:NodeLinuxSha256) | Should -BeTrue
+            $nodeText | Should -Match 'npm --version'
+            $nodeText | Should -Match 'tar -xzf'
+            $nodeText | Should -Not -Match '\.tar\.xz'
+            $nodeText | Should -Not -Match '\-xJf'
             $cyberduckDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'cyberduck'
             $cyberduckText = [IO.File]::ReadAllText((Join-Path $cyberduckDir 'README.txt'))
             $cyberduckText.Contains($script:FileCyberduckInstaller) | Should -BeTrue
@@ -1961,6 +2078,11 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match 'pinned fallback; live lookup failed'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-amd64\.exe'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-embed-amd64\.zip'
+            $isosText | Should -Match '04-etc\\golang\\go1\.27\.4\.windows-amd64\.zip'
+            $isosText | Should -Match '04-etc\\golang\\go1\.27\.4\.linux-amd64\.tar\.gz'
+            $isosText | Should -Match '04-etc\\nodejs\\node-v26\.13\.1-win-x64\.zip'
+            $isosText | Should -Match '04-etc\\nodejs\\node-v26\.13\.1-linux-x64\.tar\.gz'
+            $isosText | Should -Match 'Checksum file \(shipped alongside\): SHASUMS256-node-v26\.13\.1\.txt'
             $isosText | Should -Match '04-etc\\7zip\\7z2606-x64\.exe'
             $isosText | Should -Match '04-etc\\7zip\\7z2606-extra\.7z'
             $isosText | Should -Match '04-etc\\7zip\\7zr-2606\.exe'
