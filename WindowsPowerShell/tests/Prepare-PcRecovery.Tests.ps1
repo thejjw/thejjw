@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby|ImgBurn|Firefox|Font|Go|Node)' }, $false)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby|ImgBurn|Firefox|Font|Go|Node|TigerVnc|UltraVnc)' }, $false)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -53,6 +53,8 @@ Describe 'Prepare-PcRecovery.ps1' {
                 DirTabby = 'tabby'; TabbyVersion = '1.0.238'; FileTabbyZip = 'tabby-1.0.238-portable-x64.zip'; FileTabbyDeb = 'tabby-1.0.238-linux-x64.deb'; FileTabbyRpm = 'tabby-1.0.238-linux-x64.rpm'
                 DirGolang = 'golang'; GoVersion = '1.27.4'; GoReleased = '2026-11-10'; GoUrlBase = 'https://go.dev/dl/'; FileGoWindows = 'go1.27.4.windows-amd64.zip'; FileGoLinux = 'go1.27.4.linux-amd64.tar.gz'; GoWindowsSha256 = '178ab98950ac69ab25069307dc6ade79f3816e414cce95b4da166a115cde1e7e'; GoLinuxSha256 = '7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840'
                 DirNodeJs = 'nodejs'; NodeVersion = '26.13.1'; NodeLtsName = 'Lithium'; NodeReleased = '2026-11-10'; NodeUrlBase = 'https://nodejs.org/dist/v26.13.1/'; NodeSumsUrl = 'https://nodejs.org/dist/v26.13.1/SHASUMS256.txt'; FileNodeWindows = 'node-v26.13.1-win-x64.zip'; FileNodeLinux = 'node-v26.13.1-linux-x64.tar.gz'; FileNodeSums = 'SHASUMS256-node-v26.13.1.txt'; NodeWindowsSha256 = 'e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f1f7'; NodeLinuxSha256 = '518674de2b621728a5e4486f5fb3b7d2900bb3cc4aa97969edaa463db99f9778'
+                DirTigerVnc = 'tigervnc'; TigerVncVersion = '1.16.2'; TigerVncReleased = '2026-03-26'; TigerVncUrlBase = 'https://sourceforge.net/projects/tigervnc/files/stable/1.16.2/'; FileTigerVncWindows = 'vncviewer64-1.16.2.exe'; FileTigerVncLinux = 'tigervnc-1.16.2.x86_64.tar.gz'; TigerVncViewerSha256 = '58396d99556026da6b906c9ed51ad6cb5c840cc3fb65e53653c52ca5a80bfad9'; TigerVncLinuxSha256 = '5b70c84baefc09a030cfc78315c34ccb55b2a0dde4092b7da67a1962c5f0dea6'
+                DirUltraVnc = 'ultravnc'; UltraVncVersion = '1.8.3.2'; UltraVncReleased = '2026-11-08'; UltraVncUrlBase = 'https://uvnc.eu/download/1800/'; FileUltraVncZip = 'UltraVNC_1832.zip'; FileUltraVncInstaller = 'UltraVNC_1832_x64_Setup.exe'; UltraVncZipSha256 = '8984e920169238de2a878ca3af71b7b8ac4feb3bbe295916dcd3ff1219456aad'; UltraVncInstallerSha256 = 'ae1bb545c59e082620997d98589e3aef871e71494cb100144c95608c8323b4f7'
                 DirImgBurn = 'imgburn'; ImgBurnVersion = '2.5.8.0'; FileImgBurnInstaller = 'SetupImgBurn_2.5.8.0.exe'; FileImgBurnExe = 'ImgBurn.exe'; FileImgBurnLauncher = 'ImgBurn Portable.cmd'; FileImgBurnIni = 'ImgBurn.ini'
                 DirFirefox = 'firefox'; FirefoxFallbackVersion = '153.7.0esr'; FirefoxFallbackReleased = '2026-11-10'; ImgBurnReleased = '2013-06-16'
                 DirFonts = 'fonts'; FileFont = 'NotoSansMonoCJKkr-Regular.otf'; FileFontLicense = 'OFL.txt'; FontCommit = '165c01b46ea533872e002e0785ff17e44f6d97d8'; FontVersion = '2.004'; FontReleased = '2021-04-30'
@@ -110,6 +112,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $names | Should -Contain '04-etc\python'
             $names | Should -Contain '04-etc\golang'
             $names | Should -Contain '04-etc\nodejs'
+            $names | Should -Contain '04-etc\tigervnc'
+            $names | Should -Contain '04-etc\ultravnc'
             $names | Should -Contain '04-etc\cyberduck'
             $names | Should -Contain '04-etc\tabby'
             $names | Should -Contain '04-etc\fonts'
@@ -731,6 +735,10 @@ Describe 'Prepare-PcRecovery.ps1' {
             $goLinux = [array]::IndexOf($script:order, $script:FileGoLinux)
             $nodeWin = [array]::IndexOf($script:order, $script:FileNodeWindows)
             $nodeLinux = [array]::IndexOf($script:order, $script:FileNodeLinux)
+            $tigerWin = [array]::IndexOf($script:order, $script:FileTigerVncWindows)
+            $tigerLinux = [array]::IndexOf($script:order, $script:FileTigerVncLinux)
+            $ultraZip = [array]::IndexOf($script:order, $script:FileUltraVncZip)
+            $ultraInstaller = [array]::IndexOf($script:order, $script:FileUltraVncInstaller)
             $sevenZip | Should -BeGreaterThan $fedora
             $sevenZip | Should -BeLessThan $pythonEmbed
             $putty | Should -BeGreaterThan $fedora
@@ -752,6 +760,11 @@ Describe 'Prepare-PcRecovery.ps1' {
             $nodeLinux | Should -BeGreaterThan $goWin
             $nodeWin | Should -BeGreaterThan $nodeLinux
             $nodeWin | Should -BeLessThan $pythonEmbed
+            $tigerLinux | Should -BeGreaterThan $tabbyZip
+            $tigerWin | Should -BeGreaterThan $tigerLinux
+            $ultraZip | Should -BeGreaterThan $tigerWin
+            $ultraInstaller | Should -BeGreaterThan $ultraZip
+            $ultraInstaller | Should -BeLessThan $winScp
             $winScp | Should -BeGreaterThan $pythonInstaller
         }
     }
@@ -815,6 +828,65 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text.Contains($script:FileNodeSums) | Should -BeTrue
             $text | Should -Not -Match '\.tar\.xz'
             $text | Should -Not -Match '\-xJf'
+        }
+    }
+
+    Context 'vnc tools' {
+        It 'pins TigerVNC and UltraVNC artifacts under 04-etc' {
+            $tiger = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\tigervnc' })
+            $tiger.Count | Should -Be 2
+            foreach ($row in $tiger) {
+                $row.HashKind | Should -Be 'Pinned'
+                $row.Hash | Should -Match '^[0-9a-f]{64}$'
+                $row.Url | Should -Match '^https://sourceforge\.net/projects/tigervnc/files/stable/1\.16\.2/(vncviewer64-1\.16\.2\.exe|tigervnc-1\.16\.2\.x86_64\.tar\.gz)/download$'
+                $row.SidecarName | Should -BeNullOrEmpty
+            }
+            $tiger.FileName | Should -Contain $script:FileTigerVncWindows
+            $tiger.FileName | Should -Contain $script:FileTigerVncLinux
+            $ultra = @(Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\ultravnc' })
+            $ultra.Count | Should -Be 2
+            foreach ($row in $ultra) {
+                $row.HashKind | Should -Be 'Pinned'
+                $row.Hash | Should -Match '^[0-9a-f]{64}$'
+                $row.Url | Should -Match '^https://uvnc\.eu/download/1800/UltraVNC_1832(_x64_Setup\.exe|\.zip)$'
+                $row.SidecarName | Should -BeNullOrEmpty
+            }
+            $ultra.FileName | Should -Contain $script:FileUltraVncZip
+            $ultra.FileName | Should -Contain $script:FileUltraVncInstaller
+        }
+
+        It 'builds the TigerVNC readme with the X11-only Linux path' {
+            $text = Get-TigerVncReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
+            foreach ($row in (Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\tigervnc' })) {
+                $text.Contains($row.FileName) | Should -BeTrue
+                $text.Contains($row.Hash) | Should -BeTrue
+            }
+            $text | Should -Match 'x0vncserver'
+            $text | Should -Match 'Xvnc'
+            $text | Should -Match 'X509Vnc'
+            $text | Should -Match '-rfbauth'
+            $text | Should -Match 'w0vncserver'
+            $text | Should -Match 'Wayland'
+            $text | Should -Match 'No Windows server'
+            $text | Should -Match 'UltraVNC'
+            $text | Should -Not -Match 'TVWIN|TVTAR'
+        }
+
+        It 'builds the UltraVNC readme with portable, service, and auth guidance' {
+            $text = Get-UltraVncReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
+            foreach ($row in (Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\ultravnc' })) {
+                $text.Contains($row.FileName) | Should -BeTrue
+                $text.Contains($row.Hash) | Should -BeTrue
+            }
+            $text | Should -Match 'vncviewer\.exe'
+            $text | Should -Match 'winvnc\.exe'
+            $text | Should -Match 'SecureVNCPlugin64\.dsm'
+            $text | Should -Match 'wpeutil InitializeNetwork'
+            $text | Should -Match 'MS-Logon II'
+            $text | Should -Match 'plink -R'
+            $text | Should -Match 'netsh advfirewall'
+            $text | Should -Match '7za\.exe x'
+            $text | Should -Not -Match 'UVZIP|UVINST'
         }
     }
 
@@ -1639,7 +1711,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'resolves pinned metadata for every 04-etc topic' {
-            foreach ($topic in @('python', '7zip', 'putty', 'winscp', 'cyberduck', 'tabby', 'golang', 'nodejs', 'imgburn', 'fonts')) {
+            foreach ($topic in @('python', '7zip', 'putty', 'winscp', 'cyberduck', 'tabby', 'golang', 'nodejs', 'tigervnc', 'ultravnc', 'imgburn', 'fonts')) {
                 $m = Get-TopicReadmeMeta -Topic $topic
                 $m.Package | Should -Not -BeNullOrEmpty
                 $m.Version | Should -Not -BeNullOrEmpty
@@ -1658,6 +1730,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             (Get-TopicReadmeMeta -Topic '7zip').Released | Should -Be 'November 2026'
             (Get-TopicReadmeMeta -Topic 'golang').Released | Should -Be '2026-11-10'
             (Get-TopicReadmeMeta -Topic 'nodejs').Released | Should -Be '2026-11-10'
+            (Get-TopicReadmeMeta -Topic 'tigervnc').Released | Should -Be '2026-03-26'
+            (Get-TopicReadmeMeta -Topic 'ultravnc').Released | Should -Be '2026-11-08'
             (Get-TopicReadmeMeta -Topic 'imgburn').Released | Should -Be '2013-06-16'
         }
 
@@ -1763,6 +1837,8 @@ Describe 'Prepare-PcRecovery.ps1' {
                 (Get-TabbyReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-GoReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-NodeReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-TigerVncReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-UltraVncReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-ImgBurnReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-FontsReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
                 (Get-FirefoxReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp)
@@ -1921,7 +1997,11 @@ Describe 'Prepare-PcRecovery.ps1' {
                     @{ Dir = $script:DirGolang; Name = $script:FileGoWindows; Hash = $script:GoWindowsSha256; Sidecar = '' },
                     @{ Dir = $script:DirGolang; Name = $script:FileGoLinux; Hash = $script:GoLinuxSha256; Sidecar = '' },
                     @{ Dir = $script:DirNodeJs; Name = $script:FileNodeWindows; Hash = $script:NodeWindowsSha256; Sidecar = $script:FileNodeSums },
-                    @{ Dir = $script:DirNodeJs; Name = $script:FileNodeLinux; Hash = $script:NodeLinuxSha256; Sidecar = $script:FileNodeSums }
+                    @{ Dir = $script:DirNodeJs; Name = $script:FileNodeLinux; Hash = $script:NodeLinuxSha256; Sidecar = $script:FileNodeSums },
+                    @{ Dir = $script:DirTigerVnc; Name = $script:FileTigerVncWindows; Hash = $script:TigerVncViewerSha256; Sidecar = '' },
+                    @{ Dir = $script:DirTigerVnc; Name = $script:FileTigerVncLinux; Hash = $script:TigerVncLinuxSha256; Sidecar = '' },
+                    @{ Dir = $script:DirUltraVnc; Name = $script:FileUltraVncZip; Hash = $script:UltraVncZipSha256; Sidecar = '' },
+                    @{ Dir = $script:DirUltraVnc; Name = $script:FileUltraVncInstaller; Hash = $script:UltraVncInstallerSha256; Sidecar = '' }
                 )) {
                     $artifactDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') $artifact.Dir
                     New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
@@ -2046,6 +2126,25 @@ Describe 'Prepare-PcRecovery.ps1' {
             $nodeText | Should -Match 'tar -xzf'
             $nodeText | Should -Not -Match '\.tar\.xz'
             $nodeText | Should -Not -Match '\-xJf'
+            $rootText | Should -Match 'tigervnc'
+            $rootText | Should -Match 'ultravnc'
+            $rootText | Should -Match 'REMOTE DESKTOP'
+            $tigerDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'tigervnc'
+            $tigerText = [IO.File]::ReadAllText((Join-Path $tigerDir 'README.txt'))
+            $tigerText.Contains($script:FileTigerVncWindows) | Should -BeTrue
+            $tigerText.Contains($script:FileTigerVncLinux) | Should -BeTrue
+            $tigerText.Contains($script:TigerVncViewerSha256) | Should -BeTrue
+            $tigerText.Contains($script:TigerVncLinuxSha256) | Should -BeTrue
+            $tigerText | Should -Match 'x0vncserver'
+            $tigerText | Should -Match 'X509Vnc'
+            $ultraDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'ultravnc'
+            $ultraText = [IO.File]::ReadAllText((Join-Path $ultraDir 'README.txt'))
+            $ultraText.Contains($script:FileUltraVncZip) | Should -BeTrue
+            $ultraText.Contains($script:FileUltraVncInstaller) | Should -BeTrue
+            $ultraText.Contains($script:UltraVncZipSha256) | Should -BeTrue
+            $ultraText.Contains($script:UltraVncInstallerSha256) | Should -BeTrue
+            $ultraText | Should -Match 'SecureVNCPlugin64\.dsm'
+            $ultraText | Should -Match 'MS-Logon II'
             $cyberduckDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'cyberduck'
             $cyberduckText = [IO.File]::ReadAllText((Join-Path $cyberduckDir 'README.txt'))
             $cyberduckText.Contains($script:FileCyberduckInstaller) | Should -BeTrue
@@ -2083,6 +2182,10 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match '04-etc\\nodejs\\node-v26\.13\.1-win-x64\.zip'
             $isosText | Should -Match '04-etc\\nodejs\\node-v26\.13\.1-linux-x64\.tar\.gz'
             $isosText | Should -Match 'Checksum file \(shipped alongside\): SHASUMS256-node-v26\.13\.1\.txt'
+            $isosText | Should -Match '04-etc\\tigervnc\\vncviewer64-1\.16\.2\.exe'
+            $isosText | Should -Match '04-etc\\tigervnc\\tigervnc-1\.16\.2\.x86_64\.tar\.gz'
+            $isosText | Should -Match '04-etc\\ultravnc\\UltraVNC_1832\.zip'
+            $isosText | Should -Match '04-etc\\ultravnc\\UltraVNC_1832_x64_Setup\.exe'
             $isosText | Should -Match '04-etc\\7zip\\7z2606-x64\.exe'
             $isosText | Should -Match '04-etc\\7zip\\7z2606-extra\.7z'
             $isosText | Should -Match '04-etc\\7zip\\7zr-2606\.exe'

@@ -72,6 +72,9 @@
     Go/Node rows: pinned Go 1.27.4 and Node.js LTS 26.13.1, Windows ZIP plus
     Linux tar.gz. Node's tar.gz avoids an xz extractor; re-pin version and
     hashes together.
+    VNC rows: TigerVNC viewer + Linux X11 server; UltraVNC Windows server/
+    viewer. The generic TigerVNC tarball has no w0vncserver; Wayland uses
+    distro packages or built-in sharing.
     Firefox ESR: resolves FIREFOX_ESR live from product-details.mozilla.org
     and verifies the release SHA256SUMS (publisher checksum). The pinned
     153.7.0esr release is the fallback ONLY when the metadata or checksum
@@ -167,6 +170,25 @@ $script:FileNodeSums = 'SHASUMS256-node-v' + $script:NodeVersion + '.txt'
 $script:NodeSumsUrl = $script:NodeUrlBase + 'SHASUMS256.txt'
 $script:NodeWindowsSha256 = 'e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f1f7'
 $script:NodeLinuxSha256 = '518674de2b621728a5e4486f5fb3b7d2900bb3cc4aa97969edaa463db99f9778'
+# VNC: TigerVNC viewer on both platforms plus the Linux X11 server; UltraVNC
+# supplies the Windows server/viewer. The generic TigerVNC archive has no
+# w0vncserver, so Wayland stays with distro packages or built-in sharing.
+$script:DirTigerVnc = 'tigervnc'
+$script:TigerVncVersion = '1.16.2'
+$script:TigerVncReleased = '2026-03-26'
+$script:TigerVncUrlBase = 'https://sourceforge.net/projects/tigervnc/files/stable/' + $script:TigerVncVersion + '/'
+$script:FileTigerVncWindows = 'vncviewer64-' + $script:TigerVncVersion + '.exe'
+$script:FileTigerVncLinux = 'tigervnc-' + $script:TigerVncVersion + '.x86_64.tar.gz'
+$script:TigerVncViewerSha256 = '58396d99556026da6b906c9ed51ad6cb5c840cc3fb65e53653c52ca5a80bfad9'
+$script:TigerVncLinuxSha256 = '5b70c84baefc09a030cfc78315c34ccb55b2a0dde4092b7da67a1962c5f0dea6'
+$script:DirUltraVnc = 'ultravnc'
+$script:UltraVncVersion = '1.8.3.2'
+$script:UltraVncReleased = '2026-11-08'
+$script:UltraVncUrlBase = 'https://uvnc.eu/download/1800/'
+$script:FileUltraVncZip = 'UltraVNC_' + $script:UltraVncVersion.Replace('.', '') + '.zip'
+$script:FileUltraVncInstaller = 'UltraVNC_' + $script:UltraVncVersion.Replace('.', '') + '_x64_Setup.exe'
+$script:UltraVncZipSha256 = '8984e920169238de2a878ca3af71b7b8ac4feb3bbe295916dcd3ff1219456aad'
+$script:UltraVncInstallerSha256 = 'ae1bb545c59e082620997d98589e3aef871e71494cb100144c95608c8323b4f7'
 # CJK display font: one Regular OTF for Linux and Windows; the KR variant is
 # the user-selected face. Pinned to a commit because upstream has no checksum.
 $script:DirFonts = 'fonts'
@@ -339,6 +361,12 @@ function Get-TopicReadmeMeta([string]$Topic) {
         'nodejs' {
             [pscustomobject]@{ Package = 'Node.js LTS'; Version = ($script:NodeVersion + ' (' + $script:NodeLtsName + ')'); Released = $script:NodeReleased; Source = $script:NodeUrlBase; Trust = 'pinned SHA-256 from SHASUMS256.txt; see INTEGRITY'; Note = '' }
         }
+        'tigervnc' {
+            [pscustomobject]@{ Package = 'TigerVNC'; Version = $script:TigerVncVersion; Released = $script:TigerVncReleased; Source = ('https://github.com/TigerVNC/tigervnc/releases/tag/v' + $script:TigerVncVersion); Trust = 'EXE Authenticode + pinned SHA-256; tarball first-download pin (no publisher checksum); see INTEGRITY'; Note = 'Windows viewer and Linux X11 viewer/server; no Windows server.' }
+        }
+        'ultravnc' {
+            [pscustomobject]@{ Package = 'UltraVNC'; Version = $script:UltraVncVersion; Released = $script:UltraVncReleased; Source = 'https://uvnc.com/downloads/ultravnc/175-ultravnc-1-8-3-2.html'; Trust = 'official SHA-256 + Authenticode; see INTEGRITY'; Note = 'Windows server/viewer; use UltraVNC viewer for DSM, MS Logon, Repeater, or SC.' }
+        }
         'fonts' {
             [pscustomobject]@{ Package = 'Noto Sans Mono CJK KR'; Version = $script:FontVersion; Released = $script:FontReleased; Source = $script:FontSourceUrl; Trust = ('pinned SHA-256 at noto-cjk commit ' + $script:FontCommit.Substring(0, 7) + ' (no upstream checksum); see INTEGRITY'); Note = '' }
         }
@@ -468,7 +496,8 @@ STRUCTURE
                      fonts\ (one CJK display font for Linux/Windows),
                      cyberduck\ (cloud/SFTP GUI and duck CLI),
                      python\ (Windows x64), golang\ (Go), nodejs\
-                     (Node.js LTS), 7zip\ (extractor), putty\, tabby\,
+                     (Node.js LTS), tigervnc\ (VNC), ultravnc\ (VNC),
+                     7zip\ (extractor), putty\, tabby\,
                      winscp\ (terminals and transfer clients).
   isos\README.txt    Per-folder contents, sizes, and re-verify notes.
 
@@ -503,6 +532,13 @@ PROGRAMMING ENVIRONMENTS
   isos\04-etc\golang\ and nodejs\ carry portable x64 Go and Node.js LTS
   toolchains for Windows and Linux. Extract the archive and add its bin
   folder to PATH; each README has the exact commands.
+
+REMOTE DESKTOP (VNC)
+  isos\04-etc\tigervnc\ has the cross-platform viewer and Linux X11 server.
+  isos\04-etc\ultravnc\ has the Windows server and viewer, portable ZIP plus
+  x64 installer. Use the UltraVNC viewer for UltraVNC/DSM/Repeater; use
+  TigerVNC viewer for Linux/TLS. VNC is unencrypted unless TLS, DSM, or a
+  tunnel is used. Prefer built-in RDP (mstsc) when the target edition supports it.
 "@
 }
 
@@ -535,7 +571,7 @@ FOLDERS
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
   04-etc\        Post-boot utilities by topic: copyparty\, cyberduck\,
                  firefox\, fonts\, golang\, imgburn\, nodejs\, python\,
-                 7zip\, putty\, tabby\, winscp\.
+                 tigervnc\, ultravnc\, 7zip\, putty\, tabby\, winscp\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
@@ -1157,6 +1193,179 @@ NOTES
     return Add-TopicReadmeHeader -Text $text.Replace('NODEZIP', $script:FileNodeWindows).Replace('NODETAR', $script:FileNodeLinux).Replace('NODESUMS', $script:FileNodeSums).Replace('NODEVER', $script:NodeVersion).Replace('NODELTS', $script:NodeLtsName).Replace('NODEWINHASH', $script:NodeWindowsSha256).Replace('NODELINHASH', $script:NodeLinuxSha256) -Meta (Get-TopicReadmeMeta -Topic 'nodejs') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
+# Offline TigerVNC sheet for isos\04-etc\tigervnc\. Windows viewer plus the
+# generic Linux X11 viewer/server archive; the tarball has no w0vncserver.
+function Get-TigerVncReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
+    $text = @'
+TIGERVNC VIEWER AND LINUX SERVER (offline)
+==========================================
+{HEADER}
+
+FILES
+  TVWIN   Windows x64 standalone viewer, no installer.
+  TVTAR   Linux x86_64 generic archive: viewer and X11 servers.
+
+WINDOWS VIEWER (no install)
+  Run .\TVWIN, enter the host and display (host:1) or host::5901.
+  The viewer supports TLS/VeNCrypt when the server offers it. For general
+  VNC and TigerVNC Linux servers, this is the preferred client.
+  It may write per-user connection settings; it does not install a service.
+
+LINUX (extract on a Linux filesystem, not the exFAT USB stick)
+    mkdir -p ~/.local/tigervnc
+    tar -xzf ./TVTAR -C ~/.local/tigervnc
+    export TVROOT="$HOME/.local/tigervnc/tigervnc-TVVER.x86_64"
+    export PATH="$TVROOT/usr/bin:$PATH"
+  Check dependencies before relying on it:
+    ldd "$TVROOT/usr/bin/x0vncserver" | grep 'not found'
+  If libraries are missing, use the distribution's tigervnc package instead.
+
+SHARE THE EXISTING X11 DESKTOP (recommended for rescue images)
+  The generic tarball has x0vncserver but no w0vncserver. This works only on
+  X11, not Wayland.
+    "$TVROOT/usr/bin/vncpasswd" -f > /tmp/vnc.pass
+    "$TVROOT/usr/bin/x0vncserver" -display :0 -rfbauth /tmp/vnc.pass -localhost yes
+  From the helper, tunnel port 5900 and connect:
+    ssh -L 5900:localhost:5900 user@host
+    "$TVROOT/usr/bin/vncviewer" localhost::5900
+
+DIRECT VIRTUAL X SESSION (X11 only)
+  Start Xvnc and a desktop on display :1:
+    "$TVROOT/usr/bin/Xvnc" :1 -geometry 1920x1080 -depth 24 \
+      -rfbauth /tmp/vnc.pass -localhost yes &
+    DISPLAY=:1 startxfce4 &
+  Tunnel 5901 and connect to localhost:1 or localhost::5901.
+  Do not rely on the relocated usr/libexec/vncserver or usr/sbin/vncsession
+  from an extracted tree: they expect /usr/bin/Xvnc, /etc/tigervnc, and PAM
+  paths. Use the distribution package when you need its service wrapper.
+
+SECURITY
+  The default VNC password is weak and VNC Authentication truncates it to
+  eight characters. x0vncserver on localhost plus an SSH tunnel is the safe
+  recovery default.
+  Direct TLS:
+    -SecurityTypes TLSVnc with -rfbauth encrypts the session, but TLSVnc is
+    anonymous TLS and does not prove the server identity.
+    -SecurityTypes X509Vnc with -rfbauth uses a certificate for identity.
+  Avoid X509Plain as a default: Plain authentication depends on the
+  tigervnc PAM service, which may be absent on live images.
+
+WAYLAND
+  The generic tarball does not include w0vncserver. Mint Xfce, antiX, and
+  SystemRescue use X11 and work with x0vncserver. Fedora GNOME is Wayland;
+  use GNOME Remote Desktop (RDP) there, not this archive.
+
+ULTRAVNC WINDOWS SERVERS
+  TigerVNC viewer can use UltraVNC's classic VNC password. For UltraVNC
+  MS Logon, DSM encryption, Repeater, or SC, use the UltraVNC viewer.
+
+INTEGRITY
+  Windows:
+    Get-FileHash .\TVWIN -Algorithm SHA256
+    Get-AuthenticodeSignature .\TVWIN
+  Linux:
+    sha256sum ./TVTAR
+  Pinned values:
+    TVWIN  TVWINHASH
+    TVTAR  TVLINHASH
+  The EXE is Authenticode-valid, signer "Open Source Developer, Brian Hinz".
+  The Linux tarball has no publisher checksum; this is a first-download pin.
+  TigerVNC is GPL-2.0; source: https://github.com/TigerVNC/tigervnc
+
+NOTES
+  - x64 only. Windows 11 ARM runs the x64 viewer through emulation.
+  - No Windows server is included; use UltraVNC for that.
+  - After a version bump, old tigervnc-* files stay here; delete the previous set.
+'@
+    return Add-TopicReadmeHeader -Text $text.Replace('TVWINHASH', $script:TigerVncViewerSha256).Replace('TVLINHASH', $script:TigerVncLinuxSha256).Replace('TVWIN', $script:FileTigerVncWindows).Replace('TVTAR', $script:FileTigerVncLinux).Replace('TVVER', $script:TigerVncVersion) -Meta (Get-TopicReadmeMeta -Topic 'tigervnc') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
+}
+
+# Offline UltraVNC sheet for isos\04-etc\ultravnc\. Windows server and viewer;
+# the ZIP is the portable/WinPE path, the x64 installer the service path.
+function Get-UltraVncReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
+    $text = @'
+ULTRAVNC SERVER AND VIEWER FOR WINDOWS (offline)
+================================================
+{HEADER}
+
+FILES
+  UVZIP   Portable ZIP, x86 and x64 server/viewer, SecureVNC DSM plugin.
+  UVINST  x64 installer for service-mode use.
+
+PORTABLE (no install; use a local writable folder)
+  Extract UVZIP to C:\Tools\UltraVNC, not directly on the USB stick.
+    x64\vncviewer.exe   viewer
+    x64\winvnc.exe      server
+    x64\SecureVNCPlugin64.dsm
+  Run the server elevated; otherwise UAC prompts can be black and
+  Ctrl-Alt-Del may not reach the target. Set a password before the first
+  connection; with no password the server refuses connections.
+  Keep configuration and logs on the local disk, not on shared media.
+  If you must run from the stick, delete the generated ultravnc.ini and logs
+  before handing it over.
+  Firewall rule (admin; replace the helper address):
+    netsh advfirewall firewall add rule name="UltraVNC 5900" dir=in action=allow protocol=TCP localport=5900 remoteip=<helper-ip>
+    netsh advfirewall firewall delete rule name="UltraVNC 5900"
+
+WINPE
+  Use the ZIP in portable mode; the server can run headless without Explorer.
+  Base WinPE has no Expand-Archive. Extract on a working PC, or use 7za:
+  7zr only opens .7z, so unpack the 7-Zip extra package first; then use
+  "7za.exe x UVZIP -oC:\Tools\UltraVNC".
+  In WinPE:
+    wpeutil InitializeNetwork
+    wpeutil DisableFirewall
+  Test network drivers and the exact PE build before relying on it. HBCD PE
+  is the WinPE in this kit.
+
+INSTALLER / SERVICE MODE (normal Windows)
+  Run UVINST, install Server and Viewer. Use service mode when you need the
+  logon screen or unattended access. Open TCP 5900 to the helper only.
+  Do not run the installed server and the portable server at the same time.
+
+AUTHENTICATION AND ENCRYPTION
+  - 1.8.3.2 retired MS-Logon II. Use the classic VNC password or the
+    remaining MS Logon. Classic VNC passwords are cut to eight characters
+    and are weak.
+  - TigerVNC viewer can connect with the classic VNC password. For UltraVNC
+    MS Logon, DSM encryption, Repeater, or SC, use UltraVNC viewer.
+  - SecureVNC DSM: enable the plugin on both server and viewer. Non-DSM
+    viewers, including TigerVNC, cannot connect to a DSM-only server.
+  - Otherwise use an SSH/VPN tunnel. Windows has no sshd by default, and
+    WinPE never does. With PuTTY:
+      plink -R 5900:localhost:5900 user@linuxhost
+    then on the Linux host:
+      vncviewer localhost::5900
+    Optional reverse connect, where the target initiates:
+      winvnc -connect helper.example:5500
+      vncviewer -listen
+    Verify the exact syntax on the build you deploy.
+  - Do not install the UVncVirtualDisplay driver unless a headless display is
+    required.
+
+INTEGRITY
+  Get-FileHash .\UVZIP -Algorithm SHA256
+  Get-FileHash .\UVINST -Algorithm SHA256
+  Get-AuthenticodeSignature .\UVINST
+  Pinned values:
+    UVZIP   UVZIPHASH
+    UVINST  UVINSTHASH
+  The official UltraVNC 1.8.3.2 page publishes both SHA-256 values. Its
+  displayed size fields are stale; the hashes match the served bytes.
+  The installer and the x64 viewer/server binaries are Authenticode-valid,
+  signer "Open Source Developer Rudi De Vos". UltraVNC is GPL-3.0;
+  source: https://github.com/ultravnc/UltraVNC
+
+NOTES
+  - Windows-only. The ZIP includes x86 and x64; use x64 on current Windows.
+  - After a version bump, old UltraVNC_* files stay here; delete the previous set.
+  - Prefer built-in RDP (mstsc) when the target edition supports it.
+'@
+    return Add-TopicReadmeHeader -Text $text.Replace('UVZIPHASH', $script:UltraVncZipSha256).Replace('UVINSTHASH', $script:UltraVncInstallerSha256).Replace('UVZIP', $script:FileUltraVncZip).Replace('UVINST', $script:FileUltraVncInstaller) -Meta (Get-TopicReadmeMeta -Topic 'ultravnc') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
+}
+
 # CJK display font sheet for isos\04-etc\fonts\. One Regular OTF plus its
 # OFL license; install steps stay general and display-only.
 function Get-FontsReadmeText {
@@ -1748,6 +1957,10 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Windows portable'; Category = '04-etc\tabby'; FileName = $script:FileTabbyZip; Url = ($script:TabbyUrlBase + $script:FileTabbyZip); AlternateUrl = ''; Hash = '56de045fbb5a74d586903367d3f7227276d538281b0068d8132de3318cdd5019'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Electron terminal with built-in SSH, telnet, serial, and local shells, an SSH SFTP panel, and Zmodem transfers; portable-mode zip that keeps configuration and host lists in a data folder beside Tabby.exe.'; Released = 'Version 1.0.238, October 2026 (185,884,613 bytes; Tabby.exe signed by Eugen Pankov Softwareentwicklung).'; SizeNote = 'About 177 MB (extracts to about 481 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the zip is unsigned, and Tabby.exe inside is Authenticode-valid with Eugen Pankov Softwareentwicklung as signer. Download ' + $script:TabbyUrlBase + $script:FileTabbyZip + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Linux x64 deb'; Category = '04-etc\tabby'; FileName = $script:FileTabbyDeb; Url = ($script:TabbyUrlBase + $script:FileTabbyDeb); AlternateUrl = ''; Hash = '5ea2b9aa84f2b5cdcb98cb7e94bd3d92de48c96254a98b52bf2d1f30a52d1d1c'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Debian/Ubuntu x64 package for the same terminal; installs /opt/Tabby and a /usr/bin/tabby wrapper that adds --no-sandbox.'; Released = 'Version 1.0.238, October 2026 (130,349,456 bytes; unsigned; needs gnome-keyring and GUI libraries).'; SizeNote = 'About 124 MB (installs to about 431 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the package is unsigned. Download ' + $script:TabbyUrlBase + $script:FileTabbyDeb + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Linux x64 rpm'; Category = '04-etc\tabby'; FileName = $script:FileTabbyRpm; Url = ($script:TabbyUrlBase + $script:FileTabbyRpm); AlternateUrl = ''; Hash = 'd5027a5f905edf40aaf1fd42ef5015abfaffbd96f5825b3622ef352dfc3136b3'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Fedora/RHEL/Rocky x64 package for the same terminal; requires gnome-keyring and links /usr/bin/tabby to /opt/Tabby/tabby.'; Released = 'Version 1.0.238, October 2026 (113,337,069 bytes; unsigned; requires gnome-keyring).'; SizeNote = 'About 108 MB (installs to about 431 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the package is unsigned. Download ' + $script:TabbyUrlBase + $script:FileTabbyRpm + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
+        [pscustomobject]@{ Name = 'TigerVNC 1.16.2 Windows viewer'; Category = '04-etc\tigervnc'; FileName = $script:FileTigerVncWindows; Url = ($script:TigerVncUrlBase + $script:FileTigerVncWindows + '/download'); AlternateUrl = ''; Hash = $script:TigerVncViewerSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Standalone TigerVNC viewer for Windows x64; no installer or service, and TLS/VeNCrypt support when the server offers it.'; Released = ('Version ' + $script:TigerVncVersion + ', ' + $script:TigerVncReleased + ' (TigerVNC release page; 24,072,224 bytes; Authenticode-valid, signer Brian Hinz).'); SizeNote = 'About 23 MB.'; Check = ('SourceForge HTTPS plus the pinned SHA-256; Authenticode signer is Brian Hinz. Download ' + $script:TigerVncUrlBase + $script:FileTigerVncWindows + ' into isos\04-etc\tigervnc\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'TigerVNC 1.16.2 Linux x64'; Category = '04-etc\tigervnc'; FileName = $script:FileTigerVncLinux; Url = ($script:TigerVncUrlBase + $script:FileTigerVncLinux + '/download'); AlternateUrl = ''; Hash = $script:TigerVncLinuxSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Generic Linux x86_64 TigerVNC archive: vncviewer, Xvnc, x0vncserver, vncpasswd, and the X11 server pieces; no w0vncserver.'; Released = ('Version ' + $script:TigerVncVersion + ', ' + $script:TigerVncReleased + ' (TigerVNC release page; 15,042,988 bytes; no publisher checksum).'); SizeNote = 'About 14 MB.'; Check = ('SourceForge HTTPS; TigerVNC publishes no checksum for this generic archive, so the first-download SHA-256 is pinned. Download ' + $script:TigerVncUrlBase + $script:FileTigerVncLinux + ' into isos\04-etc\tigervnc\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'UltraVNC 1.8.3.2 Windows portable'; Category = '04-etc\ultravnc'; FileName = $script:FileUltraVncZip; Url = ($script:UltraVncUrlBase + $script:FileUltraVncZip); AlternateUrl = ''; Hash = $script:UltraVncZipSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable x86/x64 UltraVNC ZIP with server, viewer, SecureVNC DSM plugin, and virtual display driver; the WinPE-friendly path.'; Released = ('Version ' + $script:UltraVncVersion + ', October 2026 (release summary; 17,283,281 bytes; page size field is stale; hash matches).'); SizeNote = 'About 16 MB.'; Check = ('Official UltraVNC 1.8.3.2 SHA-256 matches the served bytes; the page size field is stale. Authenticode signer is Rudi De Vos. Download ' + $script:UltraVncUrlBase + $script:FileUltraVncZip + ' into isos\04-etc\ultravnc\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'UltraVNC 1.8.3.2 Windows x64 installer'; Category = '04-etc\ultravnc'; FileName = $script:FileUltraVncInstaller; Url = ($script:UltraVncUrlBase + $script:FileUltraVncInstaller); AlternateUrl = ''; Hash = $script:UltraVncInstallerSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'x64 UltraVNC installer for normal Windows service mode, logon-screen access, and unattended support; includes server and viewer.'; Released = ('Version ' + $script:UltraVncVersion + ', October 2026 (release summary; 6,256,464 bytes; page size field is stale; hash matches).'); SizeNote = 'About 6 MB.'; Check = ('Official UltraVNC 1.8.3.2 SHA-256 matches the served bytes; the page size field is stale. Authenticode signer is Rudi De Vos. Download ' + $script:UltraVncUrlBase + $script:FileUltraVncInstaller + ' into isos\04-etc\ultravnc\ by hand; the next run verifies it and skips.') }
         [pscustomobject]@{ Name = 'Noto Sans Mono CJK KR'; Category = '04-etc\fonts'; FileName = $script:FileFont; Url = $script:FontRawUrl; AlternateUrl = ''; Hash = $script:FontSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Single Regular-weight OFL font for CJK display on Linux and Windows; covers Han, Kana, Hangul, and Bopomofo with KR-default glyph forms.'; Released = ('Version ' + $script:FontVersion + ', April 2021 (file date ' + $script:FontReleased + ' at commit ' + $script:FontCommit.Substring(0, 7) + '; 16,389,532 bytes).'); SizeNote = 'About 15.6 MB.'; Check = ('Download ' + $script:FontRawUrl + ' into isos\04-etc\fonts\ by hand (commit-pinned source; no upstream checksum); the next run verifies SHA-256 and skips it.') }
         [pscustomobject]@{ Name = 'Noto CJK OFL license'; Category = '04-etc\fonts'; FileName = $script:FileFontLicense; Url = $script:FontLicenseUrl; AlternateUrl = ''; Hash = $script:FontLicenseSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'OFL 1.1 text for the bundled Noto CJK font; upstream LICENSE renamed byte-for-byte.'; Released = ('OFL 1.1, file date ' + $script:FontReleased + ' at commit ' + $script:FontCommit.Substring(0, 7) + '.'); SizeNote = 'About 4 KB.'; Check = ('Download ' + $script:FontLicenseUrl + ' into isos\04-etc\fonts\ by hand and save it as OFL.txt; the next run verifies it against the pinned hash and skips it.') }
     )
@@ -2837,6 +3050,7 @@ function Write-PlanTable {
     Write-Detail 'copyparty: latest GitHub release, sfx.py + exe under isos\04-etc\copyparty\.'
     Write-Detail 'ImgBurn: official 2.5.8.0 installer, extracted into isos\04-etc\imgburn\bin\.'
     Write-Detail 'Go 1.27.4 and Node.js LTS 26.13.1: Windows ZIP plus Linux tar.gz under 04-etc.'
+    Write-Detail 'TigerVNC viewer/Linux server and UltraVNC Windows server/viewer under 04-etc.'
     Write-Detail "Firefox ESR: latest en-US win64 resolved live; pinned $($script:FirefoxFallbackVersion) fallback if metadata/checksum lookup fails."
     Write-Detail 'Windows 11 ISO resolved live through Fido; Tiny11 built from it with -Elevate.'
     $rows = Get-RecoveryCatalog | Where-Object {
@@ -2933,6 +3147,8 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirGolang)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirNodeJs)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTigerVnc)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirUltraVnc)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) 'bin')
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox)
@@ -2946,6 +3162,8 @@ function Invoke-PreparePcRecovery {
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby) $script:FileReadme) -Text (Get-TabbyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirGolang) $script:FileReadme) -Text (Get-GoReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirNodeJs) $script:FileReadme) -Text (Get-NodeReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTigerVnc) $script:FileReadme) -Text (Get-TigerVncReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirUltraVnc) $script:FileReadme) -Text (Get-UltraVncReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) $script:FileReadme) -Text (Get-ImgBurnReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFonts) $script:FileReadme) -Text (Get-FontsReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         # Provisional sheets so live topics still have documentation if the
