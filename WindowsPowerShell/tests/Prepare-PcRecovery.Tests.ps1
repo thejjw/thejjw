@@ -1303,6 +1303,23 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:Failures[0].Manual | Should -Not -Match 'SourceForge'
         }
 
+        It 'uses the exact retry text when the hash still mismatches' {
+            Reset-State
+            $root = Join-Path $TestDrive 'firefox-mismatch'
+            Mock Invoke-RestMethod { throw 'offline' }
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'not-firefox' -NoNewline; return $true }
+            Save-FirefoxEsr -Root $root | Should -BeFalse
+            $ff = New-FirefoxFallbackRelease
+            $ffOut = Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox') $ff.FileName
+            Test-Path -LiteralPath $ffOut | Should -BeFalse
+            $script:Failures | Should -HaveCount 1
+            $script:Failures[0].Detail | Should -Match 'Hash mismatch after retry'
+            $script:Failures[0].Manual | Should -Match ([regex]::Escape($script:FirefoxFallbackSha256))
+            $script:Failures[0].Manual | Should -Match ([regex]::Escape($ff.Url))
+            $script:Failures[0].Manual | Should -Not -Match 'SourceForge'
+            $script:FirefoxRelease | Should -BeNullOrEmpty
+        }
+
         It 'names the exact fallback file and hash when the download throws' {
             Reset-State
             $root = Join-Path $TestDrive 'firefox-throw'
