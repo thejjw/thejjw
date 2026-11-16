@@ -290,7 +290,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $sample = Join-Path $TestDrive 'cp-sample.bin'
             Set-Content -LiteralPath $sample -Value 'x' -NoNewline
             $sha = (Get-FileHash -LiteralPath $sample -Algorithm SHA256).Hash.ToLowerInvariant()
-            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; assets = @(
+            Mock Invoke-GitHubApiJson { [pscustomobject]@{ tag_name = 'v1.20.26'; published_at = '2026-10-01T12:34:56Z'; assets = @(
                 [pscustomobject]@{ name = 'copyparty-sfx.py'; size = 1206486; digest = "sha256:$sha"; browser_download_url = 'https://github.com/9001/copyparty/releases/download/v1.20.26/copyparty-sfx.py' }
                 [pscustomobject]@{ name = 'copyparty.exe'; size = 13207240; digest = "sha256:$sha"; browser_download_url = 'https://github.com/9001/copyparty/releases/download/v1.20.26/copyparty.exe' }
             ) } }
@@ -303,6 +303,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:sawDownloads[0].OutFile | Should -Match 'isos\\04-etc\\copyparty\\copyparty-sfx\.py$'
             $script:sawDownloads[1].OutFile | Should -Match 'isos\\04-etc\\copyparty\\copyparty\.exe$'
             $script:CopypartyRows.Count | Should -Be 2
+            $script:CopypartyRows[0].PublishedAt | Should -Be '2026-10-01'
+            (Get-CopypartyReadmeMeta).Released | Should -Be '2026-10-01'
             $block = Format-IsoReadmeEntry -Row ($script:CopypartyRows | Where-Object { $_.FileName -eq 'copyparty.exe' }) -Root $root
             $block | Should -Match 'v1\.20\.26'
             $block | Should -Match $sha
@@ -1216,7 +1218,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             Reset-State
             $root = Join-Path $TestDrive 'firefox-live'
             $script:liveHash = 'cd' * 32
-            Mock Invoke-RestMethod { [pscustomobject]@{ FIREFOX_ESR = '153.8.0esr' } }
+            Mock Invoke-RestMethod -ParameterFilter { $Uri -eq $script:FirefoxVersionsUrl } { [pscustomobject]@{ FIREFOX_ESR = '153.8.0esr' } }
+            Mock Invoke-RestMethod -ParameterFilter { $Uri -eq $script:FirefoxJsonUrl } { [pscustomobject]@{ releases = [pscustomobject]@{ 'firefox-153.8.0esr' = [pscustomobject]@{ date = '2026-11-10' } } } }
             Mock Invoke-WebText { "$script:liveHash  win64/en-US/Firefox Setup 153.8.0esr.exe" }
             (Get-FirefoxEsrHash -ChecksumUrl 'https://example.invalid/SHA256SUMS' -ChecksumPath 'win64/en-US/Firefox Setup 153.8.0esr.exe') | Should -Be $script:liveHash
             Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'firefox' -NoNewline; return $true }
@@ -1227,6 +1230,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:FirefoxRelease.Version | Should -Be '153.8.0esr'
             $script:FirefoxRelease.Source | Should -Be 'live'
             $script:FirefoxRelease.Hash | Should -Be $script:liveHash
+            $script:FirefoxRelease.Released | Should -Be '2026-11-10'
+            (Get-FirefoxReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC') | Should -Match 'Released:\s+2026-11-10'
             Test-Path -LiteralPath $script:FirefoxRelease.OutFile | Should -BeTrue
             $script:VerifiedHashes[$script:FirefoxRelease.OutFile] | Should -Be $script:liveHash
             $script:Failures.Count | Should -Be 0
@@ -1259,6 +1264,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             }
             $script:FirefoxRelease.Source | Should -Be 'fallback'
             $script:FirefoxRelease.Hash | Should -Be $script:FirefoxFallbackSha256
+            $script:FirefoxRelease.Released | Should -Be $script:FirefoxFallbackReleased
             $script:Failures.Count | Should -Be 0
         }
 
@@ -1570,6 +1576,12 @@ Describe 'Prepare-PcRecovery.ps1' {
             $m = Get-CopypartyReadmeMeta
             $m.Version | Should -Be 'v1.20.26'
             $m.Note | Should -Match ([regex]::Escape($script:FileCopypartySfx))
+        }
+
+        It 'uses a release-page pointer when copyparty has no published date' {
+            Reset-State
+            $script:CopypartyRows = @([pscustomobject]@{ FileName = $script:FileCopypartyExe; Tag = 'v1.20.26'; PublishedAt = '' })
+            (Get-CopypartyReadmeMeta).Released | Should -Be 'see GitHub release'
         }
 
         It 'marks an unresolved copyparty set' {
