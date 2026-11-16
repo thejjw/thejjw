@@ -33,7 +33,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         # Resets recorded failures/results between tests.
-        function Reset-State { $script:Failures = @(); $script:Results = @(); $script:UseSudo = $false; $script:VerifiedHashes = @{}; $script:Sidecars = @{}; $script:CopypartyRows = @(); $script:FirefoxRelease = $null }
+        function Reset-State { $script:Failures = @(); $script:Results = @(); $script:UseSudo = $false; $script:VerifiedHashes = @{}; $script:Sidecars = @{}; $script:CopypartyRows = @(); $script:FirefoxRelease = $null; $script:FirefoxResolved = $null }
     }
 
     Context 'shared constants' {
@@ -52,7 +52,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 DirCyberduck = 'cyberduck'; CyberduckVersion = '9.6.0.46406'; FileCyberduckInstaller = 'Cyberduck-Installer-9.6.0.46406.exe'; FileCyberduckDuck = 'duck_9.6.0.46406_amd64.deb'; FileCyberduckDuckRpm = 'duck-9.6.0.46406-1.x86_64.rpm'
                 DirTabby = 'tabby'; TabbyVersion = '1.0.238'; FileTabbyZip = 'tabby-1.0.238-portable-x64.zip'; FileTabbyDeb = 'tabby-1.0.238-linux-x64.deb'; FileTabbyRpm = 'tabby-1.0.238-linux-x64.rpm'
                 DirImgBurn = 'imgburn'; ImgBurnVersion = '2.5.8.0'; FileImgBurnInstaller = 'SetupImgBurn_2.5.8.0.exe'; FileImgBurnExe = 'ImgBurn.exe'; FileImgBurnLauncher = 'ImgBurn Portable.cmd'; FileImgBurnIni = 'ImgBurn.ini'
-                DirFirefox = 'firefox'; FirefoxFallbackVersion = '153.7.0esr'
+                DirFirefox = 'firefox'; FirefoxFallbackVersion = '153.7.0esr'; FirefoxFallbackReleased = '2026-11-10'; ImgBurnReleased = '2013-06-16'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -61,10 +61,12 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:MsDownloadPage | Should -Match '^https://'
             $script:CopypartyApiUrl | Should -Match '^https://api\.github\.com/'
             $script:CopypartyReleasesUrl | Should -Match '^https://github\.com/'
+            $script:CopypartyTagUrlBase | Should -Be 'https://github.com/9001/copyparty/releases/tag/'
             $script:CyberduckDownloadPage | Should -Match '^https://cyberduck\.io/'
             $script:FirefoxVersionsUrl | Should -Be 'https://product-details.mozilla.org/1.0/firefox_versions.json'
             $script:FirefoxReleasesUrl | Should -Be 'https://ftp.mozilla.org/pub/firefox/releases/'
             $script:FirefoxFallbackSha256 | Should -Match '^[0-9a-f]{64}$'
+            $script:FirefoxJsonUrl | Should -Be 'https://product-details.mozilla.org/1.0/firefox.json'
             $script:ThirdPartyTip | Should -Not -BeNullOrEmpty
             $script:WinIsoNaming | Should -Match 'Win11_'
             $script:MakerHintAdmin | Should -Match 'Enable-WindowsSudo'
@@ -679,7 +681,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'builds the topic readme from the catalog file names' {
-            $text = Get-PythonReadmeText
+            $text = Get-PythonReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             foreach ($row in (Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\python' })) {
                 $text.Contains($row.FileName) | Should -BeTrue
             }
@@ -756,7 +758,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'builds the topic readme from the catalog file names' {
-            $text = Get-SevenZipReadmeText
+            $text = Get-SevenZipReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             foreach ($row in (Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\7zip' })) {
                 $text.Contains($row.FileName) | Should -BeTrue
             }
@@ -785,7 +787,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'builds the topic readme from the catalog file names' {
-            $text = Get-PuttyReadmeText
+            $text = Get-PuttyReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             $text.Contains($script:FilePuttyZip) | Should -BeTrue
             $text.Contains($script:FilePuttySums) | Should -BeTrue
             $text | Should -Match 'Expand-Archive'
@@ -815,7 +817,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'builds the topic readme with the portable and scripting steps' {
-            $text = Get-WinScpReadmeText
+            $text = Get-WinScpReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             $text.Contains($script:FileWinScpPortable) | Should -BeTrue
             $text | Should -Match 'Expand-Archive'
             $text | Should -Match 'Set-Content \.\\bin\\WinSCP\.ini'
@@ -834,7 +836,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'writes the portable settings before the first launch' {
-            $text = Get-WinScpReadmeText
+            $text = Get-WinScpReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             $settings = $text.IndexOf('RandomSeedFile=%WINSCP_PATH%')
             $launch = $text.IndexOf('.\bin\WinSCP.exe')
             $settings | Should -BeGreaterThan -1
@@ -865,7 +867,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'builds the topic readme with the install and integrity steps' {
-            $text = Get-CyberduckReadmeText
+            $text = Get-CyberduckReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             $text.Contains($script:FileCyberduckInstaller) | Should -BeTrue
             $text | Should -Match '\.exe /s'
             $text | Should -Match 'Get-FileHash'
@@ -912,7 +914,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'builds the topic readme with portable and Linux steps' {
-            $text = Get-TabbyReadmeText
+            $text = Get-TabbyReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             $text.Contains($script:FileTabbyZip) | Should -BeTrue
             $text.Contains($script:FileTabbyDeb) | Should -BeTrue
             $text.Contains($script:FileTabbyRpm) | Should -BeTrue
@@ -945,7 +947,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'creates the portable data folder before the first launch' {
-            $text = Get-TabbyReadmeText
+            $text = Get-TabbyReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             $data = $text.IndexOf('New-Item .\bin\data -ItemType Directory')
             $launch = $text.IndexOf('.\bin\Tabby.exe')
             $data | Should -BeGreaterThan -1
@@ -1144,7 +1146,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'documents the portable launcher, switches, and trust boundary' {
-            $text = Get-ImgBurnReadmeText
+            $text = Get-ImgBurnReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             $text.Contains($script:FileImgBurnLauncher) | Should -BeTrue
             $text.Contains($script:FileImgBurnExe) | Should -BeTrue
             $text.Contains($script:FileImgBurnIni) | Should -BeTrue
@@ -1354,7 +1356,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         It 'documents install, uninstall, fallback, and integrity' {
-            $text = Get-FirefoxReadmeText
+            $text = Get-FirefoxReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             $text | Should -Match '/S'
             $text | Should -Match 'MaintenanceService=false'
             $text | Should -Match 'StartMenuShortcut=false'
@@ -1496,6 +1498,134 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
     }
 
+    Context 'readme metadata' {
+        It 'builds the fixed header in a stable order' {
+            $h = Get-ReadmeHeader -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:01 UTC' -Package 'X' -Version '1.2' -Released 'October 2026' -Source 'https://example.invalid' -Trust 'hash'
+            $h | Should -Match '^Run started: 2026-11-16 00:00 UTC'
+            $h | Should -Match 'Written:     2026-11-16 00:01 UTC'
+            $h | Should -Match 'Package:     X'
+            $h | Should -Match 'Version:     1.2'
+            $h | Should -Match 'Released:    October 2026'
+            $h | Should -Match 'Source:      https://example.invalid'
+            $h | Should -Match 'Trust:       hash'
+            $h.Contains('Hashes:      ..\..\README.txt') | Should -BeTrue
+            $h | Should -Match 'Re-runs replace this file\.'
+        }
+
+        It 'rejects an empty timestamp' {
+            { Get-ReadmeHeader -RunStartedUtc '' -WrittenUtc 'x' -Package 'P' -Version '1' -Released 'd' -Source 's' -Trust 't' } | Should -Throw
+        }
+
+        It 'resolves pinned metadata for every 04-etc topic' {
+            foreach ($topic in @('python', '7zip', 'putty', 'winscp', 'cyberduck', 'tabby', 'imgburn')) {
+                $m = Get-TopicReadmeMeta -Topic $topic
+                $m.Package | Should -Not -BeNullOrEmpty
+                $m.Version | Should -Not -BeNullOrEmpty
+                $m.Released | Should -Not -BeNullOrEmpty
+                $m.Source | Should -Not -BeNullOrEmpty
+                $m.Trust | Should -Not -BeNullOrEmpty
+            }
+            { Get-TopicReadmeMeta -Topic 'nope' } | Should -Throw
+        }
+
+        It 'derives pinned release dates from the catalog' {
+            (Get-TopicReadmeMeta -Topic 'python').Released | Should -Be 'October 2026'
+            (Get-TopicReadmeMeta -Topic '7zip').Released | Should -Be 'November 2026'
+            (Get-TopicReadmeMeta -Topic 'imgburn').Released | Should -Be '2013-06-16'
+        }
+
+        It 'parses published_at as string or datetime' {
+            Format-ReleaseDate '2026-10-01T12:34:56Z' | Should -Be '2026-10-01'
+            $utc = [datetime]::SpecifyKind([datetime]'2026-10-02T00:00:00', [DateTimeKind]::Utc)
+            Format-ReleaseDate $utc | Should -Be '2026-10-02'
+            Format-ReleaseDate '' | Should -Be ''
+        }
+
+        It 'builds copyparty metadata from verified rows' {
+            Reset-State
+            $script:CopypartyRows = @(
+                [pscustomobject]@{ FileName = $script:FileCopypartySfx; Tag = 'v1.20.26'; PublishedAt = '2026-10-01' },
+                [pscustomobject]@{ FileName = $script:FileCopypartyExe; Tag = 'v1.20.26'; PublishedAt = '2026-10-01' }
+            )
+            $m = Get-CopypartyReadmeMeta
+            $m.Version | Should -Be 'v1.20.26'
+            $m.Released | Should -Be '2026-10-01'
+            $m.Source | Should -Be ($script:CopypartyTagUrlBase + 'v1.20.26')
+            $m.Note | Should -Be ''
+        }
+
+        It 'marks a partial copyparty set' {
+            Reset-State
+            $script:CopypartyRows = @([pscustomobject]@{ FileName = $script:FileCopypartyExe; Tag = 'v1.20.26'; PublishedAt = '2026-10-01' })
+            $m = Get-CopypartyReadmeMeta
+            $m.Version | Should -Be 'v1.20.26'
+            $m.Note | Should -Match ([regex]::Escape($script:FileCopypartySfx))
+        }
+
+        It 'marks an unresolved copyparty set' {
+            Reset-State
+            $m = Get-CopypartyReadmeMeta
+            $m.Version | Should -Be 'not verified this run'
+            $m.Note | Should -Match 'No verified'
+        }
+
+        It 'labels staged, resolved, and unresolved Firefox states' {
+            Reset-State
+            $script:FirefoxRelease = [pscustomobject]@{ Version = '153.8.0esr'; Released = '2026-11-10'; Url = 'https://example.invalid/x'; Source = 'live' }
+            $m = Get-FirefoxReadmeMeta
+            $m.Version | Should -Be '153.8.0esr'
+            $m.Released | Should -Be '2026-11-10'
+            $m.Note | Should -Be ''
+            $script:FirefoxRelease = $null
+            $script:FirefoxResolved = [pscustomobject]@{ Version = '153.8.0esr'; Released = '2026-11-10'; Url = 'https://example.invalid/x'; Source = 'live' }
+            $m = Get-FirefoxReadmeMeta
+            $m.Version | Should -Be '153.8.0esr'
+            $m.Note | Should -Match 'not staged'
+            $script:FirefoxResolved = $null
+            $m = Get-FirefoxReadmeMeta
+            $m.Version | Should -Be 'unresolved this run'
+        }
+
+        It 'formats stamps invariantly under a non-invariant culture' {
+            $old = [Threading.Thread]::CurrentThread.CurrentCulture
+            try {
+                [Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo('th-TH')
+                (Get-UtcStamp) | Should -Match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$'
+            } finally {
+                [Threading.Thread]::CurrentThread.CurrentCulture = $old
+            }
+        }
+
+        It 'adds a header to every topic sheet' {
+            Reset-State
+            $stamp = '2026-11-16 00:00 UTC'
+            $script:CopypartyRows = @([pscustomobject]@{ FileName = $script:FileCopypartySfx; Tag = 'v1.20.26'; PublishedAt = '2026-10-01' })
+            $script:FirefoxRelease = [pscustomobject]@{ Version = '153.8.0esr'; Released = '2026-11-10'; Url = 'https://example.invalid/x'; Source = 'live' }
+            $texts = @(
+                (Get-CopypartyReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-PythonReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-SevenZipReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-PuttyReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-WinScpReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-CyberduckReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-TabbyReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-ImgBurnReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp),
+                (Get-FirefoxReadmeText -RunStartedUtc $stamp -WrittenUtc $stamp)
+            )
+            foreach ($t in $texts) {
+                $t | Should -Match 'Run started:'
+                $t | Should -Match 'Written:'
+                $t | Should -Match 'Package:'
+                $t | Should -Match 'Version:'
+                $t | Should -Match 'Released:'
+                $t | Should -Match 'Source:'
+                $t | Should -Match 'Trust:'
+                $t | Should -Match 'Hashes:'
+                $t | Should -Not -Match '\{HEADER\}'
+            }
+        }
+    }
+
     Context 'elevation' {
         It 'never invokes sudo.exe without -Elevate' {
             Reset-State
@@ -1613,6 +1743,8 @@ Describe 'Prepare-PcRecovery.ps1' {
                     Hash = ('ab' * 32)
                     HashKind = 'GitHub digest'
                     Released = 'v1.20.26 (GitHub asset digest, sha256)'
+                    Tag = 'v1.20.26'
+                    PublishedAt = '2026-10-01'
                     SizeNote = 'About 13 MB.'
                     About = 'Portable file server for Windows.'
                     Check = 'GitHub API digest.'
@@ -1643,7 +1775,9 @@ Describe 'Prepare-PcRecovery.ps1' {
                     Hash = $ffHash
                     Source = 'fallback'
                     OutFile = $ffFile
+                    Released = '2026-11-10'
                 }
+                $script:FirefoxResolved = $script:FirefoxRelease
                 return $true
             }
             Mock Get-WindowsIsoViaFido { return $true }
@@ -1744,6 +1878,32 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match 'v1\.20\.26'
             $isosText | Should -Match 'copyparty \(copyparty-sfx\.py, not verified this run\)'
             $isosText | Should -Match 'SHA-256 \(on disk at write time\)'
+            $rootRun = [regex]::Match($rootText, 'Run started: (.+)').Groups[1].Value
+            $isosRun = [regex]::Match($isosText, 'Run started: (.+)').Groups[1].Value
+            $rootRun | Should -Not -BeNullOrEmpty
+            $isosRun | Should -Be $rootRun
+            $baseReadmes = @(
+                (Join-Path $root 'README.txt'),
+                (Join-Path (Join-Path $root 'isos') 'README.txt')
+            )
+            $topicReadmes = @(Get-ChildItem -LiteralPath (Join-Path (Join-Path $root 'isos') '04-etc') -Directory | ForEach-Object { Join-Path $_.FullName 'README.txt' })
+            foreach ($path in @($baseReadmes + $topicReadmes)) {
+                $text = [IO.File]::ReadAllText($path)
+                $text | Should -Match 'Run started:'
+                $text | Should -Not -Match '\{HEADER\}'
+                $bytes = [IO.File]::ReadAllBytes($path)
+                ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) | Should -BeFalse
+                (@($bytes | Where-Object { $_ -gt 127 }).Count) | Should -Be 0
+            }
+            foreach ($path in $topicReadmes) {
+                $text = [IO.File]::ReadAllText($path)
+                $text | Should -Match 'Package:'
+                $text | Should -Match 'Version:'
+                $text | Should -Match 'Released:'
+                $text | Should -Match 'Source:'
+                $text | Should -Match 'Trust:'
+                $text | Should -Match 'Hashes:'
+            }
         }
 
         It 'fetches the checksum sidecar next to the ISO and lists it' {

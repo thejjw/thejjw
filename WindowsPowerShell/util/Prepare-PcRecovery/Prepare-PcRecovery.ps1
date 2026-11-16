@@ -147,6 +147,7 @@ $script:FileTabbyRpm = 'tabby-' + $script:TabbyVersion + '-linux-x64.rpm'
 # shipped. Hashes are pinned locally; the installer also matches the
 # CRC32/MD5/SHA-1 published on imgburn.com.
 $script:ImgBurnVersion = '2.5.8.0'
+$script:ImgBurnReleased = '2013-06-16'
 $script:ImgBurnUrl = 'https://download.imgburn.com/SetupImgBurn_' + $script:ImgBurnVersion + '.exe'
 $script:FileImgBurnInstaller = 'SetupImgBurn_' + $script:ImgBurnVersion + '.exe'
 $script:ImgBurnInstallerSha256 = '49aa06eaffe431f05687109fee25f66781abbe1108f3f8ca78c79bdec8753420'
@@ -169,6 +170,8 @@ $script:FirefoxVersionsUrl = 'https://product-details.mozilla.org/1.0/firefox_ve
 $script:FirefoxReleasesUrl = 'https://ftp.mozilla.org/pub/firefox/releases/'
 $script:FirefoxFallbackVersion = '153.7.0esr'
 $script:FirefoxFallbackSha256 = '3d6fabd249aa1338c0667991fb73891fce941d7dc35ba278da24074874c67508'
+$script:FirefoxFallbackReleased = '2026-11-10'
+$script:FirefoxJsonUrl = 'https://product-details.mozilla.org/1.0/firefox.json'
 $script:FileVentoyExe = 'Ventoy2Disk.exe'
 $script:FileFido = 'Fido.ps1'
 $script:FileRufusPatternNote = 'rufus-.*p\.exe'
@@ -192,6 +195,7 @@ $script:VentoyReleasesUrl = 'https://github.com/ventoy/Ventoy/releases/latest'
 $script:Tiny11BuilderReleasesUrl = 'https://github.com/ntdevlabs/tiny11builder/releases/latest'
 $script:CopypartyApiUrl = 'https://api.github.com/repos/9001/copyparty/releases/latest'
 $script:CopypartyReleasesUrl = 'https://github.com/9001/copyparty/releases/latest'
+$script:CopypartyTagUrlBase = 'https://github.com/9001/copyparty/releases/tag/'
 # Manual-retry text for the Tiny11 build. MakerHintManual takes the official
 # ISO file name (or a placeholder) through -f.
 $script:MakerHintAdmin = 'Run Enable-WindowsSudo in an elevated shell, then re-run with -Elevate; or mount the official ISO, save ' + $script:Tiny11AnswerUrl + ' as autounattend.xml next to tiny11maker.ps1, run it with -ISO <letter> -SCRATCH <letter> from an elevated shell, then move tiny11.iso into isos\03-Installers\tiny11\.'
@@ -201,6 +205,7 @@ $script:Failures = @()
 $script:Results = @()
 $script:UseSudo = $false
 $script:FirefoxRelease = $null
+$script:FirefoxResolved = $null
 
 # -----------------------------------------------------------------------------
 # Maintained text blocks. These readmes are written into the download tree
@@ -211,12 +216,190 @@ $script:FirefoxRelease = $null
 # no BOM.
 # -----------------------------------------------------------------------------
 
+
+# Returns the current UTC time as the shared readme stamp.
+function Get-UtcStamp {
+    return [DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) + ' UTC'
+}
+
+# Builds the fixed metadata header used by the 04-etc topic sheets.
+function Get-ReadmeHeader {
+    param(
+        [string]$RunStartedUtc,
+        [string]$WrittenUtc,
+        [string]$Package,
+        [string]$Version,
+        [string]$Released,
+        [string]$Source,
+        [string]$Trust,
+        [string]$Note = ''
+    )
+    if (-not $RunStartedUtc -or -not $WrittenUtc) { throw 'Readme header requires RunStartedUtc and WrittenUtc.' }
+    if (-not $Package -or -not $Version -or -not $Released -or -not $Source -or -not $Trust) {
+        throw 'Readme header requires Package, Version, Released, Source, and Trust.'
+    }
+    $lines = @(
+        "Run started: $RunStartedUtc",
+        "Written:     $WrittenUtc",
+        "Package:     $Package",
+        "Version:     $Version",
+        "Released:    $Released",
+        "Source:      $Source",
+        "Trust:       $Trust",
+        'Hashes:      ..\..\README.txt'
+    )
+    if ($Note) { $lines += "Note:        $Note" }
+    $lines += ''
+    $lines += 'Re-runs replace this file.'
+    return ($lines -join "`r`n")
+}
+
+# Reads the short release date from the first catalog row in a category.
+function Find-CatalogReleasedDate([string]$Category) {
+    $row = Get-RecoveryCatalog | Where-Object { $_.Category -eq $Category } | Select-Object -First 1
+    if (-not $row -or -not $row.Released) { return '' }
+    if ($row.Released -match '(?i)Version\s+[^,]+,\s*([A-Za-z]+ \d{4})') { return $Matches[1] }
+    return ''
+}
+
+# Returns the metadata for a pinned 04-etc topic.
+function Get-TopicReadmeMeta([string]$Topic) {
+    switch ($Topic) {
+        'python' {
+            $released = Find-CatalogReleasedDate '04-etc\python'
+            if (-not $released) { $released = 'see catalog' }
+            [pscustomobject]@{ Package = 'Python for Windows'; Version = $script:PyVersion; Released = $released; Source = $script:PyUrlBase; Trust = 'pinned SHA-256 (prep script); see INTEGRITY'; Note = '' }
+        }
+        '7zip' {
+            $released = Find-CatalogReleasedDate '04-etc\7zip'
+            if (-not $released) { $released = 'see catalog' }
+            [pscustomobject]@{ Package = '7-Zip for Windows'; Version = $script:SevenZipVersion; Released = $released; Source = ('https://github.com/ip7z/7zip/releases/tag/' + $script:SevenZipVersion); Trust = 'GitHub asset SHA-256; see INTEGRITY'; Note = '' }
+        }
+        'putty' {
+            $released = Find-CatalogReleasedDate '04-etc\putty'
+            if (-not $released) { $released = 'see catalog' }
+            [pscustomobject]@{ Package = 'PuTTY for Windows'; Version = $script:PuttyVersion; Released = $released; Source = $script:PuttyUrlBase; Trust = 'official sha256sums; see INTEGRITY'; Note = '' }
+        }
+        'winscp' {
+            $released = Find-CatalogReleasedDate '04-etc\winscp'
+            if (-not $released) { $released = 'see catalog' }
+            [pscustomobject]@{ Package = 'WinSCP'; Version = $script:WinScpVersion; Released = $released; Source = $script:WinScpUrlBase; Trust = 'release ReadMe SHA-256; see INTEGRITY'; Note = '' }
+        }
+        'cyberduck' {
+            $released = Find-CatalogReleasedDate '04-etc\cyberduck'
+            if (-not $released) { $released = 'see catalog' }
+            [pscustomobject]@{ Package = 'Cyberduck and duck'; Version = $script:CyberduckVersion; Released = $released; Source = $script:CyberduckDownloadPage; Trust = 'cyberduck.io pin + GitHub asset digests; see INTEGRITY'; Note = '' }
+        }
+        'tabby' {
+            $released = Find-CatalogReleasedDate '04-etc\tabby'
+            if (-not $released) { $released = 'see catalog' }
+            [pscustomobject]@{ Package = 'Tabby'; Version = $script:TabbyVersion; Released = $released; Source = $script:TabbyUrlBase; Trust = 'GitHub asset SHA-256; see INTEGRITY'; Note = '' }
+        }
+        'imgburn' {
+            [pscustomobject]@{ Package = 'ImgBurn'; Version = $script:ImgBurnVersion; Released = $script:ImgBurnReleased; Source = $script:ImgBurnUrl; Trust = 'payload SHA-256 pin; see INTEGRITY'; Note = '' }
+        }
+        default { throw "Unknown readme topic: $Topic" }
+    }
+}
+
+# Parses a GitHub published_at value into yyyy-MM-dd, accepting string or datetime.
+function Format-ReleaseDate($Value) {
+    if ($null -eq $Value -or "$Value" -eq '') { return '' }
+    if ($Value -is [datetime]) {
+        return $Value.ToUniversalTime().ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    $parsed = [datetime]::MinValue
+    $styles = [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal
+    if ([datetime]::TryParse([string]$Value, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$parsed)) {
+        return $parsed.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    return [string]$Value
+}
+
+# Builds copyparty metadata from the verified rows, not the lookup tag.
+function Get-CopypartyReadmeMeta {
+    $rows = @($script:CopypartyRows)
+    $tag = ''
+    $published = ''
+    if ($rows.Count -gt 0) {
+        $tag = [string]$rows[0].Tag
+        $published = Format-ReleaseDate $rows[0].PublishedAt
+    }
+    if (-not $tag) {
+        return [pscustomobject]@{
+            Package = 'copyparty'
+            Version = 'not verified this run'
+            Released = 'see isos\README.txt'
+            Source = $script:CopypartyReleasesUrl
+            Trust = 'GitHub asset digest; see INTEGRITY'
+            Note = 'No verified copyparty files this run; see the failure above.'
+        }
+    }
+    $missing = @()
+    foreach ($name in @($script:FileCopypartySfx, $script:FileCopypartyExe)) {
+        $verified = @($rows | Where-Object { $_.FileName -eq $name })
+        if ($verified.Count -eq 0) { $missing += $name }
+    }
+    $note = ''
+    if ($missing.Count -gt 0) { $note = 'not verified this run: ' + ($missing -join ', ') }
+    if (-not $published) { $published = 'see GitHub release' }
+    return [pscustomobject]@{
+        Package = 'copyparty'
+        Version = $tag
+        Released = $published
+        Source = $script:CopypartyTagUrlBase + $tag
+        Trust = 'GitHub asset digest; see INTEGRITY'
+        Note = $note
+    }
+}
+
+# Builds Firefox metadata for staged, resolved-but-not-staged, or unresolved.
+function Get-FirefoxReadmeMeta {
+    $staged = $script:FirefoxRelease
+    $resolved = $script:FirefoxResolved
+    if ($staged) {
+        $version = $staged.Version
+        $released = $staged.Released
+        $source = $staged.Url
+        $note = ''
+        if ($staged.Source -eq 'fallback') { $note = 'pinned fallback; live lookup failed' }
+    } elseif ($resolved) {
+        $version = $resolved.Version
+        $released = $resolved.Released
+        $source = $resolved.Url
+        $note = 'resolved but not staged this run; see failure above'
+        if ($resolved.Source -eq 'fallback') { $note = 'pinned fallback; live lookup failed; ' + $note }
+    } else {
+        $version = 'unresolved this run'
+        $released = 'see failure above'
+        $source = $script:FirefoxReleasesUrl
+        $note = 'no Firefox ESR version resolved this run'
+    }
+    if (-not $released) { $released = 'see Mozilla release notes' }
+    return [pscustomobject]@{
+        Package = 'Firefox ESR'
+        Version = $version
+        Released = $released
+        Source = $source
+        Trust = 'Mozilla SHA256SUMS; see INTEGRITY'
+        Note = $note
+    }
+}
+
+# Prepends the standard header to a topic template.
+function Add-TopicReadmeHeader([string]$Text, $Meta, [string]$RunStartedUtc, [string]$WrittenUtc) {
+    $header = Get-ReadmeHeader -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc -Package $Meta.Package -Version $Meta.Version -Released $Meta.Released -Source $Meta.Source -Trust $Meta.Trust -Note $Meta.Note
+    return $Text.Replace('{HEADER}', $header)
+}
+
 # What the destination root is and how to use it.
+
 function Get-RootReadmeText {
-    param([string]$WrittenUtc)
+    param([string]$WrittenUtc, [string]$RunStartedUtc = '')
     @"
 PC RECOVERY USB - download tree
 ================================
+Run started: $RunStartedUtc
 This file was written $WrittenUtc.
 Built by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1. Re-running the script is safe: files
 that already match their expected hash are skipped, interrupted downloads
@@ -275,10 +458,11 @@ FIREFOX ESR (OFFLINE)
 # compare with Get-FileHash before trusting a file, and re-check against
 # the upstream source (the Re-verify line) when freshness matters.
 function Get-IsosReadmeTemplate {
-    param([string]$WrittenUtc)
+    param([string]$WrittenUtc, [string]$RunStartedUtc = '')
     @"
 RECOVERY ISO SET
 ================
+Run started: $RunStartedUtc
 Grouped for a Ventoy USB: copy these files onto the Ventoy drive and boot.
 This file was written $WrittenUtc.
 Each entry below names the file, what it is, and the SHA-256 recorded when
@@ -310,10 +494,11 @@ NOTES
 # explicit bind address, read-only source, separate writable folder, and the
 # index moved off read-only media.
 function Get-CopypartyReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
     $text = @'
 COPYPARTY - portable file server
 ================================
-This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+{HEADER}
 
 FILES
   copyparty-sfx.py  Linux / macOS. Needs Python 2 or 3 (live images usually
@@ -358,17 +543,18 @@ NOTES
   - .hist holds the index and thumbnails; --hist keeps it off the USB.
   - Keep the USB mount read-only in -v unless you intend to write to it.
 '@
-    return $text.Replace('PYEMBED', $script:FilePythonEmbed)
+    return Add-TopicReadmeHeader -Text $text.Replace('PYEMBED', $script:FilePythonEmbed) -Meta (Get-CopypartyReadmeMeta) -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # Offline Python sheet for isos\04-etc\python\. Filenames come from the shared
 # constants so a version bump is one edit point; the commands are the safe
 # per-user form (no Store alias, no file associations, no shortcuts).
 function Get-PythonReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
     $text = @'
 PYTHON FOR WINDOWS (offline)
 ============================
-This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+{HEADER}
 
 FILES
   PYINST          Full installer for Windows 10/11 x64.
@@ -417,17 +603,18 @@ NOTES
     of scope. Python 3.15 supports Windows 10 and newer; use 3.12 for 8.1.
   - WinPE is not supported (untested).
 '@
-    return $text.Replace('PYINST', $script:FilePythonInstaller).Replace('PYEMBED', $script:FilePythonEmbed).Replace('PYVER', $script:PyVersion)
+    return Add-TopicReadmeHeader -Text $text.Replace('PYINST', $script:FilePythonInstaller).Replace('PYEMBED', $script:FilePythonEmbed).Replace('PYVER', $script:PyVersion) -Meta (Get-TopicReadmeMeta -Topic 'python') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # Offline 7-Zip sheet for isos\04-etc\7zip\. Filenames come from the shared
 # constants so a version bump is one edit point; the install form needs admin,
 # so the portable 7za path is documented next to it.
 function Get-SevenZipReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
     $text = @'
 7-ZIP FOR WINDOWS (offline)
 ===========================
-This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+{HEADER}
 
 FILES
   7ZINST    x64 installer, about 1.6 MB. Installs and elevates itself.
@@ -475,17 +662,18 @@ NOTES
   - winget alternative (needs App Installer and network):
     winget install --id 7zip.7zip -e --accept-package-agreements --accept-source-agreements
 '@
-    return $text.Replace('7ZINST', $script:FileSevenZipInstaller).Replace('7ZEXTRA', $script:FileSevenZipExtra).Replace('7ZR', $script:FileSevenZipBootstrap).Replace('7ZVER', $script:SevenZipVersion)
+    return Add-TopicReadmeHeader -Text $text.Replace('7ZINST', $script:FileSevenZipInstaller).Replace('7ZEXTRA', $script:FileSevenZipExtra).Replace('7ZR', $script:FileSevenZipBootstrap).Replace('7ZVER', $script:SevenZipVersion) -Meta (Get-TopicReadmeMeta -Topic '7zip') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # Offline PuTTY sheet for isos\04-etc\putty\. One portable zip keeps the tools
 # together with no install, PATH, or Start-menu changes; PuTTY still writes its
 # own HKCU settings and seed file, and -cleanup removes them.
 function Get-PuttyReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
     $text = @'
 PUTTY FOR WINDOWS (offline)
 ===========================
-This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+{HEADER}
 
 FILES
   PUTTYZIP   portable bundle, about 3.9 MB; all tools, no installer.
@@ -535,17 +723,18 @@ NOTES
     PuTTY stays the terminal, serial, and key tool.
 
 '@
-    return $text.Replace('PUTTYSUMS', $script:FilePuttySums).Replace('PUTTYZIP', $script:FilePuttyZip)
+    return Add-TopicReadmeHeader -Text $text.Replace('PUTTYSUMS', $script:FilePuttySums).Replace('PUTTYZIP', $script:FilePuttyZip) -Meta (Get-TopicReadmeMeta -Topic 'putty') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # Offline WinSCP sheet for isos\04-etc\winscp\. Portable GUI plus scripting for
 # SFTP/SCP/FTP/FTPS/WebDAV/S3; no install, and the INI keeps settings on the
 # stick instead of the host registry.
 function Get-WinScpReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
     $text = @'
 WINSCP FOR WINDOWS (offline)
 ============================
-This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+{HEADER}
 
 FILES
   WINSZIP   portable package, about 8.4 MB; extracts to about 20 MB.
@@ -610,17 +799,18 @@ NOTES
     zip stays in place, so delete the previous one.
 
 '@
-    return $text.Replace('WINSZIP', $script:FileWinScpPortable).Replace('WINSVER', $script:WinScpVersion)
+    return Add-TopicReadmeHeader -Text $text.Replace('WINSZIP', $script:FileWinScpPortable).Replace('WINSVER', $script:WinScpVersion) -Meta (Get-TopicReadmeMeta -Topic 'winscp') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # Offline Cyberduck sheet for isos\04-etc\cyberduck\. Windows needs an installer
 # (no portable build); macOS builds and the Windows/macOS duck CLI exist
 # upstream but are not stored here; the Linux x86_64 deb/rpm packages are.
 function Get-CyberduckReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
     $text = @'
 CYBERDUCK AND DUCK (offline)
 ============================
-This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+{HEADER}
 
 FILES
   CYBERINSTALLER   Windows x64 GUI installer, about 88 MB.
@@ -687,16 +877,17 @@ NOTES
     duck-*.rpm stay in place; delete the previous ones.
 
 '@
-    return $text.Replace('CYBERINSTALLER', $script:FileCyberduckInstaller).Replace('CYBERDEB', $script:FileCyberduckDuck).Replace('CYBERRPM', $script:FileCyberduckDuckRpm).Replace('CYBERPAGE', $script:CyberduckDownloadPage)
+    return Add-TopicReadmeHeader -Text $text.Replace('CYBERINSTALLER', $script:FileCyberduckInstaller).Replace('CYBERDEB', $script:FileCyberduckDuck).Replace('CYBERRPM', $script:FileCyberduckDuckRpm).Replace('CYBERPAGE', $script:CyberduckDownloadPage) -Meta (Get-TopicReadmeMeta -Topic 'cyberduck') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # Offline Tabby sheet for isos\04-etc\tabby\. Windows portable zip plus Linux
 # deb/rpm; the Linux tarball and AppImage are deliberately not stored.
 function Get-TabbyReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
     $text = @'
 TABBY TERMINAL (offline)
 ========================
-This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+{HEADER}
 
 FILES
   TABBYZIP   Windows x64 portable zip, about 177 MB; extracts to about 481 MB.
@@ -769,16 +960,17 @@ NOTES
     previous ones.
 
 '@
-    return $text.Replace('TABBYZIP', $script:FileTabbyZip).Replace('TABBYDEB', $script:FileTabbyDeb).Replace('TABBYRPM', $script:FileTabbyRpm)
+    return Add-TopicReadmeHeader -Text $text.Replace('TABBYZIP', $script:FileTabbyZip).Replace('TABBYDEB', $script:FileTabbyDeb).Replace('TABBYRPM', $script:FileTabbyRpm) -Meta (Get-TopicReadmeMeta -Topic 'tabby') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # Portable ImgBurn sheet for isos\04-etc\imgburn\. Placeholders keep the
 # version, payload file names, and hash in one edit point.
 function Get-ImgBurnReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
     $text = @'
 IMGBURN (PORTABLE)
 ==================
-This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+{HEADER}
 
 FILES
   bin/{IBEXE}             Portable disc burner/imager, version {IBVER}.
@@ -830,16 +1022,17 @@ NOTES
   - Windows-only; WinPE is untested. x86 runs on x64 and on Windows 11 ARM
     through emulation.
 '@
-    return $text.Replace('{IBVER}', $script:ImgBurnVersion).Replace('{IBEXE}', $script:FileImgBurnExe).Replace('{IBINST}', $script:FileImgBurnInstaller).Replace('{IBLAUNCH}', $script:FileImgBurnLauncher).Replace('{IBINI}', $script:FileImgBurnIni).Replace('{IBHASH}', $script:ImgBurnPayload[$script:FileImgBurnExe])
+    return Add-TopicReadmeHeader -Text $text.Replace('{IBVER}', $script:ImgBurnVersion).Replace('{IBEXE}', $script:FileImgBurnExe).Replace('{IBINST}', $script:FileImgBurnInstaller).Replace('{IBLAUNCH}', $script:FileImgBurnLauncher).Replace('{IBINI}', $script:FileImgBurnIni).Replace('{IBHASH}', $script:ImgBurnPayload[$script:FileImgBurnExe]) -Meta (Get-TopicReadmeMeta -Topic 'imgburn') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # Offline Firefox ESR sheet for isos\04-etc\firefox\. The live flow resolves
 # the version; FBVER is only the fallback pinned in the script.
 function Get-FirefoxReadmeText {
+    param([string]$RunStartedUtc, [string]$WrittenUtc)
     $text = @'
 FIREFOX ESR (OFFLINE)
 =====================
-This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+{HEADER}
 
 FILES
   Firefox Setup <version>.exe  en-US x64 ESR installer, about 86 MB. The
@@ -900,7 +1093,7 @@ NOTES
   - The MSI package exists upstream but is not stored here; this folder keeps
     the EXE full installer for a simple double-click or /S deployment.
 '@
-    return $text.Replace('FBVER', $script:FirefoxFallbackVersion)
+    return Add-TopicReadmeHeader -Text $text.Replace('FBVER', $script:FirefoxFallbackVersion) -Meta (Get-FirefoxReadmeMeta) -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
 # -----------------------------------------------------------------------------
@@ -1606,6 +1799,7 @@ function Save-CopypartyTools {
         return $false
     }
     $tag = [string]$release.tag_name
+    $publishedAt = Format-ReleaseDate $release.published_at
     if (-not $tag) {
         Write-Failure -Name 'copyparty release lookup' -Detail 'Release has no tag name.' -Manual $manual
         return $false
@@ -1758,6 +1952,8 @@ function Save-CopypartyTools {
                 Hash = $hash
                 HashKind = 'GitHub digest'
                 Released = "$tag (GitHub asset digest, sha256)"
+                Tag = $tag
+                PublishedAt = $publishedAt
                 SizeNote = "About $sizeMb MB."
                 About = $about
                 Check = "GitHub API releases/tags/$tag digest field, or the release page."
@@ -1969,7 +2165,21 @@ function New-FirefoxFallbackRelease {
         ChecksumPath = 'win64/en-US/' + $fileName
         Source = 'fallback'
         FallbackHash = $script:FirefoxFallbackSha256
+        Released = $script:FirefoxFallbackReleased
     }
+}
+
+# Looks up the exact per-release date for an ESR version. Returns '' when the
+# release catalog is unavailable or has no entry.
+function Get-FirefoxReleaseDate([string]$Version) {
+    try {
+        $data = Invoke-RestMethod -Uri $script:FirefoxJsonUrl -Headers @{ 'User-Agent' = 'pc-recovery' } -UseBasicParsing
+        $entry = $data.releases.('firefox-' + $Version)
+        if ($entry -and $entry.date) { return [string]$entry.date }
+    } catch {
+        Write-Detail "Firefox release date lookup failed: $($_.Exception.Message)"
+    }
+    return ''
 }
 
 # Resolves the current Firefox ESR win64/en-US installer from Mozilla's
@@ -1996,6 +2206,7 @@ function Get-FirefoxEsrRelease {
         ChecksumPath = 'win64/en-US/' + $fileName
         Source = 'live'
         FallbackHash = ''
+        Released = (Get-FirefoxReleaseDate -Version $version)
     }
 }
 
@@ -2032,6 +2243,7 @@ function Save-FirefoxEsr {
         $hash = $release.FallbackHash
         Write-Warning "Firefox ESR live lookup failed; using the pinned $($release.Version) fallback. Re-run online for the current ESR."
     }
+    $script:FirefoxResolved = $release
     $outFile = Join-Path $dir $release.FileName
     $label = 'Firefox ESR ' + $release.Version
     if ($release.Source -eq 'fallback') { $label += ' (pinned fallback)' }
@@ -2061,6 +2273,7 @@ function Save-FirefoxEsr {
         Hash = $hash.ToLowerInvariant()
         Source = $release.Source
         OutFile = $outFile
+        Released = $release.Released
     }
     Write-Detail "Firefox ESR $($release.Version) staged ($($release.Source))."
     return $true
@@ -2434,10 +2647,13 @@ function Invoke-PreparePcRecovery {
             return 0
         }
         Write-Section "Preparing recovery files in $Root"
+        $runStartedUtc = Get-UtcStamp
+        $writtenUtc = Get-UtcStamp
         $script:VerifiedHashes = @{}
         $script:Sidecars = @{}
         $script:CopypartyRows = @()
         $script:FirefoxRelease = $null
+        $script:FirefoxResolved = $null
         Initialize-ElevationState -Elevate:$Elevate
         Initialize-Directory -Path $Root
         Initialize-Directory -Path (Join-Path $Root $script:DirTools)
@@ -2456,16 +2672,14 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) 'bin')
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox)
-        Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText)
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython) $script:FileReadme) -Text (Get-PythonReadmeText)
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirSevenZip) $script:FileReadme) -Text (Get-SevenZipReadmeText)
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPutty) $script:FileReadme) -Text (Get-PuttyReadmeText)
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirWinScp) $script:FileReadme) -Text (Get-WinScpReadmeText)
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck) $script:FileReadme) -Text (Get-CyberduckReadmeText)
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby) $script:FileReadme) -Text (Get-TabbyReadmeText)
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) $script:FileReadme) -Text (Get-ImgBurnReadmeText)
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox) $script:FileReadme) -Text (Get-FirefoxReadmeText)
+        Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc $writtenUtc -RunStartedUtc $runStartedUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython) $script:FileReadme) -Text (Get-PythonReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirSevenZip) $script:FileReadme) -Text (Get-SevenZipReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPutty) $script:FileReadme) -Text (Get-PuttyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirWinScp) $script:FileReadme) -Text (Get-WinScpReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck) $script:FileReadme) -Text (Get-CyberduckReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby) $script:FileReadme) -Text (Get-TabbyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) $script:FileReadme) -Text (Get-ImgBurnReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null
@@ -2478,6 +2692,7 @@ function Invoke-PreparePcRecovery {
         Invoke-SafeStep -Name 'copyparty' -Manual @("Open $($script:CopypartyReleasesUrl) and place $($script:FileCopypartySfx) and $($script:FileCopypartyExe) into isos\04-etc\copyparty\.") -Body {
             Save-CopypartyTools -Root $Root | Out-Null
         }
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc (Get-UtcStamp))
         Write-Step 'Catalog ISOs (netboot first)'
         Save-CatalogIsos -Root $Root -NetbootArch $NetbootArch -MintHwe $MintHwe
         Write-Step 'ImgBurn portable (04-etc)'
@@ -2490,6 +2705,7 @@ function Invoke-PreparePcRecovery {
         Invoke-SafeStep -Name 'Firefox ESR' -Manual @($firefoxHint) -Body {
             Save-FirefoxEsr -Root $Root | Out-Null
         }
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox) $script:FileReadme) -Text (Get-FirefoxReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc (Get-UtcStamp))
         Write-Step 'Windows 11 ISO via Fido'
         Invoke-SafeStep -Name 'Windows 11 ISO' -Manual @('Open ' + $script:MsDownloadPage + ' and place the Windows ISO (' + $script:WinIsoNaming + ') into isos\03-Installers\.') -Body {
             Get-WindowsIsoViaFido -Root $Root | Out-Null
@@ -2531,7 +2747,7 @@ function Invoke-PreparePcRecovery {
                 Url = $script:ImgBurnUrl
                 Hash = [string]$script:ImgBurnPayload[$script:FileImgBurnExe]
                 HashKind = 'Pinned'
-                Released = ('Version ' + $script:ImgBurnVersion + ', June 2013.')
+                Released = ('Version ' + $script:ImgBurnVersion + ', ' + $script:ImgBurnReleased + '.')
                 SizeNote = 'About 2.6 MB.'
                 About = 'Portable optical media burner and imager: ISO to CD/DVD/BD, disc to image, verify.'
                 Check = 'Official imgburn.com download plus the pinned payload hash.'
@@ -2555,7 +2771,8 @@ function Invoke-PreparePcRecovery {
         } else {
             $isoBlocks += '== Tiny11 ISO (not present) ==' + "`r`n" + 'Build with -Elevate once the official ISO is present.'
         }
-        Write-ReadmeFile -Path (Join-Path (Join-Path $Root $script:DirIsos) $script:FileReadme) -Text ((Get-IsosReadmeTemplate -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC')) -f ($isoBlocks -join "`r`n`r`n"))
+        $isosWrittenUtc = Get-UtcStamp
+        Write-ReadmeFile -Path (Join-Path (Join-Path $Root $script:DirIsos) $script:FileReadme) -Text ((Get-IsosReadmeTemplate -WrittenUtc $isosWrittenUtc -RunStartedUtc $runStartedUtc) -f ($isoBlocks -join "`r`n`r`n"))
         return (Write-Summary)
     } finally {
         [Console]::OutputEncoding = $savedEncoding
