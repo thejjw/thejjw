@@ -329,7 +329,7 @@ function Get-CopypartyReadmeMeta {
         return [pscustomobject]@{
             Package = 'copyparty'
             Version = 'not verified this run'
-            Released = 'see isos\README.txt'
+            Released = 'unknown (not verified this run)'
             Source = $script:CopypartyReleasesUrl
             Trust = 'GitHub asset digest; see INTEGRITY'
             Note = 'No copyparty files verified this run; see ..\..\README.txt for files on disk, or re-run online.'

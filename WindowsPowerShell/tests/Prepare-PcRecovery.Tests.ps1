@@ -1524,6 +1524,8 @@ Describe 'Prepare-PcRecovery.ps1' {
                 $m.Released | Should -Not -BeNullOrEmpty
                 $m.Source | Should -Not -BeNullOrEmpty
                 $m.Trust | Should -Not -BeNullOrEmpty
+                $m.Released | Should -Not -Be 'see catalog'
+                $m.Released | Should -Match '^[A-Za-z]+ \d{4}$|^\d{4}-\d{2}-\d{2}$'
             }
             { Get-TopicReadmeMeta -Topic 'nope' } | Should -Throw
         }
@@ -1566,6 +1568,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Reset-State
             $m = Get-CopypartyReadmeMeta
             $m.Version | Should -Be 'not verified this run'
+            $m.Released | Should -Be 'unknown (not verified this run)'
             $m.Note | Should -Match 'No copyparty files verified'
         }
 
@@ -1606,6 +1609,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             try {
                 [Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo('th-TH')
                 (Get-UtcStamp) | Should -Match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$'
+                (Get-UtcStamp).Substring(0, 4) | Should -Be ([DateTime]::UtcNow.ToString('yyyy', [Globalization.CultureInfo]::InvariantCulture))
             } finally {
                 [Threading.Thread]::CurrentThread.CurrentCulture = $old
             }
