@@ -2074,7 +2074,12 @@ function Get-FirefoxIsosBlock([string]$Root) {
             About = 'Offline Firefox ESR browser for Windows 11/Tiny11 where Edge is removed.'
             Check = 'Mozilla release SHA256SUMS; Authenticode Mozilla Corporation.'
         }
-        return (Format-IsoReadmeEntry -Row $row -Root $Root)
+        $block = Format-IsoReadmeEntry -Row $row -Root $Root
+        $others = @(Get-ChildItem -LiteralPath $dir -Filter 'Firefox Setup *.exe' -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -ne $script:FirefoxRelease.OutFile } | Sort-Object LastWriteTime -Descending)
+        foreach ($file in $others) {
+            $block += "`r`n`r`n" + (Format-ManualIsoReadmeEntry -Title 'Firefox ESR (other installer, not verified this run)' -Path $file.FullName -Folder (Join-Path '04-etc' $script:DirFirefox) -Note 'Installer left in this folder by another run; not verified against Mozilla SHA256SUMS this run.' -Root $Root)
+        }
+        return $block
     }
     $existing = @(Get-ChildItem -LiteralPath $dir -Filter 'Firefox Setup *.exe' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
     if ($existing.Count -gt 0) {

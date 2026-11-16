@@ -1211,6 +1211,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             (Get-FirefoxEsrHash -ChecksumUrl 'https://example.invalid/SHA256SUMS' -ChecksumPath 'win64/en-US/Firefox Setup 153.8.0esr.exe') | Should -Be $script:liveHash
             Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'firefox' -NoNewline; return $true }
             Save-FirefoxEsr -Root $root | Should -BeTrue
+            Should -Invoke -CommandName Save-VerifiedFile -Times 1 -Exactly -ParameterFilter {
+                $ExpectedHash -eq $script:liveHash -and $Url -like '*153.8.0esr/win64/en-US/*'
+            }
             $script:FirefoxRelease.Version | Should -Be '153.8.0esr'
             $script:FirefoxRelease.Source | Should -Be 'live'
             $script:FirefoxRelease.Hash | Should -Be $script:liveHash
@@ -1226,6 +1229,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Invoke-WebText { 'deadbeef  win64/en-US/other.exe' }
             Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'firefox' -NoNewline; return $true }
             Save-FirefoxEsr -Root $root | Should -BeTrue
+            Should -Invoke -CommandName Save-VerifiedFile -Times 1 -Exactly -ParameterFilter {
+                $ExpectedHash -eq $script:FirefoxFallbackSha256 -and $Url -like '*153.7.0esr/win64/en-US/*'
+            }
             $script:FirefoxRelease.Source | Should -Be 'fallback'
             $script:FirefoxRelease.Version | Should -Be $script:FirefoxFallbackVersion
             $script:FirefoxRelease.Hash | Should -Be $script:FirefoxFallbackSha256
@@ -1238,6 +1244,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Invoke-RestMethod { throw 'offline' }
             Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'firefox' -NoNewline; return $true }
             Save-FirefoxEsr -Root $root | Should -BeTrue
+            Should -Invoke -CommandName Save-VerifiedFile -Times 1 -Exactly -ParameterFilter {
+                $ExpectedHash -eq $script:FirefoxFallbackSha256 -and $Url -like '*153.7.0esr/win64/en-US/*'
+            }
             $script:FirefoxRelease.Source | Should -Be 'fallback'
             $script:FirefoxRelease.Hash | Should -Be $script:FirefoxFallbackSha256
             $script:Failures.Count | Should -Be 0
@@ -1303,6 +1312,31 @@ Describe 'Prepare-PcRecovery.ps1' {
             $block = Get-FirefoxIsosBlock -Root $root
             $block | Should -Match 'resolved live'
             $block | Should -Not -Match 'pinned fallback'
+            $block | Should -Match 'SHA-256 \(verified this run\)'
+        }
+
+        It 'lists a leftover installer next to the verified one' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ff-block-leftover'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $verifiedFile = Join-Path $dir 'Firefox Setup 153.7.0esr.exe'
+            Set-Content -LiteralPath $verifiedFile -Value 'verified' -NoNewline
+            Set-Content -LiteralPath (Join-Path $dir 'Firefox Setup 153.8.0esr.exe') -Value 'leftover' -NoNewline
+            $hash = 'ef' * 32
+            $script:FirefoxRelease = [pscustomobject]@{
+                Version = '153.7.0esr'
+                FileName = 'Firefox Setup 153.7.0esr.exe'
+                Url = 'https://example.invalid/firefox.exe'
+                Hash = $hash
+                Source = 'live'
+                OutFile = $verifiedFile
+            }
+            $script:VerifiedHashes[$verifiedFile] = $hash
+            $block = Get-FirefoxIsosBlock -Root $root
+            $block | Should -Match 'Firefox Setup 153\.7\.0esr\.exe'
+            $block | Should -Match 'Firefox Setup 153\.8\.0esr\.exe'
+            $block | Should -Match 'other installer, not verified this run'
             $block | Should -Match 'SHA-256 \(verified this run\)'
         }
 
