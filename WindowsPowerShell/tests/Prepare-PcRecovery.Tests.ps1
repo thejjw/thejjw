@@ -1951,6 +1951,13 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match '04-etc\\firefox\\Firefox Setup 153\.7\.0esr\.exe'
             $isosText | Should -Match '04-etc\\fonts\\NotoSansMonoCJKkr-Regular\.otf'
             $isosText | Should -Match '04-etc\\fonts\\OFL\.txt'
+            $fontsDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'fonts'
+            $fontsText = [IO.File]::ReadAllText((Join-Path $fontsDir 'README.txt'))
+            $fontsText.Contains($script:FileFont) | Should -BeTrue
+            $fontsText | Should -Match 'Package:\s+Noto Sans Mono CJK KR'
+            $fontsText.Contains($script:FontSha256) | Should -BeTrue
+            $isosText.Contains('SHA-256 (verified this run): ' + $script:FontSha256) | Should -BeTrue
+            $isosText.Contains('SHA-256 (verified this run): ' + $script:FontLicenseSha256) | Should -BeTrue
             $isosText | Should -Match 'pinned fallback; live lookup failed'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-amd64\.exe'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-embed-amd64\.zip'
