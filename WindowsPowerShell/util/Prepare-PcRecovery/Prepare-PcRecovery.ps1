@@ -1947,17 +1947,19 @@ function Save-VerifiedFile {
 #      shared $script: version/hash/URL-base constant the row uses, plus
 #      Get-TopicReadmeMeta, readme examples, and tests that repeat the
 #      version. Search for dotted, dashed, and dotless forms (9.6.0,
-#      release-9-6-0, 1832, 7z2606) and for the old hash; tests may
-#      hard-code all of them.
+#      release-9-6-0, 1832, 2606), URL buckets such as /1800/, and the old
+#      hash; tests may hard-code all of them.
 #   3. Run Invoke-Pester .\tests\Prepare-PcRecovery.Tests.ps1.
 #   4. Run -WhatIf, then one real run. A second run must be all verified skips.
 # Audit 2026-11-16: all Pinned rows matched upstream. Clonezilla stable was
 # 3.3.3-37; 3.3.4-28 was testing at audit time, so re-check before pinning.
 # SourceForge sidecars use the /download URL and are best effort. A sidecar
 # that no longer contains the pinned hash is removed and reported so the row
-# gets re-pinned; a moving sidecar URL (Clonezilla stable/data, Mint
-# hwe/sha256sum.txt) is re-downloaded and warned on each selected run until
-# re-pinned.
+# gets re-pinned. A moving sidecar URL (e.g. Clonezilla stable/data, Mint
+# hwe/sha256sum.txt; Ubuntu and Rocky versioned paths also move on point/minor
+# releases) is re-downloaded and warned when no valid local copy exists, such
+# as on a fresh root. Shared sidecars such as Mint HWE's
+# sha256sum-mint-hwe.txt are intentional.
 #
 # For ISO rows, SidecarUrl/SidecarName name the publisher checksum file staged
 # beside the artifact. Leave them empty only when upstream publishes none; say
