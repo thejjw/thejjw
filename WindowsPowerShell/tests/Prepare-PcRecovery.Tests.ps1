@@ -1966,8 +1966,24 @@ Describe 'Prepare-PcRecovery.ps1' {
             $cpReadme = Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty') 'README.txt'
             Test-Path -LiteralPath $ffReadme | Should -BeTrue
             Test-Path -LiteralPath $cpReadme | Should -BeTrue
-            ([IO.File]::ReadAllText($ffReadme)) | Should -Match 'Run started:'
+            $ffEarly = [IO.File]::ReadAllText($ffReadme)
+            $ffEarly | Should -Match 'Run started:'
+            $ffEarly | Should -Match 'Version:\s+unresolved this run'
             ([IO.File]::ReadAllText($cpReadme)) | Should -Match 'Run started:'
+        }
+
+        It 'writes the early copyparty sheet before its download step' {
+            Reset-State
+            $root = Join-Path $TestDrive 'interrupted-before-copyparty'
+            Mock Install-Ventoy { return $true }
+            Mock Save-RufusTools { return $true }
+            Mock Write-Step -ParameterFilter { $Text -like 'copyparty*' } { throw 'stop here' }
+            { Invoke-PreparePcRecovery -Root $root } | Should -Throw
+            $cpReadme = Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty') 'README.txt'
+            Test-Path -LiteralPath $cpReadme | Should -BeTrue
+            $cpEarly = [IO.File]::ReadAllText($cpReadme)
+            $cpEarly | Should -Match 'Version:\s+not verified this run'
+            $cpEarly | Should -Match 'No copyparty files verified'
         }
 
         It 'fetches the checksum sidecar next to the ISO and lists it' {
