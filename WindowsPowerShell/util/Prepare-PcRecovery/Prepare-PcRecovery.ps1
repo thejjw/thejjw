@@ -75,6 +75,8 @@
     VNC rows: TigerVNC viewer + Linux X11 server; UltraVNC Windows server/
     viewer. The generic TigerVNC tarball has no w0vncserver; Wayland uses
     distro packages or built-in sharing.
+    Maintenance: pinned rows are snapshots. Follow the re-pin checklist in
+    the Get-RecoveryCatalog header and the Check text on each row.
     Firefox ESR: resolves FIREFOX_ESR live from product-details.mozilla.org
     and verifies the release SHA256SUMS (publisher checksum). The pinned
     153.7.0esr release is the fallback ONLY when the metadata or checksum
@@ -1937,15 +1939,35 @@ function Save-VerifiedFile {
 # live every run), or Manual (resolved by a dedicated function, never a URL).
 # MintHwe marks HWE rows fetched only when -MintHwe names them; NetbootVariant
 # marks the x64/multi rows of which only the selected one is fetched.
+#
+# MAINTENANCE - re-pin checklist (last full audit 2026-11-16):
+#   1. Open the upstream release/checksum page named in the row's Check text.
+#   2. Update FileName, Url, AlternateUrl, Hash, Released, SizeNote, About,
+#      Check, and any SidecarUrl/SidecarName together. Row Name values and
+#      readme examples often contain the version too, so search for the old
+#      version.
+#   3. Run Invoke-Pester .\tests\Prepare-PcRecovery.Tests.ps1.
+#   4. Run -WhatIf, then one real run. A second run must be all verified skips.
+# Audit 2026-11-16: all Pinned rows matched upstream. Clonezilla stable is
+# 3.3.3-37; 3.3.4-28 is testing and must not be pinned. SourceForge sidecars
+# use the /download URL and are best effort. A sidecar that no longer contains
+# the pinned hash is removed and reported so the row gets re-pinned.
+#
+# For ISO rows, SidecarUrl/SidecarName name the publisher checksum file staged
+# beside the artifact. Leave them empty only when upstream publishes none; say
+# so in Check. Prefer a versioned SidecarName when the URL is a moving pointer;
+# shared sidecars that list multiple artifacts are acceptable. Tool rows
+# (04-etc) may omit a sidecar even when upstream publishes one; their pinned
+# hash and Check text are authoritative.
 # -----------------------------------------------------------------------------
 
 function Get-RecoveryCatalog {
     @(
         [pscustomobject]@{ Name = 'netboot.xyz'; Category = '01-Network'; FileName = 'netboot.xyz.iso'; Url = 'https://boot.netboot.xyz/ipxe/netboot.xyz.iso'; AlternateUrl = ''; Hash = ''; HashKind = 'Rolling'; ChecksumUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; NetbootVariant = 'x64'; SidecarUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; SidecarName = 'netboot.xyz-sha256-checksums.txt'; MintHwe = ''; About = 'Network-boot menu that loads installer and utility images over the internet (needs a working network connection).'; Released = 'Rolling release, re-resolved every run (checksum file dated 2026-11-13).'; SizeNote = 'About 3 MB.'; Check = 'Re-download netboot.xyz-sha256-checksums.txt and match the ISO filename.' },
         [pscustomobject]@{ Name = 'netboot.xyz multi-arch'; Category = '01-Network'; FileName = 'netboot.xyz-multiarch.iso'; Url = 'https://boot.netboot.xyz/ipxe/netboot.xyz-multiarch.iso'; AlternateUrl = ''; Hash = ''; HashKind = 'Rolling'; ChecksumUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; NetbootVariant = 'multi'; SidecarUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; SidecarName = 'netboot.xyz-sha256-checksums.txt'; MintHwe = ''; About = 'netboot.xyz combined image for x86_64 and ARM64 machines.'; Released = 'Rolling release, re-resolved every run (checksum file dated 2026-11-13).'; SizeNote = 'Combined x86_64 + ARM64 network-boot ISO.'; Check = 'Re-download netboot.xyz-sha256-checksums.txt and match the ISO filename.' },
-        [pscustomobject]@{ Name = "Hiren's BootCD PE x64"; Category = '02-Rescue'; FileName = 'HBCD_PE_x64.iso'; Url = 'https://www.hirensbootcd.org/files/HBCD_PE_x64.iso'; AlternateUrl = ''; Hash = '8c4c670c9c84d6c4b5a9c32e0aa5a55d8c23de851d259207d54679ea774c2498'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Windows PE rescue environment with disk, partition, recovery, and antivirus tools (BootCD PE x64 v1.0.8).'; Released = 'BootCD PE x64 v1.0.8, March 2024 (download page and changelog); the URL itself carries no version, so the hash is pinned to that build.'; SizeNote = 'About 3.06 GB.'; Check = 'Unversioned URL; re-pin hash only after official announcement.' },
+        [pscustomobject]@{ Name = "Hiren's BootCD PE x64"; Category = '02-Rescue'; FileName = 'HBCD_PE_x64.iso'; Url = 'https://www.hirensbootcd.org/files/HBCD_PE_x64.iso'; AlternateUrl = ''; Hash = '8c4c670c9c84d6c4b5a9c32e0aa5a55d8c23de851d259207d54679ea774c2498'; HashKind = 'Pinned'; ChecksumUrl = ''; SidecarUrl = ''; SidecarName = ''; NetbootVariant = ''; MintHwe = ''; About = 'Windows PE rescue environment with disk, partition, recovery, and antivirus tools (BootCD PE x64 v1.0.8).'; Released = 'BootCD PE x64 v1.0.8, March 2024 (download page and changelog); the URL itself carries no version, so the hash is pinned to that build.'; SizeNote = 'About 3.06 GB.'; Check = 'Unversioned URL; the official download page publishes the SHA-256, and there is no upstream checksum file. Re-pin only after an official announcement.' },
         [pscustomobject]@{ Name = 'SystemRescue'; Category = '02-Rescue'; FileName = 'systemrescue-13.03-amd64.iso'; Url = 'https://sourceforge.net/projects/systemrescuecd/files/sysresccd-x86/13.03/systemrescue-13.03-amd64.iso/download'; AlternateUrl = ''; Hash = 'b71b98ba6b92145524cb1a72206b9888a59861ad6fb05d127faf618ca0136891'; SidecarUrl = 'https://sourceforge.net/projects/systemrescuecd/files/sysresccd-x86/13.03/systemrescue-13.03-amd64.iso.sha256/download'; SidecarName = 'systemrescue-13.03-amd64.iso.sha256'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Arch-based Linux rescue toolkit (disk tools, filesystem repair, network utilities).'; Released = 'Version 13.03, November 2026 (SourceForge release date 2026-11-07).'; SizeNote = 'About 1.4 GB.'; Check = 'SourceForge Files page for sysresccd-x86 13.03 plus its .sha256 sidecar.' },
-        [pscustomobject]@{ Name = 'Clonezilla'; Category = '02-Rescue'; FileName = 'clonezilla-live-3.3.3-37-amd64.iso'; Url = 'https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-37/clonezilla-live-3.3.3-37-amd64.iso/download'; AlternateUrl = ''; Hash = '3079458d926a37d3533e5d5caeb61b6e49c2dc69e2c97e0332ef37986bb3414f'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Disk imaging and cloning (device-to-device and device-to-image). UEFI and Secure Boot capable amd64 build.'; Released = 'Version 3.3.3-37, September 2026 (SourceForge file date; pin rests on the draft: the folder publishes no sidecar).'; SizeNote = 'About 505 MB.'; Check = 'SourceForge Files page for clonezilla_live_stable 3.3.3-37 (pin rests on the draft: the folder publishes no sidecar).' },
+        [pscustomobject]@{ Name = 'Clonezilla'; Category = '02-Rescue'; FileName = 'clonezilla-live-3.3.3-37-amd64.iso'; Url = 'https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-37/clonezilla-live-3.3.3-37-amd64.iso/download'; AlternateUrl = ''; Hash = '3079458d926a37d3533e5d5caeb61b6e49c2dc69e2c97e0332ef37986bb3414f'; HashKind = 'Pinned'; ChecksumUrl = ''; SidecarUrl = 'https://clonezilla.org/downloads/stable/data/CHECKSUMS.TXT'; SidecarName = 'CHECKSUMS-clonezilla-3.3.3-37.txt'; NetbootVariant = ''; MintHwe = ''; About = 'Disk imaging and cloning (device-to-device and device-to-image). UEFI and Secure Boot capable amd64 build.'; Released = 'Version 3.3.3-37, September 2026 (SourceForge file date; official stable CHECKSUMS.TXT; 3.3.4-28 is testing).'; SizeNote = 'About 505 MB.'; Check = 'clonezilla.org stable CHECKSUMS.TXT (SHA-256 section) lists the pinned hash; the stable URL moves with the next stable release, so re-pin the row and sidecar name together.' },
         [pscustomobject]@{ Name = 'Ubuntu Server'; Category = '03-Installers'; FileName = 'ubuntu-26.04.1-live-server-amd64.iso'; Url = 'https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso'; AlternateUrl = ''; Hash = 'cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927'; SidecarUrl = 'https://releases.ubuntu.com/26.04/SHA256SUMS'; SidecarName = 'SHA256SUMS-ubuntu-26.04'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Ubuntu Server installer (minimal CLI base; add ubuntu-desktop afterwards for a desktop).'; Released = 'Version 26.04.1, August 2026 (SHA256SUMS dated 2026-08-27).'; SizeNote = 'About 2.7 GB.'; Check = 'releases.ubuntu.com SHA256SUMS for 26.04.1.' },
         [pscustomobject]@{ Name = 'Rocky Linux minimal'; Category = '03-Installers'; FileName = 'Rocky-10.2-x86_64-minimal.iso'; Url = 'https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10.2-x86_64-minimal.iso'; AlternateUrl = 'https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10-latest-x86_64-minimal.iso'; Hash = 'aac6ac3ce781b91a91ce78463405f66c611a5dca4b3840c79e5e01d97302f6c8'; SidecarUrl = 'https://download.rockylinux.org/pub/rocky/10/isos/x86_64/CHECKSUM'; SidecarName = 'CHECKSUM-rocky-10'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Minimal offline installer for a small RHEL-compatible server/CLI base (RHEL 10 generation, supported to roughly May 2035).'; Released = 'Version 10.2, May 2026 (ISO 2026-05-27, CHECKSUM signed 2026-05-29, 2072444928 bytes).'; SizeNote = 'About 2.1 GB.'; Check = 'Rocky-10.2-x86_64-minimal.iso CHECKSUM entry in the same directory.' },
         [pscustomobject]@{ Name = 'Debian netinst'; Category = '03-Installers'; FileName = 'debian-13.7.0-amd64-netinst.iso'; Url = 'https://cdimage.debian.org/debian-cd/13.7.0/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; AlternateUrl = 'https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; Hash = 'a7ef94ac2fb9a7fec454552abd629b7cc9d5155c886165a45649f5ce6167e355'; SidecarUrl = 'https://cdimage.debian.org/debian-cd/13.7.0/amd64/iso-cd/SHA256SUMS'; SidecarName = 'SHA256SUMS-debian-13.7.0'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Small Debian network installer (Debian 13 includes non-free firmware for Wi-Fi/BT/GPU).'; Released = 'Version 13.7.0, September 2026 (SHA256SUMS dated 2026-09-12).'; SizeNote = 'About 400 MB.'; Check = 'Debian cdimage SHA256SUMS for 13.7.0 (upstream-verified 2026-11-14); versioned path first, /current/ fallback.' },
@@ -2065,6 +2087,24 @@ function Format-ManualIsoReadmeEntry([string]$Title, [string]$Path, [string]$Fol
     return ($lines -join "`r`n")
 }
 
+# Returns true when a publisher checksum sidecar contains the expected hash.
+# The check is format-agnostic: GNU, BSD, Fedora/Rocky, and PuTTY sidecars all
+# carry the SHA-256 as text. Missing or unreadable files return false.
+function Test-SidecarListsHash([string]$Path, [string]$Hash) {
+    if (-not $Hash) { return $false }
+    try { $text = [IO.File]::ReadAllText($Path) } catch { return $false }
+    return ($text.IndexOf($Hash, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+}
+
+# Returns true when a sidecar download is an HTML/XML page instead of a
+# checksum file (SourceForge interstitials, captive portals, bot checks).
+# Any file whose first non-blank character is "<" is treated as markup.
+# Never throws.
+function Test-SidecarLooksLikeHtml([string]$Path) {
+    try { $text = [IO.File]::ReadAllText($Path).TrimStart() } catch { return $false }
+    return ($text.Length -gt 0 -and $text[0] -eq '<')
+}
+
 # Downloads one catalog row into its category folder. Selects Rolling hashes
 # live; Pinned rows verify against the catalog hash. Never throws.
 function Save-CatalogRow {
@@ -2090,13 +2130,30 @@ function Save-CatalogRow {
     # never fails the row, it just is not listed in the readme.
     if ($ok -and $Row.SidecarUrl -and $Row.SidecarName) {
         $sidecarPath = Join-Path $dir $Row.SidecarName
+        if ((Test-Path -LiteralPath $sidecarPath) -and $expected -and
+            -not (Test-SidecarListsHash -Path $sidecarPath -Hash $expected)) {
+            Write-Detail "Stale sidecar, re-downloading: $($Row.SidecarName)"
+            Remove-Item -LiteralPath $sidecarPath -Force -ErrorAction SilentlyContinue
+        }
         if (-not (Test-Path -LiteralPath $sidecarPath)) {
             if (-not (Invoke-FileDownload -Url $Row.SidecarUrl -OutFile $sidecarPath)) {
                 Write-Detail "Sidecar unavailable, skipping: $($Row.SidecarName)"
             }
         }
         if (Test-Path -LiteralPath $sidecarPath) {
-            $script:Sidecars[$outFile] = $Row.SidecarName
+            if ($expected -and -not (Test-SidecarListsHash -Path $sidecarPath -Hash $expected)) {
+                $isHtml = Test-SidecarLooksLikeHtml -Path $sidecarPath
+                Remove-Item -LiteralPath $sidecarPath -Force -ErrorAction SilentlyContinue
+                if ($isHtml) {
+                    Write-Warning "Sidecar $($Row.SidecarName) is an HTML page, not a checksum file; retry later."
+                } elseif ($Row.HashKind -eq 'Pinned') {
+                    Write-Warning "Sidecar $($Row.SidecarName) does not list the pinned SHA-256; upstream moved past this pin. Re-pin $($Row.Name)."
+                } else {
+                    Write-Warning "Sidecar $($Row.SidecarName) does not list the resolved checksum; re-run later."
+                }
+            } else {
+                $script:Sidecars[$outFile] = $Row.SidecarName
+            }
         }
     }
     return $ok

@@ -104,6 +104,15 @@ Describe 'Prepare-PcRecovery.ps1' {
             }
         }
 
+        It 'wires the stable Clonezilla checksum sidecar' {
+            $clone = Get-RecoveryCatalog | Where-Object { $_.FileName -eq 'clonezilla-live-3.3.3-37-amd64.iso' } | Select-Object -First 1
+            $clone.SidecarUrl | Should -Be 'https://clonezilla.org/downloads/stable/data/CHECKSUMS.TXT'
+            $clone.SidecarName | Should -Be 'CHECKSUMS-clonezilla-3.3.3-37.txt'
+            $hiren = Get-RecoveryCatalog | Where-Object { $_.FileName -eq 'HBCD_PE_x64.iso' } | Select-Object -First 1
+            $hiren.SidecarUrl | Should -BeNullOrEmpty
+            $hiren.SidecarName | Should -BeNullOrEmpty
+        }
+
         It 'maps categories to folder names' {
             $names = Get-RecoveryCatalog | Select-Object -ExpandProperty Category -Unique
             $names | Should -Contain '01-Network'
@@ -2317,11 +2326,87 @@ Describe 'Prepare-PcRecovery.ps1' {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
             $row = [pscustomobject]@{ Name = 'T-row'; Category = '03-Installers'; FileName = 'T.iso'; Url = 'https://example.invalid/T.iso'; AlternateUrl = ''; Hash = ('ab' * 32); HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'T'; Released = 'T'; SizeNote = 'T'; Check = 'T'; SidecarUrl = 'https://example.invalid/T.sha256'; SidecarName = 'T.iso.sha256' }
             Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'bytes' -NoNewline; return $true }
-            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'hashline' -NoNewline; return $true }
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value (('ab' * 32) + '  T.iso') -NoNewline; return $true }
             Save-CatalogRow -Row $row -Root $root | Should -BeTrue
             Test-Path -LiteralPath (Join-Path $dir 'T.iso.sha256') | Should -BeTrue
             $block = Format-IsoReadmeEntry -Row $row -Root $root
             $block | Should -Match 'Checksum file \(shipped alongside\): T\.iso\.sha256'
+        }
+
+        It 'replaces a stale sidecar that does not list the pinned hash' {
+            Reset-State
+            $root = Join-Path $TestDrive 'sidecar-stale'
+            $dir = Join-Path (Join-Path $root 'isos') '03-Installers'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $dir 'T.iso.sha256') -Value 'old' -NoNewline
+            $row = [pscustomobject]@{ Name = 'T-row'; Category = '03-Installers'; FileName = 'T.iso'; Url = 'https://example.invalid/T.iso'; AlternateUrl = ''; Hash = ('ab' * 32); HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'T'; Released = 'T'; SizeNote = 'T'; Check = 'T'; SidecarUrl = 'https://example.invalid/T.sha256'; SidecarName = 'T.iso.sha256' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'bytes' -NoNewline; return $true }
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value (('ab' * 32) + '  T.iso') -NoNewline; return $true }
+            Save-CatalogRow -Row $row -Root $root | Should -BeTrue
+            Should -Invoke -CommandName Invoke-FileDownload -Times 1 -Exactly
+            $block = Format-IsoReadmeEntry -Row $row -Root $root
+            $block | Should -Match 'Checksum file \(shipped alongside\): T\.iso\.sha256'
+        }
+
+        It 'keeps a valid existing sidecar without downloading it again' {
+            Reset-State
+            $root = Join-Path $TestDrive 'sidecar-valid'
+            $dir = Join-Path (Join-Path $root 'isos') '03-Installers'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $dir 'T.iso.sha256') -Value (('ab' * 32) + '  T.iso') -NoNewline
+            $row = [pscustomobject]@{ Name = 'T-row'; Category = '03-Installers'; FileName = 'T.iso'; Url = 'https://example.invalid/T.iso'; AlternateUrl = ''; Hash = ('ab' * 32); HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'T'; Released = 'T'; SizeNote = 'T'; Check = 'T'; SidecarUrl = 'https://example.invalid/T.sha256'; SidecarName = 'T.iso.sha256' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'bytes' -NoNewline; return $true }
+            Mock Invoke-FileDownload { throw 'should not download a valid sidecar' }
+            Save-CatalogRow -Row $row -Root $root | Should -BeTrue
+            Should -Invoke -CommandName Invoke-FileDownload -Times 0 -Exactly
+            (Format-IsoReadmeEntry -Row $row -Root $root) | Should -Match 'Checksum file \(shipped alongside\): T\.iso\.sha256'
+        }
+
+        It 'drops an HTML sidecar and warns to retry' {
+            Reset-State
+            $root = Join-Path $TestDrive 'sidecar-html'
+            $dir = Join-Path (Join-Path $root 'isos') '03-Installers'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $row = [pscustomobject]@{ Name = 'T-row'; Category = '03-Installers'; FileName = 'T.iso'; Url = 'https://example.invalid/T.iso'; AlternateUrl = ''; Hash = ('ab' * 32); HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'T'; Released = 'T'; SizeNote = 'T'; Check = 'T'; SidecarUrl = 'https://example.invalid/T.sha256'; SidecarName = 'T.iso.sha256' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'bytes' -NoNewline; return $true }
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value '<!doctype html><html>blocked</html>' -NoNewline; return $true }
+            Mock Write-Warning { }
+            Save-CatalogRow -Row $row -Root $root | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $dir 'T.iso.sha256') | Should -BeFalse
+            Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -match 'HTML page' }
+            (Format-IsoReadmeEntry -Row $row -Root $root) | Should -Not -Match 'Checksum file \(shipped alongside\)'
+        }
+
+        It 'drops a sidecar that still does not list the pinned hash' {
+            Reset-State
+            $root = Join-Path $TestDrive 'sidecar-nohash'
+            $dir = Join-Path (Join-Path $root 'isos') '03-Installers'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $row = [pscustomobject]@{ Name = 'T-row'; Category = '03-Installers'; FileName = 'T.iso'; Url = 'https://example.invalid/T.iso'; AlternateUrl = ''; Hash = ('ab' * 32); HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'T'; Released = 'T'; SizeNote = 'T'; Check = 'T'; SidecarUrl = 'https://example.invalid/T.sha256'; SidecarName = 'T.iso.sha256' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'bytes' -NoNewline; return $true }
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'no hash here' -NoNewline; return $true }
+            Mock Write-Warning { }
+            Save-CatalogRow -Row $row -Root $root | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $dir 'T.iso.sha256') | Should -BeFalse
+            Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -match 'Re-pin T-row' }
+            $block = Format-IsoReadmeEntry -Row $row -Root $root
+            $block | Should -Not -Match 'Checksum file \(shipped alongside\)'
+        }
+
+        It 'warns re-run later when a Rolling sidecar loses the resolved hash' {
+            Reset-State
+            $root = Join-Path $TestDrive 'sidecar-rolling'
+            $dir = Join-Path (Join-Path $root 'isos') '01-Network'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $row = [pscustomobject]@{ Name = 'R-row'; Category = '01-Network'; FileName = 'R.iso'; Url = 'https://example.invalid/R.iso'; AlternateUrl = ''; Hash = ''; HashKind = 'Rolling'; ChecksumUrl = 'https://example.invalid/checksums.txt'; NetbootVariant = ''; MintHwe = ''; About = 'R'; Released = 'R'; SizeNote = 'R'; Check = 'R'; SidecarUrl = 'https://example.invalid/R.sha256'; SidecarName = 'R.iso.sha256' }
+            Mock Get-RollingExpectedHash { return ('ab' * 32) }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'bytes' -NoNewline; return $true }
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'no hash here' -NoNewline; return $true }
+            Mock Write-Warning { }
+            Save-CatalogRow -Row $row -Root $root | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $dir 'R.iso.sha256') | Should -BeFalse
+            Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -match 're-run later' }
+            (Format-IsoReadmeEntry -Row $row -Root $root) | Should -Not -Match 'Checksum file \(shipped alongside\)'
         }
 
         It 'formats a readme block with the on-disk hash when present' {
