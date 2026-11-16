@@ -853,6 +853,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             }
             $ultra.FileName | Should -Contain $script:FileUltraVncZip
             $ultra.FileName | Should -Contain $script:FileUltraVncInstaller
+            foreach ($row in $tiger) { $row.Check | Should -Match '/download into' }
+            foreach ($row in $ultra) { $row.Released | Should -Match '2026-11-08' }
         }
 
         It 'builds the TigerVNC readme with the X11-only Linux path' {
@@ -864,7 +866,13 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'x0vncserver'
             $text | Should -Match 'Xvnc'
             $text | Should -Match 'X509Vnc'
+            $text | Should -Match '-X509Cert'
             $text | Should -Match '-rfbauth'
+            $text | Should -Match 'umask 077'
+            $text | Should -Match 'vncpasswd" /tmp/vnc\.pass'
+            $text | Should -Not -Match 'vncpasswd" -f'
+            $text | Should -Match 'ssh -N -L 5900:localhost:5900'
+            $text | Should -Match 'sshd'
             $text | Should -Match 'w0vncserver'
             $text | Should -Match 'Wayland'
             $text | Should -Match 'No Windows server'
@@ -885,6 +893,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'MS-Logon II'
             $text | Should -Match 'plink -R'
             $text | Should -Match 'netsh advfirewall'
+            $text | Should -Match 'Allow Loopback Connections'
+            $text | Should -Match 'Reverse connect is unencrypted'
+            $text | Should -Match '5500 must be reachable'
             $text | Should -Match '7za\.exe x'
             $text | Should -Not -Match 'UVZIP|UVINST'
         }

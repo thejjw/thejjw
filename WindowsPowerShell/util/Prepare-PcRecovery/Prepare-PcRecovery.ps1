@@ -1224,14 +1224,20 @@ LINUX (extract on a Linux filesystem, not the exFAT USB stick)
 SHARE THE EXISTING X11 DESKTOP (recommended for rescue images)
   The generic tarball has x0vncserver but no w0vncserver. This works only on
   X11, not Wayland.
-    "$TVROOT/usr/bin/vncpasswd" -f > /tmp/vnc.pass
+    rm -f /tmp/vnc.pass
+    umask 077
+    "$TVROOT/usr/bin/vncpasswd" /tmp/vnc.pass
     "$TVROOT/usr/bin/x0vncserver" -display :0 -rfbauth /tmp/vnc.pass -localhost yes
-  From the helper, tunnel port 5900 and connect:
-    ssh -L 5900:localhost:5900 user@host
-    "$TVROOT/usr/bin/vncviewer" localhost::5900
+  On the helper, in a second terminal, open a tunnel. The target must be
+  running sshd; most live images do not start it by default.
+    ssh -N -L 5900:localhost:5900 user@host
+  Then connect from the helper with its own viewer. On Windows, run
+  .\TVWIN; on Linux, use vncviewer from the tarball or the distribution
+  package.
+    vncviewer localhost::5900
 
 DIRECT VIRTUAL X SESSION (X11 only)
-  Start Xvnc and a desktop on display :1:
+  Using /tmp/vnc.pass from above, start Xvnc and a desktop on display :1:
     "$TVROOT/usr/bin/Xvnc" :1 -geometry 1920x1080 -depth 24 \
       -rfbauth /tmp/vnc.pass -localhost yes &
     DISPLAY=:1 startxfce4 &
@@ -1247,7 +1253,9 @@ SECURITY
   Direct TLS:
     -SecurityTypes TLSVnc with -rfbauth encrypts the session, but TLSVnc is
     anonymous TLS and does not prove the server identity.
-    -SecurityTypes X509Vnc with -rfbauth uses a certificate for identity.
+    -SecurityTypes X509Vnc with -rfbauth uses a certificate for identity;
+    also pass -X509Cert <cert> and -X509Key <key>, and make the viewer trust
+    that certificate.
   Avoid X509Plain as a default: Plain authentication depends on the
   tigervnc PAM service, which may be absent on live images.
 
@@ -1276,7 +1284,8 @@ INTEGRITY
 NOTES
   - x64 only. Windows 11 ARM runs the x64 viewer through emulation.
   - No Windows server is included; use UltraVNC for that.
-  - After a version bump, old tigervnc-* files stay here; delete the previous set.
+  - After a version bump, old vncviewer64-* and tigervnc-* files stay here;
+    delete the previous set.
 '@
     return Add-TopicReadmeHeader -Text $text.Replace('TVWINHASH', $script:TigerVncViewerSha256).Replace('TVLINHASH', $script:TigerVncLinuxSha256).Replace('TVWIN', $script:FileTigerVncWindows).Replace('TVTAR', $script:FileTigerVncLinux).Replace('TVVER', $script:TigerVncVersion) -Meta (Get-TopicReadmeMeta -Topic 'tigervnc') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
@@ -1338,10 +1347,16 @@ AUTHENTICATION AND ENCRYPTION
       plink -R 5900:localhost:5900 user@linuxhost
     then on the Linux host:
       vncviewer localhost::5900
+    A tunnel arrives from 127.0.0.1. If the server refuses it, enable
+    "Allow Loopback Connections" in the server settings (portable or service
+    mode), or set AllowLoopback=1 in the applicable ultravnc.ini, then
+    restart the server.
     Optional reverse connect, where the target initiates:
       winvnc -connect helper.example:5500
       vncviewer -listen
-    Verify the exact syntax on the build you deploy.
+    Reverse connect is unencrypted unless DSM or a tunnel is used, and TCP
+    5500 must be reachable on the helper. Verify the exact syntax on the
+    build you deploy.
   - Do not install the UVncVirtualDisplay driver unless a headless display is
     required.
 
@@ -1957,10 +1972,10 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Windows portable'; Category = '04-etc\tabby'; FileName = $script:FileTabbyZip; Url = ($script:TabbyUrlBase + $script:FileTabbyZip); AlternateUrl = ''; Hash = '56de045fbb5a74d586903367d3f7227276d538281b0068d8132de3318cdd5019'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Electron terminal with built-in SSH, telnet, serial, and local shells, an SSH SFTP panel, and Zmodem transfers; portable-mode zip that keeps configuration and host lists in a data folder beside Tabby.exe.'; Released = 'Version 1.0.238, October 2026 (185,884,613 bytes; Tabby.exe signed by Eugen Pankov Softwareentwicklung).'; SizeNote = 'About 177 MB (extracts to about 481 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the zip is unsigned, and Tabby.exe inside is Authenticode-valid with Eugen Pankov Softwareentwicklung as signer. Download ' + $script:TabbyUrlBase + $script:FileTabbyZip + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Linux x64 deb'; Category = '04-etc\tabby'; FileName = $script:FileTabbyDeb; Url = ($script:TabbyUrlBase + $script:FileTabbyDeb); AlternateUrl = ''; Hash = '5ea2b9aa84f2b5cdcb98cb7e94bd3d92de48c96254a98b52bf2d1f30a52d1d1c'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Debian/Ubuntu x64 package for the same terminal; installs /opt/Tabby and a /usr/bin/tabby wrapper that adds --no-sandbox.'; Released = 'Version 1.0.238, October 2026 (130,349,456 bytes; unsigned; needs gnome-keyring and GUI libraries).'; SizeNote = 'About 124 MB (installs to about 431 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the package is unsigned. Download ' + $script:TabbyUrlBase + $script:FileTabbyDeb + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Linux x64 rpm'; Category = '04-etc\tabby'; FileName = $script:FileTabbyRpm; Url = ($script:TabbyUrlBase + $script:FileTabbyRpm); AlternateUrl = ''; Hash = 'd5027a5f905edf40aaf1fd42ef5015abfaffbd96f5825b3622ef352dfc3136b3'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Fedora/RHEL/Rocky x64 package for the same terminal; requires gnome-keyring and links /usr/bin/tabby to /opt/Tabby/tabby.'; Released = 'Version 1.0.238, October 2026 (113,337,069 bytes; unsigned; requires gnome-keyring).'; SizeNote = 'About 108 MB (installs to about 431 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the package is unsigned. Download ' + $script:TabbyUrlBase + $script:FileTabbyRpm + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
-        [pscustomobject]@{ Name = 'TigerVNC 1.16.2 Windows viewer'; Category = '04-etc\tigervnc'; FileName = $script:FileTigerVncWindows; Url = ($script:TigerVncUrlBase + $script:FileTigerVncWindows + '/download'); AlternateUrl = ''; Hash = $script:TigerVncViewerSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Standalone TigerVNC viewer for Windows x64; no installer or service, and TLS/VeNCrypt support when the server offers it.'; Released = ('Version ' + $script:TigerVncVersion + ', ' + $script:TigerVncReleased + ' (TigerVNC release page; 24,072,224 bytes; Authenticode-valid, signer Brian Hinz).'); SizeNote = 'About 23 MB.'; Check = ('SourceForge HTTPS plus the pinned SHA-256; Authenticode signer is Brian Hinz. Download ' + $script:TigerVncUrlBase + $script:FileTigerVncWindows + ' into isos\04-etc\tigervnc\ by hand; the next run verifies it and skips.') }
-        [pscustomobject]@{ Name = 'TigerVNC 1.16.2 Linux x64'; Category = '04-etc\tigervnc'; FileName = $script:FileTigerVncLinux; Url = ($script:TigerVncUrlBase + $script:FileTigerVncLinux + '/download'); AlternateUrl = ''; Hash = $script:TigerVncLinuxSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Generic Linux x86_64 TigerVNC archive: vncviewer, Xvnc, x0vncserver, vncpasswd, and the X11 server pieces; no w0vncserver.'; Released = ('Version ' + $script:TigerVncVersion + ', ' + $script:TigerVncReleased + ' (TigerVNC release page; 15,042,988 bytes; no publisher checksum).'); SizeNote = 'About 14 MB.'; Check = ('SourceForge HTTPS; TigerVNC publishes no checksum for this generic archive, so the first-download SHA-256 is pinned. Download ' + $script:TigerVncUrlBase + $script:FileTigerVncLinux + ' into isos\04-etc\tigervnc\ by hand; the next run verifies it and skips.') }
-        [pscustomobject]@{ Name = 'UltraVNC 1.8.3.2 Windows portable'; Category = '04-etc\ultravnc'; FileName = $script:FileUltraVncZip; Url = ($script:UltraVncUrlBase + $script:FileUltraVncZip); AlternateUrl = ''; Hash = $script:UltraVncZipSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable x86/x64 UltraVNC ZIP with server, viewer, SecureVNC DSM plugin, and virtual display driver; the WinPE-friendly path.'; Released = ('Version ' + $script:UltraVncVersion + ', October 2026 (release summary; 17,283,281 bytes; page size field is stale; hash matches).'); SizeNote = 'About 16 MB.'; Check = ('Official UltraVNC 1.8.3.2 SHA-256 matches the served bytes; the page size field is stale. Authenticode signer is Rudi De Vos. Download ' + $script:UltraVncUrlBase + $script:FileUltraVncZip + ' into isos\04-etc\ultravnc\ by hand; the next run verifies it and skips.') }
-        [pscustomobject]@{ Name = 'UltraVNC 1.8.3.2 Windows x64 installer'; Category = '04-etc\ultravnc'; FileName = $script:FileUltraVncInstaller; Url = ($script:UltraVncUrlBase + $script:FileUltraVncInstaller); AlternateUrl = ''; Hash = $script:UltraVncInstallerSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'x64 UltraVNC installer for normal Windows service mode, logon-screen access, and unattended support; includes server and viewer.'; Released = ('Version ' + $script:UltraVncVersion + ', October 2026 (release summary; 6,256,464 bytes; page size field is stale; hash matches).'); SizeNote = 'About 6 MB.'; Check = ('Official UltraVNC 1.8.3.2 SHA-256 matches the served bytes; the page size field is stale. Authenticode signer is Rudi De Vos. Download ' + $script:UltraVncUrlBase + $script:FileUltraVncInstaller + ' into isos\04-etc\ultravnc\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'TigerVNC 1.16.2 Windows viewer'; Category = '04-etc\tigervnc'; FileName = $script:FileTigerVncWindows; Url = ($script:TigerVncUrlBase + $script:FileTigerVncWindows + '/download'); AlternateUrl = ''; Hash = $script:TigerVncViewerSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Standalone TigerVNC viewer for Windows x64; no installer or service, and TLS/VeNCrypt support when the server offers it.'; Released = ('Version ' + $script:TigerVncVersion + ', ' + $script:TigerVncReleased + ' (TigerVNC release page; 24,072,224 bytes; Authenticode-valid, signer Brian Hinz).'); SizeNote = 'About 23 MB.'; Check = ('SourceForge HTTPS plus the pinned SHA-256; Authenticode signer is Brian Hinz. Download ' + $script:TigerVncUrlBase + $script:FileTigerVncWindows + '/download into isos\04-etc\tigervnc\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'TigerVNC 1.16.2 Linux x64'; Category = '04-etc\tigervnc'; FileName = $script:FileTigerVncLinux; Url = ($script:TigerVncUrlBase + $script:FileTigerVncLinux + '/download'); AlternateUrl = ''; Hash = $script:TigerVncLinuxSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Generic Linux x86_64 TigerVNC archive: vncviewer, Xvnc, x0vncserver, vncpasswd, and the X11 server pieces; no w0vncserver.'; Released = ('Version ' + $script:TigerVncVersion + ', ' + $script:TigerVncReleased + ' (TigerVNC release page; 15,042,988 bytes; no publisher checksum).'); SizeNote = 'About 14 MB.'; Check = ('SourceForge HTTPS; TigerVNC publishes no checksum for this generic archive, so the first-download SHA-256 is pinned. Download ' + $script:TigerVncUrlBase + $script:FileTigerVncLinux + '/download into isos\04-etc\tigervnc\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'UltraVNC 1.8.3.2 Windows portable'; Category = '04-etc\ultravnc'; FileName = $script:FileUltraVncZip; Url = ($script:UltraVncUrlBase + $script:FileUltraVncZip); AlternateUrl = ''; Hash = $script:UltraVncZipSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable x86/x64 UltraVNC ZIP with server, viewer, SecureVNC DSM plugin, and virtual display driver; the WinPE-friendly path.'; Released = ('Version ' + $script:UltraVncVersion + ', ' + $script:UltraVncReleased + ' (release summary dated October 2026; 17,283,281 bytes; page size field is stale; hash matches).'); SizeNote = 'About 16 MB.'; Check = ('Official UltraVNC 1.8.3.2 SHA-256 matches the served bytes; the page size field is stale. Authenticode signer is Rudi De Vos. Download ' + $script:UltraVncUrlBase + $script:FileUltraVncZip + ' into isos\04-etc\ultravnc\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'UltraVNC 1.8.3.2 Windows x64 installer'; Category = '04-etc\ultravnc'; FileName = $script:FileUltraVncInstaller; Url = ($script:UltraVncUrlBase + $script:FileUltraVncInstaller); AlternateUrl = ''; Hash = $script:UltraVncInstallerSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'x64 UltraVNC installer for normal Windows service mode, logon-screen access, and unattended support; includes server and viewer.'; Released = ('Version ' + $script:UltraVncVersion + ', ' + $script:UltraVncReleased + ' (release summary dated October 2026; 6,256,464 bytes; page size field is stale; hash matches).'); SizeNote = 'About 6 MB.'; Check = ('Official UltraVNC 1.8.3.2 SHA-256 matches the served bytes; the page size field is stale. Authenticode signer is Rudi De Vos. Download ' + $script:UltraVncUrlBase + $script:FileUltraVncInstaller + ' into isos\04-etc\ultravnc\ by hand; the next run verifies it and skips.') }
         [pscustomobject]@{ Name = 'Noto Sans Mono CJK KR'; Category = '04-etc\fonts'; FileName = $script:FileFont; Url = $script:FontRawUrl; AlternateUrl = ''; Hash = $script:FontSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Single Regular-weight OFL font for CJK display on Linux and Windows; covers Han, Kana, Hangul, and Bopomofo with KR-default glyph forms.'; Released = ('Version ' + $script:FontVersion + ', April 2021 (file date ' + $script:FontReleased + ' at commit ' + $script:FontCommit.Substring(0, 7) + '; 16,389,532 bytes).'); SizeNote = 'About 15.6 MB.'; Check = ('Download ' + $script:FontRawUrl + ' into isos\04-etc\fonts\ by hand (commit-pinned source; no upstream checksum); the next run verifies SHA-256 and skips it.') }
         [pscustomobject]@{ Name = 'Noto CJK OFL license'; Category = '04-etc\fonts'; FileName = $script:FileFontLicense; Url = $script:FontLicenseUrl; AlternateUrl = ''; Hash = $script:FontLicenseSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'OFL 1.1 text for the bundled Noto CJK font; upstream LICENSE renamed byte-for-byte.'; Released = ('OFL 1.1, file date ' + $script:FontReleased + ' at commit ' + $script:FontCommit.Substring(0, 7) + '.'); SizeNote = 'About 4 KB.'; Check = ('Download ' + $script:FontLicenseUrl + ' into isos\04-etc\fonts\ by hand and save it as OFL.txt; the next run verifies it against the pinned hash and skips it.') }
     )
