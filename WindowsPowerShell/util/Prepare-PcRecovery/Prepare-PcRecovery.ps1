@@ -246,7 +246,7 @@ function Get-ReadmeHeader {
         "Released:    $Released",
         "Source:      $Source",
         "Trust:       $Trust",
-        'Hashes:      ..\..\README.txt'
+        'Hashes:      ..\..\README.txt (when the run completes)'
     )
     if ($Note) { $lines += "Note:        $Note" }
     $lines += ''
@@ -332,7 +332,7 @@ function Get-CopypartyReadmeMeta {
             Released = 'unknown (not verified this run)'
             Source = $script:CopypartyReleasesUrl
             Trust = 'GitHub asset digest; see INTEGRITY'
-            Note = 'No copyparty files verified this run; see ..\..\README.txt for files on disk, or re-run online.'
+            Note = 'No copyparty files verified this run; re-run online. Files from earlier runs may remain in this folder.'
         }
     }
     $missing = @()
@@ -2688,9 +2688,16 @@ function Invoke-PreparePcRecovery {
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby) $script:FileReadme) -Text (Get-TabbyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) $script:FileReadme) -Text (Get-ImgBurnReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
         # Provisional sheets so live topics still have documentation if the
-        # run is interrupted before their downloads; rewritten below on success.
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
-        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox) $script:FileReadme) -Text (Get-FirefoxReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        # run is interrupted before their downloads. Never replace a sheet from
+        # an earlier run; the post-step writes refresh them on success.
+        $cpReadmePath = Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme
+        $ffReadmePath = Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox) $script:FileReadme
+        if (-not (Test-Path -LiteralPath $cpReadmePath)) {
+            Write-ReadmeFile -Path $cpReadmePath -Text (Get-CopypartyReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        }
+        if (-not (Test-Path -LiteralPath $ffReadmePath)) {
+            Write-ReadmeFile -Path $ffReadmePath -Text (Get-FirefoxReadmeText -RunStartedUtc $runStartedUtc -WrittenUtc $writtenUtc)
+        }
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null

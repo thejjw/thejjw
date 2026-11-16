@@ -1521,7 +1521,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $h | Should -Match 'Released:    October 2026'
             $h | Should -Match 'Source:      https://example.invalid'
             $h | Should -Match 'Trust:       hash'
-            $h.Contains('Hashes:      ..\..\README.txt') | Should -BeTrue
+            $h.Contains('Hashes:      ..\..\README.txt (when the run completes)') | Should -BeTrue
             $h | Should -Match 'Re-runs replace this file\.'
         }
 
@@ -1972,6 +1972,21 @@ Describe 'Prepare-PcRecovery.ps1' {
             ([IO.File]::ReadAllText($cpReadme)) | Should -Match 'Run started:'
         }
 
+        It 'does not overwrite an existing live sheet on an interrupted run' {
+            Reset-State
+            $root = Join-Path $TestDrive 'preserve-live'
+            $ffDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox'
+            New-Item -ItemType Directory -Path $ffDir -Force | Out-Null
+            $ffReadme = Join-Path $ffDir 'README.txt'
+            Set-Content -LiteralPath $ffReadme -Value 'SENTINEL-FROM-PREVIOUS-RUN' -NoNewline
+            Mock Install-Ventoy { return $true }
+            Mock Save-RufusTools { return $true }
+            Mock Save-CopypartyTools { return $true }
+            Mock Save-CatalogIsos { throw 'stop here' }
+            { Invoke-PreparePcRecovery -Root $root } | Should -Throw
+            ([IO.File]::ReadAllText($ffReadme)) | Should -Be 'SENTINEL-FROM-PREVIOUS-RUN'
+        }
+
         It 'writes the early copyparty sheet before its download step' {
             Reset-State
             $root = Join-Path $TestDrive 'interrupted-before-copyparty'
@@ -1984,6 +1999,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $cpEarly = [IO.File]::ReadAllText($cpReadme)
             $cpEarly | Should -Match 'Version:\s+not verified this run'
             $cpEarly | Should -Match 'No copyparty files verified'
+            $cpEarly | Should -Match 'earlier runs may remain'
         }
 
         It 'fetches the checksum sidecar next to the ISO and lists it' {
