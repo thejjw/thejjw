@@ -1293,11 +1293,14 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Invoke-FileDownload { return $false }
             Save-FirefoxEsr -Root $root | Should -BeFalse
             $script:Failures | Should -HaveCount 1
+            $ff = New-FirefoxFallbackRelease
+            $ffOut = Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox') $ff.FileName
             $script:Failures[0].Manual | Should -Match ([regex]::Escape($script:FirefoxFallbackSha256))
+            $script:Failures[0].Manual | Should -Match ([regex]::Escape($ff.Url))
+            $script:Failures[0].Manual | Should -Match ([regex]::Escape($ffOut))
             $script:Failures[0].Manual | Should -Match 'same version'
-            $script:Failures[0].Manual | Should -Match '153\.7\.0esr'
             $script:Failures[0].Manual | Should -Match 'pinned fallback'
-            $script:Failures[0].Manual | Should -Match 'same version'
+            $script:Failures[0].Manual | Should -Not -Match 'SourceForge'
         }
 
         It 'names the exact fallback file and hash when the download throws' {
