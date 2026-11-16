@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby)' }, $true)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby|ImgBurn)' }, $true)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -51,6 +51,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 DirWinScp = 'winscp'; WinScpVersion = '6.7.1'; FileWinScpPortable = 'WinSCP-6.7.1-Portable.zip'
                 DirCyberduck = 'cyberduck'; CyberduckVersion = '9.6.0.46406'; FileCyberduckInstaller = 'Cyberduck-Installer-9.6.0.46406.exe'; FileCyberduckDuck = 'duck_9.6.0.46406_amd64.deb'; FileCyberduckDuckRpm = 'duck-9.6.0.46406-1.x86_64.rpm'
                 DirTabby = 'tabby'; TabbyVersion = '1.0.238'; FileTabbyZip = 'tabby-1.0.238-portable-x64.zip'; FileTabbyDeb = 'tabby-1.0.238-linux-x64.deb'; FileTabbyRpm = 'tabby-1.0.238-linux-x64.rpm'
+                DirImgBurn = 'imgburn'; ImgBurnVersion = '2.5.8.0'; FileImgBurnInstaller = 'SetupImgBurn_2.5.8.0.exe'; FileImgBurnExe = 'ImgBurn.exe'; FileImgBurnLauncher = 'ImgBurn Portable.cmd'; FileImgBurnIni = 'ImgBurn.ini'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -949,6 +950,209 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
     }
 
+    Context 'imgburn portable' {
+        BeforeAll {
+            # Builds a payload fixture whose real hashes stand in for the vendor
+            # files, so the flow runs without the 2.6 MB download.
+            function New-ImgBurnFixture([string]$BinDir) {
+                $payload = [ordered]@{}
+                foreach ($name in @('ImgBurn.exe', 'ImgBurnPreview.exe', 'ReadMe.txt', 'Sounds\Error.wav', 'Sounds\Success.wav')) {
+                    $path = Join-Path $BinDir $name
+                    $parent = Split-Path -Parent $path
+                    if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+                    Set-Content -LiteralPath $path -Value $name -NoNewline
+                    $payload[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+                return $payload
+            }
+
+            # Returns the ImgBurn bin folder under a test root.
+            function Get-ImgBurnBin([string]$Root) {
+                return (Join-Path (Join-Path (Join-Path (Join-Path $Root 'isos') '04-etc') $script:DirImgBurn) 'bin')
+            }
+        }
+
+        It 'pins the installer and all five payload files' {
+            $script:ImgBurnInstallerSha256 | Should -Match '^[0-9a-f]{64}$'
+            $script:ImgBurnPayload.Count | Should -Be 5
+            foreach ($hash in $script:ImgBurnPayload.Values) { $hash | Should -Match '^[0-9a-f]{64}$' }
+            $script:ImgBurnUrl | Should -Be ('https://download.imgburn.com/' + $script:FileImgBurnInstaller)
+        }
+
+        It 'skips when every payload hash matches' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ib-skip'
+            $bin = Get-ImgBurnBin $root
+            New-Item -ItemType Directory -Path $bin -Force | Out-Null
+            $payload = New-ImgBurnFixture $bin
+            Mock Invoke-FileDownload { throw 'MUTATION: download attempted' }
+            Mock Save-VerifiedFile { throw 'MUTATION: download attempted' }
+            Mock Find-SevenZipExe { throw 'MUTATION: extractor lookup attempted' }
+            Install-ImgBurnPortable -Root $root -Payload $payload | Should -BeTrue
+            $script:Results[-1].Status | Should -Be 'Skipped'
+            $script:VerifiedHashes[(Join-Path $bin 'ImgBurn.exe')] | Should -Be $payload['ImgBurn.exe']
+            Test-Path -LiteralPath (Join-Path $root 'isos\04-etc\imgburn\ImgBurn Portable.cmd') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $bin 'ImgBurn.ini') | Should -BeTrue
+        }
+
+        It 'keeps an existing settings file byte-for-byte' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ib-ini'
+            $bin = Get-ImgBurnBin $root
+            New-Item -ItemType Directory -Path $bin -Force | Out-Null
+            $payload = New-ImgBurnFixture $bin
+            $ini = Join-Path $bin 'ImgBurn.ini'
+            Set-Content -LiteralPath $ini -Value 'keep-me' -NoNewline
+            Install-ImgBurnPortable -Root $root -Payload $payload | Should -BeTrue
+            [IO.File]::ReadAllText($ini) | Should -Be 'keep-me'
+        }
+
+        It 'removes an orphaned stage on a skip run' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ib-orphan'
+            $bin = Get-ImgBurnBin $root
+            New-Item -ItemType Directory -Path $bin -Force | Out-Null
+            $payload = New-ImgBurnFixture $bin
+            $stage = Join-Path $root 'tools\imgburn\_stage'
+            New-Item -ItemType Directory -Path $stage -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $stage 'leftover.dll') -Value 'x' -NoNewline
+            Install-ImgBurnPortable -Root $root -Payload $payload | Should -BeTrue
+            Test-Path -LiteralPath $stage | Should -BeFalse
+        }
+
+        It 'extracts, verifies, and moves only the allowlisted payload' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ib-install'
+            $bin = Get-ImgBurnBin $root
+            $fixture = Join-Path $TestDrive 'ib-payload'
+            New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+            $payload = New-ImgBurnFixture $fixture
+            Set-Content -LiteralPath (Join-Path $fixture 'uninstall.exe') -Value 'no' -NoNewline
+            New-Item -ItemType Directory -Path (Join-Path $fixture '$PLUGINSDIR') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $fixture '$PLUGINSDIR\tool.dll') -Value 'no' -NoNewline
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'installer' -NoNewline; return $true }
+            Mock Find-SevenZipExe { 'C:\fake\7z.exe' }
+            Mock Expand-NsisPayload { Copy-Item -LiteralPath $fixture -Destination $Destination -Recurse -Force; return $true }
+            Install-ImgBurnPortable -Root $root -Payload $payload | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $bin 'ImgBurn.exe') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $bin 'Sounds\Success.wav') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $bin 'uninstall.exe') | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $bin '$PLUGINSDIR') | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $root 'tools\imgburn\SetupImgBurn_2.5.8.0.exe') | Should -BeFalse
+            $launcher = Join-Path $root 'isos\04-etc\imgburn\ImgBurn Portable.cmd'
+            Test-Path -LiteralPath $launcher | Should -BeTrue
+            $launcherText = [IO.File]::ReadAllText($launcher)
+            $launcherText | Should -Match '/PORTABLE /SETTINGS'
+            $launcherText | Should -Match '%~dp0bin\\ImgBurn\.exe'
+            Test-Path -LiteralPath (Join-Path $bin 'ImgBurn.ini') | Should -BeTrue
+            $script:Results[-1].Status | Should -Be 'Downloaded'
+        }
+
+        It 'replaces a stale payload only after the new files verify' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ib-stale'
+            $bin = Get-ImgBurnBin $root
+            New-Item -ItemType Directory -Path $bin -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $bin 'ImgBurn.exe') -Value 'stale' -NoNewline
+            $fixture = Join-Path $TestDrive 'ib-stale-payload'
+            New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+            $payload = New-ImgBurnFixture $fixture
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'installer' -NoNewline; return $true }
+            Mock Find-SevenZipExe { 'C:\fake\7z.exe' }
+            Mock Expand-NsisPayload { Copy-Item -LiteralPath $fixture -Destination $Destination -Recurse -Force; return $true }
+            Install-ImgBurnPortable -Root $root -Payload $payload | Should -BeTrue
+            (Get-FileHash -LiteralPath (Join-Path $bin 'ImgBurn.exe') -Algorithm SHA256).Hash.ToLowerInvariant() | Should -Be $payload['ImgBurn.exe']
+        }
+
+        It 'records one failure and keeps the installer when no extractor exists' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ib-no7z'
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'installer' -NoNewline; return $true }
+            Mock Find-SevenZipExe { '' }
+            Mock Expand-NsisPayload { throw 'MUTATION: extraction attempted' }
+            Install-ImgBurnPortable -Root $root | Should -BeFalse
+            $script:Failures | Should -HaveCount 1
+            $script:Failures[0].Manual | Should -Match '7-Zip'
+            Test-Path -LiteralPath (Join-Path $root 'tools\imgburn\SetupImgBurn_2.5.8.0.exe') | Should -BeTrue
+        }
+
+        It 'records a failure when extraction fails' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ib-badextract'
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'installer' -NoNewline; return $true }
+            Mock Find-SevenZipExe { 'C:\fake\7z.exe' }
+            Mock Expand-NsisPayload { return $false }
+            Install-ImgBurnPortable -Root $root | Should -BeFalse
+            $script:Failures | Should -HaveCount 1
+        }
+
+        It 'rejects a payload file whose hash differs from the pin' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ib-badhash'
+            $fixture = Join-Path $TestDrive 'ib-badhash-payload'
+            New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+            $payload = New-ImgBurnFixture $fixture
+            Set-Content -LiteralPath (Join-Path $fixture 'ReadMe.txt') -Value 'tampered' -NoNewline
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'installer' -NoNewline; return $true }
+            Mock Find-SevenZipExe { 'C:\fake\7z.exe' }
+            Mock Expand-NsisPayload { Copy-Item -LiteralPath $fixture -Destination $Destination -Recurse -Force; return $true }
+            Install-ImgBurnPortable -Root $root -Payload $payload | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path (Get-ImgBurnBin $root) 'ImgBurn.exe') | Should -BeFalse
+        }
+
+        It 'writes nothing and records nothing under -WhatIf' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ib-whatif'
+            Mock Save-VerifiedFile { throw 'MUTATION: download attempted' }
+            Mock Find-SevenZipExe { throw 'MUTATION: extractor lookup attempted' }
+            Mock Expand-NsisPayload { throw 'MUTATION: extraction attempted' }
+            Install-ImgBurnPortable -Root $root -WhatIf | Should -BeTrue
+            Test-Path -LiteralPath $root | Should -BeFalse
+            $script:Results.Count | Should -Be 0
+            $script:Failures.Count | Should -Be 0
+        }
+
+        It 'bootstraps 7z.exe from the pinned 7-Zip files' {
+            $root = Join-Path $TestDrive 'ib-bootstrap'
+            $zipDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') $script:DirSevenZip
+            New-Item -ItemType Directory -Path $zipDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $zipDir $script:FileSevenZipBootstrap) -Value 'zr' -NoNewline
+            Set-Content -LiteralPath (Join-Path $zipDir $script:FileSevenZipInstaller) -Value 'zi' -NoNewline
+            $bootstrap = Join-Path (Join-Path (Join-Path $root 'tools') 'imgburn') '7z'
+            Mock Invoke-Cli {
+                New-Item -ItemType Directory -Path $bootstrap -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $bootstrap '7z.exe') -Value '7z' -NoNewline
+                Set-Content -LiteralPath (Join-Path $bootstrap '7z.dll') -Value 'dll' -NoNewline
+                [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' }
+            }
+            Find-SevenZipExe -Root $root | Should -Be (Join-Path $bootstrap '7z.exe')
+        }
+
+        It 'falls back to a host 7z.exe when the pinned files are absent' {
+            $root = Join-Path $TestDrive 'ib-host7z'
+            Mock Get-Command { [pscustomobject]@{ Source = 'C:\host\7z.exe' } } -ParameterFilter { $Name -eq '7z.exe' }
+            Find-SevenZipExe -Root $root | Should -Be 'C:\host\7z.exe'
+        }
+
+        It 'treats a non-zero 7z exit as an extraction failure' {
+            Mock Invoke-Cli { [pscustomobject]@{ ExitCode = 1; StdOut = ''; StdErr = 'warning' } }
+            Expand-NsisPayload -SevenZip '7z.exe' -Installer 'setup.exe' -Destination $TestDrive | Should -BeFalse
+        }
+
+        It 'documents the portable launcher, switches, and trust boundary' {
+            $text = Get-ImgBurnReadmeText
+            $text.Contains($script:FileImgBurnLauncher) | Should -BeTrue
+            $text.Contains($script:FileImgBurnExe) | Should -BeTrue
+            $text.Contains($script:FileImgBurnIni) | Should -BeTrue
+            $text.Contains($script:ImgBurnPayload[$script:FileImgBurnExe]) | Should -BeTrue
+            $text | Should -Match '/PORTABLE /SETTINGS'
+            $text | Should -Match 'OpenCandy'
+            $text | Should -Match 'isoburn\.exe'
+            $text | Should -Match 'NotSigned'
+            $text | Should -Not -Match '\{IB'
+        }
+    }
+
     Context 'elevation' {
         It 'never invokes sudo.exe without -Elevate' {
             Reset-State
@@ -1073,6 +1277,14 @@ Describe 'Prepare-PcRecovery.ps1' {
                 return $true
             }
             Mock Save-CatalogIsos { $script:VerifiedHashes[(Join-Path (Join-Path (Join-Path $root 'isos') '02-Rescue') 'HBCD_PE_x64.iso')] = ('ab' * 32) }
+            Mock Install-ImgBurnPortable {
+                $ibDir = Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'imgburn') 'bin'
+                New-Item -ItemType Directory -Path $ibDir -Force | Out-Null
+                $ibFile = Join-Path $ibDir $script:FileImgBurnExe
+                Set-Content -LiteralPath $ibFile -Value 'imgburn' -NoNewline
+                $script:VerifiedHashes[$ibFile] = $script:ImgBurnPayload[$script:FileImgBurnExe]
+                return $true
+            }
             Mock Get-WindowsIsoViaFido { return $true }
             Mock Invoke-Tiny11Build { return $true }
             Invoke-PreparePcRecovery -Root $root | Should -Be 0
@@ -1081,6 +1293,12 @@ Describe 'Prepare-PcRecovery.ps1' {
             $rootText | Should -Match 'tiny11builder'
             $rootText | Should -Match 'en-US'
             $rootText | Should -Match 'copyparty'
+            $rootText | Should -Match 'imgburn'
+            $imgburnDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'imgburn'
+            $imgburnText = [IO.File]::ReadAllText((Join-Path $imgburnDir 'README.txt'))
+            $imgburnText | Should -Match '/PORTABLE /SETTINGS'
+            $imgburnText.Contains($script:ImgBurnPayload[$script:FileImgBurnExe]) | Should -BeTrue
+            $imgburnText | Should -Match 'OpenCandy'
             $rootText | Should -Match 'python\\'
             $topicDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
             $topicText = [IO.File]::ReadAllText((Join-Path $topicDir 'README.txt'))
@@ -1140,6 +1358,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match 'Official Windows 11 ISO \(not present\)'
             $isosText | Should -Match 'Tiny11 ISO \(not present\)'
             $isosText | Should -Match '04-etc\\copyparty\\copyparty\.exe'
+            $isosText | Should -Match '04-etc\\imgburn\\bin\\ImgBurn\.exe'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-amd64\.exe'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-embed-amd64\.zip'
             $isosText | Should -Match '04-etc\\7zip\\7z2606-x64\.exe'

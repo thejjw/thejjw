@@ -134,6 +134,25 @@ $script:TabbyUrlBase = 'https://github.com/Eugeny/tabby/releases/download/v' + $
 $script:FileTabbyZip = 'tabby-' + $script:TabbyVersion + '-portable-x64.zip'
 $script:FileTabbyDeb = 'tabby-' + $script:TabbyVersion + '-linux-x64.deb'
 $script:FileTabbyRpm = 'tabby-' + $script:TabbyVersion + '-linux-x64.rpm'
+# ImgBurn: the official host is the only first-party source; its installer
+# carries OpenCandy, so it is extracted with 7-Zip and never executed or
+# shipped. Hashes are pinned locally; the installer also matches the
+# CRC32/MD5/SHA-1 published on imgburn.com.
+$script:ImgBurnVersion = '2.5.8.0'
+$script:ImgBurnUrl = 'https://download.imgburn.com/SetupImgBurn_' + $script:ImgBurnVersion + '.exe'
+$script:FileImgBurnInstaller = 'SetupImgBurn_' + $script:ImgBurnVersion + '.exe'
+$script:ImgBurnInstallerSha256 = '49aa06eaffe431f05687109fee25f66781abbe1108f3f8ca78c79bdec8753420'
+$script:DirImgBurn = 'imgburn'
+$script:FileImgBurnExe = 'ImgBurn.exe'
+$script:FileImgBurnLauncher = 'ImgBurn Portable.cmd'
+$script:FileImgBurnIni = 'ImgBurn.ini'
+$script:ImgBurnPayload = [ordered]@{
+    'ImgBurn.exe' = '02c74678128a9dfef58eab5abe269382c6b4862440c26c22cde7b83868f478f1'
+    'ImgBurnPreview.exe' = '363f61889adaf3ee4bb95bda5f6d7cb1d7c906b61c310c8e98ad02717c5203f9'
+    'ReadMe.txt' = '8b9d97c137459a495936af47f5140fe75f795728a30e9ec3d8ac9c1cb2e5c65f'
+    'Sounds\Error.wav' = 'acad74b9bb57809e1b35bc06f357941986ebdc547ba33fc618f07e6e7bdc49bd'
+    'Sounds\Success.wav' = '8dae19fc9c722a7fb169f37b5881e74551a8d3b8b43ec6f52b6d5d46e885ed6c'
+}
 $script:FileVentoyExe = 'Ventoy2Disk.exe'
 $script:FileFido = 'Fido.ps1'
 $script:FileRufusPatternNote = 'rufus-.*p\.exe'
@@ -197,7 +216,8 @@ STRUCTURE
                      Fedora, the Windows 11 ISO (Fido's Win11_*.iso name or
                      the official en-us_windows_11_*.iso name), tiny11\.
   isos\04-etc\       Post-boot utilities by topic: copyparty\ (portable file
-                     server), cyberduck\ (cloud/SFTP GUI and duck CLI),
+                     server), imgburn\ (portable optical media burner and
+                     imager), cyberduck\ (cloud/SFTP GUI and duck CLI),
                      python\ (Windows x64), 7zip\ (extractor), putty\,
                      tabby\, winscp\ (terminals and transfer clients).
   isos\README.txt    Per-folder contents, sizes, and re-verify notes.
@@ -215,6 +235,12 @@ TINY11 BUILD
   (iso filename is always tiny11.iso. the base image comes from Windows iso in ..\)
   Needs -Elevate (inline sudo pre-enabled) or an elevated shell.
   See tools\tiny11builder\ for the builder files used.
+
+IMGBURN (OPTICAL MEDIA)
+  isos\04-etc\imgburn\bin\ImgBurn.exe burns ISO images to CD/DVD/BD and
+  creates images from discs. Start it through "ImgBurn Portable.cmd": that
+  keeps settings in bin\ImgBurn.ini and writes nothing to the PC. The vendor
+  installer is not shipped; its OpenCandy offer never runs.
 "@
 }
 
@@ -245,7 +271,7 @@ FOLDERS
   02-Rescue\     Offline-capable rescue and imaging environments.
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
   04-etc\        Post-boot utilities by topic: copyparty\, cyberduck\,
-                 python\, 7zip\, putty\, tabby\, winscp\.
+                 imgburn\, python\, 7zip\, putty\, tabby\, winscp\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
@@ -719,6 +745,67 @@ NOTES
 
 '@
     return $text.Replace('TABBYZIP', $script:FileTabbyZip).Replace('TABBYDEB', $script:FileTabbyDeb).Replace('TABBYRPM', $script:FileTabbyRpm)
+}
+
+# Portable ImgBurn sheet for isos\04-etc\imgburn\. Placeholders keep the
+# version, payload file names, and hash in one edit point.
+function Get-ImgBurnReadmeText {
+    $text = @'
+IMGBURN (PORTABLE)
+==================
+This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+
+FILES
+  bin/{IBEXE}             Portable disc burner/imager, version {IBVER}.
+  bin/ImgBurnPreview.exe  Image preview helper used by Write mode.
+  bin/ReadMe.txt          Official vendor readme (command-line switches).
+  bin/{IBINI}             Settings; created on first close, stays on the stick.
+  {IBLAUNCH}              Launcher; use it for portable mode.
+
+START (no install, no registry writes)
+  Double-click {IBLAUNCH}, or run:
+    bin/{IBEXE} /PORTABLE /SETTINGS "bin/{IBINI}"
+  /PORTABLE stops the file-association, autoplay, and shell-extension writes;
+  /SETTINGS keeps settings in bin/{IBINI} instead of the registry. Starting
+  bin/{IBEXE} directly still loads bin/{IBINI}, but may also write registry
+  entries, so prefer the launcher.
+
+BURN AN ISO TO CD/DVD/BD
+  1. Start through the launcher, choose Write image file to disc.
+  2. Source: browse for the .iso. Destination: the optical drive.
+  3. Pick a safe Write Speed (4x-8x on old media), enable Verify, click Write.
+  Without ImgBurn, Windows 11 can burn a plain ISO through the signed
+  C:\Windows\System32\isoburn.exe (right-click the ISO > Burn disc image).
+
+IMAGE A DISC OR BUILD ONE
+  Read mode copies a CD/DVD/BD to an image file (ISO/MDS/CUE) for archiving.
+  Build mode writes a folder tree or files to an ISO, including bootable
+  discs. Verify mode re-reads a burned disc against its image.
+
+SETTINGS AND CLEANUP
+  bin/{IBINI} holds settings, recent paths, and window state; delete it to
+  reset. It travels with the stick: do not leave private paths or credentials
+  on shared media. ImgBurn writes logs to the folder chosen under
+  Tools > Settings > General (by default the current user's Documents).
+  No install or uninstall is needed: delete this folder to remove it.
+
+INTEGRITY
+  The files were extracted from the official {IBINST} installer and
+  verified against these SHA-256 values:
+    {IBEXE}: {IBHASH}
+  The installer's SHA-256 is pinned in the prep script; it also matches the
+  CRC32/MD5/SHA-1 published on imgburn.com. The extracted binaries are
+  unsigned (Authenticode NotSigned), so the hash is the check. The installer
+  itself is not shipped: its OpenCandy offer never runs.
+
+NOTES
+  - 2013 freeware, 32-bit x86, asInvoker (the app does not request admin).
+  - Smart App Control or an AV policy may block unsigned binaries; allow the
+    file, or use the signed isoburn.exe for a simple ISO burn.
+  - Windows-only; WinPE is untested. x86 runs on x64 and on Windows 11 ARM
+    through emulation.
+'@
+    return $text.Replace('{IBVER}', $script:ImgBurnVersion).Replace('{IBEXE}', $script:FileImgBurnExe).Replace('{IBINST}', $script:FileImgBurnInstaller).Replace('{IBLAUNCH}', $script:FileImgBurnLauncher).Replace('{IBINI}', $script:FileImgBurnIni).Replace('{IBHASH}', $script:ImgBurnPayload[$script:FileImgBurnExe])
 }
 
 # -----------------------------------------------------------------------------
@@ -1579,6 +1666,195 @@ function Save-CopypartyTools {
     return $ok
 }
 
+# Returns true when every allowlisted payload file exists under bin\ and
+# matches its pinned SHA-256. Never throws.
+function Test-ImgBurnPayload([string]$BinDir, [System.Collections.IDictionary]$Payload) {
+    foreach ($name in $Payload.Keys) {
+        $path = Join-Path $BinDir $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+        try {
+            if (-not (Test-LocalFileHash -Path $path -ExpectedHash ([string]$Payload[$name]))) { return $false }
+        } catch {
+            return $false
+        }
+    }
+    return $true
+}
+
+# Locates a 7z.exe that can unpack the ImgBurn NSIS installer: first the
+# private copy bootstrapped from the pinned 7-Zip installer under
+# tools\imgburn\7z, then a host installation. Returns '' when none is usable.
+function Find-SevenZipExe {
+    [CmdletBinding()]
+    param([string]$Root)
+    $bootstrapDir = Join-Path (Join-Path (Join-Path $Root $script:DirTools) 'imgburn') '7z'
+    $bootExe = Join-Path $bootstrapDir '7z.exe'
+    if (Test-Path -LiteralPath $bootExe -PathType Leaf) { return $bootExe }
+    $zipDir = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirSevenZip
+    $zipr = Join-Path $zipDir $script:FileSevenZipBootstrap
+    $zipInstaller = Join-Path $zipDir $script:FileSevenZipInstaller
+    if ((Test-Path -LiteralPath $zipr -PathType Leaf) -and (Test-Path -LiteralPath $zipInstaller -PathType Leaf)) {
+        Initialize-Directory -Path $bootstrapDir
+        $result = Invoke-Cli -Command $zipr -Arguments @('x', $zipInstaller, '7z.exe', '7z.dll', "-o$bootstrapDir", '-y')
+        if ($result.ExitCode -eq 0 -and (Test-Path -LiteralPath $bootExe -PathType Leaf)) { return $bootExe }
+        Write-Detail "7-Zip bootstrap failed (7zr exit $($result.ExitCode)); trying a host 7z.exe."
+    }
+    $hostCommand = Get-Command 7z.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($hostCommand) { return $hostCommand.Source }
+    $candidates = @()
+    if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles '7-Zip\7z.exe') }
+    if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} '7-Zip\7z.exe') }
+    if ($env:LOCALAPPDATA) { $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\7-Zip\7z.exe') }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    return ''
+}
+
+# Unpacks an NSIS installer with the supplied 7z.exe. Exit 1 ("warning") is a
+# failure here; the caller verifies every extracted hash before moving files.
+function Expand-NsisPayload([string]$SevenZip, [string]$Installer, [string]$Destination) {
+    try {
+        $result = Invoke-Cli -Command $SevenZip -Arguments @('x', $Installer, "-o$Destination", '-y', '-bso0', '-bsp0')
+    } catch {
+        Write-Detail "7-Zip could not start: $($_.Exception.Message)"
+        return $false
+    }
+    if ($result.ExitCode -ne 0) {
+        Write-Detail "7-Zip extraction failed (exit $($result.ExitCode)): $($result.StdErr)"
+        return $false
+    }
+    return $true
+}
+
+# Writes the portable launcher and seeds the settings file beside ImgBurn.exe.
+# Never overwrites an existing ImgBurn.ini (user settings live there).
+# Returns true on success and records a failure itself on write errors.
+function Write-ImgBurnPortableFiles([string]$TopicDir, [string]$BinDir) {
+    $launcherPath = Join-Path $TopicDir $script:FileImgBurnLauncher
+    $iniPath = Join-Path $BinDir $script:FileImgBurnIni
+    $launcher = '@echo off' + "`r`n" + 'start "" /d "%~dp0bin" "%~dp0bin\ImgBurn.exe" /PORTABLE /SETTINGS "%~dp0bin\ImgBurn.ini"' + "`r`n"
+    try {
+        [IO.File]::WriteAllText($launcherPath, $launcher, [Text.UTF8Encoding]::new($false))
+        if (-not (Test-Path -LiteralPath $iniPath)) {
+            [IO.File]::WriteAllText($iniPath, '', [Text.UTF8Encoding]::new($false))
+        }
+        return $true
+    } catch {
+        $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
+        Write-Failure -Name 'ImgBurn' -Detail "Could not write the portable launcher or settings file: $detail" -Manual @(
+            "Create $launcherPath by hand; it must start bin\ImgBurn.exe with /PORTABLE /SETTINGS bin\ImgBurn.ini.",
+            "Create an empty $iniPath only when it does not exist."
+        )
+        return $false
+    }
+}
+
+# Installs the portable ImgBurn payload into isos\04-etc\imgburn\bin by
+# extracting the official installer with 7-Zip. The installer is never
+# executed, so its OpenCandy offer never runs, and it is deleted after a
+# verified extraction. Never throws.
+function Install-ImgBurnPortable {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [string]$Root,
+        [System.Collections.IDictionary]$Payload = $script:ImgBurnPayload,
+        [string]$InstallerHash = $script:ImgBurnInstallerSha256
+    )
+    $topicDir = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn
+    $binDir = Join-Path $topicDir 'bin'
+    $hostDir = Join-Path (Join-Path $Root $script:DirTools) 'imgburn'
+    $stageDir = Join-Path $hostDir '_stage'
+    if (-not $PSCmdlet.ShouldProcess($binDir, "Install ImgBurn $($script:ImgBurnVersion) portable")) { return $true }
+    Initialize-Directory -Path $binDir
+    # An interrupted run leaves NSIS scaffolding on the prep host. It must
+    # never reach the stick, and a skip run still cleans it.
+    Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
+    $manual = @(
+        ("Place these files under {0}: {1}." -f $binDir, (@($Payload.Keys) -join ', ')),
+        'The next run verifies their SHA-256 values and skips the download.'
+    )
+    if (Test-ImgBurnPayload -BinDir $binDir -Payload $Payload) {
+        if (-not (Write-ImgBurnPortableFiles -TopicDir $topicDir -BinDir $binDir)) { return $false }
+        Write-Ok "Skipped (verified): ImgBurn $($script:ImgBurnVersion)"
+        $script:Results += [pscustomobject]@{ Name = 'ImgBurn'; Status = 'Skipped'; Detail = 'payload hashes match' }
+        foreach ($name in $Payload.Keys) {
+            $script:VerifiedHashes[(Join-Path $binDir $name)] = ([string]$Payload[$name]).ToLowerInvariant()
+        }
+        return $true
+    }
+    Initialize-Directory -Path $hostDir
+    $installerPath = Join-Path $hostDir $script:FileImgBurnInstaller
+    try {
+        if (-not (Save-VerifiedFile -Url $script:ImgBurnUrl -OutFile $installerPath -ExpectedHash $InstallerHash -Name "ImgBurn $($script:ImgBurnVersion) installer")) { return $false }
+    } catch {
+        $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
+        Write-Failure -Name 'ImgBurn' -Detail "Installer verification failed: $detail" -Manual $manual
+        return $false
+    }
+    $sevenZip = Find-SevenZipExe -Root $Root
+    if (-not $sevenZip) {
+        Write-Failure -Name 'ImgBurn' -Detail 'No 7-Zip extractor was available (bootstrap and host lookup failed).' -Manual (@(
+            'Re-run after the 7-Zip files exist under isos\04-etc\7zip\, or install 7-Zip on this PC.'
+        ) + $manual)
+        return $false
+    }
+    Initialize-Directory -Path $stageDir
+    if (-not (Expand-NsisPayload -SevenZip $sevenZip -Installer $installerPath -Destination $stageDir)) {
+        Write-Failure -Name 'ImgBurn' -Detail 'The installer payload could not be extracted.' -Manual $manual
+        return $false
+    }
+    $found = @(Get-ChildItem -LiteralPath $stageDir -Recurse -File -Filter $script:FileImgBurnExe -ErrorAction SilentlyContinue) | Select-Object -First 1
+    if (-not $found) {
+        Write-Failure -Name 'ImgBurn' -Detail "No $($script:FileImgBurnExe) in the extracted payload." -Manual $manual
+        return $false
+    }
+    $payloadRoot = Split-Path -Parent $found.FullName
+    $staged = @{}
+    foreach ($name in $Payload.Keys) {
+        $source = Join-Path $payloadRoot $name
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            Write-Failure -Name 'ImgBurn' -Detail "Extracted payload is missing $name." -Manual $manual
+            return $false
+        }
+        try {
+            if (-not (Test-LocalFileHash -Path $source -ExpectedHash ([string]$Payload[$name]))) {
+                Write-Failure -Name 'ImgBurn' -Detail "Extracted $name does not match its pinned hash." -Manual $manual
+                return $false
+            }
+        } catch {
+            $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
+            Write-Failure -Name 'ImgBurn' -Detail "Could not hash extracted ${name}: $detail" -Manual $manual
+            return $false
+        }
+        $staged[$name] = $source
+    }
+    try {
+        foreach ($name in $Payload.Keys) {
+            $target = Join-Path $binDir $name
+            $parent = Split-Path -Parent $target
+            if ($parent) { Initialize-Directory -Path $parent }
+            Move-Item -LiteralPath $staged[$name] -Destination $target -Force
+            if (-not (Test-LocalFileHash -Path $target -ExpectedHash ([string]$Payload[$name]))) {
+                throw "verification failed after moving $name"
+            }
+        }
+    } catch {
+        $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
+        Write-Failure -Name 'ImgBurn' -Detail "Could not install the payload: $detail" -Manual $manual
+        return $false
+    }
+    Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+    if (-not (Write-ImgBurnPortableFiles -TopicDir $topicDir -BinDir $binDir)) { return $false }
+    foreach ($name in $Payload.Keys) {
+        $script:VerifiedHashes[(Join-Path $binDir $name)] = ([string]$Payload[$name]).ToLowerInvariant()
+    }
+    Write-Ok "Installed: ImgBurn $($script:ImgBurnVersion) portable"
+    $script:Results += [pscustomobject]@{ Name = 'ImgBurn'; Status = 'Downloaded'; Detail = 'verified payload' }
+    return $true
+}
+
 # Finds official Windows ISOs in the installers folder, newest first.
 # Matches Fido-style names (Win11_*.iso) and official Microsoft names
 # (en-us_windows_11_*.iso). Never matches the tiny11\ build output.
@@ -1830,6 +2106,7 @@ function Write-PlanTable {
     Write-Section 'Planned recovery file set (WhatIf: nothing downloaded)'
     Write-Detail 'Tools: latest Ventoy Windows zip, latest Rufus portable, Fido.ps1, tiny11builder x64 zip + tiny11maker.ps1'
     Write-Detail 'copyparty: latest GitHub release, sfx.py + exe under isos\04-etc\copyparty\.'
+    Write-Detail 'ImgBurn: official 2.5.8.0 installer, extracted into isos\04-etc\imgburn\bin\.'
     Write-Detail 'Windows 11 ISO resolved live through Fido; Tiny11 built from it with -Elevate.'
     $rows = Get-RecoveryCatalog | Where-Object {
         (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
@@ -1919,6 +2196,8 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirWinScp)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn)
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) 'bin')
         Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython) $script:FileReadme) -Text (Get-PythonReadmeText)
@@ -1927,6 +2206,7 @@ function Invoke-PreparePcRecovery {
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirWinScp) $script:FileReadme) -Text (Get-WinScpReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck) $script:FileReadme) -Text (Get-CyberduckReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby) $script:FileReadme) -Text (Get-TabbyReadmeText)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) $script:FileReadme) -Text (Get-ImgBurnReadmeText)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null
@@ -1941,6 +2221,10 @@ function Invoke-PreparePcRecovery {
         }
         Write-Step 'Catalog ISOs (netboot first)'
         Save-CatalogIsos -Root $Root -NetbootArch $NetbootArch -MintHwe $MintHwe
+        Write-Step 'ImgBurn portable (04-etc)'
+        Invoke-SafeStep -Name 'ImgBurn' -Manual @('Place the ImgBurn payload files in isos\04-etc\imgburn\bin\ by hand; the next run verifies them.') -Body {
+            Install-ImgBurnPortable -Root $Root | Out-Null
+        }
         Write-Step 'Windows 11 ISO via Fido'
         Invoke-SafeStep -Name 'Windows 11 ISO' -Manual @('Open ' + $script:MsDownloadPage + ' and place the Windows ISO (' + $script:WinIsoNaming + ') into isos\03-Installers\.') -Body {
             Get-WindowsIsoViaFido -Root $Root | Out-Null
@@ -1954,9 +2238,9 @@ function Invoke-PreparePcRecovery {
             Write-Detail 'Tiny11 build skipped by -SkipTiny11.'
         }
         # Refresh the isos readme: one block per selected catalog row (with
-        # the on-disk hash when present), then the two non-catalog entries
-        # (official Windows ISO, Tiny11 output) hashed the same way, so the
-        # file is a self-contained verification sheet for the real tree.
+        # the on-disk hash when present), then the non-catalog entries
+        # (copyparty, ImgBurn, Windows ISO, Tiny11) hashed the same way, so
+        # the file is a self-contained verification sheet for the real tree.
         $isoBlocks = Get-RecoveryCatalog | Where-Object {
             (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
             (($_.MintHwe -eq '') -or ($_.MintHwe -eq $MintHwe))
@@ -1970,6 +2254,25 @@ function Invoke-PreparePcRecovery {
             } elseif (Test-Path -LiteralPath $cpPath) {
                 $isoBlocks += (Format-ManualIsoReadmeEntry -Title "copyparty ($cpName, not verified this run)" -Path $cpPath -Folder (Join-Path '04-etc' $script:DirCopyparty) -Note 'Not verified against a GitHub asset digest this run; on-disk hash only.' -Root $Root)
             }
+        }
+        $imgBurnBin = Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) 'bin'
+        $imgBurnExe = Join-Path $imgBurnBin $script:FileImgBurnExe
+        if ($script:VerifiedHashes.ContainsKey($imgBurnExe)) {
+            $imgBurnRow = [pscustomobject]@{
+                Name = 'ImgBurn portable'
+                Category = (Join-Path '04-etc' (Join-Path $script:DirImgBurn 'bin'))
+                FileName = $script:FileImgBurnExe
+                Url = $script:ImgBurnUrl
+                Hash = [string]$script:ImgBurnPayload[$script:FileImgBurnExe]
+                HashKind = 'Pinned'
+                Released = ('Version ' + $script:ImgBurnVersion + ', June 2013.')
+                SizeNote = 'About 2.6 MB.'
+                About = 'Portable optical media burner and imager: ISO to CD/DVD/BD, disc to image, verify.'
+                Check = 'Official imgburn.com download plus the pinned payload hash.'
+            }
+            $isoBlocks += (Format-IsoReadmeEntry -Row $imgBurnRow -Root $Root)
+        } else {
+            $isoBlocks += '== ImgBurn portable (not present) ==' + "`r`n" + 'Run the prep script again; the payload is extracted from the official installer.'
         }
         $installersDir = Join-Path (Join-Path $Root $script:DirIsos) '03-Installers'
         $winIso = Find-WindowsIso -InstallersDir $installersDir | Select-Object -First 1
