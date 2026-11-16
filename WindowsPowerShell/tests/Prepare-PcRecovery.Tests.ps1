@@ -1924,6 +1924,14 @@ Describe 'Prepare-PcRecovery.ps1' {
                 $text | Should -Match 'Trust:'
                 $text | Should -Match 'Hashes:'
             }
+            $cpText = [IO.File]::ReadAllText((Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty') 'README.txt'))
+            $cpText | Should -Match 'Version:\s+v1\.20\.26'
+            $cpText | Should -Match 'Released:\s+2026-10-01'
+            $cpText | Should -Match ('Note:\s+not verified this run: ' + [regex]::Escape($script:FileCopypartySfx))
+            $ffText = [IO.File]::ReadAllText((Join-Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox') 'README.txt'))
+            $ffText | Should -Match ('Version:\s+' + [regex]::Escape($script:FirefoxFallbackVersion))
+            $ffText | Should -Match 'Note:\s+pinned fallback; live lookup failed'
+            $ffText | Should -Not -Match 'unresolved this run'
         }
 
         It 'fetches the checksum sidecar next to the ISO and lists it' {
