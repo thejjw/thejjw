@@ -2030,9 +2030,12 @@ function Save-FirefoxEsr {
     $label = 'Firefox ESR ' + $release.Version
     if ($release.Source -eq 'fallback') { $label += ' (pinned fallback)' }
     $manual = @(
-        'Open https://www.mozilla.org/firefox/enterprise/ or https://ftp.mozilla.org/pub/firefox/releases/ and download the current Firefox ESR win64/en-US installer into isos\04-etc\firefox\,',
-        'compare its SHA-256 with the release SHA256SUMS, then re-run.'
+        ("Download {0} by hand into {1}." -f $release.Url, $outFile),
+        ("SHA-256 must be {0}; the next run verifies it and skips the download." -f $hash)
     )
+    if ($release.Source -eq 'fallback') {
+        $manual += 'The live ESR lookup failed; this is the pinned fallback release.'
+    }
     try {
         if (-not (Save-VerifiedFile -Url $release.Url -OutFile $outFile -ExpectedHash $hash -Name $label)) { return $false }
     } catch {
@@ -2476,7 +2479,7 @@ function Invoke-PreparePcRecovery {
             Install-ImgBurnPortable -Root $Root | Out-Null
         }
         Write-Step 'Firefox ESR (04-etc)'
-        Invoke-SafeStep -Name 'Firefox ESR' -Manual @('Download the current Firefox ESR win64/en-US installer from https://www.mozilla.org/firefox/enterprise/ into isos\04-etc\firefox\ and re-run.') -Body {
+        Invoke-SafeStep -Name 'Firefox ESR' -Manual @('See the Firefox ESR failure above for the exact file and SHA-256; place it in isos\04-etc\firefox\ and re-run.') -Body {
             Save-FirefoxEsr -Root $Root | Out-Null
         }
         Write-Step 'Windows 11 ISO via Fido'

@@ -1266,6 +1266,30 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:Failures.Count | Should -Be 0
         }
 
+        It 'leaves the release state empty when the download is not produced' {
+            Reset-State
+            $root = Join-Path $TestDrive 'firefox-nodownload'
+            Mock Invoke-RestMethod { [pscustomobject]@{ FIREFOX_ESR = '153.8.0esr' } }
+            Mock Invoke-WebText { ('ab' * 32) + '  win64/en-US/Firefox Setup 153.8.0esr.exe' }
+            Mock Save-VerifiedFile { return $false }
+            Save-FirefoxEsr -Root $root | Should -BeFalse
+            $script:FirefoxRelease | Should -BeNullOrEmpty
+            $script:VerifiedHashes.Count | Should -Be 0
+            (Get-FirefoxIsosBlock -Root $root) | Should -Match 'not present'
+        }
+
+        It 'names the exact fallback file and hash when the download throws' {
+            Reset-State
+            $root = Join-Path $TestDrive 'firefox-throw'
+            Mock Invoke-RestMethod { throw 'offline' }
+            Mock Save-VerifiedFile { throw 'locked by scanner' }
+            Save-FirefoxEsr -Root $root | Should -BeFalse
+            $script:Failures | Should -HaveCount 1
+            $script:Failures[0].Name | Should -Be 'Firefox ESR'
+            $script:Failures[0].Manual | Should -Match ([regex]::Escape($script:FirefoxFallbackVersion))
+            $script:Failures[0].Manual | Should -Match ([regex]::Escape($script:FirefoxFallbackSha256))
+        }
+
         It 'does not treat a silent download success as a file' {
             Reset-State
             $root = Join-Path $TestDrive 'firefox-nofile'
