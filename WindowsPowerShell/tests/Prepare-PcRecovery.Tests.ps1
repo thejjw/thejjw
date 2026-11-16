@@ -1605,11 +1605,13 @@ Describe 'Prepare-PcRecovery.ps1' {
             $m.Version | Should -Be '153.8.0esr'
             $m.Note | Should -Match 'not staged'
             $m.Note | Should -Match 're-run online'
+            $m.Note | Should -Match 'earlier runs may remain'
             $script:FirefoxResolved = $null
             $m = Get-FirefoxReadmeMeta
             $m.Version | Should -Be 'unresolved this run'
             $m.Released | Should -Be 'unknown (not resolved this run)'
             $m.Note | Should -Match 're-run online'
+            $m.Note | Should -Match 'earlier runs may remain'
         }
 
         It 'uses the per-release Firefox date and tolerates its lookup failure' {
@@ -1985,6 +1987,20 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Save-CatalogIsos { throw 'stop here' }
             { Invoke-PreparePcRecovery -Root $root } | Should -Throw
             ([IO.File]::ReadAllText($ffReadme)) | Should -Be 'SENTINEL-FROM-PREVIOUS-RUN'
+        }
+
+        It 'does not overwrite an existing copyparty sheet before its step' {
+            Reset-State
+            $root = Join-Path $TestDrive 'preserve-copyparty'
+            $cpDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
+            New-Item -ItemType Directory -Path $cpDir -Force | Out-Null
+            $cpReadme = Join-Path $cpDir 'README.txt'
+            Set-Content -LiteralPath $cpReadme -Value 'SENTINEL-COPY' -NoNewline
+            Mock Install-Ventoy { return $true }
+            Mock Save-RufusTools { return $true }
+            Mock Write-Step -ParameterFilter { $Text -like 'copyparty*' } { throw 'stop here' }
+            { Invoke-PreparePcRecovery -Root $root } | Should -Throw
+            ([IO.File]::ReadAllText($cpReadme)) | Should -Be 'SENTINEL-COPY'
         }
 
         It 'writes the early copyparty sheet before its download step' {

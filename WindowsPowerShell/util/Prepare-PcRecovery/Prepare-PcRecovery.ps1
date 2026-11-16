@@ -367,13 +367,13 @@ function Get-FirefoxReadmeMeta {
         $version = $resolved.Version
         $released = $resolved.Released
         $source = $resolved.Url
-        $note = 'resolved but not staged this run; re-run online to download it'
+        $note = 'resolved but not staged this run; re-run online to download it. Installers from earlier runs may remain in this folder; see ..\..\README.txt.'
         if ($resolved.Source -eq 'fallback') { $note = 'pinned fallback; live lookup failed; ' + $note }
     } else {
         $version = 'unresolved this run'
         $released = 'unknown (not resolved this run)'
         $source = $script:FirefoxReleasesUrl
-        $note = 'no Firefox ESR version resolved this run; re-run online'
+        $note = 'no Firefox ESR version resolved this run; re-run online. Installers from earlier runs may remain in this folder; see ..\..\README.txt.'
     }
     if (-not $released) { $released = 'see Mozilla release notes' }
     return [pscustomobject]@{
