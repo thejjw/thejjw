@@ -852,7 +852,7 @@ INSTALL (machine-wide; needs an elevated shell)
     "Firefox Setup <version>.exe" /S
   Leaner silent install (no maintenance service or shortcuts):
     "Firefox Setup <version>.exe" /S /MaintenanceService=false ^
-      /DesktopShortcut=false /TaskbarShortcut=false
+      /DesktopShortcut=false /TaskbarShortcut=false /StartMenuShortcut=false
   All installer options imply silent mode; /S and -ms are equivalent.
   To inspect the payload without installing:
     "Firefox Setup <version>.exe" /ExtractDir=<directory>
@@ -2075,7 +2075,7 @@ function Get-FirefoxIsosBlock([string]$Root) {
             Check = 'Mozilla release SHA256SUMS; Authenticode Mozilla Corporation.'
         }
         $block = Format-IsoReadmeEntry -Row $row -Root $Root
-        $others = @(Get-ChildItem -LiteralPath $dir -Filter 'Firefox Setup *.exe' -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -ne $script:FirefoxRelease.OutFile } | Sort-Object LastWriteTime -Descending)
+        $others = @(Get-ChildItem -LiteralPath $dir -Filter 'Firefox Setup *.exe' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne $script:FirefoxRelease.FileName } | Sort-Object LastWriteTime -Descending)
         foreach ($file in $others) {
             $block += "`r`n`r`n" + (Format-ManualIsoReadmeEntry -Title 'Firefox ESR (other installer, not verified this run)' -Path $file.FullName -Folder (Join-Path '04-etc' $script:DirFirefox) -Note 'Installer left in this folder by another run; not verified against Mozilla SHA256SUMS this run.' -Root $Root)
         }

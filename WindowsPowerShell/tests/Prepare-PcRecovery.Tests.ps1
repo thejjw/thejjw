@@ -1277,6 +1277,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text = Get-FirefoxReadmeText
             $text | Should -Match '/S'
             $text | Should -Match 'MaintenanceService=false'
+            $text | Should -Match 'StartMenuShortcut=false'
             $text | Should -Match 'helper\.exe" -ms'
             $text | Should -Match 'SHA256SUMS'
             $text | Should -Match 'Mozilla Corporation'
@@ -1360,6 +1361,33 @@ Describe 'Prepare-PcRecovery.ps1' {
             $block = Get-FirefoxIsosBlock -Root $root
             $block | Should -Match 'pinned fallback; live lookup failed'
             $block | Should -Not -Match 'resolved live'
+        }
+
+        It 'does not list the verified file as an other installer under a relative root' {
+            Reset-State
+            Push-Location $TestDrive
+            try {
+                $root = 'ff-rel'
+                $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox'
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                $verified = Join-Path $dir 'Firefox Setup 153.7.0esr.exe'
+                Set-Content -LiteralPath $verified -Value 'verified' -NoNewline
+                $hash = 'ef' * 32
+                $script:FirefoxRelease = [pscustomobject]@{
+                    Version = '153.7.0esr'
+                    FileName = 'Firefox Setup 153.7.0esr.exe'
+                    Url = 'https://example.invalid/firefox.exe'
+                    Hash = $hash
+                    Source = 'live'
+                    OutFile = $verified
+                }
+                $script:VerifiedHashes[$verified] = $hash
+                $block = Get-FirefoxIsosBlock -Root $root
+                ([regex]::Matches($block, [regex]::Escape('Firefox Setup 153.7.0esr.exe'))).Count | Should -Be 1
+                $block | Should -Not -Match 'other installer'
+            } finally {
+                Pop-Location
+            }
         }
 
         It 'lists an unverified installer instead of saying not present' {
