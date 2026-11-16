@@ -1303,6 +1303,10 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:Failures[0].Manual | Should -Match 'same version'
             $script:Failures[0].Manual | Should -Match 'pinned fallback'
             $script:Failures[0].Manual | Should -Not -Match 'SourceForge'
+            $script:FirefoxResolved.Version | Should -Be $script:FirefoxFallbackVersion
+            $script:FirefoxResolved.Source | Should -Be 'fallback'
+            $script:FirefoxRelease | Should -BeNullOrEmpty
+            (Get-FirefoxReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC') | Should -Match 'resolved but not staged'
         }
 
         It 'uses the exact retry text when the hash still mismatches' {
@@ -1320,6 +1324,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:Failures[0].Manual | Should -Match ([regex]::Escape($ff.Url))
             $script:Failures[0].Manual | Should -Not -Match 'SourceForge'
             $script:FirefoxRelease | Should -BeNullOrEmpty
+            $script:FirefoxResolved.Version | Should -Be $script:FirefoxFallbackVersion
+            $script:FirefoxResolved.Source | Should -Be 'fallback'
+            (Get-FirefoxReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC') | Should -Match 'resolved but not staged'
         }
 
         It 'names the exact fallback file and hash when the download throws' {
@@ -1641,7 +1648,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 $t | Should -Match 'Trust:'
                 $t | Should -Match 'Hashes:'
                 $t | Should -Not -Match '\{HEADER\}'
-                if ($t -match 'see INTEGRITY') { $t | Should -Match '(?m)^INTEGRITY$' }
+                if ($t -match 'see INTEGRITY') { $t | Should -Match '(?m)^INTEGRITY\r?$' }
             }
         }
     }
