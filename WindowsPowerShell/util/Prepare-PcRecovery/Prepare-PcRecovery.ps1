@@ -332,7 +332,7 @@ function Get-CopypartyReadmeMeta {
             Released = 'see isos\README.txt'
             Source = $script:CopypartyReleasesUrl
             Trust = 'GitHub asset digest; see INTEGRITY'
-            Note = 'No verified copyparty files this run; see the failure above.'
+            Note = 'No copyparty files verified this run; see ..\..\README.txt for files on disk, or re-run online.'
         }
     }
     $missing = @()
@@ -367,13 +367,13 @@ function Get-FirefoxReadmeMeta {
         $version = $resolved.Version
         $released = $resolved.Released
         $source = $resolved.Url
-        $note = 'resolved but not staged this run; see failure above'
+        $note = 'resolved but not staged this run; re-run online to download it'
         if ($resolved.Source -eq 'fallback') { $note = 'pinned fallback; live lookup failed; ' + $note }
     } else {
         $version = 'unresolved this run'
-        $released = 'see failure above'
+        $released = 'unknown (not resolved this run)'
         $source = $script:FirefoxReleasesUrl
-        $note = 'no Firefox ESR version resolved this run'
+        $note = 'no Firefox ESR version resolved this run; re-run online'
     }
     if (-not $released) { $released = 'see Mozilla release notes' }
     return [pscustomobject]@{

@@ -1566,7 +1566,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Reset-State
             $m = Get-CopypartyReadmeMeta
             $m.Version | Should -Be 'not verified this run'
-            $m.Note | Should -Match 'No verified'
+            $m.Note | Should -Match 'No copyparty files verified'
         }
 
         It 'labels staged, resolved, and unresolved Firefox states' {
@@ -1581,9 +1581,24 @@ Describe 'Prepare-PcRecovery.ps1' {
             $m = Get-FirefoxReadmeMeta
             $m.Version | Should -Be '153.8.0esr'
             $m.Note | Should -Match 'not staged'
+            $m.Note | Should -Match 're-run online'
             $script:FirefoxResolved = $null
             $m = Get-FirefoxReadmeMeta
             $m.Version | Should -Be 'unresolved this run'
+            $m.Released | Should -Be 'unknown (not resolved this run)'
+            $m.Note | Should -Match 're-run online'
+        }
+
+        It 'uses the per-release Firefox date and tolerates its lookup failure' {
+            Mock Invoke-RestMethod -ParameterFilter { $Uri -eq $script:FirefoxVersionsUrl } { [pscustomobject]@{ FIREFOX_ESR = '153.8.0esr' } }
+            Mock Invoke-RestMethod -ParameterFilter { $Uri -eq $script:FirefoxJsonUrl } { [pscustomobject]@{ releases = [pscustomobject]@{ 'firefox-153.8.0esr' = [pscustomobject]@{ date = '2026-11-10' } } } }
+            $release = Get-FirefoxEsrRelease
+            $release.Source | Should -Be 'live'
+            $release.Released | Should -Be '2026-11-10'
+            Mock Invoke-RestMethod -ParameterFilter { $Uri -eq $script:FirefoxJsonUrl } { throw 'offline' }
+            $release = Get-FirefoxEsrRelease
+            $release.Source | Should -Be 'live'
+            $release.Released | Should -Be ''
         }
 
         It 'formats stamps invariantly under a non-invariant culture' {
