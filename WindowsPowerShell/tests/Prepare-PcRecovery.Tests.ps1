@@ -1275,6 +1275,77 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text.Contains($script:FirefoxFallbackVersion) | Should -BeTrue
             $text | Should -Not -Match 'FBVER'
         }
+
+        It 'prints the configured fallback version in the plan table' {
+            $script:planLines = @()
+            Mock Write-Host { $script:planLines += [string]$Object }
+            Write-PlanTable
+            ($script:planLines -join "`n") | Should -Match ([regex]::Escape($script:FirefoxFallbackVersion))
+        }
+
+        It 'labels a live verified release as resolved live' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ff-block-live'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $file = Join-Path $dir 'Firefox Setup 153.8.0esr.exe'
+            Set-Content -LiteralPath $file -Value 'firefox' -NoNewline
+            $hash = 'ab' * 32
+            $script:FirefoxRelease = [pscustomobject]@{
+                Version = '153.8.0esr'
+                FileName = 'Firefox Setup 153.8.0esr.exe'
+                Url = 'https://example.invalid/firefox.exe'
+                Hash = $hash
+                Source = 'live'
+                OutFile = $file
+            }
+            $script:VerifiedHashes[$file] = $hash
+            $block = Get-FirefoxIsosBlock -Root $root
+            $block | Should -Match 'resolved live'
+            $block | Should -Not -Match 'pinned fallback'
+            $block | Should -Match 'SHA-256 \(verified this run\)'
+        }
+
+        It 'labels a fallback release as pinned fallback' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ff-block-fallback'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $file = Join-Path $dir 'Firefox Setup 153.7.0esr.exe'
+            Set-Content -LiteralPath $file -Value 'firefox' -NoNewline
+            $hash = 'cd' * 32
+            $script:FirefoxRelease = [pscustomobject]@{
+                Version = '153.7.0esr'
+                FileName = 'Firefox Setup 153.7.0esr.exe'
+                Url = 'https://example.invalid/firefox.exe'
+                Hash = $hash
+                Source = 'fallback'
+                OutFile = $file
+            }
+            $script:VerifiedHashes[$file] = $hash
+            $block = Get-FirefoxIsosBlock -Root $root
+            $block | Should -Match 'pinned fallback; live lookup failed'
+            $block | Should -Not -Match 'resolved live'
+        }
+
+        It 'lists an unverified installer instead of saying not present' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ff-block-unverified'
+            $dir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $dir 'Firefox Setup 153.8.0esr.exe') -Value 'firefox' -NoNewline
+            $block = Get-FirefoxIsosBlock -Root $root
+            $block | Should -Match 'present, not verified this run'
+            $block | Should -Match 'Bytes on disk'
+            $block | Should -Not -Match '\(not present\)'
+        }
+
+        It 'says not present when the folder has no installer' {
+            Reset-State
+            $root = Join-Path $TestDrive 'ff-block-empty'
+            New-Item -ItemType Directory -Path (Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox') -Force | Out-Null
+            (Get-FirefoxIsosBlock -Root $root) | Should -Match 'Firefox ESR \(not present\)'
+        }
     }
 
     Context 'elevation' {

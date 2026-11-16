@@ -74,7 +74,7 @@
     153.7.0esr release is the fallback ONLY when the metadata or checksum
     lookup fails; refresh that pin when ESR 153 leaves support. The EXE is
     about 86 MB; old installers stay in isos\04-etc\firefox\ and are deleted
-    after a newer one verifies.
+    by hand after a newer one verifies.
     Suite: Invoke-Pester .\tests\Prepare-PcRecovery.Tests.ps1 (offline).
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -2048,6 +2048,45 @@ function Save-FirefoxEsr {
     return $true
 }
 
+# Builds the isos readme block for Firefox ESR. A release verified this run is
+# documented as verified; an installer left by an earlier run is listed with
+# its on-disk hash and an explicit "not verified this run" label; an empty
+# folder says so. Never claims a stale file is current.
+function Get-FirefoxIsosBlock([string]$Root) {
+    $dir = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox
+    if ($script:FirefoxRelease -and $script:VerifiedHashes.ContainsKey($script:FirefoxRelease.OutFile)) {
+        if ($script:FirefoxRelease.Source -eq 'fallback') {
+            $source = 'pinned fallback; live lookup failed'
+            $hashKind = 'pinned fallback'
+        } else {
+            $source = 'resolved live'
+            $hashKind = 'Mozilla SHA256SUMS'
+        }
+        $row = [pscustomobject]@{
+            Name = 'Firefox ESR'
+            Category = (Join-Path '04-etc' $script:DirFirefox)
+            FileName = $script:FirefoxRelease.FileName
+            Url = $script:FirefoxRelease.Url
+            Hash = $script:FirefoxRelease.Hash
+            HashKind = $hashKind
+            Released = ('Version ' + $script:FirefoxRelease.Version + ', ' + $source + '.')
+            SizeNote = 'About 86 MB.'
+            About = 'Offline Firefox ESR browser for Windows 11/Tiny11 where Edge is removed.'
+            Check = 'Mozilla release SHA256SUMS; Authenticode Mozilla Corporation.'
+        }
+        return (Format-IsoReadmeEntry -Row $row -Root $Root)
+    }
+    $existing = @(Get-ChildItem -LiteralPath $dir -Filter 'Firefox Setup *.exe' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+    if ($existing.Count -gt 0) {
+        $blocks = @()
+        foreach ($file in $existing) {
+            $blocks += (Format-ManualIsoReadmeEntry -Title 'Firefox ESR (present, not verified this run)' -Path $file.FullName -Folder (Join-Path '04-etc' $script:DirFirefox) -Note 'Present on disk but not verified against Mozilla SHA256SUMS this run; re-run online to resolve and verify.' -Root $Root)
+        }
+        return ($blocks -join "`r`n`r`n")
+    }
+    return ('== Firefox ESR (not present) ==' + "`r`n" + 'Run the prep script with network access; the current ESR is resolved live and falls back to the pinned release.')
+}
+
 # Finds official Windows ISOs in the installers folder, newest first.
 # Matches Fido-style names (Win11_*.iso) and official Microsoft names
 # (en-us_windows_11_*.iso). Never matches the tiny11\ build output.
@@ -2300,7 +2339,7 @@ function Write-PlanTable {
     Write-Detail 'Tools: latest Ventoy Windows zip, latest Rufus portable, Fido.ps1, tiny11builder x64 zip + tiny11maker.ps1'
     Write-Detail 'copyparty: latest GitHub release, sfx.py + exe under isos\04-etc\copyparty\.'
     Write-Detail 'ImgBurn: official 2.5.8.0 installer, extracted into isos\04-etc\imgburn\bin\.'
-    Write-Detail 'Firefox ESR: latest en-US win64 resolved live; pinned 153.7.0esr fallback if metadata/checksum lookup fails.'
+    Write-Detail "Firefox ESR: latest en-US win64 resolved live; pinned $($script:FirefoxFallbackVersion) fallback if metadata/checksum lookup fails."
     Write-Detail 'Windows 11 ISO resolved live through Fido; Tiny11 built from it with -Elevate.'
     $rows = Get-RecoveryCatalog | Where-Object {
         (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
@@ -2476,31 +2515,7 @@ function Invoke-PreparePcRecovery {
         } else {
             $isoBlocks += '== ImgBurn portable (not present) ==' + "`r`n" + 'Run the prep script again; the payload is extracted from the official installer.'
         }
-        $firefoxDir = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox
-        if ($script:FirefoxRelease -and $script:VerifiedHashes.ContainsKey($script:FirefoxRelease.OutFile)) {
-            if ($script:FirefoxRelease.Source -eq 'fallback') {
-                $firefoxSource = 'pinned fallback; live lookup failed'
-                $firefoxHashKind = 'pinned fallback'
-            } else {
-                $firefoxSource = 'resolved live'
-                $firefoxHashKind = 'Mozilla SHA256SUMS'
-            }
-            $firefoxRow = [pscustomobject]@{
-                Name = 'Firefox ESR'
-                Category = (Join-Path '04-etc' $script:DirFirefox)
-                FileName = $script:FirefoxRelease.FileName
-                Url = $script:FirefoxRelease.Url
-                Hash = $script:FirefoxRelease.Hash
-                HashKind = $firefoxHashKind
-                Released = ('Version ' + $script:FirefoxRelease.Version + ', ' + $firefoxSource + '.')
-                SizeNote = 'About 86 MB.'
-                About = 'Offline Firefox ESR browser for Windows 11/Tiny11 where Edge is removed.'
-                Check = 'Mozilla release SHA256SUMS; Authenticode Mozilla Corporation.'
-            }
-            $isoBlocks += (Format-IsoReadmeEntry -Row $firefoxRow -Root $Root)
-        } else {
-            $isoBlocks += '== Firefox ESR (not present) ==' + "`r`n" + 'Run the prep script with network access; the current ESR is resolved live and falls back to the pinned release.'
-        }
+        $isoBlocks += (Get-FirefoxIsosBlock -Root $Root)
         $installersDir = Join-Path (Join-Path $Root $script:DirIsos) '03-Installers'
         $winIso = Find-WindowsIso -InstallersDir $installersDir | Select-Object -First 1
         if ($winIso) {
