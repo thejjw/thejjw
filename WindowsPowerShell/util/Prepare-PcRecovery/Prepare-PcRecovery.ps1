@@ -1198,8 +1198,20 @@ function Test-LocalFileHash([string]$Path, [string]$ExpectedHash) {
 # Returns $true on download-or-skip, $false on recorded failure. Never throws.
 function Save-VerifiedFile {
     [CmdletBinding(SupportsShouldProcess = $true)]
-    param([string]$Url, [string]$OutFile, [string]$ExpectedHash = '', [string]$AlternateUrl = '', [string]$Name = '')
+    param([string]$Url, [string]$OutFile, [string]$ExpectedHash = '', [string]$AlternateUrl = '', [string]$Name = '', [string[]]$Manual = @())
     $label = if ($Name) { $Name } else { $OutFile }
+    $downloadManual = @(
+        "Download $Url by hand into $OutFile.",
+        'Re-run the script; verified files are skipped.'
+    )
+    $mismatchManual = @(
+        "Download $Url by hand into $OutFile and compare its SHA-256 with $ExpectedHash.",
+        'A SourceForge interstitial page instead of bytes is the usual cause; retry later.'
+    )
+    if ($Manual.Count -gt 0) {
+        $downloadManual = $Manual
+        $mismatchManual = $Manual
+    }
     if (-not $PSCmdlet.ShouldProcess($OutFile, "Download $Url")) { return $true }
     if (Test-Path -LiteralPath $OutFile) {
         if ($ExpectedHash) {
@@ -1229,10 +1241,7 @@ function Save-VerifiedFile {
         if (Invoke-FileDownload -Url $candidates[$n] -OutFile $OutFile) { $downloaded = $true; break }
     }
     if (-not $downloaded) {
-        Write-Failure -Name $label -Detail "Download failed: $Url" -Manual @(
-            "Download $Url by hand into $OutFile.",
-            'Re-run the script; verified files are skipped.'
-        )
+        Write-Failure -Name $label -Detail "Download failed: $Url" -Manual $downloadManual
         return $false
     }
     if ($ExpectedHash -and -not (Test-LocalFileHash -Path $OutFile -ExpectedHash $ExpectedHash)) {
@@ -1244,10 +1253,7 @@ function Save-VerifiedFile {
             return $true
         }
         Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
-        Write-Failure -Name $label -Detail "Hash mismatch after retry: $Url" -Manual @(
-            "Download $Url by hand into $OutFile and compare its SHA-256 with $ExpectedHash.",
-            'A SourceForge interstitial page instead of bytes is the usual cause; retry later.'
-        )
+        Write-Failure -Name $label -Detail "Hash mismatch after retry: $Url" -Manual $mismatchManual
         return $false
     }
     Write-Ok "Downloaded: $label"
@@ -2037,7 +2043,7 @@ function Save-FirefoxEsr {
         $manual += 'The live ESR lookup failed; this is the pinned fallback release.'
     }
     try {
-        if (-not (Save-VerifiedFile -Url $release.Url -OutFile $outFile -ExpectedHash $hash -Name $label)) { return $false }
+        if (-not (Save-VerifiedFile -Url $release.Url -OutFile $outFile -ExpectedHash $hash -Name $label -Manual $manual)) { return $false }
     } catch {
         $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
         Write-Failure -Name 'Firefox ESR' -Detail "Download failed: $detail" -Manual $manual
@@ -2479,7 +2485,9 @@ function Invoke-PreparePcRecovery {
             Install-ImgBurnPortable -Root $Root | Out-Null
         }
         Write-Step 'Firefox ESR (04-etc)'
-        Invoke-SafeStep -Name 'Firefox ESR' -Manual @('See the Firefox ESR failure above for the exact file and SHA-256; place it in isos\04-etc\firefox\ and re-run.') -Body {
+        $firefoxFallback = New-FirefoxFallbackRelease
+        $firefoxHint = 'Download the Firefox ESR en-US win64 installer from ' + $script:FirefoxReleasesUrl + '<version>/win64/en-US/ into isos\04-etc\firefox\ and compare it with that release SHA256SUMS. Pinned fallback: ' + $firefoxFallback.Url + ' (SHA-256 ' + $script:FirefoxFallbackSha256 + ').'
+        Invoke-SafeStep -Name 'Firefox ESR' -Manual @($firefoxHint) -Body {
             Save-FirefoxEsr -Root $Root | Out-Null
         }
         Write-Step 'Windows 11 ISO via Fido'

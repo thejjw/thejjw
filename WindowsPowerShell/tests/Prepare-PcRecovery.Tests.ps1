@@ -1278,6 +1278,18 @@ Describe 'Prepare-PcRecovery.ps1' {
             (Get-FirefoxIsosBlock -Root $root) | Should -Match 'not present'
         }
 
+        It 'uses the exact retry text when the download engine fails' {
+            Reset-State
+            $root = Join-Path $TestDrive 'firefox-downloadfail'
+            Mock Invoke-RestMethod { throw 'offline' }
+            Mock Invoke-FileDownload { return $false }
+            Save-FirefoxEsr -Root $root | Should -BeFalse
+            $script:Failures | Should -HaveCount 1
+            $script:Failures[0].Manual | Should -Match ([regex]::Escape($script:FirefoxFallbackSha256))
+            $script:Failures[0].Manual | Should -Match '153\.7\.0esr'
+            $script:Failures[0].Manual | Should -Match 'pinned fallback'
+        }
+
         It 'names the exact fallback file and hash when the download throws' {
             Reset-State
             $root = Join-Path $TestDrive 'firefox-throw'
