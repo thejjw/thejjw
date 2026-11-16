@@ -848,19 +848,26 @@ FILES
 
 INSTALL (machine-wide; needs an elevated shell)
   GUI: double-click the installer.
-  Silent:
-    "Firefox Setup <version>.exe" /S
-  Leaner silent install (no maintenance service or shortcuts):
-    "Firefox Setup <version>.exe" /S /MaintenanceService=false ^
+  cmd.exe:
+    start "" /wait "Firefox Setup <version>.exe" /S
+    start "" /wait "Firefox Setup <version>.exe" /S /MaintenanceService=false ^
       /DesktopShortcut=false /TaskbarShortcut=false /StartMenuShortcut=false
+  PowerShell:
+    Start-Process -Wait -FilePath ".\Firefox Setup <version>.exe" -ArgumentList '/S'
+    Start-Process -Wait -FilePath ".\Firefox Setup <version>.exe" `
+      -ArgumentList '/S','/MaintenanceService=false','/DesktopShortcut=false',`
+      '/TaskbarShortcut=false','/StartMenuShortcut=false'
   All installer options imply silent mode; /S and -ms are equivalent.
   To inspect the payload without installing:
-    "Firefox Setup <version>.exe" /ExtractDir=<directory>
+    cmd.exe: "Firefox Setup <version>.exe" /ExtractDir=<directory>
   (/ExtractDir must be the only option.)
 
 UNINSTALL
   Settings > Apps > Mozilla Firefox, or from an elevated shell:
-    "%ProgramFiles%\Mozilla Firefox\uninstall\helper.exe" -ms
+    cmd.exe:
+      "%ProgramFiles%\Mozilla Firefox\uninstall\helper.exe" -ms
+    PowerShell:
+      & "$env:ProgramFiles\Mozilla Firefox\uninstall\helper.exe" -ms
   A per-user install uses the same helper under its install path.
 
 PROFILE AND PRIVACY
@@ -878,9 +885,11 @@ VERSIONS AND UPDATES
 
 INTEGRITY
   SHA-256 comes from the release SHA256SUMS published by Mozilla. The
-  installer is Authenticode-valid with Mozilla Corporation as signer. The
-  isos README records the exact version, hash, and whether it was resolved
-  live or from the pinned fallback.
+  installer should be Authenticode-valid with Mozilla Corporation as signer;
+  verify it with:
+    Get-AuthenticodeSignature '.\Firefox Setup <version>.exe'
+  The isos README records the exact version, hash, and whether it was
+  resolved live or from the pinned fallback.
 
 NOTES
   - Tiny11 removes Edge and WebView2. Firefox ESR supplies the browser; it
@@ -2072,7 +2081,7 @@ function Get-FirefoxIsosBlock([string]$Root) {
             Released = ('Version ' + $script:FirefoxRelease.Version + ', ' + $source + '.')
             SizeNote = 'About 86 MB.'
             About = 'Offline Firefox ESR browser for Windows 11/Tiny11 where Edge is removed.'
-            Check = 'Mozilla release SHA256SUMS; Authenticode Mozilla Corporation.'
+            Check = 'Mozilla release SHA256SUMS; verify Authenticode with Get-AuthenticodeSignature.'
         }
         $block = Format-IsoReadmeEntry -Row $row -Root $Root
         $others = @(Get-ChildItem -LiteralPath $dir -Filter 'Firefox Setup *.exe' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne $script:FirefoxRelease.FileName } | Sort-Object LastWriteTime -Descending)

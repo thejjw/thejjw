@@ -1252,6 +1252,20 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:Failures.Count | Should -Be 0
         }
 
+        It 'falls back when the checksum list cannot be downloaded' {
+            Reset-State
+            $root = Join-Path $TestDrive 'firefox-nosums'
+            Mock Invoke-RestMethod { [pscustomobject]@{ FIREFOX_ESR = '153.8.0esr' } }
+            Mock Invoke-WebText { throw 'offline' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'firefox' -NoNewline; return $true }
+            Save-FirefoxEsr -Root $root | Should -BeTrue
+            Should -Invoke -CommandName Save-VerifiedFile -Times 1 -Exactly -ParameterFilter {
+                $ExpectedHash -eq $script:FirefoxFallbackSha256 -and $Url -like '*153.7.0esr/win64/en-US/*'
+            }
+            $script:FirefoxRelease.Source | Should -Be 'fallback'
+            $script:Failures.Count | Should -Be 0
+        }
+
         It 'does not treat a silent download success as a file' {
             Reset-State
             $root = Join-Path $TestDrive 'firefox-nofile'
@@ -1278,6 +1292,12 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match '/S'
             $text | Should -Match 'MaintenanceService=false'
             $text | Should -Match 'StartMenuShortcut=false'
+            $text | Should -Match 'cmd\.exe:'
+            $text | Should -Match 'PowerShell:'
+            $text | Should -Match 'start "" /wait'
+            $text | Should -Match 'Start-Process -Wait'
+            $text | Should -Match '\$env:ProgramFiles'
+            $text | Should -Match 'Get-AuthenticodeSignature'
             $text | Should -Match 'helper\.exe" -ms'
             $text | Should -Match 'SHA256SUMS'
             $text | Should -Match 'Mozilla Corporation'
