@@ -1159,7 +1159,7 @@ Describe 'Prepare-PcRecovery.ps1' {
 
     Context 'firefox esr' {
         It 'pins a valid fallback and Mozilla endpoints' {
-            $script:FirefoxFallbackVersion | Should -Match '^\d+\.\d+\.\d+esr$'
+            $script:FirefoxFallbackVersion | Should -Match '^\d+\.\d+(\.\d+)?esr$'
             $script:FirefoxFallbackSha256 | Should -Match '^[0-9a-f]{64}$'
             $script:FirefoxVersionsUrl | Should -Be 'https://product-details.mozilla.org/1.0/firefox_versions.json'
             $script:FirefoxReleasesUrl | Should -Be 'https://ftp.mozilla.org/pub/firefox/releases/'
@@ -1184,6 +1184,14 @@ Describe 'Prepare-PcRecovery.ps1' {
             $release.FallbackHash | Should -Be $script:FirefoxFallbackSha256
             $release.Url | Should -Match '153\.7\.0esr/win64/en-US/Firefox%20Setup%20153\.7\.0esr\.exe$'
             $release.ChecksumPath | Should -Be 'win64/en-US/Firefox Setup 153.7.0esr.exe'
+        }
+
+        It 'accepts a two-component FIREFOX_ESR version' {
+            Mock Invoke-RestMethod { [pscustomobject]@{ FIREFOX_ESR = '165.0esr' } }
+            $release = Get-FirefoxEsrRelease
+            $release.Source | Should -Be 'live'
+            $release.FileName | Should -Be 'Firefox Setup 165.0esr.exe'
+            $release.Url | Should -Be 'https://ftp.mozilla.org/pub/firefox/releases/165.0esr/win64/en-US/Firefox%20Setup%20165.0esr.exe'
         }
 
         It 'falls back when FIREFOX_ESR is malformed' {
@@ -1286,8 +1294,10 @@ Describe 'Prepare-PcRecovery.ps1' {
             Save-FirefoxEsr -Root $root | Should -BeFalse
             $script:Failures | Should -HaveCount 1
             $script:Failures[0].Manual | Should -Match ([regex]::Escape($script:FirefoxFallbackSha256))
+            $script:Failures[0].Manual | Should -Match 'same version'
             $script:Failures[0].Manual | Should -Match '153\.7\.0esr'
             $script:Failures[0].Manual | Should -Match 'pinned fallback'
+            $script:Failures[0].Manual | Should -Match 'same version'
         }
 
         It 'names the exact fallback file and hash when the download throws' {

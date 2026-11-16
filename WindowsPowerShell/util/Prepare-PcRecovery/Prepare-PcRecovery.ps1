@@ -1983,7 +1983,7 @@ function Get-FirefoxEsrRelease {
         return (New-FirefoxFallbackRelease)
     }
     $version = [string]$meta.FIREFOX_ESR
-    if ($version -notmatch '^\d+\.\d+\.\d+esr$') {
+    if ($version -notmatch '^\d+\.\d+(\.\d+)?esr$') {
         Write-Detail "Firefox ESR metadata returned no usable FIREFOX_ESR ('$version')."
         return (New-FirefoxFallbackRelease)
     }
@@ -2037,7 +2037,7 @@ function Save-FirefoxEsr {
     if ($release.Source -eq 'fallback') { $label += ' (pinned fallback)' }
     $manual = @(
         ("Download {0} by hand into {1}." -f $release.Url, $outFile),
-        ("SHA-256 must be {0}; the next run verifies it and skips the download." -f $hash)
+        ("SHA-256 must be {0}. A later run that resolves this same version verifies it and skips the download; a different resolved version downloads its own installer and lists this file as unverified." -f $hash)
     )
     if ($release.Source -eq 'fallback') {
         $manual += 'The live ESR lookup failed; this is the pinned fallback release.'
