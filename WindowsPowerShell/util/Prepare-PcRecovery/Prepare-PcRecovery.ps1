@@ -47,13 +47,13 @@
     Copyright (c) 2026 @thejjw. All rights reserved.
     Last Updated: November 16, 2026
 
-    Catalog: per-ISO About / Released / SizeNote / Hash / Check rows in
-    Get-RecoveryCatalog. Re-pin Pinned rows only (Hash + Released +
-    SizeNote together); Rolling rows resolve live, Manual rows are
-    handled by dedicated functions. Dates come from checksum headers,
-    SourceForge file dates, or the project page -- never guess.
-    HWE Mint rows share the kernel.org tree; one AlternateUrl pattern
-    covers all three (kernel.org stalls large ISOs: Princeton fallback).
+    Catalog: per-row About / Released / SizeNote / Hash / Check entries in
+    Get-RecoveryCatalog. Re-pin Pinned rows only, using the checklist in the
+    Get-RecoveryCatalog header and each row's Check text; Rolling rows resolve
+    live, Manual rows are handled by dedicated functions. Dates come from
+    checksum headers, SourceForge file dates, or the project page -- never guess.
+    Mint rows (regular and HWE) use mirrors.kernel.org with a Princeton
+    AlternateUrl fallback (kernel.org stalls large ISOs).
     Sentinel may refuse Fido per IP: "Sentinel marked this request as
     rejected" is transient (retried 3x), then place the ISO by hand.
     Elevation: sudo.exe inline mode raises a UAC consent dialog and waits;
@@ -65,18 +65,13 @@
     file (2 KB), staged per run; the 95 MB WinUI zip is hash context
     only and never runs. Child uses 'Continue', shadowed Read-Host,
     unloaded HKLM\z* hives.
-    Python rows: pinned to python.org 3.15.2 (Oct 2026). 3.16+ stop shipping
-    the traditional Windows installer (PEP 773 / Python install manager), so
-    drop the installer row then; the embeddable zip stays. Re-pin Hash +
-    Released + SizeNote together.
-    Go/Node rows: pinned Go 1.27.4 and Node.js LTS 26.13.1, Windows ZIP plus
-    Linux tar.gz. Node's tar.gz avoids an xz extractor; re-pin version and
-    hashes together.
+    Python rows: 3.16+ stop shipping the traditional Windows installer
+    (PEP 773 / Python install manager), so drop the installer row then; the
+    embeddable zip stays.
+    Go/Node rows: Windows ZIP plus Linux tar.gz. Node's tar.gz avoids an xz
+    extractor.
     VNC rows: TigerVNC viewer + Linux X11 server; UltraVNC Windows server/
-    viewer. The generic TigerVNC tarball has no w0vncserver; Wayland uses
-    distro packages or built-in sharing.
-    Maintenance: pinned rows are snapshots. Follow the re-pin checklist in
-    the Get-RecoveryCatalog header and the Check text on each row.
+    viewer.
     Firefox ESR: resolves FIREFOX_ESR live from product-details.mozilla.org
     and verifies the release SHA256SUMS (publisher checksum). The pinned
     153.7.0esr release is the fallback ONLY when the metadata or checksum
@@ -152,7 +147,7 @@ $script:FileTabbyDeb = 'tabby-' + $script:TabbyVersion + '-linux-x64.deb'
 $script:FileTabbyRpm = 'tabby-' + $script:TabbyVersion + '-linux-x64.rpm'
 # Go and Node.js LTS: portable x64 toolchains for Windows and Linux. Linux
 # artifacts are .tar.gz (Node also publishes .tar.xz) so extraction needs only
-# tar/gzip, not xz. Re-pin version and both hashes together.
+# tar/gzip, not xz.
 $script:DirGolang = 'golang'
 $script:GoVersion = '1.27.4'
 $script:GoReleased = '2026-11-10'
@@ -330,7 +325,7 @@ function Get-TopicReadmeMeta([string]$Topic) {
         'python' {
             $released = Find-CatalogReleasedDate '04-etc\python'
             if (-not $released) { $released = 'see catalog' }
-            [pscustomobject]@{ Package = 'Python for Windows'; Version = $script:PyVersion; Released = $released; Source = $script:PyUrlBase; Trust = 'pinned SHA-256 (prep script); see INTEGRITY'; Note = '' }
+            [pscustomobject]@{ Package = 'Python for Windows'; Version = $script:PyVersion; Released = $released; Source = $script:PyUrlBase; Trust = 'python.org SPDX SHA-256 pin + Authenticode (Python Software Foundation); see INTEGRITY'; Note = '' }
         }
         '7zip' {
             $released = Find-CatalogReleasedDate '04-etc\7zip'
@@ -364,7 +359,7 @@ function Get-TopicReadmeMeta([string]$Topic) {
             [pscustomobject]@{ Package = 'Node.js LTS'; Version = ($script:NodeVersion + ' (' + $script:NodeLtsName + ')'); Released = $script:NodeReleased; Source = $script:NodeUrlBase; Trust = 'pinned SHA-256 from SHASUMS256.txt; see INTEGRITY'; Note = '' }
         }
         'tigervnc' {
-            [pscustomobject]@{ Package = 'TigerVNC'; Version = $script:TigerVncVersion; Released = $script:TigerVncReleased; Source = ('https://github.com/TigerVNC/tigervnc/releases/tag/v' + $script:TigerVncVersion); Trust = 'EXE Authenticode + pinned SHA-256; tarball first-download pin (no publisher checksum); see INTEGRITY'; Note = 'Windows viewer and Linux X11 viewer/server; no Windows server.' }
+            [pscustomobject]@{ Package = 'TigerVNC'; Version = $script:TigerVncVersion; Released = $script:TigerVncReleased; Source = $script:TigerVncUrlBase; Trust = 'EXE first-download SHA-256 pin + Authenticode (Brian Hinz); tarball first-download pin; no publisher checksum; see INTEGRITY'; Note = 'Windows viewer and Linux X11 viewer/server; no Windows server.' }
         }
         'ultravnc' {
             [pscustomobject]@{ Package = 'UltraVNC'; Version = $script:UltraVncVersion; Released = $script:UltraVncReleased; Source = 'https://uvnc.com/downloads/ultravnc/175-ultravnc-1-8-3-2.html'; Trust = 'official SHA-256 + Authenticode; see INTEGRITY'; Note = 'Windows server/viewer; use UltraVNC viewer for DSM, MS Logon, Repeater, or SC.' }
@@ -1195,8 +1190,7 @@ NOTES
     return Add-TopicReadmeHeader -Text $text.Replace('NODEZIP', $script:FileNodeWindows).Replace('NODETAR', $script:FileNodeLinux).Replace('NODESUMS', $script:FileNodeSums).Replace('NODEVER', $script:NodeVersion).Replace('NODELTS', $script:NodeLtsName).Replace('NODEWINHASH', $script:NodeWindowsSha256).Replace('NODELINHASH', $script:NodeLinuxSha256) -Meta (Get-TopicReadmeMeta -Topic 'nodejs') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
-# Offline TigerVNC sheet for isos\04-etc\tigervnc\. Windows viewer plus the
-# generic Linux X11 viewer/server archive; the tarball has no w0vncserver.
+# Offline TigerVNC sheet for isos\04-etc\tigervnc\.
 function Get-TigerVncReadmeText {
     param([string]$RunStartedUtc, [string]$WrittenUtc)
     $text = @'
@@ -1278,8 +1272,11 @@ INTEGRITY
   Pinned values:
     TVWIN  TVWINHASH
     TVTAR  TVLINHASH
-  The EXE is Authenticode-valid, signer "Open Source Developer, Brian Hinz".
-  The Linux tarball has no publisher checksum; this is a first-download pin.
+  TigerVNC publishes no checksum for either file; both SHA-256 values are
+  first-download pins. The EXE is also Authenticode-valid, signer
+  "Open Source Developer, Brian Hinz". If a file here stops matching its
+  pinned value, treat it as damaged or tampered with and re-run the prep
+  script to download it again.
   TigerVNC is GPL-2.0; source: https://github.com/TigerVNC/tigervnc
 
 NOTES
@@ -1392,8 +1389,8 @@ CJK DISPLAY FONT
 {HEADER}
 
 FILES
-  FONTFILE  Noto Sans Mono CJK KR Regular, version 2.004; one
-                       Regular weight, monospaced, about 15.6 MB.
+  FONTFILE  Noto Sans Mono CJK KR Regular, version FONTVER; one
+                       Regular weight, monospaced.
   FONTLICENSE        Upstream SIL OFL 1.1 license, byte-for-byte.
 
 INSTALL - LINUX (no admin)
@@ -1439,7 +1436,7 @@ INTEGRITY
 LICENSE
   SIL Open Font License 1.1; see FONTLICENSE.
 '@
-    $body = $text.Replace('FONTFILE', $script:FileFont).Replace('FONTLICENSE', $script:FileFontLicense).Replace('FONTHASH', $script:FontSha256).Replace('FONTCOMMIT', $script:FontCommit)
+    $body = $text.Replace('FONTFILE', $script:FileFont).Replace('FONTLICENSE', $script:FileFontLicense).Replace('FONTHASH', $script:FontSha256).Replace('FONTCOMMIT', $script:FontCommit).Replace('FONTVER', $script:FontVersion)
     return Add-TopicReadmeHeader -Text $body -Meta (Get-TopicReadmeMeta -Topic 'fonts') -RunStartedUtc $RunStartedUtc -WrittenUtc $WrittenUtc
 }
 
@@ -1875,12 +1872,10 @@ function Save-VerifiedFile {
     $label = if ($Name) { $Name } else { $OutFile }
     $downloadManual = @(
         "Download $Url by hand into $OutFile.",
-        'Re-run the script; verified files are skipped.'
+        'Re-run the script; verified files are skipped.',
+        'If the URL returns 404 on every run, upstream may have archived the release; update the pin or source.'
     )
-    $mismatchManual = @(
-        "Download $Url by hand into $OutFile and compare its SHA-256 with $ExpectedHash.",
-        'A SourceForge interstitial page instead of bytes is the usual cause; retry later.'
-    )
+    $mismatchManual = @()
     if ($Manual.Count -gt 0) {
         $downloadManual = $Manual
         $mismatchManual = $Manual
@@ -1904,6 +1899,7 @@ function Save-VerifiedFile {
     $candidates = @($Url)
     if ($AlternateUrl) { $candidates += $AlternateUrl }
     $downloaded = $false
+    $downloadedFrom = ''
     for ($n = 0; $n -lt $candidates.Count; $n++) {
         if ($n -gt 0) {
             # A stale .partial belongs to the previous host; resuming from its
@@ -1911,22 +1907,51 @@ function Save-VerifiedFile {
             Write-Detail "Primary failed; retrying from alternate mirror: $label"
             Remove-Item -LiteralPath "$OutFile.partial" -Force -ErrorAction SilentlyContinue
         }
-        if (Invoke-FileDownload -Url $candidates[$n] -OutFile $OutFile) { $downloaded = $true; break }
+        if (Invoke-FileDownload -Url $candidates[$n] -OutFile $OutFile) {
+            $downloaded = $true
+            $downloadedFrom = $candidates[$n]
+            break
+        }
     }
     if (-not $downloaded) {
-        Write-Failure -Name $label -Detail "Download failed: $Url" -Manual $downloadManual
+        $detail = if ($AlternateUrl) {
+            "Download failed: $Url (alternate also failed: $AlternateUrl)"
+        } else {
+            "Download failed: $Url"
+        }
+        Write-Failure -Name $label -Detail $detail -Manual $downloadManual
         return $false
     }
     if ($ExpectedHash -and -not (Test-LocalFileHash -Path $OutFile -ExpectedHash $ExpectedHash)) {
         Write-Detail "Hash mismatch, retrying once: $label"
         Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
-        if ((Invoke-FileDownload -Url $Url -OutFile $OutFile) -and (Test-LocalFileHash -Path $OutFile -ExpectedHash $ExpectedHash)) {
+        if ((Invoke-FileDownload -Url $downloadedFrom -OutFile $OutFile) -and (Test-LocalFileHash -Path $OutFile -ExpectedHash $ExpectedHash)) {
             Write-Ok "Downloaded (verified on retry): $label"
             $script:Results += [pscustomobject]@{ Name = $label; Status = 'Downloaded'; Detail = 'verified on retry' }
             return $true
         }
         Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
-        Write-Failure -Name $label -Detail "Hash mismatch after retry: $Url" -Manual $mismatchManual
+        if ($mismatchManual.Count -eq 0) {
+            if ($downloadedFrom -ne $Url) {
+                $mismatchManual = @(
+                    "Download $Url by hand into $OutFile and compare its SHA-256 with $ExpectedHash; the next run verifies it and skips.",
+                    "The alternate $downloadedFrom served different bytes (a latest/current URL may point at a newer release); verify its version before changing the pin.",
+                    "If $Url returns 404 on every run, upstream has archived this release; download the archived copy by hand or re-pin from the Re-verify line for this entry in isos\README.txt."
+                )
+            } else {
+                $cause = if ($downloadedFrom -match 'sourceforge\.net') {
+                    'A proxy, captive portal, or SourceForge interstitial page served instead of the file is the usual one-off cause; retry later.'
+                } else {
+                    'A proxy, captive portal, or mirror page served instead of the file is the usual one-off cause; retry later.'
+                }
+                $mismatchManual = @(
+                    "Download $Url by hand into $OutFile and compare its SHA-256 with $ExpectedHash.",
+                    $cause,
+                    'If it repeats on every run, the source no longer serves the expected file; verify the source before trusting or re-pinning it. For catalog rows, see the Re-verify line for this entry in isos\README.txt.'
+                )
+            }
+        }
+        Write-Failure -Name $label -Detail "Hash mismatch after retry: $downloadedFrom" -Manual $mismatchManual
         return $false
     }
     Write-Ok "Downloaded: $label"
@@ -1940,33 +1965,45 @@ function Save-VerifiedFile {
 # MintHwe marks HWE rows fetched only when -MintHwe names them; NetbootVariant
 # marks the x64/multi rows of which only the selected one is fetched.
 #
-# MAINTENANCE - re-pin checklist (last full audit 2026-11-16):
+# MAINTENANCE - re-pin checklist:
 #   1. Open the upstream release/checksum page named in the row's Check text.
-#   2. Update FileName, Url, AlternateUrl, Hash, Released, SizeNote, About,
-#      Check, and any SidecarUrl/SidecarName together. Also update every
+#   2. Update Name, FileName, Url, AlternateUrl, Hash, Released, SizeNote,
+#      About, Check, and any SidecarUrl/SidecarName together. Also update every
 #      shared $script: version/hash/URL-base constant the row uses, plus
-#      Get-TopicReadmeMeta, readme examples, and tests that repeat the
-#      version. Search for dotted, dashed, and dotless forms (9.6.0,
-#      release-9-6-0, 1832, 2606), URL buckets such as /1800/, and the old
-#      hash; tests may hard-code all of them.
+#      Get-TopicReadmeMeta, comment-based help, Write-Detail strings, readme
+#      examples, and tests that repeat the version. Search for dotted (1.2.3),
+#      dashed (release-1-2-3), dotless (123), URL buckets (/1200/), and the
+#      old hash; tests may hard-code all.
 #   3. Run Invoke-Pester .\tests\Prepare-PcRecovery.Tests.ps1.
 #   4. Run -WhatIf, then one real run. A second run must be all verified skips.
-# Audit 2026-11-16: all Pinned rows matched upstream. Clonezilla stable was
-# 3.3.3-37; 3.3.4-28 was testing at audit time, so re-check before pinning.
-# SourceForge sidecars use the /download URL and are best effort. A sidecar
-# that no longer contains the pinned hash is removed and reported so the row
-# gets re-pinned. A moving sidecar URL (e.g. Clonezilla stable/data, Mint
-# hwe/sha256sum.txt; Ubuntu and Rocky versioned paths also move on point/minor
-# releases) is re-downloaded and warned when no valid local copy exists, such
-# as on a fresh root. Shared sidecars such as Mint HWE's
-# sha256sum-mint-hwe.txt are intentional.
+# Last full audit: 2026-11-16; all Pinned rows matched upstream. Sidecars are
+# best effort: a failed fetch skips the readme listing and never fails the row.
+# SourceForge sidecars use the /download URL. A stale local copy is deleted and
+# re-downloaded. HTML/interstitial -> retry later, never a re-pin signal. A
+# Pinned row whose sidecar still lacks the hash after one re-run -> check Hash
+# and SidecarUrl against Check; re-pin only when a moving sidecar URL shows a
+# newer release. A Rolling row -> re-run later. A moving URL can hide upstream
+# changes in an existing root; delete the staged SidecarName files to audit.
 #
 # For ISO rows, SidecarUrl/SidecarName name the publisher checksum file staged
 # beside the artifact. Leave them empty only when upstream publishes none; say
-# so in Check. Prefer a versioned SidecarName when the URL is a moving pointer;
-# shared sidecars that list multiple artifacts are acceptable. Tool rows
-# (04-etc) may omit a sidecar even when upstream publishes one; their pinned
-# hash and Check text are authoritative.
+# so in Check. For Pinned rows whose SidecarUrl moves with the next release
+# (unversioned or shared), say so in Check; Rolling rows move by definition.
+# Include a version in SidecarName when practical; shared sidecars and
+# unversioned names are acceptable because the stale check handles reuse.
+# Tool rows (04-etc) may omit a sidecar; their pinned hash and Check text are
+# authoritative.
+#
+# Trust anchors, strongest first: publisher checksum/sidecar; official page or
+# ReadMe value; GitHub asset digest; commit-pinned source; first-download or
+# payload SHA-256 pin. An Authenticode signer adds to any tier and never
+# replaces one. State the anchor in Check; mark first-download pins explicitly.
+# A first-download pin that still mismatches on later runs, with no proxy,
+# captive portal, or interstitial page involved, means a re-upload or
+# tampering; re-pin only after an independent check (Authenticode signer for
+# EXEs, an upstream release note or size, or a second source), and record it
+# in Check. A second mirror of the same upload is supporting evidence only,
+# never enough by itself.
 # -----------------------------------------------------------------------------
 
 function Get-RecoveryCatalog {
@@ -1975,13 +2012,15 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'netboot.xyz multi-arch'; Category = '01-Network'; FileName = 'netboot.xyz-multiarch.iso'; Url = 'https://boot.netboot.xyz/ipxe/netboot.xyz-multiarch.iso'; AlternateUrl = ''; Hash = ''; HashKind = 'Rolling'; ChecksumUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; NetbootVariant = 'multi'; SidecarUrl = 'https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt'; SidecarName = 'netboot.xyz-sha256-checksums.txt'; MintHwe = ''; About = 'netboot.xyz combined image for x86_64 and ARM64 machines.'; Released = 'Rolling release, re-resolved every run (checksum file dated 2026-11-13).'; SizeNote = 'Combined x86_64 + ARM64 network-boot ISO.'; Check = 'Re-download netboot.xyz-sha256-checksums.txt and match the ISO filename.' },
         [pscustomobject]@{ Name = "Hiren's BootCD PE x64"; Category = '02-Rescue'; FileName = 'HBCD_PE_x64.iso'; Url = 'https://www.hirensbootcd.org/files/HBCD_PE_x64.iso'; AlternateUrl = ''; Hash = '8c4c670c9c84d6c4b5a9c32e0aa5a55d8c23de851d259207d54679ea774c2498'; HashKind = 'Pinned'; ChecksumUrl = ''; SidecarUrl = ''; SidecarName = ''; NetbootVariant = ''; MintHwe = ''; About = 'Windows PE rescue environment with disk, partition, recovery, and antivirus tools (BootCD PE x64 v1.0.8).'; Released = 'BootCD PE x64 v1.0.8, March 2024 (download page and changelog); the URL itself carries no version, so the hash is pinned to that build.'; SizeNote = 'About 3.06 GB.'; Check = 'Unversioned URL; the official download page publishes the SHA-256, and there is no upstream checksum file. Re-pin only after an official announcement.' },
         [pscustomobject]@{ Name = 'SystemRescue'; Category = '02-Rescue'; FileName = 'systemrescue-13.03-amd64.iso'; Url = 'https://sourceforge.net/projects/systemrescuecd/files/sysresccd-x86/13.03/systemrescue-13.03-amd64.iso/download'; AlternateUrl = ''; Hash = 'b71b98ba6b92145524cb1a72206b9888a59861ad6fb05d127faf618ca0136891'; SidecarUrl = 'https://sourceforge.net/projects/systemrescuecd/files/sysresccd-x86/13.03/systemrescue-13.03-amd64.iso.sha256/download'; SidecarName = 'systemrescue-13.03-amd64.iso.sha256'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Arch-based Linux rescue toolkit (disk tools, filesystem repair, network utilities).'; Released = 'Version 13.03, November 2026 (SourceForge release date 2026-11-07).'; SizeNote = 'About 1.4 GB.'; Check = 'SourceForge Files page for sysresccd-x86 13.03 plus its .sha256 sidecar.' },
+        # Audit 2026-11-16: Clonezilla stable 3.3.3-37; 3.3.4-28 testing.
+        # Re-check stable vs testing before pinning.
         [pscustomobject]@{ Name = 'Clonezilla'; Category = '02-Rescue'; FileName = 'clonezilla-live-3.3.3-37-amd64.iso'; Url = 'https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-37/clonezilla-live-3.3.3-37-amd64.iso/download'; AlternateUrl = ''; Hash = '3079458d926a37d3533e5d5caeb61b6e49c2dc69e2c97e0332ef37986bb3414f'; HashKind = 'Pinned'; ChecksumUrl = ''; SidecarUrl = 'https://clonezilla.org/downloads/stable/data/CHECKSUMS.TXT'; SidecarName = 'CHECKSUMS-clonezilla-3.3.3-37.txt'; NetbootVariant = ''; MintHwe = ''; About = 'Disk imaging and cloning (device-to-device and device-to-image). UEFI and Secure Boot capable amd64 build.'; Released = 'Version 3.3.3-37, September 2026 (SourceForge file date; official stable CHECKSUMS.TXT).'; SizeNote = 'About 505 MB.'; Check = 'clonezilla.org stable CHECKSUMS.TXT (SHA-256 section) lists the pinned hash; the stable URL moves with the next stable release, so re-pin the row and sidecar name together.' },
-        [pscustomobject]@{ Name = 'Ubuntu Server'; Category = '03-Installers'; FileName = 'ubuntu-26.04.1-live-server-amd64.iso'; Url = 'https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso'; AlternateUrl = ''; Hash = 'cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927'; SidecarUrl = 'https://releases.ubuntu.com/26.04/SHA256SUMS'; SidecarName = 'SHA256SUMS-ubuntu-26.04'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Ubuntu Server installer (minimal CLI base; add ubuntu-desktop afterwards for a desktop).'; Released = 'Version 26.04.1, August 2026 (SHA256SUMS dated 2026-08-27).'; SizeNote = 'About 2.7 GB.'; Check = 'releases.ubuntu.com SHA256SUMS for 26.04.1.' },
-        [pscustomobject]@{ Name = 'Rocky Linux minimal'; Category = '03-Installers'; FileName = 'Rocky-10.2-x86_64-minimal.iso'; Url = 'https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10.2-x86_64-minimal.iso'; AlternateUrl = 'https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10-latest-x86_64-minimal.iso'; Hash = 'aac6ac3ce781b91a91ce78463405f66c611a5dca4b3840c79e5e01d97302f6c8'; SidecarUrl = 'https://download.rockylinux.org/pub/rocky/10/isos/x86_64/CHECKSUM'; SidecarName = 'CHECKSUM-rocky-10'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Minimal offline installer for a small RHEL-compatible server/CLI base (RHEL 10 generation, supported to roughly May 2035).'; Released = 'Version 10.2, May 2026 (ISO 2026-05-27, CHECKSUM signed 2026-05-29, 2072444928 bytes).'; SizeNote = 'About 2.1 GB.'; Check = 'Rocky-10.2-x86_64-minimal.iso CHECKSUM entry in the same directory.' },
-        [pscustomobject]@{ Name = 'Debian netinst'; Category = '03-Installers'; FileName = 'debian-13.7.0-amd64-netinst.iso'; Url = 'https://cdimage.debian.org/debian-cd/13.7.0/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; AlternateUrl = 'https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; Hash = 'a7ef94ac2fb9a7fec454552abd629b7cc9d5155c886165a45649f5ce6167e355'; SidecarUrl = 'https://cdimage.debian.org/debian-cd/13.7.0/amd64/iso-cd/SHA256SUMS'; SidecarName = 'SHA256SUMS-debian-13.7.0'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Small Debian network installer (Debian 13 includes non-free firmware for Wi-Fi/BT/GPU).'; Released = 'Version 13.7.0, September 2026 (SHA256SUMS dated 2026-09-12).'; SizeNote = 'About 400 MB.'; Check = 'Debian cdimage SHA256SUMS for 13.7.0 (upstream-verified 2026-11-14); versioned path first, /current/ fallback.' },
+        [pscustomobject]@{ Name = 'Ubuntu Server'; Category = '03-Installers'; FileName = 'ubuntu-26.04.1-live-server-amd64.iso'; Url = 'https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso'; AlternateUrl = ''; Hash = 'cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927'; SidecarUrl = 'https://releases.ubuntu.com/26.04/SHA256SUMS'; SidecarName = 'SHA256SUMS-ubuntu-26.04'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Ubuntu Server installer (minimal CLI base; add ubuntu-desktop afterwards for a desktop).'; Released = 'Version 26.04.1, August 2026 (SHA256SUMS dated 2026-08-27).'; SizeNote = 'About 2.7 GB.'; Check = 'releases.ubuntu.com SHA256SUMS for 26.04.1; the sidecar URL moves with the next point release.' },
+        [pscustomobject]@{ Name = 'Rocky Linux minimal'; Category = '03-Installers'; FileName = 'Rocky-10.2-x86_64-minimal.iso'; Url = 'https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10.2-x86_64-minimal.iso'; AlternateUrl = 'https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10-latest-x86_64-minimal.iso'; Hash = 'aac6ac3ce781b91a91ce78463405f66c611a5dca4b3840c79e5e01d97302f6c8'; SidecarUrl = 'https://download.rockylinux.org/pub/rocky/10/isos/x86_64/CHECKSUM'; SidecarName = 'CHECKSUM-rocky-10'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Minimal offline installer for a small RHEL-compatible server/CLI base (RHEL 10 generation, supported to roughly May 2035).'; Released = 'Version 10.2, May 2026 (ISO 2026-05-27, CHECKSUM signed 2026-05-29, 2072444928 bytes).'; SizeNote = 'About 2.1 GB.'; Check = 'Rocky-10.2-x86_64-minimal.iso CHECKSUM entry in the same directory; the sidecar URL moves with the next minor release.' },
+        [pscustomobject]@{ Name = 'Debian netinst'; Category = '03-Installers'; FileName = 'debian-13.7.0-amd64-netinst.iso'; Url = 'https://cdimage.debian.org/debian-cd/13.7.0/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; AlternateUrl = 'https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso'; Hash = 'a7ef94ac2fb9a7fec454552abd629b7cc9d5155c886165a45649f5ce6167e355'; SidecarUrl = 'https://cdimage.debian.org/debian-cd/13.7.0/amd64/iso-cd/SHA256SUMS'; SidecarName = 'SHA256SUMS-debian-13.7.0'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Small Debian network installer (Debian 13 includes non-free firmware for Wi-Fi/BT/GPU).'; Released = 'Version 13.7.0, September 2026 (SHA256SUMS dated 2026-09-12).'; SizeNote = 'About 400 MB.'; Check = 'Debian cdimage SHA256SUMS for 13.7.0; versioned path first, /current/ fallback.' },
         [pscustomobject]@{ Name = 'Linux Mint Xfce'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit.iso'; Url = 'https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-xfce-64bit.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/stable/22.3/linuxmint-22.3-xfce-64bit.iso'; Hash = '45a835b5dddaf40e84d776549e0b19b3fbd49673b6cc6434ebddbfcd217df776'; SidecarUrl = 'https://mirrors.kernel.org/linuxmint/stable/22.3/sha256sum.txt'; SidecarName = 'sha256sum-mint-22.3.txt'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Live/installer ISO with the Xfce desktop (based on Ubuntu 24.04 LTS, kernel 6.14).'; Released = 'Version 22.3, January 2026 (sha256sum.txt dated 2026-01-11).'; SizeNote = 'About 3.0 GB.'; Check = 'mirrors.kernel.org/linuxmint stable/22.3 sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
-        [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 6.17'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; Hash = '8c8eb200642bca2f34b7f22e812e4ac3d97483b06b188355cdff8ff98f03f550'; SidecarUrl = 'https://mirrors.kernel.org/linuxmint/hwe/sha256sum.txt'; SidecarName = 'sha256sum-mint-hwe.txt'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '6.17'; About = 'Mint Xfce with the newer HWE 6.17 kernel for hardware the regular ISO does not support.'; Released = 'Version 22.3 with HWE kernel 6.17 (hwe sha256sum.txt dated 2026-08-08).'; SizeNote = 'Fetch only with -MintHwe 6.17 (HWE kernel 6.17 for newer hardware).'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
-        [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 7.0'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Hash = '17475774172776978f24677a847a62d7595c5bee34cb1f96ee3d26eedeca33c8'; SidecarUrl = 'https://mirrors.kernel.org/linuxmint/hwe/sha256sum.txt'; SidecarName = 'sha256sum-mint-hwe.txt'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '7.0'; About = 'Mint Xfce with the newer HWE 7.0 kernel for hardware the regular ISO does not support.'; Released = 'Version 22.3 with HWE kernel 7.0 (hwe sha256sum.txt dated 2026-08-08).'; SizeNote = 'Fetch only with -MintHwe 7.0 (HWE kernel 7.0 for newer hardware).'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback).' },
+        [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 6.17'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-6.17.iso'; Hash = '8c8eb200642bca2f34b7f22e812e4ac3d97483b06b188355cdff8ff98f03f550'; SidecarUrl = 'https://mirrors.kernel.org/linuxmint/hwe/sha256sum.txt'; SidecarName = 'sha256sum-mint-hwe.txt'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '6.17'; About = 'Mint Xfce with the newer HWE 6.17 kernel for hardware the regular ISO does not support.'; Released = 'Version 22.3 with HWE kernel 6.17 (hwe sha256sum.txt dated 2026-08-08).'; SizeNote = 'Fetch only with -MintHwe 6.17 (HWE kernel 6.17 for newer hardware).'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback); the shared sidecar moves with the next HWE release.' },
+        [pscustomobject]@{ Name = 'Linux Mint Xfce HWE 7.0'; Category = '03-Installers'; FileName = 'linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Url = 'https://mirrors.kernel.org/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; AlternateUrl = 'https://mirror.math.princeton.edu/pub/linuxmint/hwe/linuxmint-22.3-xfce-64bit-hwe-7.0.iso'; Hash = '17475774172776978f24677a847a62d7595c5bee34cb1f96ee3d26eedeca33c8'; SidecarUrl = 'https://mirrors.kernel.org/linuxmint/hwe/sha256sum.txt'; SidecarName = 'sha256sum-mint-hwe.txt'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = '7.0'; About = 'Mint Xfce with the newer HWE 7.0 kernel for hardware the regular ISO does not support.'; Released = 'Version 22.3 with HWE kernel 7.0 (hwe sha256sum.txt dated 2026-08-08).'; SizeNote = 'Fetch only with -MintHwe 7.0 (HWE kernel 7.0 for newer hardware).'; Check = 'mirrors.kernel.org/linuxmint hwe/sha256sum.txt (Princeton mirror is a byte-identical fallback); the shared sidecar moves with the next HWE release.' },
         [pscustomobject]@{ Name = 'antiX full'; Category = '03-Installers'; FileName = 'antiX-26.1_x64-full.iso'; Url = 'https://sourceforge.net/projects/antix-linux/files/Final/antiX-26.1/antiX-26.1_x64-full.iso/download'; AlternateUrl = ''; Hash = '293381af0b7c48399abe015da8f67d41fd34372b73c4aafcf53747fbaed22371'; SidecarUrl = 'https://sourceforge.net/projects/antix-linux/files/Final/antiX-26.1/antiX-26.1_x64-full.iso.sha256/download'; SidecarName = 'antiX-26.1_x64-full.iso.sha256'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Debian 13-based, systemd-free live/installer with a desktop; suits modern and older PCs alike.'; Released = 'Version 26.1, September 2026 (SourceForge files dated 2026-09-28).'; SizeNote = 'About 2.5 GB.'; Check = 'SourceForge Final/antiX-26.1 file list plus the .sha256 sidecar.' },
         [pscustomobject]@{ Name = 'Fedora Workstation Live'; Category = '03-Installers'; FileName = 'Fedora-Workstation-Live-45-1.4.x86_64.iso'; Url = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso'; AlternateUrl = ''; Hash = '68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb'; SidecarUrl = 'https://download.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; SidecarName = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM'; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Live desktop installer with GNOME.'; Released = 'Version 45-1.4, October 2026.'; SizeNote = 'About 2.72 GB.'; Check = 'Fedora-Workstation-45-1.4-x86_64-CHECKSUM in the same directory.' },
         [pscustomobject]@{ Name = 'Python 3.15 Windows installer'; Category = '04-etc\python'; FileName = $script:FilePythonInstaller; Url = ($script:PyUrlBase + $script:FilePythonInstaller); AlternateUrl = ''; Hash = '06e225a228191b0f4d1dcf6905fbb21bf9f6970d13a2ec63137ab9bee76f15aa'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Full offline CPython for Windows 10/11 x64: pip, venv, tkinter, and a normal per-user or all-users install.'; Released = 'Version 3.15.2, October 2026 (last line to ship the traditional Windows installer; 3.16+ use the Python install manager).'; SizeNote = 'About 36 MB.'; Check = 'python.org SPDX sidecar (CPython package SHA-256) matches the pinned hash; Authenticode signer is the Python Software Foundation. Download ' + $script:PyUrlBase + $script:FilePythonInstaller + ' into isos\04-etc\python\ by hand; the next run verifies it against the pinned hash and skips it.' },
@@ -2001,12 +2040,12 @@ function Get-RecoveryCatalog {
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Windows portable'; Category = '04-etc\tabby'; FileName = $script:FileTabbyZip; Url = ($script:TabbyUrlBase + $script:FileTabbyZip); AlternateUrl = ''; Hash = '56de045fbb5a74d586903367d3f7227276d538281b0068d8132de3318cdd5019'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Electron terminal with built-in SSH, telnet, serial, and local shells, an SSH SFTP panel, and Zmodem transfers; portable-mode zip that keeps configuration and host lists in a data folder beside Tabby.exe.'; Released = 'Version 1.0.238, October 2026 (185,884,613 bytes; Tabby.exe signed by Eugen Pankov Softwareentwicklung).'; SizeNote = 'About 177 MB (extracts to about 481 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the zip is unsigned, and Tabby.exe inside is Authenticode-valid with Eugen Pankov Softwareentwicklung as signer. Download ' + $script:TabbyUrlBase + $script:FileTabbyZip + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Linux x64 deb'; Category = '04-etc\tabby'; FileName = $script:FileTabbyDeb; Url = ($script:TabbyUrlBase + $script:FileTabbyDeb); AlternateUrl = ''; Hash = '5ea2b9aa84f2b5cdcb98cb7e94bd3d92de48c96254a98b52bf2d1f30a52d1d1c'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Debian/Ubuntu x64 package for the same terminal; installs /opt/Tabby and a /usr/bin/tabby wrapper that adds --no-sandbox.'; Released = 'Version 1.0.238, October 2026 (130,349,456 bytes; unsigned; needs gnome-keyring and GUI libraries).'; SizeNote = 'About 124 MB (installs to about 431 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the package is unsigned. Download ' + $script:TabbyUrlBase + $script:FileTabbyDeb + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
         [pscustomobject]@{ Name = 'Tabby 1.0.238 Linux x64 rpm'; Category = '04-etc\tabby'; FileName = $script:FileTabbyRpm; Url = ($script:TabbyUrlBase + $script:FileTabbyRpm); AlternateUrl = ''; Hash = 'd5027a5f905edf40aaf1fd42ef5015abfaffbd96f5825b3622ef352dfc3136b3'; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Fedora/RHEL/Rocky x64 package for the same terminal; requires gnome-keyring and links /usr/bin/tabby to /opt/Tabby/tabby.'; Released = 'Version 1.0.238, October 2026 (113,337,069 bytes; unsigned; requires gnome-keyring).'; SizeNote = 'About 108 MB (installs to about 431 MB).'; Check = 'SHA-256 matches the GitHub release asset digest; the package is unsigned. Download ' + $script:TabbyUrlBase + $script:FileTabbyRpm + ' into isos\04-etc\tabby\ by hand; the next run verifies it against the pinned hash and skips it.' }
-        [pscustomobject]@{ Name = 'TigerVNC 1.16.2 Windows viewer'; Category = '04-etc\tigervnc'; FileName = $script:FileTigerVncWindows; Url = ($script:TigerVncUrlBase + $script:FileTigerVncWindows + '/download'); AlternateUrl = ''; Hash = $script:TigerVncViewerSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Standalone TigerVNC viewer for Windows x64; no installer or service, and TLS/VeNCrypt support when the server offers it.'; Released = ('Version ' + $script:TigerVncVersion + ', ' + $script:TigerVncReleased + ' (TigerVNC release page; 24,072,224 bytes; Authenticode-valid, signer Brian Hinz).'); SizeNote = 'About 23 MB.'; Check = ('SourceForge HTTPS plus the pinned SHA-256; Authenticode signer is Brian Hinz. Download ' + $script:TigerVncUrlBase + $script:FileTigerVncWindows + '/download into isos\04-etc\tigervnc\ by hand; the next run verifies it and skips.') }
-        [pscustomobject]@{ Name = 'TigerVNC 1.16.2 Linux x64'; Category = '04-etc\tigervnc'; FileName = $script:FileTigerVncLinux; Url = ($script:TigerVncUrlBase + $script:FileTigerVncLinux + '/download'); AlternateUrl = ''; Hash = $script:TigerVncLinuxSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Generic Linux x86_64 TigerVNC archive: vncviewer, Xvnc, x0vncserver, vncpasswd, and the X11 server pieces; no w0vncserver.'; Released = ('Version ' + $script:TigerVncVersion + ', ' + $script:TigerVncReleased + ' (TigerVNC release page; 15,042,988 bytes; no publisher checksum).'); SizeNote = 'About 14 MB.'; Check = ('SourceForge HTTPS; TigerVNC publishes no checksum for this generic archive, so the first-download SHA-256 is pinned. Download ' + $script:TigerVncUrlBase + $script:FileTigerVncLinux + '/download into isos\04-etc\tigervnc\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'TigerVNC 1.16.2 Windows viewer'; Category = '04-etc\tigervnc'; FileName = $script:FileTigerVncWindows; Url = ($script:TigerVncUrlBase + $script:FileTigerVncWindows + '/download'); AlternateUrl = ''; Hash = $script:TigerVncViewerSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Standalone TigerVNC viewer for Windows x64; no installer or service, and TLS/VeNCrypt support when the server offers it.'; Released = ('Version ' + $script:TigerVncVersion + ', ' + $script:TigerVncReleased + ' (TigerVNC release page; 24,072,224 bytes; Authenticode-valid, signer Brian Hinz).'); SizeNote = 'About 23 MB.'; Check = ('TigerVNC publishes no checksum for this EXE; the SHA-256 is a first-download pin; the EXE is also Authenticode-valid, signer Brian Hinz. If it still mismatches on later runs with no proxy, captive portal, or SourceForge interstitial page involved, upstream re-uploaded or the file was tampered with; do not use it until the pin is re-checked independently (Authenticode signer, release-page size, or a second source; a second mirror of the same upload is not enough). Download ' + $script:TigerVncUrlBase + $script:FileTigerVncWindows + '/download into isos\04-etc\tigervnc\ by hand; the next run verifies it and skips.') }
+        [pscustomobject]@{ Name = 'TigerVNC 1.16.2 Linux x64'; Category = '04-etc\tigervnc'; FileName = $script:FileTigerVncLinux; Url = ($script:TigerVncUrlBase + $script:FileTigerVncLinux + '/download'); AlternateUrl = ''; Hash = $script:TigerVncLinuxSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Generic Linux x86_64 TigerVNC archive: vncviewer, Xvnc, x0vncserver, vncpasswd, and the X11 server pieces; no w0vncserver.'; Released = ('Version ' + $script:TigerVncVersion + ', ' + $script:TigerVncReleased + ' (TigerVNC release page; 15,042,988 bytes; no publisher checksum).'); SizeNote = 'About 14 MB.'; Check = ('TigerVNC publishes no checksum for this generic archive, so the first-download SHA-256 is pinned. If it still mismatches on later runs with no proxy, captive portal, or SourceForge interstitial page involved, upstream re-uploaded or the file was tampered with; do not use it until the pin is re-checked independently (release-page size or a second source; a second mirror of the same upload is not enough). Download ' + $script:TigerVncUrlBase + $script:FileTigerVncLinux + '/download into isos\04-etc\tigervnc\ by hand; the next run verifies it and skips.') }
         [pscustomobject]@{ Name = 'UltraVNC 1.8.3.2 Windows portable'; Category = '04-etc\ultravnc'; FileName = $script:FileUltraVncZip; Url = ($script:UltraVncUrlBase + $script:FileUltraVncZip); AlternateUrl = ''; Hash = $script:UltraVncZipSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Portable x86/x64 UltraVNC ZIP with server, viewer, SecureVNC DSM plugin, and virtual display driver; the WinPE-friendly path.'; Released = ('Version ' + $script:UltraVncVersion + ', ' + $script:UltraVncReleased + ' (release announcement; 17,283,281 bytes; page size field is stale; hash matches).'); SizeNote = 'About 16 MB.'; Check = ('Official UltraVNC 1.8.3.2 SHA-256 matches the served bytes; the page size field is stale. Authenticode signer is Rudi De Vos. Download ' + $script:UltraVncUrlBase + $script:FileUltraVncZip + ' into isos\04-etc\ultravnc\ by hand; the next run verifies it and skips.') }
         [pscustomobject]@{ Name = 'UltraVNC 1.8.3.2 Windows x64 installer'; Category = '04-etc\ultravnc'; FileName = $script:FileUltraVncInstaller; Url = ($script:UltraVncUrlBase + $script:FileUltraVncInstaller); AlternateUrl = ''; Hash = $script:UltraVncInstallerSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'x64 UltraVNC installer for normal Windows service mode, logon-screen access, and unattended support; includes server and viewer.'; Released = ('Version ' + $script:UltraVncVersion + ', ' + $script:UltraVncReleased + ' (release announcement; 6,256,464 bytes; page size field is stale; hash matches).'); SizeNote = 'About 6 MB.'; Check = ('Official UltraVNC 1.8.3.2 SHA-256 matches the served bytes; the page size field is stale. Authenticode signer is Rudi De Vos. Download ' + $script:UltraVncUrlBase + $script:FileUltraVncInstaller + ' into isos\04-etc\ultravnc\ by hand; the next run verifies it and skips.') }
         [pscustomobject]@{ Name = 'Noto Sans Mono CJK KR'; Category = '04-etc\fonts'; FileName = $script:FileFont; Url = $script:FontRawUrl; AlternateUrl = ''; Hash = $script:FontSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'Single Regular-weight OFL font for CJK display on Linux and Windows; covers Han, Kana, Hangul, and Bopomofo with KR-default glyph forms.'; Released = ('Version ' + $script:FontVersion + ', April 2021 (file date ' + $script:FontReleased + ' at commit ' + $script:FontCommit.Substring(0, 7) + '; 16,389,532 bytes).'); SizeNote = 'About 15.6 MB.'; Check = ('Download ' + $script:FontRawUrl + ' into isos\04-etc\fonts\ by hand (commit-pinned source; no upstream checksum); the next run verifies SHA-256 and skips it.') }
-        [pscustomobject]@{ Name = 'Noto CJK OFL license'; Category = '04-etc\fonts'; FileName = $script:FileFontLicense; Url = $script:FontLicenseUrl; AlternateUrl = ''; Hash = $script:FontLicenseSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'OFL 1.1 text for the bundled Noto CJK font; upstream LICENSE renamed byte-for-byte.'; Released = ('OFL 1.1, file date ' + $script:FontReleased + ' at commit ' + $script:FontCommit.Substring(0, 7) + '.'); SizeNote = 'About 4 KB.'; Check = ('Download ' + $script:FontLicenseUrl + ' into isos\04-etc\fonts\ by hand and save it as OFL.txt; the next run verifies it against the pinned hash and skips it.') }
+        [pscustomobject]@{ Name = 'Noto CJK OFL license'; Category = '04-etc\fonts'; FileName = $script:FileFontLicense; Url = $script:FontLicenseUrl; AlternateUrl = ''; Hash = $script:FontLicenseSha256; SidecarUrl = ''; SidecarName = ''; HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'OFL 1.1 text for the bundled Noto CJK font; upstream LICENSE renamed byte-for-byte.'; Released = ('OFL 1.1, file date ' + $script:FontReleased + ' at commit ' + $script:FontCommit.Substring(0, 7) + '.'); SizeNote = 'About 4 KB.'; Check = ('Download ' + $script:FontLicenseUrl + ' into isos\04-etc\fonts\ by hand and save it as ' + $script:FileFontLicense + '; the next run verifies it against the pinned hash and skips it (commit-pinned source; no upstream checksum).') }
     )
 }
 
@@ -2155,7 +2194,7 @@ function Save-CatalogRow {
                 if ($isHtml) {
                     Write-Warning "Sidecar $($Row.SidecarName) is an HTML page, not a checksum file; retry later."
                 } elseif ($Row.HashKind -eq 'Pinned') {
-                    Write-Warning "Sidecar $($Row.SidecarName) does not list the pinned SHA-256; upstream moved past this pin. Re-pin $($Row.Name)."
+                    Write-Warning "Sidecar $($Row.SidecarName) does not list the pinned SHA-256. Re-run once; if it repeats, check the Re-verify line for this entry in isos\README.txt and compare this row's Hash and SidecarUrl in Get-RecoveryCatalog (Prepare-PcRecovery.ps1) with that source (only a moving sidecar URL can mean upstream moved past this pin)."
                 } else {
                     Write-Warning "Sidecar $($Row.SidecarName) does not list the resolved checksum; re-run later."
                 }

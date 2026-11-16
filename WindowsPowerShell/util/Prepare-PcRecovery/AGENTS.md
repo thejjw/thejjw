@@ -3,6 +3,11 @@
 Scope: the recovery-USB prep script lives in this folder; its offline suite lives
 at `WindowsPowerShell/tests/Prepare-PcRecovery.Tests.ps1`.
 
+Keep this file policy-level. Current catalog versions, hashes, release dates,
+and asset sizes belong in the script, tests, or release data. Reviewer CLI
+flags below are examples; re-check them with `--help` after upgrades. Change
+this file only when a rule or review workflow changes.
+
 ## Layout
 
 - `Prepare-PcRecovery.ps1` - the whole tool: catalog, download engine, tool
@@ -50,6 +55,14 @@ at `WindowsPowerShell/tests/Prepare-PcRecovery.Tests.ps1`.
 - Manual-retry text must be traceable: after the user follows it, the very next
   run must actually change the outcome.
 
+## Pinned catalog maintenance
+
+- The `Get-RecoveryCatalog` header is authoritative; do not duplicate it here.
+- Pinned rows are snapshots; update every version-bearing copy per the
+  checklist.
+- Keep a regression test for every sidecar branch in `Save-CatalogRow`; the
+  branch rules live in the `Get-RecoveryCatalog` header.
+
 ## Verification
 
 ```powershell
@@ -66,8 +79,8 @@ network or disk.
 
 ## Recurring review patterns
 
-These classes recurred across 11 opus review rounds. Check them before calling
-a change done.
+These classes recurred across review rounds. Check them before calling a
+change done.
 
 | Pattern | Failure shape | Guardrail |
 |---|---|---|
@@ -80,14 +93,15 @@ a change done.
 | New branch, no test | Each fix adds a `catch`/`else`/`continue` that the next review finds untested | Regression test is part of the fix and fails when the branch is removed |
 | Unfaithful test seams | Mocks write bytes that cannot match a fake digest, return true without a file, or a filtered Pester mock intercepts every call | Use real hashes of real content; mocks reproduce the callee contract |
 | Trust-label inflation | GitHub asset digest presented as a publisher checksum | Name the trust boundary in the readme |
+| Pin drift | Version changed in one row but not constants, metadata, readme, tests, or sidecar | Search all version forms and the old hash; use the catalog checklist |
+| Sidecar trust | Sidecar missing the expected hash, stale, or an HTML interstitial | Validate content; remove and warn actionably; keep a regression test |
 | PS 5.1 quirks | `Join-Path` arity, here-string backticks, `$Matches` reuse, `-WhatIf` vs `-Confirm` | Verify each quirk empirically once; keep it here |
 
-## Polishing with claude -p (opus)
+## Polishing with claude -p
 
 After a change is green locally, run the external review loop below. Claude is
-the default reviewer; Codex/GPT-6.1-Sol is an opt-in alternative or second
-opinion, see "Optional second reviewer: Codex CLI" below. Run the loop from the
-repo root
+the default reviewer; Codex is an opt-in alternative or second opinion, see
+"Optional second reviewer: Codex CLI" below. Run the loop from the repo root
 and feed the cumulative local diff so the reviewer sees the whole change, not
 one commit:
 
@@ -133,10 +147,8 @@ Review the local commits on stdin (PowerShell 5.1 WindowsPowerShell/util/Prepare
   Pester run, file/tree check, upstream data). "Only low severity left" is not
   a stop condition while any claim is still valid, and a false claim is never
   a reason to weaken the code.
-- Keep each round bounded: batch all accepted fixes, run Pester once, commit,
-  then re-review. Each fix can add branches the next round will probe.
 
-## Optional second reviewer: Codex CLI (gpt-6.1-sol)
+## Optional second reviewer: Codex CLI
 
 Claude remains the default. Use Codex only when the user asks for it, when
 Claude is unavailable or rate-limited and a review is still needed, or when a
@@ -150,7 +162,7 @@ if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
     'codex not installed; use the Claude loop'
     return
 }
-codex --version          # verified with codex-cli 0.169.0
+codex --version
 $previous = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $null = codex login status 2>$null
@@ -162,10 +174,11 @@ if ($loginCode -ne 0) {
 }
 ```
 
-If any check fails, say so and fall back to the Claude loop. The model ID is
-`gpt-6.1-sol` (the full ID; `sol` alone is not an alias). Requested effort is
-`high`; the model supports `low`, `medium`, `high`, `xhigh`, and `max`.
-Use `high` for review; `xhigh`/`max` only when the user asks.
+If any check fails, say so and fall back to the Claude loop. The example below
+uses `$codexModel` at `high` effort. Model IDs and effort levels change; verify
+the current review model with `codex exec --help` and the account's available
+models before relying on them. Use the example's effort level unless the user
+asks otherwise; do not go higher without an explicit request.
 
 Same loop shape as Claude: feed the cumulative diff on stdin, ask for
 `NO ACTIONABLE FINDINGS` or findings with file:line, severity, and a fix, and
@@ -175,6 +188,8 @@ the final message.
 
 ```powershell
 $base = 'origin/main'   # or the commit before the change under review
+$codexModel = $env:CODEX_REVIEW_MODEL
+if (-not $codexModel) { throw 'Set CODEX_REVIEW_MODEL after checking codex exec --help and available models.' }
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 $diff = @(git diff "$base...HEAD")
 if ($diff.Count -eq 0) { throw "No changes in $base...HEAD; set `$base" }
@@ -188,7 +203,7 @@ try {
     ((@(git log --format='--- %h %s%n%b' "$base..HEAD") + $diff) -join "`r`n") |
         codex exec `
             -C (git rev-parse --show-toplevel) `
-            -m gpt-6.1-sol `
+            -m $codexModel `
             -c model_reasoning_effort=high `
             -s read-only --ephemeral `
             -o $reviewFile `
@@ -207,29 +222,25 @@ $review
 
 - Keep `-s read-only`: the reviewer must not write. Do not use
   `--dangerously-bypass-approvals-and-sandbox` for reviews.
-- Do NOT add `--ignore-user-config` when the reviewer must inspect repository
-  files. On this host it makes read-only shell commands fail with "blocked by
-  policy"; under the user config (`~/.codex/config.toml`, which sets
-  `[windows] sandbox = "unelevated"`), `-s read-only` can read and grep.
-  `--ignore-rules` does not change that and is not needed.
+- Do NOT add `--ignore-user-config` when the reviewer must inspect files. If
+  read-only shell reads require a sandbox setting (for example
+  `[windows] sandbox = "unelevated"`), that flag drops it and breaks file
+  reads. `--ignore-rules` does not change that and is not needed.
 - `-s read-only` constrains Codex's shell, not user MCP servers or hooks; those
   run as separate processes. Loading them is a deliberate tradeoff, not a
   sandbox guarantee. For a hermetic run, create a dedicated `CODEX_HOME`, run
   `codex login` there, and keep a minimal config that preserves
-  `[windows] sandbox = "unelevated"` (required for read-only shell reads on
-  this host) with no `[mcp_servers]` or hooks. Do not copy `auth.json` between
+  `[windows] sandbox = "unelevated"` (if required for read-only shell reads)
+  with no `[mcp_servers]` or hooks. Do not copy `auth.json` between
   homes; refresh tokens can rotate. These isolate user configuration only;
   project, system, and managed layers can still add MCP servers or hooks, so
   check every active layer before claiming a hermetic run.
-  `--ignore-user-config` drops the sandbox setting, so treat those runs as
-  diff-only.
 - `--ephemeral` keeps session files out of `~/.codex`. `-o` captures the final
   message; the prompt is the argument and the git log/diff is piped stdin
   (Codex appends it as a `<stdin>` block). Keep the UTF-8 preamble so non-ASCII
   diff text survives the 5.1 pipe.
-- `codex exec review` rejects a custom prompt for both `--commit <sha>` and
-  `--base <branch>` in codex-cli 0.169.0 ("the argument '--commit/--base' cannot
-  be used with '[PROMPT]'"). Use the generic `codex exec` above.
+- If the installed `codex exec review` rejects a custom prompt for
+  `--commit <sha>` or `--base <branch>`, use the generic `codex exec` above.
 - The snippet lowers `$ErrorActionPreference` around `codex exec` because Codex
   streams progress to stderr; under PowerShell 5.1 `Stop`, a redirected native
   stderr line can terminate the review. The `finally` restores it and deletes
@@ -238,19 +249,17 @@ $review
   clean only when the trimmed `-o` message equals `NO ACTIONABLE FINDINGS`
   exactly. That is termination state (a); the loop may also end under state (b)
   of the termination rule above.
-- Measured on this host: a 42 KB diff at `high` took 171 s and about 50k
-  tokens. Budget accordingly. The Codex reviewer may use web search, unlike
-  the Claude loop (Read/Grep/Glob only); verify its external citations before
-  accepting a finding.
+- Reviews of large diffs can run for many minutes. Run them in the background
+  or with a generous tool timeout. A killed or timed-out run is a failed
+  round, not a clean one. Put measured durations in the round summary, not
+  here.
+- If the active Codex config enables web search, verify any external citation
+  before accepting a finding.
 
 ## Known false leads
 
 - PowerShell 5.1 passes a comma-containing argument to a native program as one
   argument; `-v C:\data:data:r,admin` does not split (verified with an argv
   probe). Quoting it is still fine for clarity.
-- copyparty ships no WinPE build in current releases; `copyparty-winpe64.exe`
-  exists only for the deprecated v1.8.7 release.
-- Codex CLI `-s read-only` can read repository files under the user config
-  that sets `[windows] sandbox = "unelevated"`; `--ignore-user-config` drops
-  it and makes shell reads fail with "blocked by policy" on this host. Do not
-  disable the user config for a file-reading review.
+- copyparty dropped WinPE builds after v1.8.7; check the release assets before
+  adding one back.

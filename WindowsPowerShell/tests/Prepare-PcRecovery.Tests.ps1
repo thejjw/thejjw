@@ -160,7 +160,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Save-VerifiedFile -Url 'https://example.invalid/b.iso' -OutFile $path -ExpectedHash ('00' * 32) -Name 'T-bad' | Should -BeFalse
             Test-Path -LiteralPath $path | Should -BeFalse
             $script:Failures | Should -HaveCount 1
-            $script:Failures[0].Manual | Should -Not -BeNullOrEmpty
+            $script:Failures[0].Manual | Should -Match 'Re-verify line for this entry'
         }
 
         It 'skips an existing valid file without downloading' {
@@ -236,6 +236,45 @@ Describe 'Prepare-PcRecovery.ps1' {
             }
             Save-VerifiedFile -Url 'https://example.invalid/primary.iso' -AlternateUrl 'https://example.invalid/alt.iso' -OutFile $path -Name 'T-alt' | Should -BeTrue
             $script:calls | Should -Be 2
+        }
+
+        It 'mentions SourceForge interstitial for a SourceForge mismatch' {
+            Reset-State
+            $path = Join-Path $TestDrive 'sourceforge-mismatch.iso'
+            Mock Invoke-FileDownload { Set-Content -LiteralPath $OutFile -Value 'wrong bytes' -NoNewline; return $true }
+            Save-VerifiedFile -Url 'https://sourceforge.net/projects/x/files/y.iso/download' -OutFile $path -ExpectedHash ('ab' * 32) -Name 'T-sourceforge-mismatch' | Should -BeFalse
+            $script:Failures | Should -HaveCount 1
+            $script:Failures[0].Manual | Should -Match 'SourceForge interstitial'
+        }
+
+        It 'names the alternate mirror when it serves a hash mismatch' {
+            Reset-State
+            $path = Join-Path $TestDrive 'alt-mismatch.iso'
+            $script:calls = 0
+            Mock Invoke-FileDownload {
+                $script:calls++
+                if ($script:calls -eq 1) { return $false }
+                Set-Content -LiteralPath $OutFile -Value 'wrong bytes' -NoNewline
+                return $true
+            }
+            Save-VerifiedFile -Url 'https://example.invalid/primary.iso' -AlternateUrl 'https://example.invalid/alt.iso' -OutFile $path -ExpectedHash ('ab' * 32) -Name 'T-alt-mismatch' | Should -BeFalse
+            $script:Failures | Should -HaveCount 1
+            $script:Failures[0].Detail | Should -Match 'alt\.iso'
+            $script:Failures[0].Manual | Should -Match 'alternate .* served different bytes'
+            $script:Failures[0].Manual | Should -Match 'by hand into'
+            $script:Failures[0].Manual | Should -Match '404'
+            $script:Failures[0].Manual | Should -Not -Match 'SourceForge'
+        }
+
+        It 'names both URLs when the primary and alternate fail' {
+            Reset-State
+            $path = Join-Path $TestDrive 'both-fail.iso'
+            Mock Invoke-FileDownload { return $false }
+            Save-VerifiedFile -Url 'https://example.invalid/primary.iso' -AlternateUrl 'https://example.invalid/alt.iso' -OutFile $path -ExpectedHash ('ab' * 32) -Name 'T-both-fail' | Should -BeFalse
+            $script:Failures | Should -HaveCount 1
+            $script:Failures[0].Detail | Should -Match 'primary\.iso'
+            $script:Failures[0].Detail | Should -Match 'alt\.iso'
+            $script:Failures[0].Manual | Should -Match '404 on every run'
         }
     }
 
@@ -887,6 +926,13 @@ Describe 'Prepare-PcRecovery.ps1' {
             $text | Should -Match 'Wayland'
             $text | Should -Match 'No Windows server'
             $text | Should -Match 'UltraVNC'
+            $text | Should -Match 'no checksum for either file'
+            $text | Should -Match 'first-download pins'
+            foreach ($row in (Get-RecoveryCatalog | Where-Object { $_.Category -eq '04-etc\tigervnc' })) {
+                $row.Check | Should -Match 'mismatches on later runs'
+                $row.Check | Should -Match 'interstitial'
+                $row.Check | Should -Match 'second mirror'
+            }
             $text | Should -Not -Match 'TVWIN|TVTAR'
         }
 
@@ -1557,6 +1603,8 @@ Describe 'Prepare-PcRecovery.ps1' {
         It 'documents the CJK font and general install steps' {
             $text = Get-FontsReadmeText -RunStartedUtc '2026-11-16 00:00 UTC' -WrittenUtc '2026-11-16 00:00 UTC'
             $text.Contains($script:FileFont) | Should -BeTrue
+            $text.Contains($script:FontVersion) | Should -BeTrue
+            $text | Should -Not -Match 'about 15\.6 MB'
             $text.Contains($script:FileFontLicense) | Should -BeTrue
             $text | Should -Match 'fc-cache -fv'
             $text | Should -Match 'fc-list :lang=ko'
@@ -2362,6 +2410,22 @@ Describe 'Prepare-PcRecovery.ps1' {
             (Format-IsoReadmeEntry -Row $row -Root $root) | Should -Match 'Checksum file \(shipped alongside\): T\.iso\.sha256'
         }
 
+        It 'handles a sidecar download failure without failing the row' {
+            Reset-State
+            $root = Join-Path $TestDrive 'sidecar-download-fail'
+            $dir = Join-Path (Join-Path $root 'isos') '03-Installers'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $row = [pscustomobject]@{ Name = 'T-row'; Category = '03-Installers'; FileName = 'T.iso'; Url = 'https://example.invalid/T.iso'; AlternateUrl = ''; Hash = ('ab' * 32); HashKind = 'Pinned'; ChecksumUrl = ''; NetbootVariant = ''; MintHwe = ''; About = 'T'; Released = 'T'; SizeNote = 'T'; Check = 'T'; SidecarUrl = 'https://example.invalid/T.sha256'; SidecarName = 'T.iso.sha256' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'bytes' -NoNewline; return $true }
+            Mock Invoke-FileDownload { return $false }
+            Mock Write-Warning { }
+            Save-CatalogRow -Row $row -Root $root | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $dir 'T.iso.sha256') | Should -BeFalse
+            $script:Sidecars.Count | Should -Be 0
+            Should -Invoke -CommandName Write-Warning -Times 0 -Exactly
+            (Format-IsoReadmeEntry -Row $row -Root $root) | Should -Not -Match 'Checksum file \(shipped alongside\)'
+        }
+
         It 'drops an HTML sidecar and warns to retry' {
             Reset-State
             $root = Join-Path $TestDrive 'sidecar-html'
@@ -2388,7 +2452,7 @@ Describe 'Prepare-PcRecovery.ps1' {
             Mock Write-Warning { }
             Save-CatalogRow -Row $row -Root $root | Should -BeTrue
             Test-Path -LiteralPath (Join-Path $dir 'T.iso.sha256') | Should -BeFalse
-            Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -match 'Re-pin T-row' }
+            Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -match 'Re-run once.*Re-verify line' -and $Message -match 'Get-RecoveryCatalog' }
             $block = Format-IsoReadmeEntry -Row $row -Root $root
             $block | Should -Not -Match 'Checksum file \(shipped alongside\)'
         }
