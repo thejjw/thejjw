@@ -8,7 +8,9 @@
     download script go to tools\, and the ISO catalog (netboot.xyz, rescue
     images, installer images) goes to isos\. An official Windows 11 ISO is
     resolved through Fido and downloaded like any other entry, and a Tiny11
-    build can run on top of it when elevation is available.
+    build can run on top of it when elevation is available. Firefox ESR
+    (en-US, x64) is resolved live for Tiny11/Windows 11 where Edge is removed;
+    a pinned release is the fallback when the live lookup fails.
 
     Every step is independent: a failed download or build records a failure
     with manual retry directions and the run continues with the next entry.
@@ -43,7 +45,7 @@
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Prepare-PcRecovery.ps1 -Destination D:\pc-recovery-test -Elevate -WhatIf
 .NOTES
     Copyright (c) 2026 @thejjw. All rights reserved.
-    Last Updated: November 14, 2026
+    Last Updated: November 16, 2026
 
     Catalog: per-ISO About / Released / SizeNote / Hash / Check rows in
     Get-RecoveryCatalog. Re-pin Pinned rows only (Hash + Released +
@@ -67,6 +69,12 @@
     the traditional Windows installer (PEP 773 / Python install manager), so
     drop the installer row then; the embeddable zip stays. Re-pin Hash +
     Released + SizeNote together.
+    Firefox ESR: resolves FIREFOX_ESR live from product-details.mozilla.org
+    and verifies the release SHA256SUMS (publisher checksum). The pinned
+    153.7.0esr release is the fallback ONLY when the metadata or checksum
+    lookup fails; refresh that pin when ESR 153 leaves support. The EXE is
+    about 86 MB; old installers stay in isos\04-etc\firefox\ and are deleted
+    after a newer one verifies.
     Suite: Invoke-Pester .\tests\Prepare-PcRecovery.Tests.ps1 (offline).
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -153,6 +161,14 @@ $script:ImgBurnPayload = [ordered]@{
     'Sounds\Error.wav' = 'acad74b9bb57809e1b35bc06f357941986ebdc547ba33fc618f07e6e7bdc49bd'
     'Sounds\Success.wav' = '8dae19fc9c722a7fb169f37b5881e74551a8d3b8b43ec6f52b6d5d46e885ed6c'
 }
+# Firefox ESR: the version moves every few weeks. The flow resolves
+# FIREFOX_ESR live and verifies the release SHA256SUMS; this pinned release is
+# only the fallback when the metadata or checksum lookup fails.
+$script:DirFirefox = 'firefox'
+$script:FirefoxVersionsUrl = 'https://product-details.mozilla.org/1.0/firefox_versions.json'
+$script:FirefoxReleasesUrl = 'https://ftp.mozilla.org/pub/firefox/releases/'
+$script:FirefoxFallbackVersion = '153.7.0esr'
+$script:FirefoxFallbackSha256 = '3d6fabd249aa1338c0667991fb73891fce941d7dc35ba278da24074874c67508'
 $script:FileVentoyExe = 'Ventoy2Disk.exe'
 $script:FileFido = 'Fido.ps1'
 $script:FileRufusPatternNote = 'rufus-.*p\.exe'
@@ -184,6 +200,7 @@ $script:MakerHintManual = 'Save ' + $script:Tiny11MakerUrl + ' as tools\tiny11bu
 $script:Failures = @()
 $script:Results = @()
 $script:UseSudo = $false
+$script:FirefoxRelease = $null
 
 # -----------------------------------------------------------------------------
 # Maintained text blocks. These readmes are written into the download tree
@@ -217,7 +234,8 @@ STRUCTURE
                      the official en-us_windows_11_*.iso name), tiny11\.
   isos\04-etc\       Post-boot utilities by topic: copyparty\ (portable file
                      server), imgburn\ (portable optical media burner and
-                     imager), cyberduck\ (cloud/SFTP GUI and duck CLI),
+                     imager), firefox\ (offline ESR browser for Tiny11),
+                     cyberduck\ (cloud/SFTP GUI and duck CLI),
                      python\ (Windows x64), 7zip\ (extractor), putty\,
                      tabby\, winscp\ (terminals and transfer clients).
   isos\README.txt    Per-folder contents, sizes, and re-verify notes.
@@ -241,6 +259,13 @@ IMGBURN (OPTICAL MEDIA)
   creates images from discs. Start it through "ImgBurn Portable.cmd": that
   keeps settings in bin\ImgBurn.ini and writes nothing to the PC. The vendor
   installer is not shipped; its OpenCandy offer never runs.
+
+FIREFOX ESR (OFFLINE)
+  isos\04-etc\firefox\Firefox Setup <version>.exe is the en-US x64 ESR
+  installer. Tiny11 removes Edge and WebView2; Firefox ESR supplies the
+  browser (but not WebView2). The script resolves the current ESR live and
+  verifies Mozilla's SHA256SUMS; a pinned ESR release is the fallback when
+  that metadata or checksum lookup fails. Re-run online for a newer ESR.
 "@
 }
 
@@ -271,7 +296,7 @@ FOLDERS
   02-Rescue\     Offline-capable rescue and imaging environments.
   03-Installers\ Installer ISOs, including Windows 11 and tiny11\.
   04-etc\        Post-boot utilities by topic: copyparty\, cyberduck\,
-                 imgburn\, python\, 7zip\, putty\, tabby\, winscp\.
+                 firefox\, imgburn\, python\, 7zip\, putty\, tabby\, winscp\.
 
 NOTES
   - Ventoy itself is a tool, not an ISO: see ..\ventoy\Ventoy2Disk.exe.
@@ -806,6 +831,67 @@ NOTES
     through emulation.
 '@
     return $text.Replace('{IBVER}', $script:ImgBurnVersion).Replace('{IBEXE}', $script:FileImgBurnExe).Replace('{IBINST}', $script:FileImgBurnInstaller).Replace('{IBLAUNCH}', $script:FileImgBurnLauncher).Replace('{IBINI}', $script:FileImgBurnIni).Replace('{IBHASH}', $script:ImgBurnPayload[$script:FileImgBurnExe])
+}
+
+# Offline Firefox ESR sheet for isos\04-etc\firefox\. The live flow resolves
+# the version; FBVER is only the fallback pinned in the script.
+function Get-FirefoxReadmeText {
+    $text = @'
+FIREFOX ESR (OFFLINE)
+=====================
+This file was written by util/Prepare-PcRecovery/Prepare-PcRecovery.ps1; re-runs replace it.
+
+FILES
+  Firefox Setup <version>.exe  en-US x64 ESR installer, about 86 MB. The
+                               exact resolved version and hash are recorded
+                               in ..\..\README.txt.
+
+INSTALL (machine-wide; needs an elevated shell)
+  GUI: double-click the installer.
+  Silent:
+    "Firefox Setup <version>.exe" /S
+  Leaner silent install (no maintenance service or shortcuts):
+    "Firefox Setup <version>.exe" /S /MaintenanceService=false ^
+      /DesktopShortcut=false /TaskbarShortcut=false
+  All installer options imply silent mode; /S and -ms are equivalent.
+  To inspect the payload without installing:
+    "Firefox Setup <version>.exe" /ExtractDir=<directory>
+  (/ExtractDir must be the only option.)
+
+UNINSTALL
+  Settings > Apps > Mozilla Firefox, or from an elevated shell:
+    "%ProgramFiles%\Mozilla Firefox\uninstall\helper.exe" -ms
+  A per-user install uses the same helper under its install path.
+
+PROFILE AND PRIVACY
+  Profiles live in %APPDATA%\Mozilla\Firefox\Profiles. They hold history,
+  bookmarks, saved passwords, and cookies; do not copy them to shared media,
+  and delete the profile before handing the stick or PC to someone else.
+
+VERSIONS AND UPDATES
+  The prep script resolves FIREFOX_ESR from product-details.mozilla.org on
+  every run and verifies the release SHA256SUMS. If that lookup or its
+  checksum entry fails, it falls back to the pinned FBVER release and warns.
+  Old installers stay in this folder; delete the previous one after a newer
+  one verifies. An offline PC does not update Firefox by itself: re-run the
+  prep script and carry the newer installer.
+
+INTEGRITY
+  SHA-256 comes from the release SHA256SUMS published by Mozilla. The
+  installer is Authenticode-valid with Mozilla Corporation as signer. The
+  isos README records the exact version, hash, and whether it was resolved
+  live or from the pinned fallback.
+
+NOTES
+  - Tiny11 removes Edge and WebView2. Firefox ESR supplies the browser; it
+    does not restore WebView2 for apps that embed it.
+  - en-US, x64. ARM64 Windows runs this under emulation; language packs are
+    not included.
+  - Windows-only; WinPE is not supported. Firefox needs a full user session.
+  - The MSI package exists upstream but is not stored here; this folder keeps
+    the EXE full installer for a simple double-click or /S deployment.
+'@
+    return $text.Replace('FBVER', $script:FirefoxFallbackVersion)
 }
 
 # -----------------------------------------------------------------------------
@@ -1855,6 +1941,113 @@ function Install-ImgBurnPortable {
     return $true
 }
 
+# Builds the pinned fallback release object. The SHA-256 is the one Mozilla
+# published for that release; it is used only when the live lookup fails.
+function New-FirefoxFallbackRelease {
+    $version = $script:FirefoxFallbackVersion
+    $fileName = 'Firefox Setup ' + $version + '.exe'
+    [pscustomobject]@{
+        Version = $version
+        FileName = $fileName
+        Url = $script:FirefoxReleasesUrl + $version + '/win64/en-US/' + [uri]::EscapeDataString($fileName)
+        ChecksumUrl = $script:FirefoxReleasesUrl + $version + '/SHA256SUMS'
+        ChecksumPath = 'win64/en-US/' + $fileName
+        Source = 'fallback'
+        FallbackHash = $script:FirefoxFallbackSha256
+    }
+}
+
+# Resolves the current Firefox ESR win64/en-US installer from Mozilla's
+# product metadata. Returns the pinned fallback when the lookup or its
+# validation fails. Never throws.
+function Get-FirefoxEsrRelease {
+    try {
+        $meta = Invoke-RestMethod -Uri $script:FirefoxVersionsUrl -Headers @{ 'User-Agent' = 'pc-recovery' } -UseBasicParsing
+    } catch {
+        Write-Detail "Firefox ESR metadata lookup failed: $($_.Exception.Message)"
+        return (New-FirefoxFallbackRelease)
+    }
+    $version = [string]$meta.FIREFOX_ESR
+    if ($version -notmatch '^\d+\.\d+\.\d+esr$') {
+        Write-Detail "Firefox ESR metadata returned no usable FIREFOX_ESR ('$version')."
+        return (New-FirefoxFallbackRelease)
+    }
+    $fileName = 'Firefox Setup ' + $version + '.exe'
+    [pscustomobject]@{
+        Version = $version
+        FileName = $fileName
+        Url = $script:FirefoxReleasesUrl + $version + '/win64/en-US/' + [uri]::EscapeDataString($fileName)
+        ChecksumUrl = $script:FirefoxReleasesUrl + $version + '/SHA256SUMS'
+        ChecksumPath = 'win64/en-US/' + $fileName
+        Source = 'live'
+        FallbackHash = ''
+    }
+}
+
+# Returns the SHA-256 for one installer from the release SHA256SUMS, or ''.
+# Does not record a failure: the caller falls back to the pinned release.
+function Get-FirefoxEsrHash([string]$ChecksumUrl, [string]$ChecksumPath) {
+    try {
+        $text = Invoke-WebText -Uri $ChecksumUrl
+    } catch {
+        Write-Detail "Firefox SHA256SUMS download failed: $($_.Exception.Message)"
+        return ''
+    }
+    $hash = Find-HashInChecksumText -Text "$text" -FileName $ChecksumPath
+    if (-not $hash) { Write-Detail "No SHA256SUMS entry for $ChecksumPath." }
+    return $hash
+}
+
+# Resolves and stages the current Firefox ESR installer. Live metadata and its
+# SHA256SUMS are authoritative; when either lookup fails, the pinned fallback
+# is used with a warning. Never throws.
+function Save-FirefoxEsr {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param([string]$Root)
+    $dir = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox
+    if (-not $PSCmdlet.ShouldProcess($dir, 'Resolve and download Firefox ESR')) { return $true }
+    Initialize-Directory -Path $dir
+    $release = Get-FirefoxEsrRelease
+    $hash = ''
+    if ($release.Source -eq 'live') {
+        $hash = Get-FirefoxEsrHash -ChecksumUrl $release.ChecksumUrl -ChecksumPath $release.ChecksumPath
+    }
+    if (-not $hash) {
+        $release = New-FirefoxFallbackRelease
+        $hash = $release.FallbackHash
+        Write-Warning "Firefox ESR live lookup failed; using the pinned $($release.Version) fallback. Re-run online for the current ESR."
+    }
+    $outFile = Join-Path $dir $release.FileName
+    $label = 'Firefox ESR ' + $release.Version
+    if ($release.Source -eq 'fallback') { $label += ' (pinned fallback)' }
+    $manual = @(
+        'Open https://www.mozilla.org/firefox/enterprise/ or https://ftp.mozilla.org/pub/firefox/releases/ and download the current Firefox ESR win64/en-US installer into isos\04-etc\firefox\,',
+        'compare its SHA-256 with the release SHA256SUMS, then re-run.'
+    )
+    try {
+        if (-not (Save-VerifiedFile -Url $release.Url -OutFile $outFile -ExpectedHash $hash -Name $label)) { return $false }
+    } catch {
+        $detail = if ($_.Exception) { $_.Exception.Message } else { "$_" }
+        Write-Failure -Name 'Firefox ESR' -Detail "Download failed: $detail" -Manual $manual
+        return $false
+    }
+    if (-not (Test-Path -LiteralPath $outFile -PathType Leaf)) {
+        Write-Failure -Name 'Firefox ESR' -Detail 'Download reported success but no file exists.' -Manual $manual
+        return $false
+    }
+    $script:VerifiedHashes[$outFile] = $hash.ToLowerInvariant()
+    $script:FirefoxRelease = [pscustomobject]@{
+        Version = $release.Version
+        FileName = $release.FileName
+        Url = $release.Url
+        Hash = $hash.ToLowerInvariant()
+        Source = $release.Source
+        OutFile = $outFile
+    }
+    Write-Detail "Firefox ESR $($release.Version) staged ($($release.Source))."
+    return $true
+}
+
 # Finds official Windows ISOs in the installers folder, newest first.
 # Matches Fido-style names (Win11_*.iso) and official Microsoft names
 # (en-us_windows_11_*.iso). Never matches the tiny11\ build output.
@@ -2107,6 +2300,7 @@ function Write-PlanTable {
     Write-Detail 'Tools: latest Ventoy Windows zip, latest Rufus portable, Fido.ps1, tiny11builder x64 zip + tiny11maker.ps1'
     Write-Detail 'copyparty: latest GitHub release, sfx.py + exe under isos\04-etc\copyparty\.'
     Write-Detail 'ImgBurn: official 2.5.8.0 installer, extracted into isos\04-etc\imgburn\bin\.'
+    Write-Detail 'Firefox ESR: latest en-US win64 resolved live; pinned 153.7.0esr fallback if metadata/checksum lookup fails.'
     Write-Detail 'Windows 11 ISO resolved live through Fido; Tiny11 built from it with -Elevate.'
     $rows = Get-RecoveryCatalog | Where-Object {
         (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
@@ -2181,6 +2375,7 @@ function Invoke-PreparePcRecovery {
         $script:VerifiedHashes = @{}
         $script:Sidecars = @{}
         $script:CopypartyRows = @()
+        $script:FirefoxRelease = $null
         Initialize-ElevationState -Elevate:$Elevate
         Initialize-Directory -Path $Root
         Initialize-Directory -Path (Join-Path $Root $script:DirTools)
@@ -2198,6 +2393,7 @@ function Invoke-PreparePcRecovery {
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn)
         Initialize-Directory -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) 'bin')
+        Initialize-Directory -Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox)
         Write-ReadmeFile -Path (Join-Path $Root $script:FileReadme) -Text (Get-RootReadmeText -WrittenUtc ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'))
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCopyparty) $script:FileReadme) -Text (Get-CopypartyReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirPython) $script:FileReadme) -Text (Get-PythonReadmeText)
@@ -2207,6 +2403,7 @@ function Invoke-PreparePcRecovery {
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirCyberduck) $script:FileReadme) -Text (Get-CyberduckReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirTabby) $script:FileReadme) -Text (Get-TabbyReadmeText)
         Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirImgBurn) $script:FileReadme) -Text (Get-ImgBurnReadmeText)
+        Write-ReadmeFile -Path (Join-Path (Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox) $script:FileReadme) -Text (Get-FirefoxReadmeText)
         Write-Step 'Ventoy media tool'
         Invoke-SafeStep -Name 'Ventoy' -Manual @('See the failure message above for the manual Ventoy steps.') -Body {
             Install-Ventoy -Root $Root -CleanDownloads:$CleanDownloads | Out-Null
@@ -2225,6 +2422,10 @@ function Invoke-PreparePcRecovery {
         Invoke-SafeStep -Name 'ImgBurn' -Manual @('Place the ImgBurn payload files in isos\04-etc\imgburn\bin\ by hand; the next run verifies them.') -Body {
             Install-ImgBurnPortable -Root $Root | Out-Null
         }
+        Write-Step 'Firefox ESR (04-etc)'
+        Invoke-SafeStep -Name 'Firefox ESR' -Manual @('Download the current Firefox ESR win64/en-US installer from https://www.mozilla.org/firefox/enterprise/ into isos\04-etc\firefox\ and re-run.') -Body {
+            Save-FirefoxEsr -Root $Root | Out-Null
+        }
         Write-Step 'Windows 11 ISO via Fido'
         Invoke-SafeStep -Name 'Windows 11 ISO' -Manual @('Open ' + $script:MsDownloadPage + ' and place the Windows ISO (' + $script:WinIsoNaming + ') into isos\03-Installers\.') -Body {
             Get-WindowsIsoViaFido -Root $Root | Out-Null
@@ -2239,8 +2440,9 @@ function Invoke-PreparePcRecovery {
         }
         # Refresh the isos readme: one block per selected catalog row (with
         # the on-disk hash when present), then the non-catalog entries
-        # (copyparty, ImgBurn, Windows ISO, Tiny11) hashed the same way, so
-        # the file is a self-contained verification sheet for the real tree.
+        # (copyparty, ImgBurn, Firefox ESR, Windows ISO, Tiny11) hashed the
+        # same way, so the file is a self-contained verification sheet for the
+        # real tree.
         $isoBlocks = Get-RecoveryCatalog | Where-Object {
             (($_.NetbootVariant -eq '') -or ($_.NetbootVariant -eq $NetbootArch)) -and
             (($_.MintHwe -eq '') -or ($_.MintHwe -eq $MintHwe))
@@ -2273,6 +2475,31 @@ function Invoke-PreparePcRecovery {
             $isoBlocks += (Format-IsoReadmeEntry -Row $imgBurnRow -Root $Root)
         } else {
             $isoBlocks += '== ImgBurn portable (not present) ==' + "`r`n" + 'Run the prep script again; the payload is extracted from the official installer.'
+        }
+        $firefoxDir = Join-Path (Join-Path (Join-Path $Root $script:DirIsos) '04-etc') $script:DirFirefox
+        if ($script:FirefoxRelease -and $script:VerifiedHashes.ContainsKey($script:FirefoxRelease.OutFile)) {
+            if ($script:FirefoxRelease.Source -eq 'fallback') {
+                $firefoxSource = 'pinned fallback; live lookup failed'
+                $firefoxHashKind = 'pinned fallback'
+            } else {
+                $firefoxSource = 'resolved live'
+                $firefoxHashKind = 'Mozilla SHA256SUMS'
+            }
+            $firefoxRow = [pscustomobject]@{
+                Name = 'Firefox ESR'
+                Category = (Join-Path '04-etc' $script:DirFirefox)
+                FileName = $script:FirefoxRelease.FileName
+                Url = $script:FirefoxRelease.Url
+                Hash = $script:FirefoxRelease.Hash
+                HashKind = $firefoxHashKind
+                Released = ('Version ' + $script:FirefoxRelease.Version + ', ' + $firefoxSource + '.')
+                SizeNote = 'About 86 MB.'
+                About = 'Offline Firefox ESR browser for Windows 11/Tiny11 where Edge is removed.'
+                Check = 'Mozilla release SHA256SUMS; Authenticode Mozilla Corporation.'
+            }
+            $isoBlocks += (Format-IsoReadmeEntry -Row $firefoxRow -Root $Root)
+        } else {
+            $isoBlocks += '== Firefox ESR (not present) ==' + "`r`n" + 'Run the prep script with network access; the current ESR is resolved live and falls back to the pinned release.'
         }
         $installersDir = Join-Path (Join-Path $Root $script:DirIsos) '03-Installers'
         $winIso = Find-WindowsIso -InstallersDir $installersDir | Select-Object -First 1

@@ -12,7 +12,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         # Script-level state the helpers read; every path points into TestDrive.
         # Evaluate the script's own shared-name constant assignments (not stubs):
         # a mangled constant (e.g. self-assignment to $null) surfaces here.
-        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby|ImgBurn)' }, $true)
+        $constAssignments = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -match '^\$script:(Dir|File|MsDownload|ThirdParty|WinIso|MakerHint|Tiny11BuilderReleasesUrl|VentoyReleasesUrl|Tiny11AnswerUrl|Tiny11MakerUrl|OscdimgUrl|Copyparty|Py|SevenZip|Putty|WinScp|Cyberduck|Tabby|ImgBurn|Firefox)' }, $false)
         if (-not $constAssignments) { throw 'No shared-name constants found in script.' }
         foreach ($assignment in $constAssignments) { . ([scriptblock]::Create($assignment.Extent.Text)) }
         $script:CurlExe = Join-Path $TestDrive 'curl.exe'
@@ -33,7 +33,7 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
 
         # Resets recorded failures/results between tests.
-        function Reset-State { $script:Failures = @(); $script:Results = @(); $script:UseSudo = $false; $script:VerifiedHashes = @{}; $script:Sidecars = @{}; $script:CopypartyRows = @() }
+        function Reset-State { $script:Failures = @(); $script:Results = @(); $script:UseSudo = $false; $script:VerifiedHashes = @{}; $script:Sidecars = @{}; $script:CopypartyRows = @(); $script:FirefoxRelease = $null }
     }
 
     Context 'shared constants' {
@@ -52,6 +52,7 @@ Describe 'Prepare-PcRecovery.ps1' {
                 DirCyberduck = 'cyberduck'; CyberduckVersion = '9.6.0.46406'; FileCyberduckInstaller = 'Cyberduck-Installer-9.6.0.46406.exe'; FileCyberduckDuck = 'duck_9.6.0.46406_amd64.deb'; FileCyberduckDuckRpm = 'duck-9.6.0.46406-1.x86_64.rpm'
                 DirTabby = 'tabby'; TabbyVersion = '1.0.238'; FileTabbyZip = 'tabby-1.0.238-portable-x64.zip'; FileTabbyDeb = 'tabby-1.0.238-linux-x64.deb'; FileTabbyRpm = 'tabby-1.0.238-linux-x64.rpm'
                 DirImgBurn = 'imgburn'; ImgBurnVersion = '2.5.8.0'; FileImgBurnInstaller = 'SetupImgBurn_2.5.8.0.exe'; FileImgBurnExe = 'ImgBurn.exe'; FileImgBurnLauncher = 'ImgBurn Portable.cmd'; FileImgBurnIni = 'ImgBurn.ini'
+                DirFirefox = 'firefox'; FirefoxFallbackVersion = '153.7.0esr'
             }
             foreach ($name in $expected.Keys) {
                 $actual = (Get-Variable -Name $name -Scope Script -ValueOnly -ErrorAction Stop)
@@ -61,6 +62,9 @@ Describe 'Prepare-PcRecovery.ps1' {
             $script:CopypartyApiUrl | Should -Match '^https://api\.github\.com/'
             $script:CopypartyReleasesUrl | Should -Match '^https://github\.com/'
             $script:CyberduckDownloadPage | Should -Match '^https://cyberduck\.io/'
+            $script:FirefoxVersionsUrl | Should -Be 'https://product-details.mozilla.org/1.0/firefox_versions.json'
+            $script:FirefoxReleasesUrl | Should -Be 'https://ftp.mozilla.org/pub/firefox/releases/'
+            $script:FirefoxFallbackSha256 | Should -Match '^[0-9a-f]{64}$'
             $script:ThirdPartyTip | Should -Not -BeNullOrEmpty
             $script:WinIsoNaming | Should -Match 'Win11_'
             $script:MakerHintAdmin | Should -Match 'Enable-WindowsSudo'
@@ -1153,6 +1157,126 @@ Describe 'Prepare-PcRecovery.ps1' {
         }
     }
 
+    Context 'firefox esr' {
+        It 'pins a valid fallback and Mozilla endpoints' {
+            $script:FirefoxFallbackVersion | Should -Match '^\d+\.\d+\.\d+esr$'
+            $script:FirefoxFallbackSha256 | Should -Match '^[0-9a-f]{64}$'
+            $script:FirefoxVersionsUrl | Should -Be 'https://product-details.mozilla.org/1.0/firefox_versions.json'
+            $script:FirefoxReleasesUrl | Should -Be 'https://ftp.mozilla.org/pub/firefox/releases/'
+        }
+
+        It 'resolves FIREFOX_ESR live and builds the win64 en-US URL' {
+            Mock Invoke-RestMethod { [pscustomobject]@{ FIREFOX_ESR = '153.8.0esr' } }
+            $release = Get-FirefoxEsrRelease
+            $release.Source | Should -Be 'live'
+            $release.Version | Should -Be '153.8.0esr'
+            $release.FileName | Should -Be 'Firefox Setup 153.8.0esr.exe'
+            $release.Url | Should -Be 'https://ftp.mozilla.org/pub/firefox/releases/153.8.0esr/win64/en-US/Firefox%20Setup%20153.8.0esr.exe'
+            $release.ChecksumUrl | Should -Be 'https://ftp.mozilla.org/pub/firefox/releases/153.8.0esr/SHA256SUMS'
+            $release.ChecksumPath | Should -Be 'win64/en-US/Firefox Setup 153.8.0esr.exe'
+        }
+
+        It 'falls back to the pinned release when metadata fails' {
+            Mock Invoke-RestMethod { throw 'offline' }
+            $release = Get-FirefoxEsrRelease
+            $release.Source | Should -Be 'fallback'
+            $release.Version | Should -Be $script:FirefoxFallbackVersion
+            $release.FallbackHash | Should -Be $script:FirefoxFallbackSha256
+            $release.Url | Should -Match '153\.7\.0esr/win64/en-US/Firefox%20Setup%20153\.7\.0esr\.exe$'
+            $release.ChecksumPath | Should -Be 'win64/en-US/Firefox Setup 153.7.0esr.exe'
+        }
+
+        It 'falls back when FIREFOX_ESR is malformed' {
+            Mock Invoke-RestMethod { [pscustomobject]@{ FIREFOX_ESR = '153.8' } }
+            (Get-FirefoxEsrRelease).Source | Should -Be 'fallback'
+        }
+
+        It 'falls back when FIREFOX_ESR is missing' {
+            Mock Invoke-RestMethod { [pscustomobject]@{} }
+            (Get-FirefoxEsrRelease).Source | Should -Be 'fallback'
+        }
+
+        It 'extracts the live installer hash from SHA256SUMS' {
+            $script:liveHash = 'ab' * 32
+            Mock Invoke-WebText { "$script:liveHash  win64/en-US/Firefox Setup 153.8.0esr.exe" }
+            Get-FirefoxEsrHash -ChecksumUrl 'https://example.invalid/SHA256SUMS' -ChecksumPath 'win64/en-US/Firefox Setup 153.8.0esr.exe' | Should -Be $script:liveHash
+        }
+
+        It 'downloads the live ESR and records the verified release' {
+            Reset-State
+            $root = Join-Path $TestDrive 'firefox-live'
+            $script:liveHash = 'cd' * 32
+            Mock Invoke-RestMethod { [pscustomobject]@{ FIREFOX_ESR = '153.8.0esr' } }
+            Mock Invoke-WebText { "$script:liveHash  win64/en-US/Firefox Setup 153.8.0esr.exe" }
+            (Get-FirefoxEsrHash -ChecksumUrl 'https://example.invalid/SHA256SUMS' -ChecksumPath 'win64/en-US/Firefox Setup 153.8.0esr.exe') | Should -Be $script:liveHash
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'firefox' -NoNewline; return $true }
+            Save-FirefoxEsr -Root $root | Should -BeTrue
+            $script:FirefoxRelease.Version | Should -Be '153.8.0esr'
+            $script:FirefoxRelease.Source | Should -Be 'live'
+            $script:FirefoxRelease.Hash | Should -Be $script:liveHash
+            Test-Path -LiteralPath $script:FirefoxRelease.OutFile | Should -BeTrue
+            $script:VerifiedHashes[$script:FirefoxRelease.OutFile] | Should -Be $script:liveHash
+            $script:Failures.Count | Should -Be 0
+        }
+
+        It 'uses the pinned fallback when the checksum entry is missing' {
+            Reset-State
+            $root = Join-Path $TestDrive 'firefox-nosum'
+            Mock Invoke-RestMethod { [pscustomobject]@{ FIREFOX_ESR = '153.8.0esr' } }
+            Mock Invoke-WebText { 'deadbeef  win64/en-US/other.exe' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'firefox' -NoNewline; return $true }
+            Save-FirefoxEsr -Root $root | Should -BeTrue
+            $script:FirefoxRelease.Source | Should -Be 'fallback'
+            $script:FirefoxRelease.Version | Should -Be $script:FirefoxFallbackVersion
+            $script:FirefoxRelease.Hash | Should -Be $script:FirefoxFallbackSha256
+            $script:Failures.Count | Should -Be 0
+        }
+
+        It 'uses the pinned fallback when metadata is unavailable' {
+            Reset-State
+            $root = Join-Path $TestDrive 'firefox-meta'
+            Mock Invoke-RestMethod { throw 'offline' }
+            Mock Save-VerifiedFile { Set-Content -LiteralPath $OutFile -Value 'firefox' -NoNewline; return $true }
+            Save-FirefoxEsr -Root $root | Should -BeTrue
+            $script:FirefoxRelease.Source | Should -Be 'fallback'
+            $script:FirefoxRelease.Hash | Should -Be $script:FirefoxFallbackSha256
+            $script:Failures.Count | Should -Be 0
+        }
+
+        It 'does not treat a silent download success as a file' {
+            Reset-State
+            $root = Join-Path $TestDrive 'firefox-nofile'
+            Mock Invoke-RestMethod { [pscustomobject]@{ FIREFOX_ESR = '153.8.0esr' } }
+            Mock Invoke-WebText { ('ab' * 32) + '  win64/en-US/Firefox Setup 153.8.0esr.exe' }
+            Mock Save-VerifiedFile { return $true }
+            Save-FirefoxEsr -Root $root | Should -BeFalse
+            $script:Failures.Name | Should -Contain 'Firefox ESR'
+        }
+
+        It 'writes nothing and does not resolve under -WhatIf' {
+            Reset-State
+            $root = Join-Path $TestDrive 'firefox-whatif'
+            Mock Invoke-RestMethod { throw 'MUTATION: metadata lookup' }
+            Mock Save-VerifiedFile { throw 'MUTATION: download' }
+            Save-FirefoxEsr -Root $root -WhatIf | Should -BeTrue
+            Test-Path -LiteralPath $root | Should -BeFalse
+            $script:Results.Count | Should -Be 0
+            $script:Failures.Count | Should -Be 0
+        }
+
+        It 'documents install, uninstall, fallback, and integrity' {
+            $text = Get-FirefoxReadmeText
+            $text | Should -Match '/S'
+            $text | Should -Match 'MaintenanceService=false'
+            $text | Should -Match 'helper\.exe" -ms'
+            $text | Should -Match 'SHA256SUMS'
+            $text | Should -Match 'Mozilla Corporation'
+            $text | Should -Match 'Tiny11 removes Edge and WebView2'
+            $text.Contains($script:FirefoxFallbackVersion) | Should -BeTrue
+            $text | Should -Not -Match 'FBVER'
+        }
+    }
+
     Context 'elevation' {
         It 'never invokes sudo.exe without -Elevate' {
             Reset-State
@@ -1285,6 +1409,24 @@ Describe 'Prepare-PcRecovery.ps1' {
                 $script:VerifiedHashes[$ibFile] = $script:ImgBurnPayload[$script:FileImgBurnExe]
                 return $true
             }
+            Mock Save-FirefoxEsr {
+                $ffDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox'
+                New-Item -ItemType Directory -Path $ffDir -Force | Out-Null
+                $ffName = 'Firefox Setup ' + $script:FirefoxFallbackVersion + '.exe'
+                $ffFile = Join-Path $ffDir $ffName
+                Set-Content -LiteralPath $ffFile -Value 'firefox' -NoNewline
+                $ffHash = 'ef' * 32
+                $script:VerifiedHashes[$ffFile] = $ffHash
+                $script:FirefoxRelease = [pscustomobject]@{
+                    Version = $script:FirefoxFallbackVersion
+                    FileName = $ffName
+                    Url = 'https://example.invalid/firefox.exe'
+                    Hash = $ffHash
+                    Source = 'fallback'
+                    OutFile = $ffFile
+                }
+                return $true
+            }
             Mock Get-WindowsIsoViaFido { return $true }
             Mock Invoke-Tiny11Build { return $true }
             Invoke-PreparePcRecovery -Root $root | Should -Be 0
@@ -1294,11 +1436,17 @@ Describe 'Prepare-PcRecovery.ps1' {
             $rootText | Should -Match 'en-US'
             $rootText | Should -Match 'copyparty'
             $rootText | Should -Match 'imgburn'
+            $rootText | Should -Match 'firefox'
             $imgburnDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'imgburn'
             $imgburnText = [IO.File]::ReadAllText((Join-Path $imgburnDir 'README.txt'))
             $imgburnText | Should -Match '/PORTABLE /SETTINGS'
             $imgburnText.Contains($script:ImgBurnPayload[$script:FileImgBurnExe]) | Should -BeTrue
             $imgburnText | Should -Match 'OpenCandy'
+            $firefoxDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'firefox'
+            $firefoxText = [IO.File]::ReadAllText((Join-Path $firefoxDir 'README.txt'))
+            $firefoxText | Should -Match '/S'
+            $firefoxText | Should -Match 'SHA256SUMS'
+            $firefoxText.Contains($script:FirefoxFallbackVersion) | Should -BeTrue
             $rootText | Should -Match 'python\\'
             $topicDir = Join-Path (Join-Path (Join-Path $root 'isos') '04-etc') 'copyparty'
             $topicText = [IO.File]::ReadAllText((Join-Path $topicDir 'README.txt'))
@@ -1359,6 +1507,8 @@ Describe 'Prepare-PcRecovery.ps1' {
             $isosText | Should -Match 'Tiny11 ISO \(not present\)'
             $isosText | Should -Match '04-etc\\copyparty\\copyparty\.exe'
             $isosText | Should -Match '04-etc\\imgburn\\bin\\ImgBurn\.exe'
+            $isosText | Should -Match '04-etc\\firefox\\Firefox Setup 153\.7\.0esr\.exe'
+            $isosText | Should -Match 'pinned fallback; live lookup failed'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-amd64\.exe'
             $isosText | Should -Match '04-etc\\python\\python-3\.15\.2-embed-amd64\.zip'
             $isosText | Should -Match '04-etc\\7zip\\7z2606-x64\.exe'
