@@ -54,7 +54,7 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 
 | Agent | Model | Purpose |
 | --- | --- | --- |
-| `alt_head-premium` | `openai/gpt-6-astra` | Highest-quality orchestration and review-heavy work |
+| `alt_head-premium` | `openai/gpt-6.2-astra` | Highest-quality orchestration and review-heavy work |
 | `alt_head-openai` | `openai/gpt-5.6-terra` | All-OpenAI workflow |
 | `alt_head-glm_stack` | `zai-coding-plan/glm-5.3` | All-GLM workflow |
 | `alt_head-budget` | `zai-coding-plan/glm-5.3-flash` | Cheap and fast routine workflow |
@@ -70,7 +70,7 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 | `hard-impl-glm53` | `zai-coding-plan/glm-5.3-flash` | Main implementation work |
 | `hard-impl-openai` | `openai/gpt-6.2-sol` | OpenAI implementation work |
 | `hard-impl-m3` | `minimax-coding-plan/MiniMax-M3.1-Flash` | MiniMax implementation work |
-| `premium-reviewer-gpt-6-astra` | `openai/gpt-6-astra` | Read-only final review and risk analysis |
+| `premium-reviewer-gpt-6-astra` | `openai/gpt-6.2-astra` | Read-only final review and risk analysis |
 
 ## Routing
 
