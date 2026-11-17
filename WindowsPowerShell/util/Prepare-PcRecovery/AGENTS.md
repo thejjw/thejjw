@@ -85,7 +85,7 @@ a change done.
 ## Polishing with claude -p (opus)
 
 After a change is green locally, run the external review loop below. Claude is
-the default reviewer; Codex/GPT-6.1-Sol is an opt-in alternative or second
+the default reviewer; Codex/GPT-6.2-Sol is an opt-in alternative or second
 opinion, see "Optional second reviewer: Codex CLI" below. Run the loop from the
 repo root
 and feed the cumulative local diff so the reviewer sees the whole change, not
@@ -136,7 +136,7 @@ Review the local commits on stdin (PowerShell 5.1 WindowsPowerShell/util/Prepare
 - Keep each round bounded: batch all accepted fixes, run Pester once, commit,
   then re-review. Each fix can add branches the next round will probe.
 
-## Optional second reviewer: Codex CLI (gpt-6.1-sol)
+## Optional second reviewer: Codex CLI (gpt-6.2-sol)
 
 Claude remains the default. Use Codex only when the user asks for it, when
 Claude is unavailable or rate-limited and a review is still needed, or when a
@@ -163,7 +163,7 @@ if ($loginCode -ne 0) {
 ```
 
 If any check fails, say so and fall back to the Claude loop. The model ID is
-`gpt-6.1-sol` (the full ID; `sol` alone is not an alias). Requested effort is
+`gpt-6.2-sol` (the full ID; `sol` alone is not an alias). Requested effort is
 `high`; the model supports `low`, `medium`, `high`, `xhigh`, and `max`.
 Use `high` for review; `xhigh`/`max` only when the user asks.
 
@@ -188,7 +188,7 @@ try {
     ((@(git log --format='--- %h %s%n%b' "$base..HEAD") + $diff) -join "`r`n") |
         codex exec `
             -C (git rev-parse --show-toplevel) `
-            -m gpt-6.1-sol `
+            -m gpt-6.2-sol `
             -c model_reasoning_effort=high `
             -s read-only --ephemeral `
             -o $reviewFile `
