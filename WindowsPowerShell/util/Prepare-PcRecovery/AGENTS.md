@@ -100,8 +100,9 @@ change done.
 ## Polishing with claude -p
 
 After a change is green locally, run the external review loop below. Claude is
-the default reviewer; Codex is an opt-in alternative or second opinion, see
-"Optional second reviewer: Codex CLI" below. Run the loop from the repo root
+the default reviewer; Codex (currently GPT-6.2-Sol) is an opt-in alternative or
+second opinion, see "Optional second reviewer: Codex CLI (gpt-6.2-sol)" below.
+Run the loop from the repo root
 and feed the cumulative local diff so the reviewer sees the whole change, not
 one commit:
 
@@ -148,7 +149,7 @@ Review the local commits on stdin (PowerShell 5.1 WindowsPowerShell/util/Prepare
   a stop condition while any claim is still valid, and a false claim is never
   a reason to weaken the code.
 
-## Optional second reviewer: Codex CLI
+## Optional second reviewer: Codex CLI (gpt-6.2-sol)
 
 Claude remains the default. Use Codex only when the user asks for it, when
 Claude is unavailable or rate-limited and a review is still needed, or when a
@@ -175,10 +176,11 @@ if ($loginCode -ne 0) {
 ```
 
 If any check fails, say so and fall back to the Claude loop. The example below
-uses `$codexModel` at `high` effort. Model IDs and effort levels change; verify
-the current review model with `codex exec --help` and the account's available
-models before relying on them. Use the example's effort level unless the user
-asks otherwise; do not go higher without an explicit request.
+uses `$codexModel` at `high` effort; set it to `gpt-6.2-sol` (the full ID;
+`sol` alone is not an alias). The model supports `low`, `medium`, `high`,
+`xhigh`, and `max`. Model IDs and effort levels change; verify the current
+review model with `codex exec --help` and the account's available models before
+relying on them. Use `high` for review; `xhigh`/`max` only when the user asks.
 
 Same loop shape as Claude: feed the cumulative diff on stdin, ask for
 `NO ACTIONABLE FINDINGS` or findings with file:line, severity, and a fix, and

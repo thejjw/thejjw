@@ -3,9 +3,9 @@
   "default_agent": "head-gpt",
   "agent": {
     "head-gpt": {
-      "description": "Primary premium orchestration head using GPT 6.1 Sol. Use for planning, delegation, synthesis, and final decisions.",
+      "description": "Primary premium orchestration head using GPT 6.2 Sol. Use for planning, delegation, synthesis, and final decisions.",
       "mode": "primary",
-      "model": "openai/gpt-6.1-sol",
+      "model": "openai/gpt-6.2-sol",
       "variant": "high",
       "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-glm53. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
       "permission": {
@@ -50,9 +50,9 @@
       }
     },
     "alt_head-premium": {
-      "description": "Alternate premium routing profile using GPT 6 Astra for orchestration and review-heavy work.",
+      "description": "Alternate premium routing profile using GPT 6.2 Astra for orchestration and review-heavy work.",
       "mode": "primary",
-      "model": "openai/gpt-6-astra",
+      "model": "openai/gpt-6.2-astra",
       "prompt": "You are a premium orchestration head. Use fast-discovery-m3 for quick investigation, hard-impl-openai for implementation, and premium-reviewer-gpt-6-astra for final review or high-risk decisions.",
       "permission": {
         "edit": "ask",
@@ -207,9 +207,9 @@
       }
     },
     "hard-impl-openai": {
-      "description": "Implementation and hard debugging subagent using GPT 6.1 Sol.",
+      "description": "Implementation and hard debugging subagent using GPT 6.2 Sol.",
       "mode": "subagent",
-      "model": "openai/gpt-6.1-sol",
+      "model": "openai/gpt-6.2-sol",
       "steps": 40,
       "prompt": "You are an implementation agent. Make the smallest correct code changes, preserve existing style, run focused verification when appropriate, and report what changed. Avoid broad discovery unless necessary.",
       "permission": {
@@ -241,9 +241,9 @@
       }
     },
     "premium-reviewer-gpt-6-astra": {
-      "description": "Read-only premium reviewer using GPT 6 Astra for final audits, risk analysis, and regression checks.",
+      "description": "Read-only premium reviewer using GPT 6.2 Astra for final audits, risk analysis, and regression checks.",
       "mode": "subagent",
-      "model": "openai/gpt-6-astra",
+      "model": "openai/gpt-6.2-astra",
       "steps": 20,
       "prompt": "You are a read-only premium reviewer. Prioritize bugs, regressions, security risks, missing tests, and unclear behavior. Provide findings first with file references. Do not modify files.",
       "permission": {
