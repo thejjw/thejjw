@@ -554,7 +554,7 @@ install_libjxl_static_tools() {
     curl -fL --retry 3 -o "$archive" "$url"
   fi
 
-  # Archive layout (verified against v0.12.0): LICENSE* at root, binaries under tools/.
+  # Archive layout (verified against v0.13.0): LICENSE* at root, binaries under tools/.
   echo "libjxl: extracting static tools"
   if ! lzip -dc "$archive" | tar -x -C "$tmp_dir"; then
     echo "libjxl: extraction failed; falling back to libjxl-tools apt package" >&2
