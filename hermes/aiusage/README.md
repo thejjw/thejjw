@@ -17,7 +17,7 @@ Python stdlib calls, and delivery is a single `hermes send` invocation.
 | `render.py` | KST formatting, reset countdowns, message layout |
 | `alert.py` | weekly-window selection and the reset-alert message |
 | `providers/` | one adapter per provider: `parse(doc)` for tests, `fetch(key)` for the network |
-| `cli.py` | `fetch`, `render`, `report`, `alert` subcommands |
+| `cli.py` | `fetch`, `render`, `report`, `alert`, `snapshot` subcommands |
 | `tests/` | offline unittest suite plus captured response fixtures |
 
 ## Commands
@@ -31,6 +31,12 @@ PYTHONPATH=hermes python3 -m aiusage fetch --out /tmp/usage
 
 # render a directory of saved documents (network-free)
 PYTHONPATH=hermes python3 -m aiusage render /tmp/usage
+
+# render with the previous run's "(was X%)" context
+PYTHONPATH=hermes python3 -m aiusage render /tmp/usage --previous /tmp/usage/previous.json
+
+# save this run's documents for the next run's comparison
+PYTHONPATH=hermes python3 -m aiusage snapshot /tmp/usage --out /tmp/usage/previous.json
 
 # render only the weekly windows resetting in 1-2 days (empty output = nothing due)
 PYTHONPATH=hermes python3 -m aiusage alert /tmp/usage --within 1,2
@@ -63,6 +69,16 @@ message always states which case applies:
 - `reset n/a` — a window with no reset concept at all.
 
 Prepaid balances (DeepSeek) have no window and say so.
+
+### Previous-run context
+
+`render --previous FILE` reprints each window with a `(was X%)` clause and adds
+a legend under the header dating the comparison. The clause appears only when
+the previous report carried the same provider, window label *and* reset time —
+the same quota period. A window that rolled over, is new, or has no reset time
+to compare is left alone, and a missing or unreadable snapshot simply renders
+the plain report. The daily runner keeps the snapshot at
+`~/.hermes/cache/aiusage/previous.json`.
 
 ## Tests
 

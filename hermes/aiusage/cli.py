@@ -64,11 +64,13 @@ def load_documents(paths: list[str]) -> list[UsageReport]:
         except (OSError, json.JSONDecodeError) as exc:
             print(f"aiusage: skipping {path}: {exc}", file=sys.stderr)
             continue
-        if not isinstance(doc, dict) or "provider" not in doc:
-            # Raw provider payloads may sit in the same directory; ignore them.
-            print(f"aiusage: skipping {path}: not a usage report", file=sys.stderr)
-            continue
-        reports.append(UsageReport.from_document(doc))
+        # A snapshot file holds a JSON array; a provider document is a single
+        # object. Raw provider payloads in the same directory are ignored.
+        for candidate in doc if isinstance(doc, list) else [doc]:
+            if not isinstance(candidate, dict) or "provider" not in candidate:
+                print(f"aiusage: skipping {path}: not a usage report", file=sys.stderr)
+                continue
+            reports.append(UsageReport.from_document(candidate))
     return reports
 
 
@@ -99,7 +101,19 @@ def cmd_render(args: argparse.Namespace) -> int:
         print("aiusage: no readable report documents", file=sys.stderr)
         return 1
     now = datetime.now(timezone.utc) if args.now is None else _parse_now(args.now)
-    print(render_message(reports, now))
+    previous = load_documents([args.previous]) if args.previous else None
+    print(render_message(reports, now, previous=previous))
+    return 0
+
+
+def cmd_snapshot(args: argparse.Namespace) -> int:
+    """Implement ``snapshot``: save the current documents for the next run."""
+    reports = load_documents([args.path])
+    if not reports:
+        print("aiusage: no readable report documents", file=sys.stderr)
+        return 1
+    payload = [report.to_document() for report in reports]
+    Path(args.out).write_text(json.dumps(payload, indent=2) + "\n")
     return 0
 
 
@@ -145,8 +159,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     render = sub.add_parser("render", help="render saved JSON documents")
     render.add_argument("paths", nargs="+", help="JSON files or directories")
+    render.add_argument("--previous", help="previous run's snapshot (JSON file or directory)")
     render.add_argument("--now", help="override the report time (ISO-8601, for testing)")
     render.set_defaults(func=cmd_render)
+
+    snapshot = sub.add_parser("snapshot", help="save documents for the next run's comparison")
+    snapshot.add_argument("path", help="directory of saved documents")
+    snapshot.add_argument("--out", required=True, help="file to write the snapshot to")
+    snapshot.set_defaults(func=cmd_snapshot)
 
     report = sub.add_parser("report", help="fetch and render in one step")
     report.add_argument("--provider", action="append", choices=sorted(PROVIDERS))
