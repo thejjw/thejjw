@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import keys
+from .alert import render_alert
 from .contract import UsageReport
 from .providers import PROVIDERS
 from .render import render_message
@@ -110,6 +111,20 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0 if any(report.available for report in reports) else 1
 
 
+def cmd_alert(args: argparse.Namespace) -> int:
+    """Implement ``alert``: render only the weekly windows resetting soon."""
+    reports = load_documents(args.paths)
+    if not reports:
+        print("aiusage: no readable report documents", file=sys.stderr)
+        return 1
+    now = datetime.now(timezone.utc) if args.now is None else _parse_now(args.now)
+    within = tuple(sorted({int(part) for part in args.within.split(",") if part}))
+    message = render_alert(reports, now, within=within)
+    if message:
+        print(message)
+    return 0
+
+
 def _parse_now(value: str) -> datetime:
     """Parse an ISO-8601 instant supplied on the command line."""
     text = value[:-1] + "+00:00" if value.endswith("Z") else value
@@ -137,6 +152,12 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--provider", action="append", choices=sorted(PROVIDERS))
     report.add_argument("--now", help="override the report time (ISO-8601, for testing)")
     report.set_defaults(func=cmd_report)
+
+    alert = sub.add_parser("alert", help="render weekly windows resetting in 1-2 days")
+    alert.add_argument("paths", nargs="+", help="JSON files or directories")
+    alert.add_argument("--within", default="1,2", help="comma-separated day offsets")
+    alert.add_argument("--now", help="override the report time (ISO-8601, for testing)")
+    alert.set_defaults(func=cmd_alert)
     return parser
 
 

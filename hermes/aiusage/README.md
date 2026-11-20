@@ -15,8 +15,9 @@ Python stdlib calls, and delivery is a single `hermes send` invocation.
 | `http.py` | urllib wrapper: timeout, bounded retries, short failure reasons |
 | `keys.py` | credential resolution (flag, env, `~/.hermes/.env`, Hermes credential pool) |
 | `render.py` | KST formatting, reset countdowns, message layout |
+| `alert.py` | weekly-window selection and the reset-alert message |
 | `providers/` | one adapter per provider: `parse(doc)` for tests, `fetch(key)` for the network |
-| `cli.py` | `fetch`, `render`, `report` subcommands |
+| `cli.py` | `fetch`, `render`, `report`, `alert` subcommands |
 | `tests/` | offline unittest suite plus captured response fixtures |
 
 ## Commands
@@ -30,6 +31,9 @@ PYTHONPATH=hermes python3 -m aiusage fetch --out /tmp/usage
 
 # render a directory of saved documents (network-free)
 PYTHONPATH=hermes python3 -m aiusage render /tmp/usage
+
+# render only the weekly windows resetting in 1-2 days (empty output = nothing due)
+PYTHONPATH=hermes python3 -m aiusage alert /tmp/usage --within 1,2
 ```
 
 `aiusage.sh` in this directory is a thin wrapper for interactive use.
@@ -77,3 +81,9 @@ builds the report (three `hermes usage` calls plus `fetch --out`) and pipes the
 rendered text to `hermes send`. Host cron runs it at `0 23 * * *` UTC, which is
 08:00 KST. `/root/.hermes/scripts/verify-ai-usage-report.sh` audits the install,
 and the runner accepts `--dry-run` to print the message without sending it.
+
+A second job, `/root/.hermes/scripts/ai-usage-alert.sh`, covers the four weekly
+plans (Anthropic, OpenCodeGo, Kimi, MiniMax) and sends an alert two days and one
+day before each reset. Host cron runs it at `0 0 * * *` UTC, which is 09:00 KST;
+it sends nothing when no window is due. Codex is deliberately excluded because its
+weekly reset is not calendar-fixed.
