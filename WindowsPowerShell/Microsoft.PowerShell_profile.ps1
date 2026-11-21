@@ -649,6 +649,18 @@ $_AppLockerInternal = @{
     EveryoneSid   = 'S-1-1-0'
 }
 
+# Internal configuration for Disable-Copilot.
+$_CopilotInternal = @{
+    # Policy values written by Disable-Copilot. Kept as data so a future
+    # revert can remove exactly what was created here.
+    PolicyValues = @(
+        @{ Path = 'HKCU:\Software\Policies\Microsoft\Windows\WindowsCopilot'; Name = 'TurnOffWindowsCopilot'; Value = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot'; Name = 'TurnOffWindowsCopilot'; Value = 1 }
+        @{ Path = 'HKCU:\Software\Policies\Microsoft\Windows\WindowsAI'; Name = 'RemoveMicrosoftCopilotApp'; Value = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Name = 'HubsSidebarEnabled'; Value = 0 }
+    )
+}
+
 # --- $_ProfileHelpers: shared helper object for the whole profile ----------
 # General-purpose helpers exposed as methods on $_ProfileHelpers (e.g.
 # $_ProfileHelpers.WriteSection('x')). Home for ANY cross-cutting helper.
@@ -16523,6 +16535,98 @@ function Enable-LongPathSupport {
     }
 
     Write-Host 'Win32 long paths enabled. Already-running processes keep the old value: restart terminals (a reboot may be required). Only longPathAware apps benefit.' -ForegroundColor Green
+    return $true
+}
+
+function Disable-Copilot {
+    <#
+.SYNOPSIS
+    Removes the Copilot app and disables Copilot via policy locks.
+.DESCRIPTION
+    Removes installed and provisioned Copilot Appx packages for all users,
+    then writes policy registry values disabling Windows Copilot and the Edge
+    Copilot sidebar, and refreshes Group Policy. Notepad AI is intentionally
+    left untouched. Recall and Click to Do are unaffected: they are governed
+    by separate policies (DisableAIDataAnalysis/AllowRecallEnablement and
+    DisableClickToDo), none of which is set here.
+.EXAMPLE
+    PS C:\> Disable-Copilot
+.OUTPUTS
+    System.Boolean. True when no Copilot package remains and every policy
+    value is set after the call.
+.NOTES
+    Author: jjw(@thejjw)
+    Last Edit: 2026-11
+    Requires elevation. When UAC elevates as a different administrator, the
+    HKCU values land in that account's hive instead of the interactive user's.
+#>
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    [OutputType([bool])]
+    param()
+
+    if (-not (Test-IsAdministrator)) {
+        throw 'Disable-Copilot requires an elevated PowerShell session. Re-run as Administrator.'
+    }
+
+    $ErrorActionPreference = 'Stop'
+    $policies = $_CopilotInternal.PolicyValues
+
+    # Idempotency probe, so repeat runs report "already disabled" instead of
+    # churning through removals and a Group Policy refresh.
+    $installed = @(Get-AppxPackage -AllUsers -Name '*Copilot*' -ErrorAction SilentlyContinue)
+    $provisioned = @(Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*Copilot*' })
+    $missingPolicies = @($policies | Where-Object {
+        $entry = Get-ItemProperty -LiteralPath $_.Path -ErrorAction SilentlyContinue
+        $entry.($_.Name) -ne $_.Value
+    })
+
+    if ($installed.Count -eq 0 -and $provisioned.Count -eq 0 -and $missingPolicies.Count -eq 0) {
+        Write-Host 'Copilot is already disabled: no Copilot packages and all policy locks are set.' -ForegroundColor Green
+        return $true
+    }
+
+    if (-not $PSCmdlet.ShouldProcess('Copilot app and policy locks', 'Disable Copilot for all users')) {
+        return $false
+    }
+
+    Write-Host '1. Removing installed Copilot Appx packages for all users...' -ForegroundColor Cyan
+    foreach ($package in $installed) {
+        Write-Host "   Removing package: $($package.Name)"
+        Remove-AppxPackage -Package $package.PackageFullName -AllUsers -ErrorAction SilentlyContinue
+    }
+
+    Write-Host '2. Removing provisioned Copilot packages for new profiles...' -ForegroundColor Cyan
+    foreach ($package in $provisioned) {
+        Write-Host "   Removing provisioned package: $($package.DisplayName)"
+        Remove-AppxProvisionedPackage -Online -PackageName $package.PackageName -ErrorAction SilentlyContinue | Out-Null
+    }
+
+    Write-Host '3. Applying policy registry locks (Windows and Edge)...' -ForegroundColor Cyan
+    foreach ($policy in $policies) {
+        if (-not (Test-Path -LiteralPath $policy.Path)) {
+            New-Item -Path $policy.Path -Force | Out-Null
+        }
+        Set-ItemProperty -LiteralPath $policy.Path -Name $policy.Name -Value $policy.Value -Type DWord
+    }
+
+    Write-Host '4. Refreshing Group Policy...' -ForegroundColor Cyan
+    gpupdate /force | Out-Null
+
+    # Read back instead of trusting the removals; a package that refuses to
+    # uninstall must not report success.
+    $remaining = @(Get-AppxPackage -AllUsers -Name '*Copilot*' -ErrorAction SilentlyContinue)
+    $remainingProvisioned = @(Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*Copilot*' })
+    $stillMissing = @($policies | Where-Object {
+        $entry = Get-ItemProperty -LiteralPath $_.Path -ErrorAction SilentlyContinue
+        $entry.($_.Name) -ne $_.Value
+    })
+
+    if ($remaining.Count -gt 0 -or $remainingProvisioned.Count -gt 0 -or $stillMissing.Count -gt 0) {
+        Write-Warning ('Copilot is not fully disabled: {0} installed, {1} provisioned, {2} policy values unset.' -f $remaining.Count, $remainingProvisioned.Count, $stillMissing.Count)
+        return $false
+    }
+
+    Write-Host 'Done! Restart Edge (or sign out and back in) for all changes to take effect.' -ForegroundColor Green
     return $true
 }
 
