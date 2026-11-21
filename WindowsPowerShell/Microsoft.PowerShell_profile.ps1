@@ -4543,7 +4543,7 @@ Last Edit: 2026-11
                         @( $Lines | Where-Object { $_ -match ('^' + $Key + ' ') } |
                             ForEach-Object { ($_ -replace ('^' + $Key + ' '), '').Trim() } )
                     }
-                    $effAll = @((& $effVal $tmpGlobal 'passwordauthentication') + (& $effVal $tmpTarget 'passwordauthentication'))
+                    $effAll = @(& $effVal $tmpGlobal 'passwordauthentication'; & $effVal $tmpTarget 'passwordauthentication')
                     if ($effAll.Count -eq 0 -or @($effAll | Where-Object { $_ -ne $wantPassword }).Count -gt 0) {
                         throw "Cannot confirm effective passwordauthentication '$wantPassword' (got: $($effAll -join ', ')); live config untouched."
                     }
@@ -4551,7 +4551,7 @@ Last Edit: 2026-11
                         # Disabling passwords is safe only when key auth alone can
                         # still log in: pubkey must be on and no method list may
                         # demand a password (or keyboard-interactive) step.
-                        $pubAll = @((& $effVal $tmpGlobal 'pubkeyauthentication') + (& $effVal $tmpTarget 'pubkeyauthentication'))
+                        $pubAll = @(& $effVal $tmpGlobal 'pubkeyauthentication'; & $effVal $tmpTarget 'pubkeyauthentication')
                         if ($pubAll.Count -lt 2 -or @($pubAll | Where-Object { $_ -ne 'yes' }).Count -gt 0) {
                             throw "Cannot disable passwords: effective pubkeyauthentication is '$($pubAll -join ', ')' (need 'yes' globally and for $User); live config untouched."
                         }
