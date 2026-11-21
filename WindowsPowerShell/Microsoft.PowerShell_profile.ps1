@@ -4002,7 +4002,7 @@ the rule scope untouched.
 .PARAMETER AllowPasswordAuth
 Keeps password auth explicitly enabled. Without it, PasswordAuthentication is
 set to no (previous config backed up to sshd_config.bak) and sshd restarts.
-Verify key login in a NEW session before closing RDP. Kerberos (GSSAPI)
+Keep this session open and verify key login in a NEW session first. Kerberos (GSSAPI)
 logins are unaffected either way.
 .EXAMPLE
 PS C:\> Install-SshInboundKey -PublicKeyText 'ssh-ed25519 AAAA... me@pc'
@@ -4594,7 +4594,7 @@ Last Edit: 2026-11
         }
     }
     if ($wantPassword -eq 'no' -and ($configWritten -or $WhatIfPreference)) {
-        Write-Host 'Password auth disabled: verify key login in a NEW session before closing RDP.' -ForegroundColor Yellow
+        Write-Host 'Password auth disabled: keep this session open; verify key login in a NEW session first.' -ForegroundColor Yellow
     }
 
     # Open the firewall LAST: every failure above leaves it closed. Created and
