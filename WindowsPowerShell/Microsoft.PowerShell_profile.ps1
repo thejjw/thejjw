@@ -3583,6 +3583,1230 @@ function Send-SshKey {
     }
 }
 
+function Assert-ValidUtf8File {
+    <#
+.SYNOPSIS
+Throws unless a file is safe for the UTF-8 read/rewrite pipeline.
+.DESCRIPTION
+Accepts UTF-8/UTF-16 files (BOM or not) and throws on anything else, so a
+rewrite can never turn undecodable bytes into mojibake. Call before reading
+any file Install-SshInboundKey writes back.
+.EXAMPLE
+PS C:\> Assert-ValidUtf8File -LiteralPath 'C:\ProgramData\ssh\sshd_config'
+Throws when the file is not valid UTF-8 and has no UTF-8/16 BOM.
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-11
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LiteralPath
+    )
+
+    $rawBytes = [System.IO.File]::ReadAllBytes($LiteralPath)
+    $hasBom = ($rawBytes.Length -ge 3 -and $rawBytes[0] -eq 0xEF -and $rawBytes[1] -eq 0xBB -and $rawBytes[2] -eq 0xBF) -or
+        ($rawBytes.Length -ge 2 -and (($rawBytes[0] -eq 0xFF -and $rawBytes[1] -eq 0xFE) -or ($rawBytes[0] -eq 0xFE -and $rawBytes[1] -eq 0xFF)))
+    if ($hasBom) { return }
+    try { [void](New-Object System.Text.UTF8Encoding $false, $true).GetString($rawBytes) }
+    catch { throw "$LiteralPath is not valid UTF-8; convert it to UTF-8 or ASCII first." }
+}
+
+function Test-LocalAdminMember {
+    <#
+.SYNOPSIS
+Tests whether a SID belongs to the local Administrators group.
+.DESCRIPTION
+Enumerates the local Administrators group by SID (locale-proof) and compares
+member SIDs. Unlike WindowsIdentity.Groups, this sees through UAC filtering,
+where the Administrators SID is deny-only and missing from token groups.
+Nested group membership is not resolved. Throws when enumeration fails
+(fail closed): callers must not guess the key file.
+.EXAMPLE
+PS C:\> Test-LocalAdminMember -UserSid 'S-1-5-21-1111-2222-3333-1001'
+Returns $true when that SID is a direct local Administrators member.
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-11
+#>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$UserSid
+    )
+
+    try {
+        $adminName = (Get-LocalGroup -SID 'S-1-5-32-544' -ErrorAction Stop).Name
+        $memberSids = try { @(Get-LocalGroupMember -Group $adminName -ErrorAction Stop | ForEach-Object { $_.SID.Value }) }
+            catch {
+                # Get-LocalGroupMember fails (error 1789) with AzureAD/orphaned
+                # members; ADSI reads raw member SIDs without resolving names.
+                @(([ADSI]"WinNT://./$adminName,group").psbase.Invoke('Members') | ForEach-Object {
+                    (New-Object Security.Principal.SecurityIdentifier(
+                        [byte[]]$_.GetType().InvokeMember('objectSid', 'GetProperty', $null, $_, $null), 0)).Value
+                })
+            }
+        return $memberSids -contains $UserSid
+    }
+    catch { throw "Cannot determine local Administrators membership: $($_.Exception.Message)" }
+}
+
+function Test-SshServerConfig {
+    <#
+.SYNOPSIS
+Audits local OpenSSH Server installation and key-auth readiness. Makes no changes.
+.DESCRIPTION
+Checks the OpenSSH.Server capability, sshd service state, inbox firewall rule
+and scope (plus other rules bypassing it), sshd_config syntax and effective
+settings (pubkey + password, Match overrides), the authorized-keys file(s)
+sshd resolves for the current user, their ACLs, host keys, and recent
+OpenSSH/Operational errors. Returns one [pscustomobject] per check (Check,
+Status, Detail) with Status of Pass, Fail, Warn, or Info, and prints a
+compact color summary. Failing checks rerun cleanly elevated where access
+was the problem.
+.EXAMPLE
+PS C:\> Test-SshServerConfig
+Runs the audit and returns the per-check report.
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-11
+#>
+    [CmdletBinding()]
+    [OutputType([pscustomobject[]])]
+    param()
+
+    # Native stderr (sshd) becomes terminating under a caller-set Stop; Continue
+    # keeps explicit -ErrorAction Stop behavior unchanged. Function-local only.
+    $ErrorActionPreference = 'Continue'
+
+    $report = @()
+    $adminSid = 'S-1-5-32-544'
+
+    # Membership (not token groups: UAC filtering hides deny-only Administrators).
+    $ident = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $adminUnknown = $false
+    try { $isAdmin = Test-LocalAdminMember -UserSid $ident.User.Value }
+    catch {
+        # A read-only audit must not die here: flag it and check both files below.
+        $adminUnknown = $true
+        $isAdmin = $false
+        $report += [pscustomobject]@{ Check = 'AdminCheck'; Status = 'Warn'; Detail = "Cannot determine admin membership ($($_.Exception.Message)); auditing both key files" }
+    }
+    # Same rule Install-SshInboundKey uses to pick the key file.
+    $expectFile = if ($isAdmin) { Join-Path $env:ProgramData 'ssh\administrators_authorized_keys' }
+                  else { Join-Path $env:USERPROFILE '.ssh\authorized_keys' }
+
+    # Capability query needs elevation on some builds (terminating when denied).
+    $cap = $null
+    try {
+        $cap = Get-WindowsCapability -Online -ErrorAction Stop |
+            Where-Object { $_.Name -like 'OpenSSH.Server*' } |
+            Select-Object -First 1
+    }
+    catch { $cap = $null }
+    if ($cap -and $cap.State -eq 'Installed') {
+        $report += [pscustomobject]@{ Check = 'Capability'; Status = 'Pass'; Detail = "Installed: $($cap.Name)" }
+    }
+    elseif ($cap) {
+        $report += [pscustomobject]@{ Check = 'Capability'; Status = 'Fail'; Detail = "State: $($cap.State); install with Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0" }
+    }
+    else {
+        $report += [pscustomobject]@{ Check = 'Capability'; Status = 'Warn'; Detail = 'Capability query failed; rerun elevated to confirm' }
+    }
+
+    # Service.
+    $svc = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    if (-not $svc) {
+        $report += [pscustomobject]@{ Check = 'Service'; Status = 'Fail'; Detail = 'sshd service not present' }
+    }
+    elseif ($svc.Status -ne 'Running') {
+        $report += [pscustomobject]@{ Check = 'Service'; Status = 'Fail'; Detail = "sshd is $($svc.Status) (start mode $($svc.StartType))" }
+    }
+    elseif ($svc.StartType -ne 'Automatic') {
+        $report += [pscustomobject]@{ Check = 'Service'; Status = 'Warn'; Detail = 'sshd running but start mode is not Automatic' }
+    }
+    else {
+        $report += [pscustomobject]@{ Check = 'Service'; Status = 'Pass'; Detail = 'sshd running, Automatic' }
+    }
+
+    # Firewall: setup creates OpenSSH-Server-In-TCP; without it connections reset.
+    $fw = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $fw) {
+        $report += [pscustomobject]@{ Check = 'Firewall'; Status = 'Fail'; Detail = "Inbox rule 'OpenSSH-Server-In-TCP' missing" }
+    }
+    elseif ($fw.Enabled -ne 'True') {
+        $report += [pscustomobject]@{ Check = 'Firewall'; Status = 'Fail'; Detail = 'Rule present but disabled' }
+    }
+    else {
+        $report += [pscustomobject]@{ Check = 'Firewall'; Status = 'Pass'; Detail = 'Rule present and enabled' }
+    }
+
+    # Scope: which sources the inbox rule lets through. Read-only here;
+    # Install-SshInboundKey -AllowedSource manages it.
+    if ($fw) {
+        $scopeAddrs = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $fw -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty RemoteAddress
+        if ($scopeAddrs) {
+            $report += [pscustomobject]@{ Check = 'FirewallScope'; Status = 'Info'; Detail = "Inbound allowed from: $($scopeAddrs -join ', ')" }
+        }
+        else {
+            $report += [pscustomobject]@{ Check = 'FirewallScope'; Status = 'Info'; Detail = 'Address filter unreadable' }
+        }
+    }
+
+    # Other enabled inbound Allow rules covering TCP/22 bypass any -AllowedSource
+    # scoping silently. Bulk-fetch filters once and join by InstanceID: per-rule
+    # queries take ~40s on a typical box. Program/package/service scoping is
+    # honored: only unscoped rules (or sshd-scoped ones) truly bypass. User,
+    # profile, and IPsec conditions are not evaluated. Same check Install runs.
+    $portByRule = @{}
+    foreach ($pfAll in @(Get-NetFirewallPortFilter -ErrorAction SilentlyContinue)) {
+        if (-not $portByRule.ContainsKey($pfAll.InstanceID)) { $portByRule[$pfAll.InstanceID] = @() }
+        $portByRule[$pfAll.InstanceID] += $pfAll
+    }
+    $appByRule = @{}
+    foreach ($afAll in @(Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue)) {
+        if (-not $appByRule.ContainsKey($afAll.InstanceID)) { $appByRule[$afAll.InstanceID] = @() }
+        $appByRule[$afAll.InstanceID] += $afAll
+    }
+    $svcByRule = @{}
+    foreach ($sfAll in @(Get-NetFirewallServiceFilter -ErrorAction SilentlyContinue)) {
+        if (-not $svcByRule.ContainsKey($sfAll.InstanceID)) { $svcByRule[$sfAll.InstanceID] = @() }
+        $svcByRule[$sfAll.InstanceID] += $sfAll
+    }
+    $bypass = $null
+    if ($portByRule.Count -gt 0) {
+        $bypass = @()
+        foreach ($rule in @(Get-NetFirewallRule -Direction Inbound -ErrorAction SilentlyContinue |
+            Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Allow' -and $_.Name -ne 'OpenSSH-Server-In-TCP' })) {
+            $hit = $false
+            foreach ($pf in @($portByRule[$rule.InstanceID])) {
+                if ($pf.Protocol -and $pf.Protocol -notin @('TCP', 'Any')) { continue }
+                foreach ($portEntry in @($pf.LocalPort)) {
+                    if ($portEntry -eq 'Any' -or $portEntry -eq '22') { $hit = $true; break }
+                    if ($portEntry -match '^(\d+)-(\d+)$' -and [int]$Matches[1] -le 22 -and 22 -le [int]$Matches[2]) { $hit = $true; break }
+                }
+                if ($hit) { break }
+            }
+            if ($hit) {
+                # Scoped to another program/package/service: sshd traffic excluded.
+                $scopeVals = @()
+                foreach ($af in @($appByRule[$rule.InstanceID])) { $scopeVals += @($af.Program); $scopeVals += @($af.Package) }
+                foreach ($sf in @($svcByRule[$rule.InstanceID])) { $scopeVals += @($sf.Service) }
+                $scopeVals = @($scopeVals | Where-Object { $_ })
+                if ($scopeVals.Count -gt 0 -and @($scopeVals | Where-Object { $_ -like '*sshd*' }).Count -eq 0) { $hit = $false }
+            }
+            if ($hit) { $bypass += $rule.DisplayName }
+        }
+    }
+    if ($null -eq $bypass) {
+        $report += [pscustomobject]@{ Check = 'Port22Bypass'; Status = 'Info'; Detail = 'Port filter data unavailable; bypass check skipped' }
+    }
+    elseif ($bypass.Count -gt 0) {
+        $report += [pscustomobject]@{ Check = 'Port22Bypass'; Status = 'Warn'; Detail = "Enabled inbound rules also allowing TCP/22: $($bypass -join '; '). Check their remote scopes." }
+    }
+    else {
+        $report += [pscustomobject]@{ Check = 'Port22Bypass'; Status = 'Pass'; Detail = 'No other enabled inbound rules allow TCP/22' }
+    }
+
+    # Config syntax + effective settings.
+    $sshdConfig = Join-Path $env:ProgramData 'ssh\sshd_config'
+    # Inbox binary first: a stray sshd.exe earlier on PATH must not win.
+    # Fall back to PATH for non-inbox installs; sshd -t validates either way.
+    $sshdSource = Join-Path $env:WINDIR 'System32\OpenSSH\sshd.exe'
+    if (-not (Test-Path -LiteralPath $sshdSource -PathType Leaf)) {
+        $sshdSource = Get-Command sshd -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+    }
+    if (-not (Test-Path -LiteralPath $sshdConfig -PathType Leaf)) {
+        $report += [pscustomobject]@{ Check = 'Config'; Status = 'Fail'; Detail = "Missing: $sshdConfig (sshd writes a default on first start)" }
+    }
+    elseif (-not $sshdSource) {
+        $report += [pscustomobject]@{ Check = 'Config'; Status = 'Warn'; Detail = 'Config present but no sshd.exe found; cannot validate' }
+    }
+    else {
+        & $sshdSource -t 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            # Ambiguous without elevation (unreadable files fail the same way
+            # as a broken config), so Warn with an action instead of Fail.
+            $report += [pscustomobject]@{ Check = 'Config'; Status = 'Warn'; Detail = "sshd -t exit=$LASTEXITCODE; rerun elevated to confirm" }
+        }
+        else {
+            $report += [pscustomobject]@{ Check = 'Config'; Status = 'Pass'; Detail = 'sshd -t clean' }
+            $effMap = @{}
+            foreach ($line in @( & $sshdSource -T 2>$null )) {
+                $kv = $line -split ' ', 2
+                if ($kv.Count -eq 2) { $effMap[$kv[0].ToLower()] = $kv[1] }
+            }
+            if ($effMap.Count -eq 0) {
+                $report += [pscustomobject]@{ Check = 'PubkeyAuth'; Status = 'Warn'; Detail = 'sshd -T produced no output' }
+            }
+            elseif ($effMap['pubkeyauthentication'] -eq 'yes') {
+                $report += [pscustomobject]@{ Check = 'PubkeyAuth'; Status = 'Pass'; Detail = "pubkeyauthentication yes, port $($effMap['port'])" }
+            }
+            else {
+                $report += [pscustomobject]@{ Check = 'PubkeyAuth'; Status = 'Fail'; Detail = "pubkeyauthentication $($effMap['pubkeyauthentication'])" }
+            }
+            if ($effMap['passwordauthentication'] -eq 'no') {
+                $report += [pscustomobject]@{ Check = 'PasswordAuth'; Status = 'Pass'; Detail = 'passwordauthentication no' }
+            }
+            else {
+                $report += [pscustomobject]@{ Check = 'PasswordAuth'; Status = 'Warn'; Detail = "passwordauthentication $($effMap['passwordauthentication']); Install-SshInboundKey disables it by default" }
+            }
+        }
+        # Resolve the file sshd would actually use for the current user. -T
+        # alone never applies Match blocks; -C user=,addr=,host= does. Admins
+        # silently ignore the user file when this resolves elsewhere.
+        $connSpec = 'user={0},addr=127.0.0.1,host=localhost' -f $env:USERNAME
+        # -T can print several space-separated paths; __PROGRAMDATA__ may come
+        # through literally; relative paths expand against the profile.
+        $resolvedFiles = @( & $sshdSource -T -C $connSpec 2>$null |
+            Where-Object { $_ -match '^authorizedkeysfile ' } |
+            ForEach-Object { ($_ -replace '^authorizedkeysfile ', '') -split '\s+' } |
+            ForEach-Object {
+                $p = (($_ -replace '__PROGRAMDATA__', $env:ProgramData) -replace '%h', $env:USERPROFILE) -replace '%u', $env:USERNAME
+                if (-not [System.IO.Path]::IsPathRooted($p)) { $p = Join-Path $env:USERPROFILE ($p -replace '/', '\') }
+                else { $p = $p -replace '/', '\' }
+                $p
+            })
+        if ($adminUnknown) {
+            $report += [pscustomobject]@{ Check = 'KeyFilePath'; Status = 'Info'; Detail = "sshd resolves $env:USERNAME to $($resolvedFiles -join ', ') (membership unknown)" }
+        }
+        elseif (@($resolvedFiles | Where-Object { $_ -ieq $expectFile }).Count -gt 0) {
+            $report += [pscustomobject]@{ Check = 'KeyFilePath'; Status = 'Pass'; Detail = "sshd resolves $env:USERNAME to $expectFile" }
+        }
+        elseif ($resolvedFiles.Count -gt 0) {
+            $report += [pscustomobject]@{ Check = 'KeyFilePath'; Status = 'Warn'; Detail = "sshd resolves $env:USERNAME to $($resolvedFiles -join ', '), expected $expectFile" }
+        }
+        else {
+            $report += [pscustomobject]@{ Check = 'KeyFilePath'; Status = 'Warn'; Detail = 'Could not resolve effective AuthorizedKeysFile (sshd -T -C failed)' }
+        }
+        # A Match block re-enabling passwords overrides the global no for
+        # matched connections; -T without -C never shows it. Warn only.
+        $cfgAll = @([System.IO.File]::ReadAllLines($sshdConfig))
+        $inMatchBlock = $false
+        $matchPwYes = @()
+        for ($n = 0; $n -lt $cfgAll.Count; $n++) {
+            if ($cfgAll[$n] -match '(?i)^\s*Match(\s|$)') { $inMatchBlock = $true; continue }
+            if ($inMatchBlock -and $cfgAll[$n] -match '(?i)^\s*PasswordAuthentication\s+yes\b') { $matchPwYes += ($n + 1) }
+        }
+        if ($matchPwYes.Count -gt 0) {
+            $report += [pscustomobject]@{ Check = 'MatchPassword'; Status = 'Warn'; Detail = "Match block(s) re-enable passwords (line $($matchPwYes -join ',')); global 'no' does not cover them" }
+        }
+    }
+
+    # Host keys: sshd generates them on first start when absent.
+    $hostKeys = @(Get-ChildItem -Path (Join-Path $env:ProgramData 'ssh\ssh_host_*_key') -File -ErrorAction SilentlyContinue)
+    if ($hostKeys.Count -gt 0) {
+        $report += [pscustomobject]@{ Check = 'HostKeys'; Status = 'Pass'; Detail = "$($hostKeys.Count) host key(s) present" }
+    }
+    else {
+        $report += [pscustomobject]@{ Check = 'HostKeys'; Status = 'Warn'; Detail = 'No host keys; sshd generates them on first start' }
+    }
+
+    # Key file presence + ACLs, per effective file (both when membership unknown).
+    $keyFileTargets = @()
+    if ($adminUnknown) {
+        $keyFileTargets += [pscustomobject]@{ Path = Join-Path $env:USERPROFILE '.ssh\authorized_keys'; Check = 'KeyFileUser'; IsAdminFile = $false }
+        $keyFileTargets += [pscustomobject]@{ Path = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'; Check = 'KeyFileAdmin'; IsAdminFile = $true }
+    }
+    else {
+        $keyFileTargets += [pscustomobject]@{ Path = $expectFile; Check = 'KeyFile'; IsAdminFile = $isAdmin }
+    }
+    foreach ($kft in $keyFileTargets) {
+        if (-not (Test-Path -LiteralPath $kft.Path -PathType Leaf)) {
+            $report += [pscustomobject]@{ Check = $kft.Check; Status = 'Info'; Detail = "No key file yet: $($kft.Path)" }
+            continue
+        }
+        $acl = $null
+        try { $acl = Get-Acl -LiteralPath $kft.Path -ErrorAction Stop }
+        catch { $report += [pscustomobject]@{ Check = $kft.Check; Status = 'Warn'; Detail = "$($kft.Path) unreadable; rerun elevated" } }
+        if ($acl) {
+            $allowed = @('S-1-5-18', $adminSid)
+            if (-not $kft.IsAdminFile) { $allowed += $ident.User.Value }
+            $offenders = @( $acl.Access | ForEach-Object {
+                try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
+                catch { 'unresolvable' }
+            } | Where-Object { $allowed -notcontains $_ } | Sort-Object -Unique )
+            # Owner matters too: admins file must belong to SYSTEM/Administrators,
+            # user file to the user. Mirrors what Install-SshInboundKey enforces.
+            $ownerSid = $null
+            try { $ownerSid = (New-Object Security.Principal.NTAccount($acl.Owner)).Translate([Security.Principal.SecurityIdentifier]).Value }
+            catch { $ownerSid = $null }
+            $wantOwner = if ($kft.IsAdminFile) { @('S-1-5-18', $adminSid) } else { @($ident.User.Value) }
+            $ownerBad = -not $ownerSid -or $wantOwner -notcontains $ownerSid
+            $keyCount = @( [System.IO.File]::ReadAllLines($kft.Path) |
+                Where-Object { $_.TrimStart() -notlike '#*' -and $_ -match '(ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp\d+|sk-\S+)\s+[A-Za-z0-9+/]{20,}' } ).Count
+            $keyIssues = @()
+            if ($offenders.Count -gt 0) { $keyIssues += "reachable by $($offenders -join ', ')" }
+            if ($ownerBad) { $keyIssues += "owned by $($acl.Owner)" }
+            if ($keyIssues.Count -gt 0) {
+                $report += [pscustomobject]@{ Check = $kft.Check; Status = 'Fail'; Detail = "$($kft.Path) $($keyIssues -join '; ')" }
+            }
+            else {
+                $report += [pscustomobject]@{ Check = $kft.Check; Status = 'Pass'; Detail = "$($kft.Path) ACL clean, $keyCount key(s)" }
+            }
+        }
+    }
+
+    # Recent sshd errors are the fastest pointer at auth failures.
+    try {
+        $errs = @(Get-WinEvent -FilterHashtable @{ LogName = 'OpenSSH/Operational'; Level = 2 } -MaxEvents 3 -ErrorAction Stop)
+        if ($errs.Count -eq 0) {
+            $report += [pscustomobject]@{ Check = 'EventLog'; Status = 'Pass'; Detail = 'No recent OpenSSH/Operational errors' }
+        }
+        else {
+            $firstLine = if ($errs[0].Message) { $errs[0].Message.Split("`n")[0] } else { 'see event log' }
+            $report += [pscustomobject]@{ Check = 'EventLog'; Status = 'Warn'; Detail = "$($errs.Count) recent error(s); newest: $firstLine" }
+        }
+    }
+    catch {
+        $report += [pscustomobject]@{ Check = 'EventLog'; Status = 'Info'; Detail = 'OpenSSH/Operational log unreadable (no sshd yet or access denied)' }
+    }
+
+    $color = @{ Pass = 'Green'; Fail = 'Red'; Warn = 'Yellow'; Info = 'Gray' }
+    foreach ($row in $report) {
+        Write-Host ('[{0}] {1}: {2}' -f $row.Status.ToUpper(), $row.Check, $row.Detail) -ForegroundColor $color[$row.Status]
+    }
+    return $report
+}
+
+function Install-SshInboundKey {
+    <#
+.SYNOPSIS
+Installs a public SSH key for inbound key auth on this Windows machine.
+.DESCRIPTION
+Runs ON the target machine (e.g. over RDP). Installs and starts OpenSSH
+Server when needed (one confirmation prompt, Y default, skipped when
+everything is already configured), writes the given public key to the file
+sshd actually reads -- C:\ProgramData\ssh\administrators_authorized_keys
+for local admins, %USERPROFILE%\.ssh\authorized_keys otherwise -- repairs the
+file ACLs to what sshd enforces, disables password auth by default, and
+optionally scopes the inbox firewall rule to source subnets (-AllowedSource).
+Keys already present are skipped. Requires elevation. All writes honor -WhatIf.
+.PARAMETER PublicKeyText
+One OpenSSH public key line (ssh-ed25519 AAAA... [comment]).
+.PARAMETER PublicKeyFile
+Path to a .pub file holding the key. The private key half never leaves the client.
+.PARAMETER User
+Local target user. Defaults to the current user. Other users need elevation.
+.PARAMETER Force
+Skips confirmation prompts (sshd setup, risky password-on-open-scope combo).
+For non-interactive use; you accept what the prompts describe.
+.PARAMETER AllowedSource
+One or more sources allowed through the inbox firewall rule: IPv4/IPv6
+addresses (203.0.113.7, fd00::1), CIDR subnets (192.168.10.0/24), or the
+case-insensitive keywords 'Tailscale' (= 100.64.0.0/10 plus
+fd7a:115c:a1e0::/48) and 'Any' (reset the rule to open). Omit to leave
+the rule scope untouched.
+.PARAMETER AllowPasswordAuth
+Keeps password auth explicitly enabled. Without it, PasswordAuthentication is
+set to no (previous config backed up to sshd_config.bak) and sshd restarts.
+Verify key login in a NEW session before closing RDP. Kerberos (GSSAPI)
+logins are unaffected either way.
+.EXAMPLE
+PS C:\> Install-SshInboundKey -PublicKeyText 'ssh-ed25519 AAAA... me@pc'
+Installs one key for the current user; ensures sshd with confirmation.
+.EXAMPLE
+PS C:\> Install-SshInboundKey -PublicKeyFile C:\temp\id_rsa_p202611.pub -User svcacct
+Installs a key file for another local user.
+.EXAMPLE
+PS C:\> Install-SshInboundKey -PublicKeyFile C:\temp\id_rsa_p202611.pub -AllowedSource '192.168.10.0/24', 'Tailscale'
+Installs a key, ensures sshd, allows only LAN + Tailscale sources, disables password auth.
+.EXAMPLE
+PS C:\> Install-SshInboundKey -PublicKeyText 'ssh-ed25519 AAAA...' -AllowPasswordAuth
+Installs a key while explicitly keeping password auth enabled.
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-11
+#>
+    [CmdletBinding(SupportsShouldProcess = $true, DefaultParameterSetName = 'Text')]
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'Text')]
+        [string]$PublicKeyText,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'File')]
+        [string]$PublicKeyFile,
+
+        [string]$User = $env:USERNAME,
+
+        [switch]$Force,
+
+        [string[]]$AllowedSource,
+
+        [switch]$AllowPasswordAuth
+    )
+
+    # Native stderr (icacls, sshd) becomes terminating under a caller-set Stop;
+    # Continue keeps explicit -ErrorAction Stop behavior unchanged. Function-local.
+    $ErrorActionPreference = 'Continue'
+
+    # Load + validate the key before touching anything.
+    $keyLine = if ($PSCmdlet.ParameterSetName -eq 'File') {
+        if (-not (Test-Path -LiteralPath $PublicKeyFile -PathType Leaf)) { throw "Public key file not found: $PublicKeyFile" }
+        $pubRaw = Get-Content -Raw -LiteralPath $PublicKeyFile
+        if (-not $pubRaw) { throw "Public key file is empty: $PublicKeyFile" }
+        $pubRaw.Trim()
+    }
+    else { $PublicKeyText.Trim() }
+    if ($keyLine -match 'PRIVATE KEY') { throw 'Refusing to install private key material; pass the .pub line.' }
+    if ($keyLine -match '\r|\n') { throw 'Expected a single key line.' }
+    # Named groups: inner alternations make numbered indexes unreadable here.
+    $keyMatch = [regex]::Match($keyLine, '^(?<type>ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)(@\S+)?) (?<blob>[A-Za-z0-9+/]+={0,2})( .*)?$')
+    if (-not $keyMatch.Success) { throw 'Not a recognized OpenSSH public key line.' }
+    try { $blobBytes = [Convert]::FromBase64String($keyMatch.Groups['blob'].Value) }
+    catch { throw 'Key blob is not valid base64.' }
+    # The blob embeds its own type string; require it to match the declared
+    # type (sans @suffix), or sshd silently ignores the line.
+    if ($blobBytes.Length -lt 4) { throw 'Key blob is too short to contain a type.' }
+    $innerLen = ([int]$blobBytes[0] -shl 24) -bor ([int]$blobBytes[1] -shl 16) -bor ([int]$blobBytes[2] -shl 8) -bor [int]$blobBytes[3]
+    if ($innerLen -le 0 -or (4 + $innerLen) -gt $blobBytes.Length) { throw 'Key blob is malformed.' }
+    $innerType = [System.Text.Encoding]::ASCII.GetString($blobBytes, 4, $innerLen)
+    $declaredBase = ($keyMatch.Groups['type'].Value -split '@')[0]
+    $innerBase = ($innerType -split '@')[0]
+    if ($innerBase -ne $declaredBase) { throw "Key type '$declaredBase' does not match blob type '$innerBase'." }
+    # Type + blob without comment: the dedupe key.
+    $keyId = '{0} {1}' -f $keyMatch.Groups['type'].Value, $keyMatch.Groups['blob'].Value
+    # Validate source scopes early; unrecognized values fail closed. Keywords
+    # are case-insensitive: 'Any' resets the rule to open and wins over any
+    # accompanying entries, 'Tailscale' expands to the v4 CGNAT + v6 ULA ranges.
+    # The null filter guards explicit @($null); omitted $null never iterates.
+    $scopeList = @()
+    foreach ($entry in @($AllowedSource | Where-Object { $_ })) {
+        $token = $entry.Trim()
+        if ($token -ieq 'Any') { $scopeList = @('Any'); break }
+        if ($token -ieq 'Tailscale') { $scopeList += '100.64.0.0/10'; $scopeList += 'fd7a:115c:a1e0::/48'; continue }
+        if ($token.Contains(':')) {
+            # IPv6 address or CIDR. TryParse covers every compressed form;
+            # only bit-count masks are accepted, like the IPv4 branch.
+            $addrPart = $token
+            $maskPart = $null
+            $slashAt = $token.LastIndexOf('/')
+            if ($slashAt -ge 0) {
+                $addrPart = $token.Substring(0, $slashAt)
+                $maskPart = $token.Substring($slashAt + 1)
+            }
+            $ip6 = $null
+            if (-not [System.Net.IPAddress]::TryParse($addrPart, [ref]$ip6) -or
+                $ip6.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetworkV6) {
+                throw "Not a valid IPv6 address or CIDR subnet: $entry"
+            }
+            if ($maskPart -ne $null) {
+                $maskNum = 0
+                if ($maskPart -notmatch '^\d+$' -or -not [int]::TryParse($maskPart, [ref]$maskNum) -or $maskNum -gt 128) {
+                    throw "IPv6 CIDR mask out of range 0-128: $entry"
+                }
+            }
+        }
+        else {
+            $scopeMatch = [regex]::Match($token, '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(/(\d{1,2}))?$')
+            if (-not $scopeMatch.Success) { throw "Not an IP address, CIDR subnet, 'Any', or 'Tailscale': $entry" }
+            $octetsOk = $true
+            foreach ($g in 1..4) { if ([int]$scopeMatch.Groups[$g].Value -gt 255) { $octetsOk = $false } }
+            if (-not $octetsOk) { throw "IPv4 octet out of range 0-255: $entry" }
+            if ($scopeMatch.Groups[6].Success -and [int]$scopeMatch.Groups[6].Value -gt 32) { throw "CIDR mask out of range 0-32: $entry" }
+        }
+        $scopeList += $token
+    }
+    $scopeList = @($scopeList | Select-Object -Unique)
+
+    # Resolve the target user: SID, profile path, admin membership. SID-based
+    # so non-English group names cannot break the lookup.
+    try {
+        $userSid = (New-Object Security.Principal.NTAccount($User)).Translate([Security.Principal.SecurityIdentifier]).Value
+    }
+    catch { throw "Cannot resolve user '$User': $($_.Exception.Message)" }
+    $isSelf = $User -ieq $env:USERNAME
+    if ($isSelf) {
+        $isAdmin = Test-LocalAdminMember -UserSid ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+        $profilePath = $env:USERPROFILE
+    }
+    else {
+        $isAdmin = Test-LocalAdminMember -UserSid $userSid
+        $profilePath = Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue |
+            Where-Object { $_.SID -eq $userSid -and -not $_.Special } |
+            Select-Object -First 1 -ExpandProperty LocalPath
+        if (-not $profilePath) { throw "No local profile found for '$User'; they must sign in once first." }
+    }
+
+    # Y/N prompter shared by both confirmations. Callers skip it under -Force
+    # and -WhatIf; non-interactive shells fail fast instead of hanging.
+    $askYesNo = {
+        param($Question, $DefaultYes)
+        if (-not [Environment]::UserInteractive) { throw "Cannot prompt ($Question); rerun with -Force for non-interactive use." }
+        $hint = if ($DefaultYes) { '[Y/n]' } else { '[y/N]' }
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $answer = Read-Host "$Question $hint"
+            if ($answer -match '^\s*$') { return $DefaultYes }
+            if ($answer -match '^\s*y(es)?\s*$') { return $true }
+            if ($answer -match '^\s*no?\s*$') { return $false }
+        }
+        throw 'Aborted: no valid Y/N answer after 3 tries.'
+    }
+
+    # Every run now touches server posture (PasswordAuthentication + restart),
+    # so elevation is unconditional. Test-SshServerConfig stays the read path.
+    if (-not (Test-IsAdministrator)) {
+        throw 'Run from an elevated PowerShell: Install-SshInboundKey manages sshd configuration.'
+    }
+
+    # Server ensure, by default. Reasons are computed first; the prompt fires
+    # only when something is actually missing. Each fix stays ShouldProcess-gated.
+    # Rollback: any failure below stops a service WE started, then re-raises.
+    # break in trap stops the scope and propagates; without it errors resume.
+    # Created-disabled rules need no rollback (closed is safe).
+    $serviceWasStarted = $false
+    $ruleWasCreated = $false
+    $ruleWasDisabled = $false
+    $ruleClosedThisRun = $false
+    trap {
+        if ($serviceWasStarted) { Stop-Service sshd -ErrorAction SilentlyContinue }
+        if ($ruleClosedThisRun) {
+            Write-Warning "Inbound firewall rule left disabled after failure. Re-enable with: Enable-NetFirewallRule -Name 'OpenSSH-Server-In-TCP'."
+        }
+        break
+    }
+
+    $ensureReasons = @()
+    try {
+        $cap = Get-WindowsCapability -Online -ErrorAction Stop |
+            Where-Object { $_.Name -like 'OpenSSH.Server*' } |
+            Select-Object -First 1
+        $capState = if ($cap) { $cap.State } else { 'NotPresent' }
+        $capName = if ($cap) { $cap.Name } else { 'OpenSSH.Server~~~~0.0.1.0' }
+    }
+    catch {
+        if ($WhatIfPreference) { $capState = 'Unknown'; $capName = 'OpenSSH.Server~~~~0.0.1.0' }
+        else { throw "Cannot query Windows capabilities: $($_.Exception.Message)" }
+    }
+    $svc = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    $fw = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $ruleWasDisabled = ($null -ne $fw) -and ($fw.Enabled -ne 'True')
+    # A present service with missing capability means a non-inbox install (MSI,
+    # winget); respect it instead of installing the inbox build over it.
+    if ($capState -ne 'Installed' -and -not $svc) { $ensureReasons += "OpenSSH.Server capability: $capState" }
+    if (-not $svc) { $ensureReasons += 'sshd service not present' }
+    else {
+        if ($svc.StartType -ne 'Automatic') { $ensureReasons += "sshd start mode is $($svc.StartType)" }
+        if ($svc.Status -ne 'Running') { $ensureReasons += "sshd is $($svc.Status)" }
+    }
+    if (-not $fw) { $ensureReasons += "Firewall rule 'OpenSSH-Server-In-TCP' missing" }
+    elseif ($fw.Enabled -ne 'True') { $ensureReasons += 'Firewall rule present but disabled' }
+    if ($ensureReasons.Count -gt 0 -and -not $Force -and -not $WhatIfPreference) {
+        Write-Host 'sshd setup needed:' -ForegroundColor Yellow
+        foreach ($reason in $ensureReasons) { Write-Host "  - $reason" -ForegroundColor Yellow }
+        Write-Host 'The firewall opens only after the key and password steps succeed.' -ForegroundColor Gray
+        if (-not (& $askYesNo 'Enable and start sshd now?' $true)) {
+            throw 'Aborted: sshd setup declined.'
+        }
+    }
+    $serverChanged = $false
+    if (($capState -ne 'Installed') -and (-not $svc) -and
+        $PSCmdlet.ShouldProcess('OpenSSH.Server', 'Install Windows capability')) {
+        Add-WindowsCapability -Online -Name $capName -ErrorAction Stop | Out-Null
+        $serverChanged = $true
+        # Fresh state: the install creates the service (Manual) and the rule.
+        $svc = Get-Service -Name sshd -ErrorAction SilentlyContinue
+        $fw = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Select-Object -First 1
+        # Setup leaves the rule open; close it until hardening completes.
+        if ($fw -and $fw.Enabled -eq 'True' -and $PSCmdlet.ShouldProcess('OpenSSH-Server-In-TCP', 'Disable inbound firewall rule until hardening completes')) {
+            Disable-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction Stop
+            $ruleWasCreated = $true
+            $ruleClosedThisRun = $true
+        }
+    }
+    if ($svc -and $svc.StartType -ne 'Automatic' -and
+        $PSCmdlet.ShouldProcess('sshd', 'Set startup type Automatic')) {
+        Set-Service -Name sshd -StartupType Automatic -ErrorAction Stop
+        $serverChanged = $true
+    }
+    # A pre-enabled rule would expose stock sshd from the moment it starts;
+    # close it first (reopened at the end like other deferred enables).
+    if ((-not $svc -or $svc.Status -ne 'Running') -and $fw -and $fw.Enabled -eq 'True' -and
+        $PSCmdlet.ShouldProcess('OpenSSH-Server-In-TCP', 'Disable inbound firewall rule until hardening completes')) {
+        Disable-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction Stop
+        $ruleWasDisabled = $true
+        $ruleClosedThisRun = $true
+    }
+    if ((-not $svc -or $svc.Status -ne 'Running') -and
+        $PSCmdlet.ShouldProcess('sshd', 'Start service')) {
+        Start-Service sshd -ErrorAction Stop
+        $serverChanged = $true
+        $serviceWasStarted = $true
+    }
+    if (-not $fw -and $PSCmdlet.ShouldProcess('OpenSSH-Server-In-TCP', 'Create inbound firewall rule (disabled until hardening completes)')) {
+        New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled False -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction Stop | Out-Null
+        $serverChanged = $true
+        $ruleWasCreated = $true
+    }
+    # Pre-existing rules are enabled at the end, never mid-run.
+
+    # Scope the inbox rule to the given sources. Runs after ensure, so the rule
+    # exists unless its creation was declined; that stays an explicit error.
+    $scopeApplied = $false
+    if ($scopeList.Count -gt 0) {
+        $scopeRule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $scopeRule) { throw "No 'OpenSSH-Server-In-TCP' rule to scope; its creation must have been declined." }
+        if ($PSCmdlet.ShouldProcess('OpenSSH-Server-In-TCP', "Scope remote addresses to $($scopeList -join ', ')")) {
+            Set-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -RemoteAddress $scopeList -ErrorAction Stop
+            $scopeApplied = $true
+        }
+        # Other enabled inbound Allow rules covering TCP/22 bypass this scope.
+        # Bulk-fetch filters once and join by InstanceID: per-rule queries take
+        # ~40s on a typical box. Program/package/service scoping is honored:
+        # only unscoped rules (or sshd-scoped ones) truly bypass. Same check Test runs.
+        $portByRule = @{}
+        foreach ($pfAll in @(Get-NetFirewallPortFilter -ErrorAction SilentlyContinue)) {
+            if (-not $portByRule.ContainsKey($pfAll.InstanceID)) { $portByRule[$pfAll.InstanceID] = @() }
+            $portByRule[$pfAll.InstanceID] += $pfAll
+        }
+        $appByRule = @{}
+        foreach ($afAll in @(Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue)) {
+            if (-not $appByRule.ContainsKey($afAll.InstanceID)) { $appByRule[$afAll.InstanceID] = @() }
+            $appByRule[$afAll.InstanceID] += $afAll
+        }
+        $svcByRule = @{}
+        foreach ($sfAll in @(Get-NetFirewallServiceFilter -ErrorAction SilentlyContinue)) {
+            if (-not $svcByRule.ContainsKey($sfAll.InstanceID)) { $svcByRule[$sfAll.InstanceID] = @() }
+            $svcByRule[$sfAll.InstanceID] += $sfAll
+        }
+        if ($portByRule.Count -gt 0) {
+            $bypass = @()
+            foreach ($rule in @(Get-NetFirewallRule -Direction Inbound -ErrorAction SilentlyContinue |
+                Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Allow' -and $_.Name -ne 'OpenSSH-Server-In-TCP' })) {
+                $hit = $false
+                foreach ($pf in @($portByRule[$rule.InstanceID])) {
+                    if ($pf.Protocol -and $pf.Protocol -notin @('TCP', 'Any')) { continue }
+                    foreach ($portEntry in @($pf.LocalPort)) {
+                        if ($portEntry -eq 'Any' -or $portEntry -eq '22') { $hit = $true; break }
+                        if ($portEntry -match '^(\d+)-(\d+)$' -and [int]$Matches[1] -le 22 -and 22 -le [int]$Matches[2]) { $hit = $true; break }
+                    }
+                    if ($hit) { break }
+                }
+                if ($hit) {
+                    # Scoped to another program/package/service: sshd traffic excluded.
+                    $scopeVals = @()
+                    foreach ($af in @($appByRule[$rule.InstanceID])) { $scopeVals += @($af.Program); $scopeVals += @($af.Package) }
+                    foreach ($sf in @($svcByRule[$rule.InstanceID])) { $scopeVals += @($sf.Service) }
+                    $scopeVals = @($scopeVals | Where-Object { $_ })
+                    if ($scopeVals.Count -gt 0 -and @($scopeVals | Where-Object { $_ -like '*sshd*' }).Count -eq 0) { $hit = $false }
+                }
+                if ($hit) { $bypass += $rule.DisplayName }
+            }
+            if ($bypass.Count -gt 0) {
+                Write-Warning "Firewall scoping is bypassed by other enabled inbound rules allowing TCP/22: $($bypass -join '; '). Check their remote scopes."
+            }
+        }
+    }
+
+    # Pick the file sshd reads; admins silently ignore the user file.
+    $keyFile = if ($isAdmin) { Join-Path $env:ProgramData 'ssh\administrators_authorized_keys' }
+               else { Join-Path $profilePath '.ssh\authorized_keys' }
+    $keyDir = Split-Path -Parent $keyFile
+    $assertNoReparse = {
+        # Another user's profile is attacker-controlled: refuse reparse points
+        # so the elevated write/ACL repair cannot be redirected (e.g. junctions).
+        # Re-checked before each link-following write below: this narrows the
+        # swap window but is still check-then-use, not an atomic guard.
+        foreach ($p in @($keyDir, $keyFile)) {
+            if ((Test-Path -LiteralPath $p) -and (((Get-Item -LiteralPath $p -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                throw "Refusing to use ${p}: reparse point (possible link attack); clean it manually."
+            }
+        }
+    }
+    if (-not $isSelf) { & $assertNoReparse }
+    if (-not (Test-Path -LiteralPath $keyDir) -and $PSCmdlet.ShouldProcess($keyDir, 'Create directory')) {
+        New-Item -ItemType Directory -Path $keyDir -Force -ErrorAction Stop | Out-Null
+    }
+    $existing = @()
+    if (Test-Path -LiteralPath $keyFile -PathType Leaf) {
+        Assert-ValidUtf8File -LiteralPath $keyFile
+        $existing = @([System.IO.File]::ReadAllLines($keyFile) | Where-Object { $_ -match '\S' })
+    }
+    $keyTypeOnly = ($keyId -split ' ', 2)[0]
+    $dedupeHits = @($existing | Where-Object { $_.TrimStart() -notlike '#*' } | ForEach-Object {
+        $m = [regex]::Match($_, '^(?:.*?\s)?(ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp\d+|sk-\S+)\s+([A-Za-z0-9+/]{20,}={0,2})')
+        if ($m.Success -and ('{0} {1}' -f $m.Groups[1].Value, $m.Groups[2].Value) -eq $keyId) { $_ }
+    })
+    $alreadyThere = $dedupeHits.Count -gt 0
+    $optionsHit = @($dedupeHits | Where-Object { $_.TrimStart() -notmatch ('^' + [regex]::Escape($keyTypeOnly) + '\s') })
+    if ($optionsHit.Count -gt 0) {
+        Write-Warning "Installed key matches existing line(s) with SSH options; verify access works from your client: $($optionsHit -join '; ')"
+    }
+    $added = $false
+    if ($alreadyThere) {
+        Write-Host "Key already present in $keyFile" -ForegroundColor Gray
+    }
+    elseif ($PSCmdlet.ShouldProcess($keyFile, "Append public key for $User")) {
+        # Rewrite whole-file as UTF-8 without BOM: appending bytes to a UTF-16
+        # file (e.g. created with >>) would corrupt every key in it.
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        if (-not $isSelf) { & $assertNoReparse }
+        [System.IO.File]::WriteAllLines($keyFile, [string[]](@($existing) + @($keyLine)), $utf8NoBom)
+        $added = $true
+    }
+    if ($added -and -not (Select-String -LiteralPath $keyFile -Pattern $keyMatch.Groups['blob'].Value -SimpleMatch -Quiet)) {
+        throw "Write verification failed: key blob not found in $keyFile"
+    }
+
+    # Repair ACLs to what sshd enforces (Win32-OpenSSH wiki: Security
+    # protection of various files). SID form keeps this locale-proof.
+    if (-not (Test-Path -LiteralPath $keyFile -PathType Leaf)) {
+        # Fresh file under -WhatIf (or a declined confirm): nothing to repair yet.
+        if ($PSCmdlet.ShouldProcess($keyFile, 'Set authorized_keys ACLs')) { }
+    }
+    elseif ($isAdmin) {
+        if ($PSCmdlet.ShouldProcess($keyFile, 'Reset ACLs to SYSTEM + Administrators')) {
+            if (-not $isSelf) { & $assertNoReparse }
+            & icacls.exe $keyFile /inheritance:r /grant:r '*S-1-5-18:F' /grant:r '*S-1-5-32-544:F' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "icacls failed (exit=$LASTEXITCODE) on $keyFile" }
+            # /grant:r keeps other explicit ACEs; strip them like the user branch.
+            $adminLeft = @( (Get-Acl -LiteralPath $keyFile).Access | ForEach-Object {
+                try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
+                catch { 'unresolvable' }
+            } | Where-Object { @('S-1-5-18', 'S-1-5-32-544') -notcontains $_ } | Sort-Object -Unique )
+            if ($adminLeft -contains 'unresolvable') { throw "Cannot repair ACEs sshd may reject (unresolvable trustees); reset manually and rerun: icacls '$keyFile' /reset" }
+            foreach ($sid in ($adminLeft | Where-Object { $_ -ne 'unresolvable' })) {
+                if (-not $isSelf) { & $assertNoReparse }
+                & icacls.exe $keyFile /remove ('*' + $sid) | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "icacls failed (exit=$LASTEXITCODE) on $keyFile" }
+            }
+            $adminOwner = $null
+            try { $adminOwner = (New-Object Security.Principal.NTAccount((Get-Acl -LiteralPath $keyFile).Owner)).Translate([Security.Principal.SecurityIdentifier]).Value }
+            catch { $adminOwner = $null }
+            if (-not $adminOwner -or @('S-1-5-18', 'S-1-5-32-544') -notcontains $adminOwner) {
+                if (-not $isSelf) { & $assertNoReparse }
+                & icacls.exe $keyFile /setowner '*S-1-5-18' | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "icacls failed (exit=$LASTEXITCODE) on $keyFile" }
+            }
+        }
+    }
+    else {
+        # User file: SYSTEM/Administrators/owner only, strip any other user.
+        # Grants ride with /inheritance:r: without them the file would keep no
+        # ACEs at all (fresh files only have inherited ones).
+        $allowedSids = @('S-1-5-18', 'S-1-5-32-544', $userSid)
+        $acl = Get-Acl -LiteralPath $keyFile
+        $offenders = @( $acl.Access | ForEach-Object {
+            try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
+            catch { 'unresolvable' }
+        } | Where-Object { $allowedSids -notcontains $_ } | Sort-Object -Unique )
+        $ownerOk = $false
+        try { $ownerOk = (New-Object Security.Principal.NTAccount($acl.Owner)).Translate([Security.Principal.SecurityIdentifier]).Value -eq $userSid }
+        catch { $ownerOk = $false }
+        if (($offenders.Count -gt 0 -or -not $ownerOk) -and $PSCmdlet.ShouldProcess($keyFile, 'Repair authorized_keys ACLs')) {
+            if (-not $isSelf) { & $assertNoReparse }
+            & icacls.exe $keyFile /inheritance:r /grant:r '*S-1-5-18:F' /grant:r '*S-1-5-32-544:F' /grant:r ('*' + $userSid + ':F') | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "icacls failed (exit=$LASTEXITCODE) on $keyFile" }
+            # Re-read: drop remaining explicit ACEs the reset preserved.
+            $stillBad = @( (Get-Acl -LiteralPath $keyFile).Access | ForEach-Object {
+                try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
+                catch { 'unresolvable' }
+            } | Where-Object { $allowedSids -notcontains $_ } | Sort-Object -Unique )
+            if ($stillBad -contains 'unresolvable') { throw "Cannot repair ACEs sshd may reject (unresolvable trustees); reset manually and rerun: icacls '$keyFile' /reset" }
+            foreach ($sid in ($stillBad | Where-Object { $_ -ne 'unresolvable' })) {
+                if (-not $isSelf) { & $assertNoReparse }
+                & icacls.exe $keyFile /remove ('*' + $sid) | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "icacls failed (exit=$LASTEXITCODE) on $keyFile" }
+            }
+            if (-not $ownerOk) {
+                if (-not $isSelf) { & $assertNoReparse }
+                & icacls.exe $keyFile /setowner ('*' + $userSid) | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "icacls failed (exit=$LASTEXITCODE) on $keyFile" }
+            }
+        }
+    }
+
+    # Password posture: off by default, explicitly on with -AllowPasswordAuth.
+    # sshd honors the FIRST value per keyword, and anything appended past a
+    # Match block becomes conditional, so replace the global line in place or
+    # insert ahead of the first Match. Runs only with a key verifiably in place.
+    $wantPassword = $null
+    $configWritten = $false
+    $serviceStarted = $false
+    # Effective scope: an applied -AllowedSource wins; declined scopes and
+    # plain runs fall through to the live read so the warning and result below
+    # never report scope that was not applied. WhatIf previews the parameter.
+    if ($scopeList.Count -gt 0 -and ($scopeApplied -or $WhatIfPreference)) { $effectiveScope = $scopeList }
+    else {
+        $liveRule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Select-Object -First 1
+        $effectiveScope = @()
+        if ($liveRule) {
+            $effectiveScope = @(Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $liveRule -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty RemoteAddress)
+        }
+    }
+    $scopeIsOpen = ($effectiveScope.Count -eq 0) -or ($effectiveScope -contains 'Any')
+    if ($scopeIsOpen) {
+        Write-Warning 'sshd is reachable from ANY network. Pass -AllowedSource (e.g. a LAN subnet and Tailscale) to restrict it.'
+    }
+    # Only touch password auth when a key is verifiably in place: disabling it
+    # after a declined or failed key write would lock the user out.
+    if (-not ($added -or $alreadyThere -or $WhatIfPreference)) {
+        Write-Host 'Key was not installed; leaving PasswordAuthentication unchanged.' -ForegroundColor Yellow
+    }
+    else {
+        $wantPassword = if ($AllowPasswordAuth) { 'yes' } else { 'no' }
+        if ($AllowPasswordAuth -and $scopeIsOpen -and -not $Force -and -not $WhatIfPreference) {
+            if (-not (& $askYesNo 'Password auth on an Internet-open sshd is high risk. Really enable passwords?' $false)) {
+                throw 'Aborted: password auth on an open sshd declined.'
+            }
+        }
+        $sshdConfig = Join-Path $env:ProgramData 'ssh\sshd_config'
+        if (-not (Test-Path -LiteralPath $sshdConfig -PathType Leaf)) {
+            if ($WhatIfPreference) {
+                # Fresh-box preview: ensure would create the config first.
+                if ($PSCmdlet.ShouldProcess($sshdConfig, "Set PasswordAuthentication $wantPassword")) { }
+            }
+            else { throw "sshd_config still missing after ensure: $sshdConfig. Repair the OpenSSH Server install." }
+        }
+        else {
+            # Inbox binary first; fall back to PATH for non-inbox installs.
+            $sshdBin = Join-Path $env:WINDIR 'System32\OpenSSH\sshd.exe'
+            if (-not (Test-Path -LiteralPath $sshdBin -PathType Leaf)) {
+                $sshdBin = Get-Command sshd -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+            }
+            if (-not $sshdBin) { throw 'sshd.exe not found; cannot validate the edited config.' }
+            $targetSpec = 'user={0},addr=127.0.0.1,host=localhost' -f $User
+            # End-to-end confirmation before disabling passwords: sshd itself must
+            # resolve THIS user to THIS key file, or 'no' could lock them out.
+            if ($wantPassword -eq 'no' -and -not $WhatIfPreference) {
+                $targetFiles = @( & $sshdBin -T -C $targetSpec 2>$null |
+                    Where-Object { $_ -match '^authorizedkeysfile ' } |
+                    ForEach-Object { ($_ -replace '^authorizedkeysfile ', '') -split '\s+' } |
+                    ForEach-Object {
+                        $tp = (($_ -replace '__PROGRAMDATA__', $env:ProgramData) -replace '%h', $profilePath) -replace '%u', $User
+                        if (-not [System.IO.Path]::IsPathRooted($tp)) { $tp = Join-Path $profilePath ($tp -replace '/', '\') }
+                        else { $tp = $tp -replace '/', '\' }
+                        $tp
+                    })
+                $fileConfirmed = @($targetFiles | Where-Object { $_ -ieq $keyFile }).Count -gt 0
+                if (-not $fileConfirmed -and $Force) {
+                    Write-Warning "sshd resolves $User to '$($targetFiles -join ', ')' instead of '$keyFile'; -Force proceeds anyway."
+                }
+                elseif (-not $fileConfirmed) {
+                    throw "Refusing to disable passwords: sshd resolves $User to '$($targetFiles -join ', ')' instead of '$keyFile'. Rerun with -Force to override."
+                }
+            }
+            Assert-ValidUtf8File -LiteralPath $sshdConfig
+            $cfgLines = @([System.IO.File]::ReadAllLines($sshdConfig))
+            # A Match block re-enabling passwords overrides the global no for
+            # matched connections; refuse unless the caller accepts it via -Force.
+            $matchPwYes = @()
+            $pastMatch = $false
+            for ($n = 0; $n -lt $cfgLines.Count; $n++) {
+                if ($cfgLines[$n] -match '(?i)^\s*Match(\s|$)') { $pastMatch = $true; continue }
+                if ($pastMatch -and $cfgLines[$n] -match '(?i)^\s*PasswordAuthentication\s+yes\b') { $matchPwYes += ($n + 1) }
+            }
+            if ($matchPwYes.Count -gt 0 -and $wantPassword -eq 'no') {
+                if ($Force -or $WhatIfPreference) { Write-Warning "Match block(s) re-enable passwords (line $($matchPwYes -join ',')); global 'no' does not cover them." }
+                else { throw "Refusing to claim passwords disabled: Match block(s) re-enable them (line $($matchPwYes -join ',')); rerun with -Force to accept." }
+            }
+            $globalIdx = @()
+            $firstMatch = -1
+            for ($i = 0; $i -lt $cfgLines.Count; $i++) {
+                if ($cfgLines[$i] -match '(?i)^\s*Match(\s|$)') { $firstMatch = $i; break }
+                if ($cfgLines[$i] -match '(?i)^\s*#?\s*PasswordAuthentication\b') { $globalIdx += $i }
+            }
+            $newLine = "PasswordAuthentication $wantPassword"
+            $configChanged = $false
+            if ($globalIdx.Count -gt 0) {
+                if ($cfgLines[$globalIdx[0]] -ne $newLine) { $cfgLines[$globalIdx[0]] = $newLine; $configChanged = $true }
+                # Later dupes never take effect (first value wins); comment live ones out.
+                if ($globalIdx.Count -gt 1) {
+                    foreach ($idx in $globalIdx[1..($globalIdx.Count - 1)]) {
+                        if ($cfgLines[$idx] -notmatch '^\s*#') { $cfgLines[$idx] = '# ' + $cfgLines[$idx]; $configChanged = $true }
+                    }
+                }
+            }
+            else {
+                $insertAt = if ($firstMatch -ge 0) { $firstMatch } else { $cfgLines.Count }
+                $head = if ($insertAt -gt 0) { $cfgLines[0..($insertAt - 1)] } else { @() }
+                $tail = if ($insertAt -lt $cfgLines.Count) { $cfgLines[$insertAt..($cfgLines.Count - 1)] } else { @() }
+                $cfgLines = @($head; $newLine; $tail)
+                $configChanged = $true
+            }
+            if ($configChanged -and $PSCmdlet.ShouldProcess($sshdConfig, "Set PasswordAuthentication $wantPassword")) {
+                # Validate a temp copy first: a broken config must never land live.
+                # UTF-8 without BOM preserves non-ASCII names/paths Ascii would lose.
+                $tmpConfig = Join-Path ([System.IO.Path]::GetTempPath()) ('sshd_config.' + [guid]::NewGuid().ToString('N'))
+                try {
+                    [System.IO.File]::WriteAllLines($tmpConfig, [string[]]$cfgLines, (New-Object System.Text.UTF8Encoding $false))
+                    & $sshdBin -t -f $tmpConfig 2>$null
+                    if ($LASTEXITCODE -ne 0) { throw "sshd -t rejects the new config; live config untouched." }
+                    # Confirm the EFFECTIVE value: Include files or Match blocks
+                    # can override the global line just written.
+                    $tmpGlobal = @( & $sshdBin -T -f $tmpConfig 2>$null )
+                    $tmpTarget = @( & $sshdBin -T -C $targetSpec -f $tmpConfig 2>$null )
+                    $effVal = {
+                        param($Lines, $Key)
+                        @( $Lines | Where-Object { $_ -match ('^' + $Key + ' ') } |
+                            ForEach-Object { ($_ -replace ('^' + $Key + ' '), '').Trim() } )
+                    }
+                    $effAll = @((& $effVal $tmpGlobal 'passwordauthentication') + (& $effVal $tmpTarget 'passwordauthentication'))
+                    if ($effAll.Count -eq 0 -or @($effAll | Where-Object { $_ -ne $wantPassword }).Count -gt 0) {
+                        throw "Cannot confirm effective passwordauthentication '$wantPassword' (got: $($effAll -join ', ')); live config untouched."
+                    }
+                    if ($wantPassword -eq 'no') {
+                        # Disabling passwords is safe only when key auth alone can
+                        # still log in: pubkey must be on and no method list may
+                        # demand a password (or keyboard-interactive) step.
+                        $pubAll = @((& $effVal $tmpGlobal 'pubkeyauthentication') + (& $effVal $tmpTarget 'pubkeyauthentication'))
+                        if ($pubAll.Count -lt 2 -or @($pubAll | Where-Object { $_ -ne 'yes' }).Count -gt 0) {
+                            throw "Cannot disable passwords: effective pubkeyauthentication is '$($pubAll -join ', ')' (need 'yes' globally and for $User); live config untouched."
+                        }
+                        $amGlobal = @(& $effVal $tmpGlobal 'authenticationmethods')
+                        $amTarget = @(& $effVal $tmpTarget 'authenticationmethods')
+                        # sshd -T prints 'any' when unset: any single method (key
+                        # included) suffices. Require a publickey-only alternative
+                        # in EVERY value: a Match block may narrow the target user
+                        # even when the global value is lax (and vice versa fails
+                        # closed like the pubkey check above). Absent lines mean
+                        # unreadable -T output, not an unset option.
+                        $amKeyOk = ($amGlobal.Count -gt 0 -and $amTarget.Count -gt 0)
+                        foreach ($amValue in @($amGlobal + $amTarget)) {
+                            $thisOk = $false
+                            foreach ($altList in @($amValue -split '\s+' | Where-Object { $_ })) {
+                                if ($altList -ieq 'any' -or @($altList -split ',' | Where-Object { $_ -ne 'publickey' }).Count -eq 0) { $thisOk = $true }
+                            }
+                            if (-not $thisOk) { $amKeyOk = $false }
+                        }
+                        if (-not $amKeyOk) {
+                            $amMsg = "effective authenticationmethods lack a publickey-only path (global: '$($amGlobal -join ', ')'; ${User}: '$($amTarget -join ', ')'); live config untouched."
+                            if ($Force -or $WhatIfPreference) { Write-Warning "Cannot disable passwords: $amMsg" }
+                            else { throw "Cannot disable passwords: $amMsg Rerun with -Force to override." }
+                        }
+                    }
+                    if (-not (Test-Path -LiteralPath ($sshdConfig + '.bak') -PathType Leaf)) {
+                        Copy-Item -LiteralPath $sshdConfig -Destination ($sshdConfig + '.bak') -Force -ErrorAction Stop
+                    }
+                    [System.IO.File]::WriteAllLines($sshdConfig, [string[]]$cfgLines, (New-Object System.Text.UTF8Encoding $false))
+                }
+                finally { Remove-Item -LiteralPath $tmpConfig -Force -ErrorAction SilentlyContinue }
+                $configWritten = $true
+                if ($PSCmdlet.ShouldProcess('sshd', 'Apply config (restart or start service)')) {
+                    $svcState = Get-Service -Name sshd -ErrorAction SilentlyContinue
+                    if (-not $svcState) { throw 'sshd service missing although sshd_config exists; repair the install.' }
+                    if ($svcState.Status -eq 'Running') { Restart-Service sshd -ErrorAction Stop } else { Start-Service sshd -ErrorAction Stop }
+                    $serviceStarted = $true
+                }
+            }
+        }
+    }
+    if ($wantPassword -eq 'no' -and ($configWritten -or $WhatIfPreference)) {
+        Write-Host 'Password auth disabled: verify key login in a NEW session before closing RDP.' -ForegroundColor Yellow
+    }
+
+    # Open the firewall LAST: every failure above leaves it closed. Created and
+    # pre-disabled rules converge here; -WhatIf previews the intent.
+    $endRule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $ruleNeedsEnable = (-not $endRule -and $WhatIfPreference) -or ($endRule -and $endRule.Enabled -ne 'True')
+    if (($ruleWasCreated -or $ruleWasDisabled -or $WhatIfPreference) -and $ruleNeedsEnable -and ($added -or $alreadyThere -or $WhatIfPreference) -and
+        $PSCmdlet.ShouldProcess('OpenSSH-Server-In-TCP', 'Enable inbound firewall rule (after hardening)')) {
+        if ($endRule) { Enable-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction Stop }
+    }
+
+    # A declined confirm (or skipped enable) must not silently strand sshd
+    # behind a rule this run closed: say so with the way back.
+    if ($ruleClosedThisRun -and -not $WhatIfPreference) {
+        $leftRule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($leftRule -and $leftRule.Enabled -ne 'True') {
+            $keyState = if ($added -or $alreadyThere) { 'key is in place but' } else { 'no key was installed and' }
+            $svcState = if ($serviceWasStarted) { 'sshd is running' } else { 'sshd state unchanged' }
+            Write-Warning "Inbound firewall rule left disabled ($keyState $svcState). Re-enable with: Enable-NetFirewallRule -Name 'OpenSSH-Server-In-TCP'."
+        }
+    }
+
+    $verb = if ($added) { 'Installed key for' } elseif ($alreadyThere) { 'Key already present for' } else { 'Dry run for' }
+    Write-Host ("{0} {1} ({2})" -f $verb, $User, $keyFile) -ForegroundColor Green
+    return [pscustomobject]@{
+        User = $User; IsAdmin = $isAdmin; KeyFile = $keyFile
+        KeyAdded = $added; AlreadyPresent = $alreadyThere; ServerChanged = $serverChanged
+        PasswordAuthentication = $wantPassword; ConfigWritten = $configWritten; ServiceRestarted = $serviceStarted
+        FirewallScoped = ($effectiveScope -join ', ')
+    }
+}
+
+function Get-SshPublicKey {
+    <#
+.SYNOPSIS
+Lists local SSH public keys usable for outbound auth, with full key text.
+.DESCRIPTION
+Scans $env:USERPROFILE\.ssh\*.pub and reports each key's type, SHA256
+fingerprint, comment, whether the private half is present, the full public
+key text (paste it into Install-SshInboundKey -PublicKeyText on the target),
+and which ssh_config Host stanzas point at it via IdentityFile. Stanza
+mapping is literal: first-match-wins resolution and Match blocks are not
+evaluated. Also prints the Host stanzas found and their identities.
+.EXAMPLE
+PS C:\> Get-SshPublicKey
+Lists local public keys and the hosts configured to use them.
+.EXAMPLE
+PS C:\> (Get-SshPublicKey | Where-Object { $_.File -eq 'id_rsa_p202611.pub' }).PublicKeyText
+Prints one key's full text for pasting into a remote Install-SshInboundKey call.
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-11
+#>
+    [CmdletBinding()]
+    [OutputType([pscustomobject[]])]
+    param()
+
+    $sshDir = Join-Path $env:USERPROFILE '.ssh'
+    if (-not (Test-Path -LiteralPath $sshDir -PathType Container)) {
+        Write-Host "No ssh directory: $sshDir" -ForegroundColor Gray
+        return @()
+    }
+
+    # Minimal ssh_config parse: Host patterns + their IdentityFile entries.
+    # Match blocks end the current stanza; first-match-wins is NOT evaluated.
+    $stanzas = @()
+    $configPath = Join-Path $sshDir 'config'
+    if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+        $current = $null
+        foreach ($rawLine in @([System.IO.File]::ReadAllLines($configPath))) {
+            $line = ($rawLine -split '#', 2)[0].Trim()
+            if (-not $line) { continue }
+            if ($line -match '(?i)^Match(\s|$)') { $current = $null; continue }
+            if ($line -match '(?i)^Host\s+(.+)$') {
+                $current = [pscustomobject]@{ Patterns = @($Matches[1] -split '\s+'); Identity = @() }
+                $stanzas += $current
+            }
+            elseif ($current -and $line -match '(?i)^IdentityFile\s+(.+)$') {
+                $current.Identity += $Matches[1].Trim().Trim('"')
+            }
+        }
+    }
+
+    $keys = @()
+    foreach ($pubFile in @(Get-ChildItem -LiteralPath $sshDir -Filter '*.pub' -File | Sort-Object Name)) {
+        $rawText = [System.IO.File]::ReadAllText($pubFile.FullName)
+        if (-not $rawText) { Write-Warning "Skipping empty public key file: $($pubFile.Name)"; continue }
+        $text = $rawText.Trim()
+        $km = [regex]::Match($text, '^(\S+) ([A-Za-z0-9+/]+={0,2})( (.*))?$')
+        if (-not $km.Success -or $text -match '\r|\n') {
+            Write-Warning "Skipping unparsable public key file: $($pubFile.Name)"
+            continue
+        }
+        try { $fpRaw = [Convert]::FromBase64String($km.Groups[2].Value) }
+        catch { Write-Warning "Skipping key with invalid base64: $($pubFile.Name)"; continue }
+        $fpHash = [Security.Cryptography.SHA256]::Create().ComputeHash($fpRaw)
+        $privateBase = [System.IO.Path]::GetFileNameWithoutExtension($pubFile.Name)
+        $usedBy = @()
+        foreach ($stanza in $stanzas) {
+            foreach ($id in $stanza.Identity) {
+                $base = [System.IO.Path]::GetFileName($id)
+                if (($base -ieq $pubFile.Name) -or ($base -ieq $privateBase)) {
+                    $usedBy += ($stanza.Patterns -join ' ')
+                    break
+                }
+            }
+        }
+        $keys += [pscustomobject]@{
+            File = $pubFile.Name
+            Type = $km.Groups[1].Value
+            Fingerprint = 'SHA256:' + ([Convert]::ToBase64String($fpHash).TrimEnd('='))
+            Comment = $km.Groups[4].Value
+            HasPrivate = Test-Path -LiteralPath (Join-Path $sshDir $privateBase)
+            PublicKeyText = $text
+            ConfiguredFor = $usedBy
+        }
+    }
+
+    foreach ($stanza in $stanzas) {
+        $idShown = if ($stanza.Identity.Count -gt 0) { $stanza.Identity -join ', ' } else { '(default selection)' }
+        Write-Host ("Host {0} -> {1}" -f ($stanza.Patterns -join ' '), $idShown)
+    }
+    if ($stanzas.Count -eq 0) { Write-Host 'No Host stanzas in ssh config.' -ForegroundColor Gray }
+    return $keys
+}
+
+function Get-SshAuthorizedKey {
+    <#
+.SYNOPSIS
+Lists the public keys trusted for inbound SSH auth by the current user.
+.DESCRIPTION
+Reads the authorized-keys file sshd actually consults for the current user
+(administrators_authorized_keys for local admins, else .ssh\authorized_keys)
+and reports each key's type, SHA256 fingerprint, and comment. Keys sitting in
+an admin's user file are listed too but flagged Effective = $false: sshd
+ignores that file for admins, the classic silent misconfiguration. When admin
+membership cannot be determined, both files are listed with Effective = $null.
+.EXAMPLE
+PS C:\> Get-SshAuthorizedKey
+Lists keys allowed into this machine as the current user.
+.NOTES
+Author: jjw(@thejjw)
+Last Edit: 2026-11
+#>
+    [CmdletBinding()]
+    [OutputType([pscustomobject[]])]
+    param()
+
+    # Membership (not token groups: UAC filtering hides deny-only Administrators).
+    $adminUnknown = $false
+    try { $isAdmin = Test-LocalAdminMember -UserSid ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) }
+    catch {
+        # A read-only listing must not die here: show both, effectiveness unknown.
+        $adminUnknown = $true
+        $isAdmin = $false
+        $adminErr = $_.Exception.Message
+    }
+    if ($adminUnknown) {
+        Write-Warning "Cannot determine admin membership ($adminErr); listing both key files with unknown effectiveness."
+        $files = @(
+            [pscustomobject]@{ Path = (Join-Path $env:USERPROFILE '.ssh\authorized_keys'); Effective = $null },
+            [pscustomobject]@{ Path = (Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'); Effective = $null }
+        )
+    }
+    else {
+        $effectiveFile = if ($isAdmin) { Join-Path $env:ProgramData 'ssh\administrators_authorized_keys' }
+                         else { Join-Path $env:USERPROFILE '.ssh\authorized_keys' }
+        $files = @([pscustomobject]@{ Path = $effectiveFile; Effective = $true })
+        if ($isAdmin) {
+            $files += [pscustomobject]@{ Path = (Join-Path $env:USERPROFILE '.ssh\authorized_keys'); Effective = $false }
+        }
+    }
+
+    $out = @()
+    foreach ($f in $files) {
+        if (-not (Test-Path -LiteralPath $f.Path -PathType Leaf)) { continue }
+        try { $fileLines = @([System.IO.File]::ReadAllLines($f.Path)) }
+        catch { Write-Warning "$($f.Path) unreadable; rerun elevated."; continue }
+        $lineNo = 0
+        foreach ($rawLine in $fileLines) {
+            $lineNo++
+            $line = $rawLine.Trim()
+            if (-not $line -or $line.StartsWith('#')) { continue }
+            # Optional options prefix (from="...",command="...") precedes the
+            # key; the known-type anchor keeps it from shifting the parse.
+            $km = [regex]::Match($line, '^(?:.*?\s)?(ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp\d+|sk-\S+)\s+([A-Za-z0-9+/]{20,}={0,2})(?:\s+(.*))?$')
+            if (-not $km.Success) { Write-Warning "Skipping malformed line $lineNo in $($f.Path)"; continue }
+            try { $fpRaw = [Convert]::FromBase64String($km.Groups[3].Value) }
+            catch { Write-Warning "Skipping line $lineNo with invalid base64 in $($f.Path)"; continue }
+            $fpHash = [Security.Cryptography.SHA256]::Create().ComputeHash($fpRaw)
+            $out += [pscustomobject]@{
+                SourceFile = $f.Path
+                Line = $lineNo
+                Type = $km.Groups[1].Value
+                Fingerprint = 'SHA256:' + ([Convert]::ToBase64String($fpHash).TrimEnd('='))
+                Comment = $km.Groups[4].Value
+                Effective = $f.Effective
+            }
+        }
+    }
+
+    if ($out.Count -eq 0) { Write-Host "No authorized keys found for $env:USERNAME." -ForegroundColor Gray }
+    else {
+        Write-Host ("{0} authorized key(s):" -f $out.Count)
+        foreach ($k in $out) {
+            $flag = if ($k.Effective) { '' } else { ' [IGNORED for admins]' }
+            Write-Host ("  {0} {1}{2}" -f $k.Fingerprint, $k.Comment, $flag)
+        }
+    }
+    return $out
+}
+
 function Add-WingetPackagePaths {
     <#
 .SYNOPSIS
