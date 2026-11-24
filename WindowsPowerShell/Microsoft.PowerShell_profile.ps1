@@ -596,16 +596,18 @@ $_CcrInternal = @{
     Timeout   = 3000000
     Threshold = 60000
     Router = @{
-        default    = 'zai,glm-5.4[1m]'             # Sonnet (daily work)
+        default    = 'zai,glm-5.4'                 # Sonnet (daily work)
         background = 'zai,glm-5.3-flash'          # Haiku (background subagents)
-        think      = 'zai,glm-5.4[1m]'             # Opus (Plan Mode / reasoning)
+        think      = 'zai,glm-5.4'                 # Opus (Plan Mode / reasoning)
         webSearch  = 'gemini,gemini-2.5-flash'     # Google search grounding via Gemini Flash
     }
     Providers = @{
         zai = @{
             base        = 'https://api.z.ai/api/anthropic/v1/messages'
             key         = '$ZAI_API_KEY'
-            models      = @('glm-5.3-flash', 'glm-5.4[1m]', 'glm-4.6v')
+            # Bare ids on purpose: Z.AI rejects a literal [1m] suffix (HTTP 400, code 1211
+            # "Unknown Model"); the suffix is only a Claude Code-side marker, as with MiniMax.
+            models      = @('glm-5.3-flash', 'glm-5.4', 'glm-4.6v')
             transformer = 'Anthropic'
         }
         minimax = @{
