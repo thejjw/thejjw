@@ -1493,7 +1493,7 @@ else
   # about supported models: "All plans support GLM-5.3, GLM-5-Turbo, and GLM-4.7." (https://docs.z.ai/devpack/overview)
   #   See https://docs.z.ai/devpack/latest-model for the current lineup.
   # about 1M context:
-  #   GLM-5.3 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.3[1m]).
+  #   GLM-5.4 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.4[1m]).
   #   Z.AI also requires CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000 to actually exercise the 1M window
   #   (this profile sets it for you). Other GLM models cap at 200K (GLM-5-Turbo, GLM-4.7) or 128K (GLM-4.5-Air).
   cat >> "$PROFILE" << 'EOF'
@@ -1529,13 +1529,13 @@ claudez() {
   _jjw_prepare_secret "${ZAI_API_KEY:-}" || return 1
   key="$(_jjw_secret z "${ZAI_API_KEY:-}")" || return 1
   _zai_peak_warning
-  # "max is recommended for coding tasks." (2026-08-14, https://z.ai/blog/glm-5.3)
+  # "For coding tasks, we recommend switching to `max` effort" (https://docs.z.ai/devpack/latest-model)
   ZAI_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-5.3-flash" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.3-flash" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.3[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.4[1m]" \
   CLAUDE_CODE_SUBAGENT_MODEL="glm-5.3-flash" \
   CLAUDE_CODE_EFFORT_LEVEL="max" \
   API_TIMEOUT_MS="3000000" \
@@ -1554,13 +1554,13 @@ claudezm() {
   _jjw_prepare_secret "${ZAI_API_KEY:-}" || return 1
   key="$(_jjw_secret z "${ZAI_API_KEY:-}")" || return 1
   _zai_peak_warning
-  # "max is recommended for coding tasks." (2026-08-14, https://z.ai/blog/glm-5.3)
+  # "For coding tasks, we recommend switching to `max` effort" (https://docs.z.ai/devpack/latest-model)
   ZAI_API_KEY="$key" \
   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
   ANTHROPIC_AUTH_TOKEN="$key" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-5.3-flash" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.3-flash[1m]" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.3[1m]" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.4[1m]" \
   CLAUDE_CODE_SUBAGENT_MODEL="glm-5.3-flash" \
   CLAUDE_CODE_EFFORT_LEVEL="max" \
   API_TIMEOUT_MS="3000000" \
@@ -2032,14 +2032,14 @@ claudezr() {
   _jjw_prepare_secret "${ZAI_API_KEY:-}" || return 1
   key="$(_jjw_secret z "${ZAI_API_KEY:-}")" || return 1
 
-  # Matches the local claudezm profile: glm-5.3-flash[1m] for Sonnet, glm-5.3[1m] for Opus,
+  # Matches the local claudezm profile: glm-5.3-flash[1m] for Sonnet, glm-5.4[1m] for Opus,
   # glm-5.3-flash for Haiku/Subagent, effort=max, 1M context enabled via
   # CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
   remote_claude_base "$host" "$key" "$port" \
     "https://api.z.ai/api/anthropic" \
     "glm-5.3-flash" \
     "glm-5.3-flash[1m]" \
-    "glm-5.3[1m]" \
+    "glm-5.4[1m]" \
     "3000000" \
     "0" \
     "glm-5.3-flash" \

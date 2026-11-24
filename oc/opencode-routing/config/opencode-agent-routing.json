@@ -19,9 +19,9 @@
       }
     },
     "head-glm": {
-      "description": "Primary GLM orchestration head using GLM 5.3. Use for lower-cost or non-OpenAI main workflows.",
+      "description": "Primary GLM orchestration head using GLM 5.4. Use for lower-cost or non-OpenAI main workflows.",
       "mode": "primary",
-      "model": "zai-coding-plan/glm-5.3",
+      "model": "zai-coding-plan/glm-5.4",
       "prompt": "You are the orchestration head. Delegate broad codebase discovery, search, and summarization to fast-discovery-m3. Delegate implementation, hard debugging, and risky code changes to hard-impl-glm53. Keep direct work focused on planning, reviewing subagent results, resolving tradeoffs, and final synthesis.",
       "permission": {
         "edit": "ask",
@@ -85,7 +85,7 @@
     "alt_head-glm_stack": {
       "description": "Alternate all-GLM routing profile for lower-cost same-family work.",
       "mode": "primary",
-      "model": "zai-coding-plan/glm-5.3",
+      "model": "zai-coding-plan/glm-5.4",
       "prompt": "You are a GLM-stack orchestration head. Use fast-glm-5.3-flash for discovery and hard-impl-glm53 for implementation. Keep orchestration concise and verify subagent outputs before finalizing.",
       "permission": {
         "edit": "ask",

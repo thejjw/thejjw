@@ -596,16 +596,16 @@ $_CcrInternal = @{
     Timeout   = 3000000
     Threshold = 60000
     Router = @{
-        default    = 'zai,glm-5.3[1m]'             # Sonnet (daily work)
+        default    = 'zai,glm-5.4[1m]'             # Sonnet (daily work)
         background = 'zai,glm-4.7'                 # Haiku (background subagents)
-        think      = 'zai,glm-5.3[1m]'             # Opus (Plan Mode / reasoning)
+        think      = 'zai,glm-5.4[1m]'             # Opus (Plan Mode / reasoning)
         webSearch  = 'gemini,gemini-2.5-flash'     # Google search grounding via Gemini Flash
     }
     Providers = @{
         zai = @{
             base        = 'https://api.z.ai/api/anthropic/v1/messages'
             key         = '$ZAI_API_KEY'
-            models      = @('glm-4.7', 'glm-5.3[1m]', 'glm-4.6v')
+            models      = @('glm-4.7', 'glm-5.4[1m]', 'glm-4.6v')
             transformer = 'Anthropic'
         }
         minimax = @{
@@ -9539,7 +9539,7 @@ function claudez {
         "All plans support GLM-5.3, GLM-5-Turbo, and GLM-4.7." (https://docs.z.ai/devpack/overview)
         See https://docs.z.ai/devpack/latest-model for the current lineup.
     about 1M context:
-        GLM-5.3 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.3[1m]).
+        GLM-5.4 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.4[1m]).
         Z.AI also requires CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000 to actually exercise the 1M window
         (this profile sets it for you). Other GLM models cap at 200K (GLM-5-Turbo, GLM-4.7) or 128K (GLM-4.5-Air).
 
@@ -9583,17 +9583,17 @@ function claudez {
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
     $env:ENABLE_PROMPT_CACHING_1H = "1"
-    # GLM-5.3 supports 1M context (suffix [1m] on the model name); see https://docs.z.ai/devpack/latest-model
+    # GLM-5.4 supports 1M context (suffix [1m] on the model name); see https://docs.z.ai/devpack/latest-model
     $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = "1000000"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     # Map Anthropic model slots to Z.AI equivalents; remove once Claude Code auto-detects these
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-5.3-flash"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5.3-flash"
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.3[1m]"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.4[1m]"
 
     $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-5.3-flash"
-    # "max is recommended for coding tasks." (2026-08-14, https://z.ai/blog/glm-5.3)
+    # "For coding tasks, we recommend switching to `max` effort" (https://docs.z.ai/devpack/latest-model)
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
 
     try {
@@ -9653,17 +9653,17 @@ function claudezm {
     $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     # Request 1-hour prompt-cache TTL (API-key backends default to 5m; opt in explicitly)
     $env:ENABLE_PROMPT_CACHING_1H = "1"
-    # GLM-5.3 supports 1M context (suffix [1m] on the model name); see https://docs.z.ai/devpack/latest-model
+    # GLM-5.4 supports 1M context (suffix [1m] on the model name); see https://docs.z.ai/devpack/latest-model
     $env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = "1000000"
     $env:CLAUDE_CODE_USE_POWERSHELL_TOOL = "1"
 
     # Max plan compatibility mode uses different default model routing.
     $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "glm-5.3-flash"
     $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "glm-5.3-flash[1m]"
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.3[1m]"
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "glm-5.4[1m]"
 
     $env:CLAUDE_CODE_SUBAGENT_MODEL = "glm-5.3-flash"
-    # "max is recommended for coding tasks." (2026-08-14, https://z.ai/blog/glm-5.3)
+    # "For coding tasks, we recommend switching to `max` effort" (https://docs.z.ai/devpack/latest-model)
     $env:CLAUDE_CODE_EFFORT_LEVEL = "max"
 
     try {
@@ -10020,7 +10020,7 @@ Default: empty.
 
 .PARAMETER AutoCompactWindow
 Optional 1M-context auto-compact window (CLAUDE_CODE_AUTO_COMPACT_WINDOW).
-Z.AI's glm-5.3[1m] requires "1000000" to actually exercise the 1M context window.
+Z.AI's glm-5.4[1m] requires "1000000" to actually exercise the 1M context window.
 Default: empty.
 
 .PARAMETER MaxContextTokens
@@ -10036,7 +10036,7 @@ Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:ZAI_API_KE
 # Match local claudezm routing for Z.AI:
 Invoke-RemoteClaudeCodeBase -RemoteHost user@remote-host -ApiKey $env:ZAI_API_KEY `
     -BaseUrl "https://api.z.ai/api/anthropic" `
-    -HaikuModel "glm-5.3-flash" -SonnetModel "glm-5.3-flash[1m]" -OpusModel "glm-5.3[1m]" `
+    -HaikuModel "glm-5.3-flash" -SonnetModel "glm-5.3-flash[1m]" -OpusModel "glm-5.4[1m]" `
     -SubagentModel "glm-5.3-flash" -EffortLevel "max" -AutoCompactWindow "1000000" `
     -Disable1M "0"
 
@@ -10087,7 +10087,7 @@ Last Edit: 2026-10
         [string]$EffortLevel = "",
 
         # Optional: 1M-context auto-compact window (CLAUDE_CODE_AUTO_COMPACT_WINDOW).
-        # Z.AI's glm-5.3[1m] requires "1000000" to actually exercise 1M context.
+        # Z.AI's glm-5.4[1m] requires "1000000" to actually exercise 1M context.
         [string]$AutoCompactWindow = "",
 
         [string]$MaxContextTokens = "",
@@ -10425,13 +10425,13 @@ Last Edit: 2026-10
     }
 
     # Keep the editable remote defaults here so they are easy to tweak later.
-    # Matches the local claudezm profile: glm-5.3-flash[1m] for Sonnet, glm-5.3[1m] for Opus,
+    # Matches the local claudezm profile: glm-5.3-flash[1m] for Sonnet, glm-5.4[1m] for Opus,
     # glm-5.3-flash for Haiku/Subagent, effort=max, 1M context enabled via
     # CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000.
     $BaseUrl = "https://api.z.ai/api/anthropic"
     $HaikuModel = "glm-5.3-flash"
     $SonnetModel = "glm-5.3-flash[1m]"
-    $OpusModel = "glm-5.3[1m]"
+    $OpusModel = "glm-5.4[1m]"
     $SubagentModel = "glm-5.3-flash"
     $EffortLevel = "max"
     $AutoCompactWindow = "1000000"

@@ -2,7 +2,7 @@
 
 This bundle installs a reusable OpenCode configuration for multi-model agent routing. It keeps three primary heads and adds alternate profiles with `alt_` prefixes.
 
-Last updated: 2026-10-14.
+Last updated: 2026-11-24.
 
 ## Requirements
 
@@ -47,7 +47,7 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 | Agent | Model | Purpose |
 | --- | --- | --- |
 | `head-gpt` | `openai/gpt-6.2-sol` | Main premium orchestrator |
-| `head-glm` | `zai-coding-plan/glm-5.3` | Main GLM orchestrator |
+| `head-glm` | `zai-coding-plan/glm-5.4` | Main GLM orchestrator |
 | `head-minimax` | `minimax-coding-plan/MiniMax-M3.1-Flash` | Main MiniMax orchestrator |
 
 ## Alternate Heads
@@ -56,7 +56,7 @@ The reusable fragment is `config/opencode-agent-routing.json`. It intentionally 
 | --- | --- | --- |
 | `alt_head-premium` | `openai/gpt-6.2-astra` | Highest-quality orchestration and review-heavy work |
 | `alt_head-openai` | `openai/gpt-5.6-terra` | All-OpenAI workflow |
-| `alt_head-glm_stack` | `zai-coding-plan/glm-5.3` | All-GLM workflow |
+| `alt_head-glm_stack` | `zai-coding-plan/glm-5.4` | All-GLM workflow |
 | `alt_head-budget` | `zai-coding-plan/glm-5.3-flash` | Cheap and fast routine workflow |
 | `alt_head-review_heavy` | `openai/gpt-5.6-terra` | GLM implementation plus premium review |
 
