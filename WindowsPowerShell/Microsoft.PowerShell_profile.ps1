@@ -597,7 +597,7 @@ $_CcrInternal = @{
     Threshold = 60000
     Router = @{
         default    = 'zai,glm-5.4[1m]'             # Sonnet (daily work)
-        background = 'zai,glm-4.7'                 # Haiku (background subagents)
+        background = 'zai,glm-5.3-flash'          # Haiku (background subagents)
         think      = 'zai,glm-5.4[1m]'             # Opus (Plan Mode / reasoning)
         webSearch  = 'gemini,gemini-2.5-flash'     # Google search grounding via Gemini Flash
     }
@@ -605,7 +605,7 @@ $_CcrInternal = @{
         zai = @{
             base        = 'https://api.z.ai/api/anthropic/v1/messages'
             key         = '$ZAI_API_KEY'
-            models      = @('glm-4.7', 'glm-5.4[1m]', 'glm-4.6v')
+            models      = @('glm-5.3-flash', 'glm-5.4[1m]', 'glm-4.6v')
             transformer = 'Anthropic'
         }
         minimax = @{
