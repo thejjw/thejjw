@@ -9536,12 +9536,13 @@ function claudez {
     configures runtime environment, then invokes claude with the supplied arguments.
     If ZAI_API_KEY is not set, the function aborts and prints setup guidance.
     about supported models:
-        "All plans support GLM-5.3, GLM-5-Turbo, and GLM-4.7." (https://docs.z.ai/devpack/overview)
+        "All plans support GLM-5.4, GLM-5.3 and GLM-5.3-Flash." (https://docs.z.ai/devpack/overview)
         See https://docs.z.ai/devpack/latest-model for the current lineup.
     about 1M context:
         GLM-5.4 supports a 1M context window (request via the [1m] suffix on the model name, e.g. glm-5.4[1m]).
         Z.AI also requires CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000 to actually exercise the 1M window
-        (this profile sets it for you). Other GLM models cap at 200K (GLM-5-Turbo, GLM-4.7) or 128K (GLM-4.5-Air).
+        (this profile sets it for you). GLM-5.3 and GLM-5.3-Flash also support 1M; legacy
+        GLM models cap at 200K (GLM-5-Turbo, GLM-4.7) or 128K (GLM-4.5-Air).
 
 .EXAMPLE
     claudez
