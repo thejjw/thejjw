@@ -9062,8 +9062,10 @@ function Set-OmpJudgeLocalLemonade {
 .DESCRIPTION
     Probes for the local util\Set-OmpJudgeLocalLemonade.ps1 script under the profile directory
     or downloads it from the repository if missing (or when -UpdateScript is supplied).
-    Executes the script in an isolated PowerShell process. The previous judge/tiny models are
-    preserved as local fallbacks.
+    Executes the script in an isolated PowerShell process. Setup gates on judge probes shaped like
+    omp's own requests; batched judgments such as find fall back to omp's default model. The
+    previous tiny model becomes tiny's fallback; the previous judge becomes judge's fallback unless
+    it is one of omp's built-in local models.
 .PARAMETER Checkpoint
     Hugging Face checkpoint (repo:variant) registered when no LFM3 model exists yet.
 .PARAMETER ModelName
@@ -9212,8 +9214,11 @@ function Set-OmpJudgeLocalLlamaCpp {
     or downloads it from the repository if missing (or when -UpdateScript is supplied).
     Executes the script in an isolated PowerShell process. Setup downloads llama.cpp and the
     model into ~\llama-cpp-tiny after printing the machine's resources and asking for
-    confirmation, then preserves the previous judge/tiny models as local fallbacks;
-    -Start, -Stop and -Status manage the server afterwards.
+    confirmation, then gates on judge probes shaped like omp's own requests before pointing omp's
+    judge/tiny roles at the server (batched judgments such as find fall back to omp's default
+    model). The previous tiny model becomes tiny's fallback; the previous judge becomes judge's
+    fallback unless it is one of omp's built-in local models. -Start, -Stop and -Status manage the
+    server afterwards.
 .PARAMETER Checkpoint
     Hugging Face checkpoint (owner/repo:variant) of the GGUF model.
 .PARAMETER ModelId
