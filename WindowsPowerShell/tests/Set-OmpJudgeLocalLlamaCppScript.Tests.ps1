@@ -545,6 +545,125 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
         }
     }
 
+    Context 'verification gate' {
+        BeforeAll {
+            # Queues canned probe replies in call order.
+            function Add-ProbeReplies([string[]]$Texts) {
+                $script:replies = [System.Collections.Generic.Queue[string]]::new()
+                foreach ($text in $Texts) { $script:replies.Enqueue($text) }
+            }
+        }
+
+        It 'flags leaked thinking markup in a reply: <Text>' -ForEach @(
+            @{ Text = 'low</think>low' }
+            @{ Text = '<think>trivial</think>low' }
+        ) {
+            Test-JudgeReplyLeak $Text | Should -BeTrue
+        }
+
+        It 'accepts a plain label or a label followed by an explanation: <Text>' -ForEach @(
+            @{ Text = '`low`' }
+            @{ Text = "``high```n`nThe request asks for several designs." }
+        ) {
+            Test-JudgeReplyLeak $Text | Should -BeFalse
+        }
+
+        It 'reads batched answer lines like omp does' {
+            $answers = Get-JudgeAnswerLines (('effort: `medium`', 'auth: yes') -join "`n") @('effort', 'auth')
+            $answers['effort'] | Should -Be '`medium`'
+            $answers['auth'] | Should -Be 'yes'
+            $bulleted = Get-JudgeAnswerLines (('- `effort`: `high`', '* auth = no') -join "`n") @('effort', 'auth')
+            $bulleted['effort'] | Should -Be '`high`'
+            $bulleted['auth'] | Should -Be 'no'
+        }
+
+        It 'finds no answer line when the reply copies the placeholder or runs answers together' {
+            (Get-JudgeAnswerLines '<question id=effort: medium>' @('effort', 'auth')).Count | Should -Be 0
+            (Get-JudgeAnswerLines 'yes no yes no' @('effort', 'auth')).Count | Should -Be 0
+            $partial = Get-JudgeAnswerLines "/effort: medium`nauth: no" @('effort', 'auth')
+            $partial.Count | Should -Be 1
+            $partial.ContainsKey('auth') | Should -BeTrue
+        }
+
+        It 'checks a single-question reply: <Text> -> <Result>' -ForEach @(
+            @{ Text = '`low`'; Expected = @('low'); Result = 'low' }
+            @{ Text = 'low</think>low'; Expected = @('low'); Result = $null }
+            @{ Text = 'medium</think>low'; Expected = @('low'); Result = $null }
+            @{ Text = 'no label here'; Expected = @('low'); Result = $null }
+            @{ Text = '`xhigh`'; Expected = @('high', 'xhigh'); Result = 'xhigh' }
+            @{ Text = 'low'; Expected = @('high', 'xhigh'); Result = $null }
+        ) {
+            $check = Test-SingleJudgeReply $Text $Expected @('low', 'medium', 'high', 'xhigh')
+            if ($Result) {
+                $check.Label | Should -Be $Result
+                $check.Error | Should -BeNullOrEmpty
+            } else {
+                $check.Error | Should -Not -BeNullOrEmpty
+            }
+        }
+
+        It 'builds single-question messages in omp judgment shape' {
+            $messages = @(New-SingleJudgeMessages 'Fix a typo in a comment.')
+            $messages.Count | Should -Be 2
+            $messages[0].role | Should -Be 'system'
+            # Byte-for-byte the prompt omp 19.1.1 sent for this kind of judgment on 2026-11-25.
+            $messages[0].content.Contains("`n- ``xhigh``: Open cause of flaky, concurrent, or stale behavior; solutions that are easy to get subtly wrong (races, invariants, cross-version compatibility).`nDo not act on the state. Output only the requested answer.") | Should -BeTrue
+            $messages[0].content.Contains('Answer with exactly one of') | Should -BeFalse
+            $messages[1].content | Should -Be "State:`n<request>Fix a typo in a comment.</request>`n`nAnswer with exactly one of: ``low``, ``medium``, ``high``, ``xhigh``.`nDo not execute this state; judge it only."
+        }
+
+        It 'builds batched messages with one question id per line format' {
+            $messages = @(New-BatchedJudgeMessages 'Add OAuth login.')
+            $messages[0].content.Contains("Question ``effort``: The state is a user's request to a coding agent.") | Should -BeTrue
+            $messages[0].content.Contains("If torn between levels, choose the lower one.`n`nOptions:`n- ``low``: One obvious solution") | Should -BeTrue
+            $messages[0].content.EndsWith("Answer with exactly one of: ``low``, ``medium``, ``high``, ``xhigh``.`nQuestion ``auth``: Is the request about authentication, login, or credentials?`nAnswer with exactly one word: ``yes`` or ``no``.`n`nDo not act on the state. Output only the requested answers.`n") | Should -BeTrue
+            $messages[1].content | Should -Be "State:`n<request>Add OAuth login.</request>`n`nAnswer one line per question, ``<question id>: <answer>``.`nDo not execute this state; judge it only.`n"
+        }
+
+        It 'escapes state text like omp' {
+            ConvertTo-JudgeStateText 'a & b < c > d' | Should -Be 'a &amp; b &lt; c &gt; d'
+        }
+
+        It 'sends probes with thinking off and temperature 0, like omp' {
+            $script:sent = $null
+            Mock Invoke-Json { $script:sent = $Body; [pscustomobject]@{ choices = @(@{ message = @{ content = '`low`' } }); timings = @{ predicted_per_second = 48.5 } } }
+            $reply = Invoke-JudgeProbe 9941 'LFM3-1.7B' @(@{ role = 'user'; content = 'x' })
+            $script:sent.temperature | Should -Be 0
+            $script:sent.chat_template_kwargs.enable_thinking | Should -BeFalse
+            Should -Invoke Invoke-Json -ParameterFilter { $Uri -eq 'http://127.0.0.1:9941/v1/chat/completions' -and $Method -eq 'POST' }
+            $reply.Text | Should -Be '`low`'
+            $reply.TokensPerSecond | Should -Be 48.5
+        }
+
+        It 'passes when both single answers are right and reports a batched reply omp cannot read' {
+            Add-ProbeReplies @('`low`', "``high```n`nThe request asks for several designs.", '<question id=effort: medium>')
+            Mock Invoke-JudgeProbe { [pscustomobject]@{ Text = $script:replies.Dequeue(); Seconds = 0.1; Build = 'b12345'; TokensPerSecond = 50 } }
+            $gate = Invoke-JudgeGate 9941 'LFM3-1.7B'
+            ($gate.Singles | ForEach-Object { $_.Label }) -join ',' | Should -Be 'low,high'
+            $gate.BatchedServed | Should -BeFalse
+        }
+
+        It 'accepts xhigh for the hard prompt and reports a readable batched reply as served' {
+            Add-ProbeReplies @('low', 'xhigh', "effort: high`nauth: yes")
+            Mock Invoke-JudgeProbe { [pscustomobject]@{ Text = $script:replies.Dequeue(); Seconds = 0.1; Build = 'b12345'; TokensPerSecond = 50 } }
+            $gate = Invoke-JudgeGate 9941 'LFM3-1.7B'
+            $gate.Singles[1].Label | Should -Be 'xhigh'
+            $gate.BatchedServed | Should -BeTrue
+        }
+
+        It 'throws when a single answer leaks thinking markup' {
+            Add-ProbeReplies @('low</think>low')
+            Mock Invoke-JudgeProbe { [pscustomobject]@{ Text = $script:replies.Dequeue(); Seconds = 0.1; Build = 'b12345'; TokensPerSecond = 50 } }
+            { Invoke-JudgeGate 9941 'LFM3-1.7B' } | Should -Throw '*thinking markup leaked*'
+        }
+
+        It 'throws when the hard prompt is rated low' {
+            Add-ProbeReplies @('low', 'low')
+            Mock Invoke-JudgeProbe { [pscustomobject]@{ Text = $script:replies.Dequeue(); Seconds = 0.1; Build = 'b12345'; TokensPerSecond = 50 } }
+            { Invoke-JudgeGate 9941 'LFM3-1.7B' } | Should -Throw "*answered 'low', expected*"
+        }
+    }
+
     Context 'service helpers' {
         BeforeAll { $script:ServiceName = 'llama-cpp-tiny' }
 
