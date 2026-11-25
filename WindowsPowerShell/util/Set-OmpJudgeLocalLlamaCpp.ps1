@@ -1108,12 +1108,22 @@ function Invoke-JudgeProbe([int]$Port, [string]$Model, [object[]]$Messages) {
     }
 }
 
+# Builds the short classification prompt the gate used before 2026-11-25. It is sent only to report
+# whether thinking leaks into replies.
+function New-ShortJudgeMessages {
+    @(
+        @{ role = 'system'; content = 'Classify how much reasoning effort a coding-assistant request needs. Reply with exactly one word: low, medium, or high.' }
+        @{ role = 'user'; content = 'Rename the local variable tmp to total in utils.py.' }
+    )
+}
+
 # Runs the judge probes against llama-server. The single-question probes are the gate: a wrong or
 # leaked answer throws before omp is touched. The batched probe is reported only and never blocks
 # setup (LFM3-1.7B does not answer it; omp then uses its default model).
-# 2026-11-25: this replaced one short "reply with one word" prompt at temperature 0.1. llama-server
-# answered it 'low</think>low' (leaked thinking) and the old check still counted that as a pass,
-# while omp's batched format failed every time.
+# 2026-11-25: this replaced one short "reply with one word" prompt at temperature 0.1 as the gate.
+# llama-server answered it 'low</think>low' (leaked thinking) and the old check still counted that as
+# a pass, while omp's batched format failed every time. The short prompt is still sent, only to
+# report the leak; it never blocks setup because omp's own judge prompts came back clean (0 of 30).
 function Invoke-JudgeGate([int]$Port, [string]$Model) {
     $labels = @(Get-JudgeEffortOptions | ForEach-Object { $_.Label })
     $singles = foreach ($probe in (Get-SingleJudgeProbes)) {
@@ -1126,7 +1136,8 @@ function Invoke-JudgeGate([int]$Port, [string]$Model) {
     $answers = Get-JudgeAnswerLines $batched.Text @('effort', 'auth')
     # omp can use the reply when every question has a readable answer line.
     $served = (Get-FirstLabel $answers['effort'] $labels) -and (Get-FirstLabel $answers['auth'] @('yes', 'true', 'no', 'false'))
-    [pscustomobject]@{ Singles = @($singles); Batched = $batched; BatchedServed = [bool]$served }
+    $short = Invoke-JudgeProbe $Port $Model (New-ShortJudgeMessages)
+    [pscustomobject]@{ Singles = @($singles); Batched = $batched; BatchedServed = [bool]$served; Short = $short; ThinkingLeak = [bool](Test-JudgeReplyLeak $short.Text) }
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -1484,8 +1495,10 @@ function Show-Report([string]$Title, $Llama, $Omp, $Gate = $null) {
         Write-Row 'Single-question probes' $singles $true
         $batched = if ($Gate.BatchedServed) { 'answered locally' } else { 'not answered locally; omp uses its default model' }
         Write-Row 'Batched-question probe' $batched ($Gate.BatchedServed -or $null)
-        $seconds = ($Gate.Singles | ForEach-Object { $_.Reply.Seconds } | Measure-Object -Sum).Sum + $Gate.Batched.Seconds
-        Write-Row 'Probe time' "$([math]::Round($seconds, 2)) s for 3 requests, $($Gate.Batched.TokensPerSecond) tok/s, build $($Gate.Batched.Build)"
+        $seconds = ($Gate.Singles | ForEach-Object { $_.Reply.Seconds } | Measure-Object -Sum).Sum + $Gate.Batched.Seconds + $Gate.Short.Seconds
+        Write-Row 'Probe time' "$([math]::Round($seconds, 2)) s for 4 requests, $($Gate.Batched.TokensPerSecond) tok/s, build $($Gate.Batched.Build)"
+        $switch = if ($Gate.ThinkingLeak) { "thinking leaks into short replies: '$($Gate.Short.Text.Trim())'" } else { 'thinking off' }
+        Write-Row 'Thinking switch (short prompt)' $switch (-not $Gate.ThinkingLeak)
     }
 
     Write-Host '  omp' -ForegroundColor DarkCyan
@@ -1559,6 +1572,9 @@ function Invoke-StartAndTest($Config) {
         Write-Host "  batched questions answered locally: '$($gate.Batched.Text.Trim())'" -ForegroundColor Green
     } else {
         Write-Warning "Batched questions (find, judge() with several questions) are not answered locally; omp uses its default model for them."
+    }
+    if ($gate.ThinkingLeak) {
+        Write-Warning "Thinking is not fully off on this llama-server: a short prompt came back '$($gate.Short.Text.Trim())'. omp's own judge prompts showed no leaked thinking, so setup continues."
     }
     $gate
 }
@@ -1747,6 +1763,10 @@ function Invoke-Setup {
     } else {
         Write-Host '  - Batched judgments (find, several questions in one call) are not answered by this model:'
         Write-Host '    omp tries it first, then uses its default model for them.'
+    }
+    if ($gate.ThinkingLeak) {
+        Write-Host '  - Thinking is not fully off on this server: short prompts can come back with leaked thinking'
+        Write-Host "    (example: '$($gate.Short.Text.Trim())'). Lemonade's server does not do this; omp reads the first label."
     }
     if ($finalOmp.Thinking -eq 'auto') {
         Write-Host "  - defaultThinkingLevel is already 'auto', so every new omp session uses the classifier."

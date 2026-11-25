@@ -636,15 +636,16 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
         }
 
         It 'passes when both single answers are right and reports a batched reply omp cannot read' {
-            Add-ProbeReplies @('`low`', "``high```n`nThe request asks for several designs.", '<question id=effort: medium>')
+            Add-ProbeReplies @('`low`', "``high```n`nThe request asks for several designs.", '<question id=effort: medium>', 'low')
             Mock Invoke-JudgeProbe { [pscustomobject]@{ Text = $script:replies.Dequeue(); Seconds = 0.1; Build = 'b12345'; TokensPerSecond = 50 } }
             $gate = Invoke-JudgeGate 9941 'LFM3-1.7B'
             ($gate.Singles | ForEach-Object { $_.Label }) -join ',' | Should -Be 'low,high'
             $gate.BatchedServed | Should -BeFalse
+            $gate.ThinkingLeak | Should -BeFalse
         }
 
         It 'accepts xhigh for the hard prompt and reports a readable batched reply as served' {
-            Add-ProbeReplies @('low', 'xhigh', "effort: high`nauth: yes")
+            Add-ProbeReplies @('low', 'xhigh', "effort: high`nauth: yes", 'low')
             Mock Invoke-JudgeProbe { [pscustomobject]@{ Text = $script:replies.Dequeue(); Seconds = 0.1; Build = 'b12345'; TokensPerSecond = 50 } }
             $gate = Invoke-JudgeGate 9941 'LFM3-1.7B'
             $gate.Singles[1].Label | Should -Be 'xhigh'
@@ -661,6 +662,17 @@ Describe 'Set-OmpJudgeLocalLlamaCpp.ps1 helpers' {
             Add-ProbeReplies @('low', 'low')
             Mock Invoke-JudgeProbe { [pscustomobject]@{ Text = $script:replies.Dequeue(); Seconds = 0.1; Build = 'b12345'; TokensPerSecond = 50 } }
             { Invoke-JudgeGate 9941 'LFM3-1.7B' } | Should -Throw "*answered 'low', expected*"
+        }
+
+        It 'reports whether thinking leaks into the short prompt: <Short>' -ForEach @(
+            @{ Short = 'low</think>low'; Leak = $true }
+            @{ Short = 'low'; Leak = $false }
+        ) {
+            Add-ProbeReplies @('low', 'high', 'effort: high', $Short)
+            Mock Invoke-JudgeProbe { [pscustomobject]@{ Text = $script:replies.Dequeue(); Seconds = 0.1; Build = 'b12345'; TokensPerSecond = 50 } }
+            $gate = Invoke-JudgeGate 9941 'LFM3-1.7B'
+            $gate.ThinkingLeak | Should -Be $Leak
+            $gate.Short.Text | Should -Be $Short
         }
     }
 
