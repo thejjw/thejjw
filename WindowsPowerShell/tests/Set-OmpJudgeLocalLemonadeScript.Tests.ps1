@@ -132,16 +132,17 @@ Describe 'Set-OmpJudgeLocalLemonade.ps1 helpers' {
             $script:saved['modelRoles'].Contains('memory') | Should -BeFalse
             @($script:saved['retry.fallbackChains']['tiny']) | Should -Be @('local/lfm2-1.2b')
             @($script:saved['retry.fallbackChains']['memory']) | Should -Be @('local/lfm2-1.2b')
+            @($script:saved['retry.fallbackChains']['judge']) | Should -Be @()
         }
 
-        It 'writes explicit empty tiny and memory chains without a previous tiny role' {
+        It 'writes an explicit empty judge chain when the previous judge is a built-in local model' {
             $script:saved = @{}
             Mock Invoke-Omp {
                 [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{ modelRoles = @{ value = @{ judge = 'local/lfm2-1.2b' } } } | ConvertTo-Json -Depth 5) }
             }
             Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
             Set-OmpModelRoles 'lemonade/user.LFM3-1.7B'
-            @($script:saved['retry.fallbackChains']['judge']) | Should -Be @('local/lfm2-1.2b')
+            @($script:saved['retry.fallbackChains']['judge']) | Should -Be @()
             @($script:saved['retry.fallbackChains']['tiny']) | Should -Be @()
             @($script:saved['retry.fallbackChains']['memory']) | Should -Be @()
         }
@@ -150,12 +151,41 @@ Describe 'Set-OmpJudgeLocalLemonade.ps1 helpers' {
             Mock Invoke-Omp {
                 [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
                             modelRoles             = @{ value = @{ judge = 'lemonade/user.LFM3-1.7B'; tiny = 'lemonade/user.LFM3-1.7B' } }
-                            'retry.fallbackChains' = @{ value = @{ judge = @('local/lfm2-1.2b'); tiny = @('local/lfm2-1.2b'); memory = @('local/lfm2-1.2b') } }
+                            'retry.fallbackChains' = @{ value = @{ judge = @(); tiny = @('local/lfm2-1.2b'); memory = @('local/lfm2-1.2b') } }
                         } | ConvertTo-Json -Depth 5) }
             }
             Mock Set-OmpRecordSetting { }
             Set-OmpModelRoles 'lemonade/user.LFM3-1.7B'
             Should -Invoke Set-OmpRecordSetting -Times 0
+        }
+
+        It 'strips built-in local models from an existing judge chain and leaves tiny and memory alone' {
+            $script:saved = @{}
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
+                            modelRoles             = @{ value = @{ judge = 'lemonade/user.LFM3-1.7B'; tiny = 'lemonade/user.LFM3-1.7B' } }
+                            'retry.fallbackChains' = @{ value = @{ judge = @('local/lfm2-1.2b', 'other/model'); tiny = @('local/lfm2-1.2b'); memory = @('local/lfm2-1.2b') } }
+                        } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
+            Set-OmpModelRoles 'lemonade/user.LFM3-1.7B'
+            @($script:saved['retry.fallbackChains']['judge']) | Should -Be @('other/model')
+            @($script:saved['retry.fallbackChains']['tiny']) | Should -Be @('local/lfm2-1.2b')
+            @($script:saved['retry.fallbackChains']['memory']) | Should -Be @('local/lfm2-1.2b')
+            Should -Invoke Set-OmpRecordSetting -Times 1 -ParameterFilter { $Key -eq 'retry.fallbackChains' }
+        }
+
+        It 'keeps a previous judge that is not a built-in local model as the first judge fallback' {
+            $script:saved = @{}
+            Mock Invoke-Omp {
+                [pscustomobject]@{ ExitCode = 0; StdErr = ''; StdOut = (@{
+                            modelRoles = @{ value = @{ judge = 'llama-cpp-tiny/LFM3-1.7B'; tiny = 'llama-cpp-tiny/LFM3-1.7B' } }
+                        } | ConvertTo-Json -Depth 5) }
+            }
+            Mock Set-OmpRecordSetting { $script:saved[$Key] = $Value }
+            Set-OmpModelRoles 'lemonade/user.LFM3-1.7B'
+            @($script:saved['retry.fallbackChains']['judge']) | Should -Be @('llama-cpp-tiny/LFM3-1.7B')
+            @($script:saved['retry.fallbackChains']['tiny']) | Should -Be @('llama-cpp-tiny/LFM3-1.7B')
         }
 
         It 'preserves an explicit memory selection and its existing chain' {
