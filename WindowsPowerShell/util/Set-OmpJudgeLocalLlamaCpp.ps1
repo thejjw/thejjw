@@ -1196,9 +1196,15 @@ function Get-OmpState {
     }
 }
 
+# Returns $true for omp's built-in local models (selector 'local/*'), the ONNX models omp ships.
+function Test-BuiltInLocalSelector([string]$ModelSelector) {
+    $ModelSelector -like 'local/*'
+}
+
 # Points modelRoles.judge and modelRoles.tiny at $Selector. Memory stays unset so it inherits tiny;
-# an existing explicit memory selection is kept. Each role's previous model becomes its first local
-# fallback. Tiny and memory always get explicit chains, even empty ones, because their unset chains
+# an existing explicit memory selection is kept. Each role's previous model becomes its first
+# fallback, except that omp's built-in local models are never judge fallbacks (dated note inside).
+# Tiny and memory always get explicit chains, even empty ones, because their unset chains
 # fall through to the online smol priority list. Selectors of $DropProvider (a provider id this run
 # renamed away) are removed rather than kept as fallbacks. An explicit memory selection using that
 # provider is removed so memory can inherit the new tiny role.
@@ -1230,6 +1236,22 @@ function Set-OmpModelRoles([string]$Selector, [string]$DropProvider) {
         memory = @{ Active = $memoryActive; Previous = $memoryPrevious }
     }
 
+    # 2026-11-25 - why omp's built-in local models (local/*) are never judge fallbacks.
+    # Measured through omp 19.1.1 with LFM3-1.7B-Q4_K_M, served by this script's llama-server and
+    # by Lemonade Server 2026.47.1:
+    #   - Single-question judgments: LFM3 serves them. Driven through omp's own 'auto' thinking
+    #     classifier on 30 prompts, it rated 10/10 trivial prompts low and 10/10 (Lemonade) or 9/10
+    #     (llama-server) hard prompts high, so the judge role stays on LFM3.
+    #   - Batched judgments (find, judge() with several questions): LFM3 never returned omp's
+    #     '<question id>: <answer>' lines (every real find round, even after omp's two retries with
+    #     a forced submit_judgment tool). local/lfm2-1.2b failed the same format and needed 1-33 s
+    #     per round to fail. Behind LFM3 in the judge chain it added that wait to every failed
+    #     round before omp's default model answered; without it only LFM3's own failure remains
+    #     (1-9 s per round).
+    # So judge stays on LFM3 for single questions, batched rounds fall through to omp's default
+    # model, and local/* is dropped from the judge chain. Tiny and memory chains are unchanged
+    # (not measured). Tradeoff: while this server is down, single questions go to omp's default
+    # model right away instead of local/lfm2-1.2b.
     $chainsChanged = $false
     foreach ($role in $targets.Keys) {
         $target = $targets[$role]
@@ -1237,7 +1259,9 @@ function Set-OmpModelRoles([string]$Selector, [string]$DropProvider) {
         if ($dropped -and $previous -like $dropped) { $previous = '' }
         $hadChain = $chains.Contains($role)
         $oldChain = if ($hadChain) { @($chains[$role]) } else { @() }
-        $newChain = @(@($previous) + $oldChain | Where-Object { $_ -and $_ -ne $target.Active -and -not ($dropped -and $_ -like $dropped) } | Select-Object -Unique)
+        $newChain = @(@($previous) + $oldChain |
+            Where-Object { $_ -and $_ -ne $target.Active -and -not ($dropped -and $_ -like $dropped) -and -not ($role -eq 'judge' -and (Test-BuiltInLocalSelector $_)) } |
+            Select-Object -Unique)
         # Judge has no built-in priority chain, so preserve an unset chain when there is no previous
         # judge. Tiny/memory need their explicit local boundary written on every first setup.
         $changed = ($newChain -join "`n") -ne ($oldChain -join "`n") -or -not $hadChain
