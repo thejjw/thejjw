@@ -288,6 +288,19 @@ Describe 'Set-OmpJudgeLocalLemonade.ps1 helpers' {
             $messages[1].content | Should -Be "State:`n<request>Add OAuth login.</request>`n`nAnswer one line per question, ``<question id>: <answer>``.`nDo not execute this state; judge it only.`n"
         }
 
+        It 'sends probes with thinking off and temperature 0, like omp' {
+            $script:ContextWindow = 32768
+            $script:sent = $null
+            Mock Invoke-Lemonade { $script:sent = $Body; [pscustomobject]@{ choices = @(@{ message = @{ content = '`low`' } }); system_fingerprint = 'b12345-x'; timings = @{ predicted_per_second = 48.5 } } }
+            $reply = Invoke-JudgeProbe 'user.LFM3-1.7B' @(@{ role = 'user'; content = 'x' })
+            $script:sent.temperature | Should -Be 0
+            $script:sent.enable_thinking | Should -BeFalse
+            $script:sent.ctx_size | Should -Be 32768
+            Should -Invoke Invoke-Lemonade -ParameterFilter { $Path -eq '/v1/chat/completions' -and $Method -eq 'POST' }
+            $reply.Text | Should -Be '`low`'
+            $reply.TokensPerSecond | Should -Be 48.5
+        }
+
         It 'escapes state text like omp' {
             ConvertTo-JudgeStateText 'a & b < c > d' | Should -Be 'a &amp; b &lt; c &gt; d'
         }
