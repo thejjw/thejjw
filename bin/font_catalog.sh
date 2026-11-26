@@ -9,7 +9,7 @@
 
 # Registers all 34 curated packs into caller's add_pack handler
 load_font_catalog() {
-  add_pack "IntelOneMono" "https://github.com/intel/intel-one-mono/releases/download/V1.4.0/ttf.zip" 505443 8 "Zip" '(?i)^ttf/[^/]+\.ttf$' "IntelOneMono-Regular.ttf" 0 'Screen-optimized TTF, 4 weights with matching italics; family "Intel One Mono".'
+  add_pack "IntelOneMono" "https://github.com/intel/intel-one-mono/releases/download/V1.5.0/intel-one-mono-ttf.zip" 576167 8 "Zip" '(?i)^intel-one-mono-ttf/[^/]+\.ttf$' "IntelOneMono-Regular.ttf" 0 'Screen-optimized TTF, 4 weights with matching italics; family "Intel One Mono".'
   add_pack "GoormSansCode" "https://statics.goorm.io/fonts/GoormSansCode/v1.0.1/goorm-sans-code-1.0.1.zip" 4528715 1 "Zip" '(?i)^goorm sans code 2/Public/[^/]+\.ttf$' "goorm_Sans_Code_400.ttf" 0 'Coding sans (single weight).'
   add_pack "Jetendard" "https://github.com/kuskhan/jetendard/releases/download/v0.1.0/Jetendard-TTF.zip" 37427141 16 "Zip" '(?i)^ttf/[^/]+\.ttf$' "Jetendard-Regular.ttf" 0 'Static TTF weights.'
   add_pack "YeomilMono" "https://github.com/taevel02/yeomil-mono/releases/download/v1.1.1/YeomilMono-TTF.zip" 3055540 3 "Zip" '(?i)^[^/]+\.ttf$' "YeomilMono-Regular.ttf" 0 'Monospace, 3 weights.'
