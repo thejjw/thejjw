@@ -88,14 +88,14 @@ Describe 'Install-Fonts archive handling and catalog' {
         ($packs | Measure-Object -Property Fonts -Sum).Sum | Should -Be 20
 
         $gothic = $packs | Where-Object Name -eq 'SarasaGothicK'
-        $gothic.Bytes | Should -Be 63464316
+        $gothic.Bytes | Should -Be 63466660
         $gothic.Probe | Should -Be 'SarasaGothicK-Regular.ttf'
-        $gothic.Url | Should -Be 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaGothicK-TTF-1.0.40.7z'
+        $gothic.Url | Should -Be 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.43/SarasaGothicK-TTF-1.0.43.7z'
 
         $mono = $packs | Where-Object Name -eq 'SarasaMonoK'
-        $mono.Bytes | Should -Be 66316218
+        $mono.Bytes | Should -Be 66490261
         $mono.Probe | Should -Be 'SarasaMonoK-Regular.ttf'
-        $mono.Url | Should -Be 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.40/SarasaMonoK-TTF-1.0.40.7z'
+        $mono.Url | Should -Be 'https://github.com/be5invis/Sarasa-Gothic/releases/download/v1.0.43/SarasaMonoK-TTF-1.0.43.7z'
     }
 
     It 'matches ten expected styles per Sarasa family and rejects other variants' {
