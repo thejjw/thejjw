@@ -7,7 +7,7 @@
 # 2026 @thejjw
 #
 
-# Registers all 35 curated packs into caller's add_pack handler
+# Registers all 36 curated packs into caller's add_pack handler
 load_font_catalog() {
   add_pack "IntelOneMono" "https://github.com/intel/intel-one-mono/releases/download/V1.5.0/intel-one-mono-ttf.zip" 576167 8 "Zip" '(?i)^intel-one-mono-ttf/[^/]+\.ttf$' "IntelOneMono-Regular.ttf" 0 'Screen-optimized TTF, 4 weights with matching italics; family "Intel One Mono".'
   add_pack "GoormSansCode" "https://statics.goorm.io/fonts/GoormSansCode/v1.0.1/goorm-sans-code-1.0.1.zip" 4528715 1 "Zip" '(?i)^goorm sans code 2/Public/[^/]+\.ttf$' "goorm_Sans_Code_400.ttf" 0 'Coding sans (single weight).'
@@ -46,5 +46,6 @@ load_font_catalog() {
   add_pack "D2Coding" "https://github.com/naver/d2codingfont/releases/download/VER1.3.2/D2Coding-Ver1.3.2-20180524.zip" 21256997 1 "Zip" '(?i)^D2CodingAll/[^/]+\.ttc$' "D2Coding-Ver1.3.2-20180524-all.ttc" 0 'Installs the D2CodingAll .ttc (regular+bold+ligature in one collection).'
   add_pack "KoPubWorld" "https://www.kopus.org/wp-content/uploads/2026/04/KOPUBWORLD_OTF_FONTS2026.zip" 20297063 6 "Zip" '(?i)^[^/]+\.otf$' "KoPubWorld Batang_Pro Light.otf" 0 'OTF-only (2026 release). KoPubWorld Batang (serif) + Dotum (sans), 3 weights each (Light/Medium/Bold).'
   add_pack "KoPub" "https://www.kopus.org/wp-content/uploads/2022/04/KOPUB2.0_OTF_FONTS.zip" 12640328 6 "Zip" '(?i)^[^/]+\.otf$' "KoPub Batang_Pro Light.otf" 0 'OTF-only (classic KoPub 2.0). KoPub Batang (serif) + Dotum (sans), 3 weights each (Light/Medium/Bold).'
+  add_pack "IosevkaFixed" "https://github.com/be5invis/Iosevka/releases/download/v34.9.0/PkgTTF-IosevkaFixed-34.9.0.zip" 148235929 4 "Zip" '(?i)^IosevkaFixed-(Regular|Bold|Italic|BoldItalic)\.ttf$' "IosevkaFixed-Regular.ttf" 0 'LARGE ~141 MB archive, installs 4. Default Sans Fixed, Normal width only (Regular/Bold + Italics); Fixed has no ligatures, family "Iosevka Fixed". Excludes Extended/Oblique/Slab/Term/SS/Aile/Etoile.'
   add_pack "Camelana" "https://github.com/ericfortis/camelana/archive/refs/tags/v2.6.zip" 4246926 4 "Zip" '(?i)^camelana-2\.6/v2_camelana/[^/]+\.ttf$' "Camelana-Regular.ttf" 0 'Proportional coding font (not monospaced) with padded CamelCase capitals and coding ligatures (Regular only); family "Camelana", Regular/Italic/SemiBold/SemiBoldItalic. Upstream publishes no release assets, so this is the source archive of tag v2.6; only v2_camelana/*.ttf is extracted.'
 }
