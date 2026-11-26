@@ -511,6 +511,7 @@ $_FontInstallInternal = @{
         # Fixed = default Sans design, Normal width, 4 faces (Regular/Bold + Italics).
         # Intentionally not the Extended/Oblique/Slab/Term/SS/Aile/Etoile variants.
         [pscustomobject]@{ Name = 'IosevkaFixed';         Url = 'https://github.com/be5invis/Iosevka/releases/download/v34.9.0/PkgTTF-IosevkaFixed-34.9.0.zip'; Bytes = 148235929; Fonts = 4; Kind = 'Zip'; Include = '(?i)^IosevkaFixed-(Regular|Bold|Italic|BoldItalic)\.ttf$'; Probe = 'IosevkaFixed-Regular.ttf'; Extended = $false; Note = 'LARGE ~141 MB archive, installs 4. Default Sans Fixed, Normal width only (Regular/Bold + Italics); Fixed has no ligatures, family "Iosevka Fixed". Excludes Extended/Oblique/Slab/Term/SS/Aile/Etoile.' }
+        [pscustomobject]@{ Name = 'Camelana';            Url = 'https://github.com/ericfortis/camelana/archive/refs/tags/v2.6.zip'; Bytes = 4246926; Fonts = 4; Kind = 'Zip'; Include = '(?i)^camelana-2\.6/v2_camelana/[^/]+\.ttf$'; Probe = 'Camelana-Regular.ttf'; Extended = $false; Note = 'Proportional coding font (not monospaced) with padded CamelCase capitals and coding ligatures (Regular only); family "Camelana", Regular/Italic/SemiBold/SemiBoldItalic. Upstream publishes no release assets, so this is the source archive of tag v2.6; only v2_camelana/*.ttf is extracted.' }
     )
 }
 
