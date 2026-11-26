@@ -157,7 +157,7 @@ Describe 'Install-Fonts archive handling and catalog' {
         'MonoplexCJKNerdFontPropo/MonoplexCJKNerdFontPropo-Regular.ttf' -match $pack.Include | Should -BeFalse
     }
 
-    It 'pins the Iosevka Fixed pack to the v34.9.0 default Sans release' {
+    It 'pins the Iosevka Fixed pack to the v34.9.1 default Sans release' {
         $packs = @($_FontInstallInternal.Packs | Where-Object Name -eq 'IosevkaFixed')
 
         # Exactly one Iosevka generation: the Fixed spacing variant only, so no
@@ -166,9 +166,9 @@ Describe 'Install-Fonts archive handling and catalog' {
         $packs.Kind | Should -Be 'Zip'
         @($packs | Where-Object { $_.Extended }).Count | Should -Be 0
         $packs.Fonts | Should -Be 4
-        $packs.Bytes | Should -Be 148235929
+        $packs.Bytes | Should -Be 148458241
         $packs.Probe | Should -Be 'IosevkaFixed-Regular.ttf'
-        $packs.Url | Should -Be 'https://github.com/be5invis/Iosevka/releases/download/v34.9.0/PkgTTF-IosevkaFixed-34.9.0.zip'
+        $packs.Url | Should -Be 'https://github.com/be5invis/Iosevka/releases/download/v34.9.1/PkgTTF-IosevkaFixed-34.9.1.zip'
     }
 
     It 'matches only the four Normal-width Iosevka Fixed styles' {
