@@ -234,4 +234,67 @@ Describe 'Install-Fonts archive handling and catalog' {
             $zip.Dispose()
         }
     }
+
+    It 'pins the Intel One Mono pack to the V1.5.0 release' {
+        $packs = @($_FontInstallInternal.Packs | Where-Object Name -eq 'IntelOneMono')
+
+        # Exactly one Intel One Mono entry: the hinted TTF build only, not the
+        # sibling OTF/WOFF assets of the same release.
+        $packs.Count | Should -Be 1
+        $packs.Kind | Should -Be 'Zip'
+        @($packs | Where-Object { $_.Extended }).Count | Should -Be 0
+        $packs.Fonts | Should -Be 8
+        $packs.Bytes | Should -Be 576167
+        $packs.Probe | Should -Be 'IntelOneMono-Regular.ttf'
+        $packs.Url | Should -Be 'https://github.com/intel/intel-one-mono/releases/download/V1.5.0/intel-one-mono-ttf.zip'
+    }
+
+    It 'matches only the eight TTFs under the V1.5.0 Intel One Mono folder' {
+        $pack = $_FontInstallInternal.Packs | Where-Object Name -eq 'IntelOneMono'
+        # Real archive members (verified against the V1.5.0 central directory:
+        # eight files under intel-one-mono-ttf/; V1.4.0 used ttf/).
+        $styles = @(
+            'intel-one-mono-ttf/IntelOneMono-Light.ttf'
+            'intel-one-mono-ttf/IntelOneMono-LightItalic.ttf'
+            'intel-one-mono-ttf/IntelOneMono-Regular.ttf'
+            'intel-one-mono-ttf/IntelOneMono-Italic.ttf'
+            'intel-one-mono-ttf/IntelOneMono-Medium.ttf'
+            'intel-one-mono-ttf/IntelOneMono-MediumItalic.ttf'
+            'intel-one-mono-ttf/IntelOneMono-Bold.ttf'
+            'intel-one-mono-ttf/IntelOneMono-BoldItalic.ttf'
+        )
+        @($styles | Where-Object { $_ -match $pack.Include }).Count | Should -Be 8
+        # The retired V1.4.0 layout must not match, so a stale pin fails loudly.
+        'ttf/IntelOneMono-Regular.ttf' -match $pack.Include | Should -BeFalse
+    }
+
+    It 'pins the Camelana pack to the v2.6 source archive' {
+        $packs = @($_FontInstallInternal.Packs | Where-Object Name -eq 'Camelana')
+
+        # Upstream publishes no release assets, so the pack is the GitHub source
+        # archive of the tag; Bytes is the archive size measured at authoring time.
+        $packs.Count | Should -Be 1
+        $packs.Kind | Should -Be 'Zip'
+        @($packs | Where-Object { $_.Extended }).Count | Should -Be 0
+        $packs.Fonts | Should -Be 4
+        $packs.Bytes | Should -Be 4246926
+        $packs.Probe | Should -Be 'Camelana-Regular.ttf'
+        $packs.Url | Should -Be 'https://github.com/ericfortis/camelana/archive/refs/tags/v2.6.zip'
+    }
+
+    It 'matches only the four v2 Camelana fonts inside the source archive' {
+        $pack = $_FontInstallInternal.Packs | Where-Object Name -eq 'Camelana'
+        # Real archive members (verified against the v2.6 zip: the tag root is
+        # camelana-2.6/ and the fonts sit in v2_camelana/).
+        $styles = @(
+            'camelana-2.6/v2_camelana/Camelana-Regular.ttf'
+            'camelana-2.6/v2_camelana/Camelana-Italic.ttf'
+            'camelana-2.6/v2_camelana/Camelana-SemiBold.ttf'
+            'camelana-2.6/v2_camelana/Camelana-SemiBoldItalic.ttf'
+        )
+        @($styles | Where-Object { $_ -match $pack.Include }).Count | Should -Be 4
+        # The Verdana-derived v1 fonts ship in the same archive and must not install.
+        'camelana-2.6/v1_verdanacamel/VerdanaCamel.ttf' -match $pack.Include | Should -BeFalse
+        'camelana-2.6/v1_verdanacamel/Verdana Camel Bold.ttf' -match $pack.Include | Should -BeFalse
+    }
 }
