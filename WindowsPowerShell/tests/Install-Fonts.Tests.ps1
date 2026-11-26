@@ -111,7 +111,7 @@ Describe 'Install-Fonts archive handling and catalog' {
         }
     }
 
-    It 'pins the Monoplex CJK Nerd Font pack to the v1.1.0 Nerd Fonts 3.5.1 release' {
+    It 'pins the Monoplex CJK Nerd Font pack to the v1.3.0 Nerd Fonts 3.5.1 release' {
         $packs = @($_FontInstallInternal.Packs | Where-Object Name -like 'Monoplex*')
 
         # Exactly one Monoplex generation: v0.0.2 also shipped a Nerd family, so
@@ -121,9 +121,9 @@ Describe 'Install-Fonts archive handling and catalog' {
         $packs.Kind | Should -Be 'Zip'
         @($packs | Where-Object { $_.Extended }).Count | Should -Be 0
         $packs.Fonts | Should -Be 16
-        $packs.Bytes | Should -Be 125695049
+        $packs.Bytes | Should -Be 147953633
         $packs.Probe | Should -Be 'MonoplexCJKNerdFont-Regular.ttf'
-        $packs.Url | Should -Be 'https://github.com/y-kim/monoplex/releases/download/monoplex-cjk-nerd-font-1.1.0/MonoplexCJKNerdFont_v1.1.0.zip'
+        $packs.Url | Should -Be 'https://github.com/y-kim/monoplex/releases/download/monoplex-cjk-nerd-font-1.3.0/MonoplexCJKNerdFont_v1.3.0.zip'
     }
 
     It 'matches the sixteen Monoplex CJK Nerd styles and rejects non-TTF entries' {
