@@ -505,91 +505,139 @@ _jjw_secret() {
 
 # <<< jjw-aikeys runtime <<<
 
-# Install libjxl CLI tools (cjxl/djxl/jxlinfo) from the official statically
-# linked x86_64 release tarball. The published binaries are fully static (no
-# dynamic loader, no glibc version dependency), so they run on any amd64 Linux
-# without distro detection. Falls back to the libjxl-tools apt package on
-# non-amd64 systems or if download/extraction/exec fails.
+# >>> libjxl runtime >>>
+# Install the libjxl CLI tools (cjxl/djxl/jxlinfo).
+#
+#   install_libjxl_static_tools [--force]   static tarball only; non-zero on failure
+#   install_libjxl_tools [--force]          static tarball, else Homebrew/apt package
+#
+# The published static tarballs are fully linked (no dynamic loader), so they
+# run on any Linux amd64/arm64 without distro detection. The apt fallback
+# (libjxl-tools) is much older than the static build, so it is a last resort.
 install_libjxl_static_tools() {
-  local arch tmp_dir archive tools url b rc
+  local force=false url archive tmp_dir b rc
   local -a want=(cjxl djxl jxlinfo)
 
-  echo "libjxl: checking for official static release tools..."
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force=true; shift ;;
+      -h|--help) echo "Usage: install_libjxl_static_tools [--force]"; return 0 ;;
+      *) echo "install_libjxl_static_tools: unknown argument: $1" >&2; return 2 ;;
+    esac
+  done
 
-  if command -v cjxl &>/dev/null && ! $FORCE_REINSTALL; then
+  # The static tarballs are Linux ELF builds; on macOS the tools come from
+  # Homebrew, so bail out before downloading or writing to /usr/local/bin.
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "libjxl: the static tarball is Linux-only (this is $(uname -s))" >&2
+    return 1
+  fi
+
+  if command -v cjxl >/dev/null 2>&1 && ! $force; then
     echo "libjxl: cjxl already present at $(command -v cjxl) -- skipping (use --force to reinstall)"
     return 0
   fi
-  if command -v cjxl &>/dev/null && $FORCE_REINSTALL; then
-    echo "libjxl: --force set; reinstalling from latest release over existing $(command -v cjxl)"
-  fi
 
-  # The static tarball is x86_64/amd64 only; anything else uses the apt package.
-  arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
-  if [[ "$arch" != "amd64" ]]; then
-    echo "libjxl: architecture '$arch' has no static tarball; using libjxl-tools apt package"
-    PACKAGES="libjxl-tools $PACKAGES"
-    return 0
-  fi
+  # Static tarballs are published per architecture. macOS reports "arm64" and
+  # Linux reports "aarch64", so only the Linux spelling matches here.
+  case "$(uname -m)" in
+    x86_64|amd64) url="https://github.com/libjxl/libjxl/releases/latest/download/jxl-linux-x86_64-static.tar.lz" ;;
+    aarch64)      url="https://github.com/libjxl/libjxl/releases/latest/download/jxl-linux-aarch64-static.tar.lz" ;;
+    *) echo "libjxl: no static tarball for $(uname -m)" >&2; return 1 ;;
+  esac
 
-  # The asset is lzip-compressed (.tar.lz); GNU tar shells out to the lzip binary.
-  if ! command -v lzip &>/dev/null; then
+  # The asset is lzip-compressed (.tar.lz); GNU tar shells out to the lzip
+  # binary. PACKAGES also lists lzip, but that install runs after this
+  # function, so provision it here.
+  if ! command -v lzip >/dev/null 2>&1; then
     echo "libjxl: lzip missing; installing it for release extraction"
-    sudo apt-get install -y lzip
+    sudo apt-get install -y lzip >/dev/null 2>&1 \
+      || { sudo apt-get update >/dev/null 2>&1 && sudo apt-get install -y lzip; } \
+      || { echo "libjxl: lzip is required to extract the static release" >&2; return 1; }
   fi
 
-  tmp_dir="$(mktemp -d)"
-  archive="${tmp_dir}/jxl-linux-x86_64-static.tar.lz"
-  tools="${tmp_dir}/tools"
-  url="https://github.com/libjxl/libjxl/releases/latest/download/jxl-linux-x86_64-static.tar.lz"
+  tmp_dir="$(mktemp -d)" || return 1
+  archive="${tmp_dir}/jxl.tar.lz"
 
-  echo "libjxl: downloading static release tarball from ${url}"
-  if command -v curl &>/dev/null; then
-    curl -fL --retry 3 -o "$archive" "$url"
-  elif command -v wget &>/dev/null; then
-    wget -O "$archive" "$url"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 3 -o "$archive" "$url" || { rm -rf "$tmp_dir"; return 1; }
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$archive" "$url" || { rm -rf "$tmp_dir"; return 1; }
   else
     echo "libjxl: curl/wget missing; installing curl for release download"
-    sudo apt-get install -y curl
-    curl -fL --retry 3 -o "$archive" "$url"
+    sudo apt-get install -y curl >/dev/null 2>&1 \
+      || { sudo apt-get update >/dev/null 2>&1 && sudo apt-get install -y curl; } \
+      || { echo "libjxl: curl or wget is required to download the static release" >&2; rm -rf "$tmp_dir"; return 1; }
+    curl -fL --retry 3 -o "$archive" "$url" || { rm -rf "$tmp_dir"; return 1; }
   fi
 
-  # Archive layout (verified against v0.13.0): LICENSE* at root, binaries under tools/.
-  echo "libjxl: extracting static tools"
+  # Archive layout (verified against v0.13.0): LICENSE* at root, binaries
+  # under tools/.
   if ! lzip -dc "$archive" | tar -x -C "$tmp_dir"; then
-    echo "libjxl: extraction failed; falling back to libjxl-tools apt package" >&2
+    echo "libjxl: extraction failed" >&2
     rm -rf "$tmp_dir"
-    PACKAGES="libjxl-tools $PACKAGES"
-    return 0
+    return 1
   fi
 
-  echo "libjxl: installing ${want[*]} into /usr/local/bin"
   for b in "${want[@]}"; do
-    if [[ -f "${tools}/${b}" ]]; then
-      sudo install -m 0755 "${tools}/${b}" /usr/local/bin/
-    else
-      echo "libjxl: warning -- ${b} not found in tarball" >&2
+    if [[ ! -f "${tmp_dir}/tools/${b}" ]]; then
+      echo "libjxl: ${b} not found in tarball" >&2
+      rm -rf "$tmp_dir"
+      return 1
     fi
+    sudo install -m 0755 "${tmp_dir}/tools/${b}" /usr/local/bin/ || { rm -rf "$tmp_dir"; return 1; }
   done
   rm -rf "$tmp_dir"
 
-  # Sanity-check that the installed binary actually executes on this system.
-  # rc 126 (exec format) / 127 (not found) mean it cannot run; any other code
-  # means the program ran (a usage/help exit is fine). --help is a supported flag.
-  rc=0
-  /usr/local/bin/cjxl --help &>/dev/null || rc=$?
-  if [[ -x /usr/local/bin/cjxl && "$rc" -ne 126 && "$rc" -ne 127 ]]; then
-    echo "libjxl: static tools installed to /usr/local/bin (${want[*]})"
-  else
-    echo "libjxl: installed cjxl failed to run (rc=${rc}); falling back to libjxl-tools apt package" >&2
-    sudo rm -f /usr/local/bin/cjxl /usr/local/bin/djxl /usr/local/bin/jxlinfo
-    PACKAGES="libjxl-tools $PACKAGES"
-  fi
+  # Sanity-check that each installed binary actually executes. rc 126 (exec
+  # format) / 127 (not found) mean it cannot run; any other code means the
+  # program ran (a usage/help exit is fine).
+  for b in "${want[@]}"; do
+    rc=0
+    "/usr/local/bin/${b}" --help >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 126 || "$rc" -eq 127 ]]; then
+      echo "libjxl: ${b} failed to run (rc=${rc})" >&2
+      sudo rm -f /usr/local/bin/cjxl /usr/local/bin/djxl /usr/local/bin/jxlinfo
+      return 1
+    fi
+  done
+  echo "libjxl: static tools installed to /usr/local/bin (${want[*]})"
 }
+
+install_libjxl_tools() {
+  local -a args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) args=(--force); shift ;;
+      -h|--help) echo "Usage: install_libjxl_tools [--force]"; return 0 ;;
+      *) echo "install_libjxl_tools: unknown argument: $1" >&2; return 2 ;;
+    esac
+  done
+  if ! install_libjxl_static_tools "${args[@]}"; then
+    case "$(uname -s)" in
+      Darwin)
+        command -v brew >/dev/null 2>&1 || { echo "libjxl: brew is required on macOS" >&2; return 1; }
+        echo "libjxl: installing the jpeg-xl tools via Homebrew" >&2
+        brew install jpeg-xl || return 1
+        ;;
+      *)
+        echo "libjxl: static install unavailable; using the libjxl-tools apt package (older than the static build)" >&2
+        command -v apt-get >/dev/null 2>&1 || { echo "libjxl: apt-get not found" >&2; return 1; }
+        sudo apt-get install -y libjxl-tools \
+          || { sudo apt-get update && sudo apt-get install -y libjxl-tools; } \
+          || return 1
+        ;;
+    esac
+  fi
+  echo "libjxl: cjxl resolves to $(command -v cjxl)"
+}
+# <<< libjxl runtime <<<
 
 # Use zsh profile on macOS, bash profile elsewhere.
 if [[ "$(uname -s)" == "Darwin" ]]; then
   PROFILE="${HOME}/.zshrc"
+  # The static tarball is Linux-only; on macOS the tools come from Homebrew.
+  install_libjxl_tools || echo "libjxl: tools unavailable; continuing" >&2
 else
   PROFILE="${HOME}/.bashrc"
 
@@ -597,7 +645,11 @@ else
     echo "apt not found, skipping apt-based package installation."
   else
     sudo apt-get update
-    install_libjxl_static_tools
+    if $FORCE_REINSTALL; then
+      install_libjxl_tools --force || echo "libjxl: tools unavailable; continuing" >&2
+    else
+      install_libjxl_tools || echo "libjxl: tools unavailable; continuing" >&2
+    fi
     # PACKAGES is intentionally split into separate apt arguments.
     # shellcheck disable=SC2086
     sudo apt-get install -y $PACKAGES
