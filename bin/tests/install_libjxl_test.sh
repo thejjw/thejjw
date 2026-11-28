@@ -3,6 +3,7 @@
 # test, so shellcheck cannot see the call sites.
 # shellcheck disable=SC2329
 # Verify the libjxl CLI tools installer embedded in bin/install_j.sh.
+# Targets a POSIX host: bash, coreutils and mktemp are required.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -96,6 +97,21 @@ curl() {
   return 0
 }
 
+# Download the fake release archive with wget.
+wget() {
+  printf 'wget %s\n' "$*" >> "$TEST_ROOT/wget.log"
+  [[ "${WGET_FAIL:-0}" == 0 ]] || { echo 'connection failed' >&2; return 8; }
+  local out=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -O) out="$2"; shift ;;
+    esac
+    shift
+  done
+  if [[ -n "$out" ]]; then echo 'fake-archive' > "$out"; fi
+  return 0
+}
+
 # Decompress the fake release archive; the fake archive is already plain text.
 lzip() {
   local arg
@@ -162,16 +178,19 @@ brew() {
   return 0
 }
 
-# Reset the disposable state between cases.
+# Reset the disposable state between cases. The host's own cjxl is hidden by
+# default so the presence of the tools is a property of the case, not of the
+# machine the suite runs on.
 reset_case() {
   : > "$TEST_ROOT/curl.log"
+  : > "$TEST_ROOT/wget.log"
   : > "$TEST_ROOT/apt.log"
   : > "$TEST_ROOT/brew.log"
   rm -rf "$TEST_ROOT/install"
   mkdir -p "$TEST_ROOT/install"
   unset -f cjxl
-  unset CURL_FAIL TAR_FAIL EXEC_RC MISSING_TOOL APT_FAIL FAKE_OS FAKE_ARCH
-  export FAKE_OS=Linux FAKE_ARCH=x86_64 ABSENT_COMMANDS=""
+  unset CURL_FAIL WGET_FAIL TAR_FAIL EXEC_RC MISSING_TOOL APT_FAIL FAKE_OS FAKE_ARCH
+  export FAKE_OS=Linux FAKE_ARCH=x86_64 ABSENT_COMMANDS="cjxl"
 }
 
 # Extract the libjxl runtime block from the installer.
@@ -211,6 +230,7 @@ assert_installed() {
 # Verify the installer skips the download when the tools are already present.
 test_skip_when_present() {
   reset_case
+  export ABSENT_COMMANDS=""
   cjxl() { return 0; }
 
   local out="$TEST_ROOT/out" status=0
@@ -319,8 +339,8 @@ test_arm64_spelling_rejected() {
 # Verify a machine without curl and lzip gets them provisioned first.
 test_provisions_curl_and_lzip() {
   reset_case
-  unset -f curl lzip
-  export ABSENT_COMMANDS="curl lzip"
+  unset -f curl lzip wget
+  export ABSENT_COMMANDS="curl lzip wget cjxl"
 
   local out="$TEST_ROOT/out" status=0
   install_libjxl_static_tools --force > "$out" 2>&1 || status=$?
@@ -328,6 +348,9 @@ test_provisions_curl_and_lzip() {
   assert_contains "$TEST_ROOT/apt.log" 'lzip' 'lzip was not provisioned'
   assert_contains "$TEST_ROOT/apt.log" 'curl' 'curl was not provisioned'
   assert_absent "$TEST_ROOT/apt.log" 'libjxl-tools' 'a fresh machine must not fall back to the apt package'
+  # Only the stubs record downloads, so this proves the suite stayed offline.
+  assert_contains "$TEST_ROOT/curl.log" 'jxl-linux-x86_64-static.tar.lz' 'the download did not go through the stub'
+  assert_absent "$TEST_ROOT/wget.log" 'wget' 'the suite must not download with wget'
   for tool in cjxl djxl jxlinfo; do assert_installed "$tool"; done
 }
 
@@ -348,6 +371,7 @@ test_unsupported_arch_falls_back() {
 # Verify the dispatcher reports where cjxl resolves to.
 test_dispatcher_reports_path() {
   reset_case
+  export ABSENT_COMMANDS=""
   cjxl() { return 0; }
 
   install_libjxl_tools > "$TEST_ROOT/out" 2>&1 || fail 'dispatcher failed'
