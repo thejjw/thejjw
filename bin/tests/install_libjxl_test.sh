@@ -354,6 +354,53 @@ test_dispatcher_reports_path() {
   assert_contains "$TEST_ROOT/out" 'cjxl resolves to' 'resolved path not reported'
 }
 
+# Verify the profile installer emits both functions and upgrades a stale block.
+test_profile_installer() {
+  local profile="$TEST_ROOT/profile" section
+
+  # Emit the unpatched functions so the profile text matches a real install.
+  # shellcheck source=/dev/null
+  source "$TEST_ROOT/libjxl_runtime.sh"
+  # shellcheck source=/dev/null
+  source <(sed -n '/^remove_profile_section()/,/^}/p' "$INSTALLER")
+
+  printf '%s\n' \
+    before \
+    '# >>> libjxl >>>' \
+    '# libjxl tools version 0' \
+    old-body \
+    '# <<< libjxl <<<' \
+    after > "$profile"
+  export PROFILE="$profile"
+  # Referenced by the extracted installer section evaluated below.
+  # shellcheck disable=SC2034
+  FORCE_REINSTALL=false
+
+  section="$(awk '
+    $0 == "# >>> libjxl profile installer >>>" { emit = 1; next }
+    $0 == "# <<< libjxl profile installer <<<" { emit = 0 }
+    emit
+  ' "$INSTALLER")"
+  eval "$section" > "$TEST_ROOT/out"
+
+  assert_contains "$profile" '# libjxl tools version 1' 'version 1 marker missing'
+  assert_absent "$profile" '# libjxl tools version 0' 'stale version marker remained'
+  assert_contains "$profile" 'before' 'content before the block was lost'
+  assert_contains "$profile" 'after' 'content after the block was lost'
+  assert_contains "$profile" 'install_libjxl_static_tools' 'static installer was not emitted'
+  assert_contains "$profile" 'install_libjxl_tools' 'dispatcher was not emitted'
+  bash -n "$profile" || fail 'generated profile is not valid bash'
+  if command -v zsh >/dev/null 2>&1; then
+    zsh -f -n "$profile" || fail 'generated profile is not valid zsh'
+  else
+    echo 'skip: zsh is unavailable; generated zsh syntax was not checked' >&2
+  fi
+
+  # A second run must not duplicate the block.
+  eval "$section" > "$TEST_ROOT/out2"
+  [[ "$(grep -c '^# >>> libjxl >>>$' "$profile")" -eq 1 ]] || fail 'profile block was duplicated'
+}
+
 run_test 'existing tools are skipped' test_skip_when_present
 run_test 'forced install writes every tool' test_force_installs_tools
 run_test 'download failure falls back to apt' test_download_failure_falls_back
@@ -366,5 +413,6 @@ run_test 'the arm64 spelling is not aarch64' test_arm64_spelling_rejected
 run_test 'curl and lzip are provisioned' test_provisions_curl_and_lzip
 run_test 'unsupported architecture falls back' test_unsupported_arch_falls_back
 run_test 'the dispatcher reports the tool path' test_dispatcher_reports_path
+run_test 'the profile installer emits both functions' test_profile_installer
 
 printf 'passed: %d tests\n' "$TEST_COUNT"

@@ -1523,6 +1523,35 @@ else
 fi
 # <<< jjw-secrets profile installer <<<
 
+# ---------------------------------------------------------------------------
+# libjxl CLI tools - embed the installer into the shell profile
+# ---------------------------------------------------------------------------
+# >>> libjxl profile installer >>>
+LIBJXL_MARKER="# >>> libjxl >>>"
+LIBJXL_VERSION_MARKER="# libjxl tools version 1"
+
+if $FORCE_REINSTALL; then
+  remove_profile_section "$PROFILE" "# >>> libjxl >>>" "# <<< libjxl <<<"
+elif grep -qF "$LIBJXL_MARKER" "$PROFILE" 2>/dev/null && ! grep -qF "$LIBJXL_VERSION_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "libjxl: upgrading embedded installer"
+  remove_profile_section "$PROFILE" "# >>> libjxl >>>" "# <<< libjxl <<<"
+fi
+
+if grep -qF "$LIBJXL_MARKER" "$PROFILE" 2>/dev/null; then
+  echo "libjxl: already in $PROFILE -- skipping"
+else
+  {
+    echo
+    echo "# >>> libjxl >>>"
+    echo "$LIBJXL_VERSION_MARKER"
+    declare -f install_libjxl_static_tools install_libjxl_tools
+    echo "# <<< libjxl <<<"
+  } >> "$PROFILE"
+
+  echo "libjxl: added to $PROFILE"
+fi
+# <<< libjxl profile installer <<<
+
 cloakj
 
 # ---------------------------------------------------------------------------
