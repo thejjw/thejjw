@@ -28,7 +28,7 @@ Describe 'MiniMax Claude Code profile' {
         . ([scriptblock]::Create((Get-ProfileFunctionText 'Invoke-RemoteClaudeCodeMM')))
 
         # Profile-scope pins the remote launcher reads at call time.
-        $script:_NvmVersion = 'v0.40.8'
+        $script:_NvmVersion = 'v0.41.0'
         $script:_UvInstallUrl = 'https://astral.sh/uv/install.sh'
 
         # The profile helper module is loaded whole, so the functions under

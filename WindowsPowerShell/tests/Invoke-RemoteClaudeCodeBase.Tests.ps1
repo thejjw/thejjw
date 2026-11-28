@@ -19,7 +19,7 @@ Describe 'Invoke-RemoteClaudeCodeBase remote environment composition' {
 
         # Profile-scope pins the launcher reads at call time, plus the helper object.
         # NewTemporarySshIdentity is only touched when -KeyFile is supplied.
-        $script:_NvmVersion = 'v0.40.8'
+        $script:_NvmVersion = 'v0.41.0'
         $script:_UvInstallUrl = 'https://astral.sh/uv/install.sh'
         # The profile helper module is loaded whole, so the function under test
         # finds every helper it calls. The members that write to the host are
