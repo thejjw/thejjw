@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 PACKAGES="age gnupg pinentry-curses tmux build-essential git cmatrix fonts-noto-cjk curl wget ripgrep jq parallel zstd xz-utils lzip webp btop bubblewrap socat fd-find fzf"
-NVM_VERSION="v0.40.8"
+NVM_VERSION="v0.41.0"
 NVM_INSTALL_URL="https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
 
@@ -1784,7 +1784,7 @@ fi
 # claudez-remote (claudezr) - remote Claude Code via Z.AI
 # ---------------------------------------------------------------------------
 CLAUDEZR_MARKER="# >>> claudez-remote >>>"
-CLAUDEZR_VERSION_MARKER="# remote_claude_base version 10"
+CLAUDEZR_VERSION_MARKER="# remote_claude_base version 11"
 
 if $FORCE_REINSTALL; then
   remove_profile_section "$PROFILE" "# >>> claudez-remote >>>" "# <<< claudez-remote <<<"
@@ -1800,7 +1800,7 @@ else
   sed -e "s|__NVM_VERSION__|${NVM_VERSION}|g" \
       -e "s|__UV_INSTALL_URL__|${UV_INSTALL_URL}|g" >> "$PROFILE" << 'CLAUDERZR_EOF'
 # >>> claudez-remote >>>
-# remote_claude_base version 10
+# remote_claude_base version 11
 
 # _claude_sq - single-quote escape a value for safe bash embedding.
 _claude_sq() {
